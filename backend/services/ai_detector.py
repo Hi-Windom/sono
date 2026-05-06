@@ -1,0 +1,34 @@
+from services.ai_detector_v10 import detect_ai_audio as detect_ai_audio_v10
+from services.ai_detector_v11 import detect_ai_audio as detect_ai_audio_v11
+
+DETECTOR_VERSIONS = {
+    "v1.0": {
+        "name": "v1.0",
+        "label": "v1.0",
+        "description": "基础AI检测算法",
+        "detect_fn": detect_ai_audio_v10,
+    },
+    "v1.1": {
+        "name": "v1.1",
+        "label": "v1.1",
+        "description": "多维特征分析+混合创作判定",
+        "detect_fn": detect_ai_audio_v11,
+    },
+}
+
+DEFAULT_VERSION = "v1.1"
+
+
+def get_detector_versions() -> list[dict]:
+    return [
+        {"name": v["name"], "label": v["label"], "description": v["description"]}
+        for v in DETECTOR_VERSIONS.values()
+    ]
+
+
+def detect_ai_audio(audio_path: str, progress_callback=None, version: str | None = None) -> dict:
+    ver = version or DEFAULT_VERSION
+    version_info = DETECTOR_VERSIONS.get(ver)
+    if not version_info:
+        version_info = DETECTOR_VERSIONS[DEFAULT_VERSION]
+    return version_info["detect_fn"](audio_path, progress_callback)
