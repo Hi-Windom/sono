@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Header } from '../components/Header';
 import { AudioUploader } from '../components/AudioUploader';
@@ -66,6 +66,33 @@ export default function RepairPage() {
   } = useAudioProcessor();
 
   const [showDiag, setShowDiag] = useState(false);
+
+  // 实时更新卡住秒数
+  const [stuckDuration, setStuckDuration] = useState(0);
+  const stuckTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    if (isTaskStuck && stuckInfo) {
+      // 立即设置初始值
+      setStuckDuration(stuckInfo.duration);
+      // 每秒更新一次
+      stuckTimerRef.current = setInterval(() => {
+        setStuckDuration(prev => prev + 1);
+      }, 1000);
+    } else {
+      setStuckDuration(0);
+      if (stuckTimerRef.current) {
+        clearInterval(stuckTimerRef.current);
+        stuckTimerRef.current = null;
+      }
+    }
+
+    return () => {
+      if (stuckTimerRef.current) {
+        clearInterval(stuckTimerRef.current);
+      }
+    };
+  }, [isTaskStuck, stuckInfo]);
 
   const hasBrowserResult = !!browserProcessedBuffer;
   const hasBackendResult = !!backendProcessedBuffer;
@@ -223,7 +250,7 @@ export default function RepairPage() {
                       <span className="text-gray-400">{Math.round(processingProgress * 100)}%</span>
                       {isTaskStuck && stuckInfo && (
                         <span className="text-yellow-400">
-                          已卡住 {Math.round(stuckInfo.duration)} 秒 @ {stuckInfo.lastStep}
+                          已卡住 {Math.round(stuckDuration)} 秒 @ {stuckInfo.lastStep}
                         </span>
                       )}
                     </div>

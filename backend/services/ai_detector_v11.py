@@ -152,33 +152,36 @@ def _extract_harmonic(y):
 def detect_ai_audio(audio_path: str, progress_callback=None) -> dict:
     y, sr = librosa.load(audio_path, sr=None, mono=True)
 
-    # 不再立即更新步骤，让 API 端点设置的初始步骤保持更长时间
-    # 第一个有意义的更新在 0.25 进度时
+    # 串行执行特征提取，避免 ThreadPoolExecutor 死锁问题
+    # librosa 内部可能使用多线程，嵌套使用会导致死锁
 
-    with ThreadPoolExecutor(max_workers=4) as executor:
-        spectral_fut = executor.submit(_extract_spectral, y, sr)
-        mfcc_fut = executor.submit(_extract_mfcc, y, sr)
-        rhythm_fut = executor.submit(_extract_rhythm, y, sr)
-        pitch_fut = executor.submit(_extract_pitch, y, sr)
-        harmonic_fut = executor.submit(_extract_harmonic, y)
+    if progress_callback:
+        progress_callback(0.05, "v1.1 分析频谱特征...")
+    spectral = _extract_spectral(y, sr)
+    if progress_callback:
+        progress_callback(0.25, "v1.1 频谱特征分析完成...")
 
-        spectral = spectral_fut.result()
-        if progress_callback:
-            progress_callback(0.25, "v1.1 频谱特征分析完成...")
+    if progress_callback:
+        progress_callback(0.30, "v1.1 分析MFCC...")
+    mfcc = _extract_mfcc(y, sr, spectral.get("S"))
+    if progress_callback:
+        progress_callback(0.45, "v1.1 MFCC深度分析完成...")
 
-        mfcc = mfcc_fut.result()
-        if progress_callback:
-            progress_callback(0.45, "v1.1 MFCC深度分析完成...")
+    if progress_callback:
+        progress_callback(0.50, "v1.1 分析节奏...")
+    rhythm = _extract_rhythm(y, sr)
+    if progress_callback:
+        progress_callback(0.65, "v1.1 节奏与时域分析完成...")
 
-        rhythm = rhythm_fut.result()
-        if progress_callback:
-            progress_callback(0.65, "v1.1 节奏与时域分析完成...")
+    if progress_callback:
+        progress_callback(0.70, "v1.1 分析音高...")
+    pitch = _extract_pitch(y, sr)
+    if progress_callback:
+        progress_callback(0.80, "v1.1 音高分析完成...")
 
-        pitch = pitch_fut.result()
-        if progress_callback:
-            progress_callback(0.80, "v1.1 音高分析完成...")
-
-        harmonic = harmonic_fut.result()
+    if progress_callback:
+        progress_callback(0.82, "v1.1 分析谐波...")
+    harmonic = _extract_harmonic(y)
 
     if progress_callback:
         progress_callback(0.85, "v1.1 计算综合评分...")

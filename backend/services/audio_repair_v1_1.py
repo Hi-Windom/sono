@@ -1,10 +1,13 @@
 import numpy as np
 import librosa
 import soundfile as sf
-import soxr
-from pedalboard import Pedalboard, Compressor, Gain, LowShelfFilter, HighShelfFilter, PeakFilter, Reverb, Limiter, HighpassFilter, LowpassFilter, Chorus, Clipping
-from pedalboard.io import AudioFile as PedalboardAudioFile
-from scipy.signal import medfilt, butter, filtfilt
+try:
+    from pedalboard import Pedalboard, Compressor, Gain, LowShelfFilter, HighShelfFilter, PeakFilter, Reverb, Limiter, HighpassFilter, LowpassFilter, Chorus, Clipping
+    from pedalboard.io import AudioFile as PedalboardAudioFile
+    HAS_PEDALBOARD = True
+except ImportError:
+    HAS_PEDALBOARD = False
+from scipy.signal import medfilt, butter, filtfilt, resample_poly
 from scipy.fftpack import fft, ifft
 
 
@@ -28,8 +31,8 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
 
     if params.get("de_clipping", 0) > 0:
         if progress_callback:
-            progress_callback(0.07, "v1.1 去削波(pedalboard Clipping)...")
-        y = _apply_de_clipping_pedalboard(y, sr, params["de_clipping"])
+            progress_callback(0.07, "v1.1 去削波...")
+        y = _apply_de_clipping(y, sr, params["de_clipping"])
         issues_found.append("削波修复v2")
 
     if params.get("de_crackle", 0) > 0:
@@ -52,8 +55,8 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
 
     if params.get("noise_reduction", 0) > 0:
         if progress_callback:
-            progress_callback(0.36, "v1.1 降噪(noisereduce频谱门控)...")
-        y = _apply_noise_reduction_pedalboard(y, sr, params["noise_reduction"])
+            progress_callback(0.36, "v1.1 降噪(频谱门控)...")
+        y = _apply_noise_reduction(y, sr, params["noise_reduction"])
         issues_found.append("智能降噪v2")
 
     if params.get("transient_repair", 0) > 0:
@@ -76,14 +79,14 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
 
     if params.get("presence_boost", 0) > 0:
         if progress_callback:
-            progress_callback(0.68, "v1.1 临场感增强(pedalboard PeakFilter)...")
-        y = _apply_presence_boost_pedalboard(y, sr, params["presence_boost"])
+            progress_callback(0.68, "v1.1 临场感增强...")
+        y = _apply_presence_boost(y, sr, params["presence_boost"])
         issues_found.append("临场增强v2")
 
     if params.get("bass_enhance", 0) > 0:
         if progress_callback:
-            progress_callback(0.74, "v1.1 低音增强(pedalboard LowShelf)...")
-        y = _apply_bass_enhance_pedalboard(y, sr, params["bass_enhance"])
+            progress_callback(0.74, "v1.1 低音增强...")
+        y = _apply_bass_enhance(y, sr, params["bass_enhance"])
         issues_found.append("低音增强v2")
 
     if params.get("dynamic_range", 0) > 0:
@@ -94,32 +97,31 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
 
     if params.get("softness", 0) > 0:
         if progress_callback:
-            progress_callback(0.88, "v1.1 柔化处理(pedalboard Lowpass)...")
-        y = _apply_softness_pedalboard(y, sr, params["softness"])
+            progress_callback(0.88, "v1.1 柔化处理...")
+        y = _apply_softness(y, sr, params["softness"])
         issues_found.append("柔化处理v2")
 
     if target_sr != sr:
         if progress_callback:
-            progress_callback(0.92, f"v1.1 重采样到 {target_sr//1000} kHz (soxr VHQ+抗混叠)...")
-        # 如果降采样，先进行低通滤波防止混叠
+            progress_callback(0.92, f"v1.1 重采样到 {target_sr//1000} kHz...")
         if target_sr < sr:
             nyquist = target_sr / 2
-            cutoff = nyquist * 0.95  # 留一些余量
+            cutoff = nyquist * 0.95
             b, a = butter(8, cutoff / (sr / 2), btype='low')
             for ch in range(y.shape[0]):
                 y[ch] = filtfilt(b, a, y[ch])
 
         y_resampled = np.zeros((y.shape[0], int(y.shape[1] * target_sr / sr)))
         for ch in range(y.shape[0]):
-            y_resampled[ch] = soxr.resample(y[ch], sr, target_sr, quality="VHQ")
+            y_resampled[ch] = resample_poly(y[ch], target_sr, sr)
         y = y_resampled
         sr = target_sr
 
     if progress_callback:
-        progress_callback(0.95, "v1.1 响度归一化+峰值限制(pedalboard Limiter)...")
+        progress_callback(0.95, "v1.1 响度归一化+峰值限制...")
 
     y = _apply_loudness_normalize(y, sr, -16.0)
-    y = _apply_peak_limit_pedalboard(y, sr)
+    y = _apply_peak_limit(y, sr)
 
     if was_mono:
         y = y[0]
@@ -127,7 +129,6 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
     if progress_callback:
         progress_callback(0.97, "导出WAV...")
 
-    # 添加抖动处理（降bit时）
     bit_depth = params.get("bit_depth", 24)
     if bit_depth < 32:
         y = _apply_dither(y, bit_depth)
@@ -148,32 +149,40 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
     }
 
 
-def _apply_peak_limit_pedalboard(y: np.ndarray, sr: int) -> np.ndarray:
-    board = Pedalboard([Limiter(threshold_db=-0.5, release_ms=50)])
-    if y.shape[0] == 1:
-        out = board(y[0], sr)
-        return out.reshape(1, -1)
+def _apply_peak_limit(y: np.ndarray, sr: int) -> np.ndarray:
+    if HAS_PEDALBOARD:
+        board = Pedalboard([Limiter(threshold_db=-0.5, release_ms=50)])
+        if y.shape[0] == 1:
+            out = board(y[0], sr)
+            return out.reshape(1, -1)
+        else:
+            out = board(y, sr)
+            return out
     else:
-        out = board(y, sr)
-        return out
+        threshold = 10 ** (-0.5 / 20)
+        result = y.copy()
+        for ch in range(y.shape[0]):
+            data = result[ch]
+            over = np.abs(data) > threshold
+            if np.any(over):
+                sign = np.sign(data[over])
+                data[over] = sign * (threshold + (1 - threshold) * np.tanh((np.abs(data[over]) - threshold) / (1 - threshold)) * 0.5)
+        return result
 
 
 def _apply_loudness_normalize(y: np.ndarray, sr: int, target_lufs: float) -> np.ndarray:
-    """使用 ITU-R BS.1770-4 标准进行精确响度归一化"""
     try:
         import pyloudnorm as pyln
         meter = pyln.Meter(sr)
-        # 处理多声道
         if y.shape[0] == 1:
             loudness = meter.integrated_loudness(y[0])
         else:
             loudness = meter.integrated_loudness(y.T)
-        if loudness > -70:  # 只处理有效响度
+        if loudness > -70:
             gain_db = target_lufs - loudness
             gain_db = np.clip(gain_db, -12, 12)
             y *= 10 ** (gain_db / 20)
     except ImportError:
-        # 降级到 RMS 估算
         for ch in range(y.shape[0]):
             rms = np.sqrt(np.mean(y[ch] ** 2))
             if rms < 1e-8:
@@ -184,7 +193,7 @@ def _apply_loudness_normalize(y: np.ndarray, sr: int, target_lufs: float) -> np.
     return y
 
 
-def _apply_de_clipping_pedalboard(y: np.ndarray, sr: int, intensity: float) -> np.ndarray:
+def _apply_de_clipping(y: np.ndarray, sr: int, intensity: float) -> np.ndarray:
     result = y.copy()
     threshold = 0.92
 
@@ -335,7 +344,7 @@ def _apply_de_essing_v2(y: np.ndarray, sr: int, intensity: float, n_fft: int, ho
     return result
 
 
-def _apply_noise_reduction_pedalboard(y: np.ndarray, sr: int, intensity: float) -> np.ndarray:
+def _apply_noise_reduction(y: np.ndarray, sr: int, intensity: float) -> np.ndarray:
     try:
         import noisereduce as nr
         result = y.copy()
@@ -420,7 +429,6 @@ def _apply_transient_repair_v2(y: np.ndarray, sr: int, intensity: float) -> np.n
 
 
 def _apply_harmonic_enhance_v3(y: np.ndarray, sr: int, intensity: float, n_fft: int, hop_length: int) -> np.ndarray:
-    """改进的谐波增强 - 使用柔和的饱和算法而非简单叠加"""
     result = y.copy()
     for ch in range(y.shape[0]):
         data = result[ch]
@@ -429,10 +437,9 @@ def _apply_harmonic_enhance_v3(y: np.ndarray, sr: int, intensity: float, n_fft: 
         phase = np.angle(S)
         freqs = librosa.fft_frequencies(sr=sr, n_fft=n_fft)
 
-        # 生成谐波内容（使用更柔和的算法）
         harmonic_content = np.zeros_like(mag)
         for i, f in enumerate(freqs):
-            if f < 80 or f > 4000:  # 只处理基频范围
+            if f < 80 or f > 4000:
                 continue
             for h_num, h_gain in [(2, 0.08), (3, 0.04), (4, 0.02)]:
                 h_freq = f * h_num
@@ -440,69 +447,51 @@ def _apply_harmonic_enhance_v3(y: np.ndarray, sr: int, intensity: float, n_fft: 
                     break
                 h_idx = np.argmin(np.abs(freqs - h_freq))
                 if h_idx < mag.shape[0]:
-                    # 使用平方根压缩而非线性叠加，更自然
                     harmonic_content[h_idx, :] += np.sqrt(mag[i, :]) * h_gain * intensity
 
-        # 自适应混合 - 基于原始信号强度
         original_energy = np.sum(mag ** 2, axis=0)
         harmonic_energy = np.sum(harmonic_content ** 2, axis=0)
         mix_ratio = np.clip(harmonic_energy / (original_energy + 1e-10), 0, 0.3)
 
-        # 柔和混合
         enhanced_mag = mag + harmonic_content * (1 - mix_ratio) * intensity * 0.5
 
-        # 保持相位一致
         S_enhanced = enhanced_mag * np.exp(1j * phase)
         result[ch] = librosa.istft(S_enhanced, hop_length=hop_length, length=len(data))
 
-        # 添加轻微的电子管饱和效果
         result[ch] = _apply_tube_saturation(result[ch], intensity * 0.3)
     return result
 
 
 def _apply_tube_saturation(x: np.ndarray, amount: float) -> np.ndarray:
-    """柔和的电子管饱和效果"""
     if amount < 0.01:
         return x
-    # 使用 tanh 进行软削波，模拟电子管特性
     drive = 1 + amount * 2
     return np.tanh(x * drive) / drive
 
 
 def _apply_spatial_enhance_v3(y: np.ndarray, sr: int, intensity: float) -> np.ndarray:
-    """改进的空间感增强 - 更精细的立体声宽度控制"""
     if y.shape[0] != 2:
         return y
 
-    # Mid/Side 处理
     mid = (y[0] + y[1]) / 2
     side = (y[0] - y[1]) / 2
 
-    # 计算相关性
     correlation = np.sum(y[0] * y[1]) / (np.sqrt(np.sum(y[0]**2) * np.sum(y[1]**2)) + 1e-10)
 
-    # 自适应 Side 增益 - 基于相关性
     if correlation > 0.8:
-        # 单声道内容多，增加更多宽度
         side_gain = 1 + intensity * 0.5
     elif correlation > 0.5:
         side_gain = 1 + intensity * 0.35
     else:
-        # 已经比较宽，适度增强
         side_gain = 1 + intensity * 0.2
 
-    # Mid 轻微衰减以保持能量平衡
     mid_gain = 1 - intensity * 0.02
 
-    # 频率相关的宽度控制 - 低频保持单声道
-    low_cutoff = 120  # Hz
+    low_cutoff = 120
     if sr > low_cutoff * 2:
-        # 设计低通滤波器
         b, a = butter(4, low_cutoff / (sr / 2), btype='low')
         mid_low = filtfilt(b, a, mid)
         side_low = filtfilt(b, a, side)
-
-        # 低频部分减少 Side 增益（保持单声道兼容性）
         side = side_low * 0.3 + (side - side_low)
 
     enhanced_mid = mid * mid_gain
@@ -512,75 +501,108 @@ def _apply_spatial_enhance_v3(y: np.ndarray, sr: int, intensity: float) -> np.nd
     result[0] = enhanced_mid + enhanced_side
     result[1] = enhanced_mid - enhanced_side
 
-    # 添加微妙的混响（更保守的设置）
     reverb_amount = intensity * 0.1
     if reverb_amount > 0.02:
-        board = Pedalboard([
-            Reverb(room_size=reverb_amount, damping=0.8, wet_level=reverb_amount * 0.2, dry_level=1.0)
-        ])
-        out = board(result, sr)
-        if out.ndim == 1:
-            out = out.reshape(1, -1)
-        if out.shape[0] == result.shape[0] and out.shape[1] >= result.shape[1]:
-            result = out[:, :result.shape[1]]
+        if HAS_PEDALBOARD:
+            board = Pedalboard([
+                Reverb(room_size=reverb_amount, damping=0.8, wet_level=reverb_amount * 0.2, dry_level=1.0)
+            ])
+            out = board(result, sr)
+            if out.ndim == 1:
+                out = out.reshape(1, -1)
+            if out.shape[0] == result.shape[0] and out.shape[1] >= result.shape[1]:
+                result = out[:, :result.shape[1]]
+        else:
+            result = _apply_simple_reverb(result, sr, reverb_amount)
 
     return result
 
 
-def _apply_presence_boost_pedalboard(y: np.ndarray, sr: int, intensity: float) -> np.ndarray:
-    filters = []
+def _apply_simple_reverb(y: np.ndarray, sr: int, amount: float) -> np.ndarray:
+    delays_ms = [17, 31, 47, 67, 89]
+    gains = [0.3, 0.25, 0.2, 0.15, 0.1]
+    wet = np.zeros_like(y)
+    for delay_ms, gain in zip(delays_ms, gains):
+        delay_samples = int(sr * delay_ms / 1000)
+        for ch in range(y.shape[0]):
+            delayed = np.zeros_like(y[ch])
+            if delay_samples < len(y[ch]):
+                delayed[delay_samples:] = y[ch, :-delay_samples] * gain
+            wet[ch] += delayed
+    wet_gain = amount * 0.3
+    return y * (1 - wet_gain) + wet * wet_gain
+
+
+def _apply_presence_boost(y: np.ndarray, sr: int, intensity: float) -> np.ndarray:
     boost_db = intensity * 2.5
 
-    freqs_q = [(2000, 1.2), (3000, 1.0), (4000, 1.4), (6000, 1.6)]
-    for freq, q in freqs_q:
-        if freq < sr / 2:
-            filters.append(PeakFilter(cutoff_frequency_hz=freq, gain_db=boost_db * 0.35, q=q))
-
-    if not filters:
-        return y
-
-    board = Pedalboard(filters)
-
-    if y.shape[0] == 1:
-        out = board(y[0], sr)
-        return out.reshape(1, -1)
+    if HAS_PEDALBOARD:
+        filters = []
+        freqs_q = [(2000, 1.2), (3000, 1.0), (4000, 1.4), (6000, 1.6)]
+        for freq, q in freqs_q:
+            if freq < sr / 2:
+                filters.append(PeakFilter(cutoff_frequency_hz=freq, gain_db=boost_db * 0.35, q=q))
+        if not filters:
+            return y
+        board = Pedalboard(filters)
+        if y.shape[0] == 1:
+            out = board(y[0], sr)
+            return out.reshape(1, -1)
+        else:
+            out = board(y, sr)
+            if out.ndim == 1:
+                out = out.reshape(2, -1)
+            return out[:, :y.shape[1]]
     else:
-        out = board(y, sr)
-        if out.ndim == 1:
-            out = out.reshape(2, -1)
-        return out[:, :y.shape[1]]
+        result = y.copy()
+        freqs_boost = [(2000, 4000, boost_db * 0.35), (4000, 6000, boost_db * 0.25)]
+        for low, high, gain_db in freqs_boost:
+            if high >= sr / 2:
+                continue
+            b, a = butter(2, [low / (sr / 2), high / (sr / 2)], btype='band')
+            for ch in range(y.shape[0]):
+                presence = filtfilt(b, a, result[ch])
+                result[ch] += presence * (10 ** (gain_db / 20) - 1)
+        return result
 
 
-def _apply_bass_enhance_pedalboard(y: np.ndarray, sr: int, intensity: float) -> np.ndarray:
+def _apply_bass_enhance(y: np.ndarray, sr: int, intensity: float) -> np.ndarray:
     boost_db = intensity * 3.0
-    filters = []
 
-    if 80 < sr / 2:
-        filters.append(LowShelfFilter(cutoff_frequency_hz=80, gain_db=boost_db * 0.4, q=0.7))
-    if 150 < sr / 2:
-        filters.append(LowShelfFilter(cutoff_frequency_hz=150, gain_db=boost_db * 0.25, q=0.7))
-
-    if not filters:
-        return y
-
-    board = Pedalboard(filters)
-
-    if y.shape[0] == 1:
-        out = board(y[0], sr)
-        return out.reshape(1, -1)
+    if HAS_PEDALBOARD:
+        filters = []
+        if 80 < sr / 2:
+            filters.append(LowShelfFilter(cutoff_frequency_hz=80, gain_db=boost_db * 0.4, q=0.7))
+        if 150 < sr / 2:
+            filters.append(LowShelfFilter(cutoff_frequency_hz=150, gain_db=boost_db * 0.25, q=0.7))
+        if not filters:
+            return y
+        board = Pedalboard(filters)
+        if y.shape[0] == 1:
+            out = board(y[0], sr)
+            return out.reshape(1, -1)
+        else:
+            out = board(y, sr)
+            if out.ndim == 1:
+                out = out.reshape(2, -1)
+            return out[:, :y.shape[1]]
     else:
-        out = board(y, sr)
-        if out.ndim == 1:
-            out = out.reshape(2, -1)
-        return out[:, :y.shape[1]]
+        result = y.copy()
+        shelf_freqs = [(80, boost_db * 0.4), (150, boost_db * 0.25)]
+        for freq, gain_db in shelf_freqs:
+            if freq >= sr / 2:
+                continue
+            b, a = butter(2, freq / (sr / 2), btype='low')
+            for ch in range(y.shape[0]):
+                bass = filtfilt(b, a, result[ch])
+                result[ch] += bass * (10 ** (gain_db / 20) - 1)
+        return result
 
 
 def _apply_multiband_compression(y: np.ndarray, sr: int, intensity: float) -> np.ndarray:
-    """多段压缩 - 低频/中频/高频分别控制"""
     if intensity < 0.05:
         return y
 
-    # 分频点
     low_crossover = 250
     high_crossover = 4000
 
@@ -589,89 +611,108 @@ def _apply_multiband_compression(y: np.ndarray, sr: int, intensity: float) -> np
     for ch in range(y.shape[0]):
         data = y[ch]
 
-        # 使用 Linkwitz-Riley 分频
-        # 低频
         b_low, a_low = butter(4, low_crossover / (sr / 2), btype='low')
         low_band = filtfilt(b_low, a_low, data)
 
-        # 中频
         b_mid_low, a_mid_low = butter(4, low_crossover / (sr / 2), btype='high')
         b_mid_high, a_mid_high = butter(4, high_crossover / (sr / 2), btype='low')
         mid_band = filtfilt(b_mid_low, a_mid_low, data)
         mid_band = filtfilt(b_mid_high, a_mid_high, mid_band)
 
-        # 高频
         b_high, a_high = butter(4, high_crossover / (sr / 2), btype='high')
         high_band = filtfilt(b_high, a_high, data)
 
-        # 各频段不同的压缩参数
         bands = [
-            (low_band, -20, 3.0, 10.0, 100.0),   # 低频：温和压缩
-            (mid_band, -18, 2.5 + intensity * 2, 5.0, 80.0),  # 中频：适度压缩
-            (high_band, -16, 2.0 + intensity * 3, 3.0, 60.0),  # 高频：稍强压缩
+            (low_band, -20, 3.0, 10.0, 100.0),
+            (mid_band, -18, 2.5 + intensity * 2, 5.0, 80.0),
+            (high_band, -16, 2.0 + intensity * 3, 3.0, 60.0),
         ]
 
         compressed_bands = []
         for band, thresh, ratio, attack, release in bands:
-            board = Pedalboard([
-                Compressor(threshold_db=thresh, ratio=ratio, attack_ms=attack, release_ms=release),
-            ])
-            compressed = board(band, sr)
-            if isinstance(compressed, np.ndarray):
-                compressed_bands.append(compressed[:len(data)])
+            if HAS_PEDALBOARD:
+                board = Pedalboard([
+                    Compressor(threshold_db=thresh, ratio=ratio, attack_ms=attack, release_ms=release),
+                ])
+                compressed = board(band, sr)
+                if isinstance(compressed, np.ndarray):
+                    compressed_bands.append(compressed[:len(data)])
+                else:
+                    compressed_bands.append(band)
             else:
-                compressed_bands.append(band)
+                compressed_bands.append(_simple_compress(band, thresh, ratio, attack, release, sr))
 
-        # 混合
         result[ch] = sum(compressed_bands)
 
-    # 整体增益补偿
     makeup_gain = intensity * 1.5
     result *= 10 ** (makeup_gain / 20)
 
     return result
 
 
-def _apply_softness_pedalboard(y: np.ndarray, sr: int, intensity: float) -> np.ndarray:
+def _simple_compress(band: np.ndarray, threshold_db: float, ratio: float, attack_ms: float, release_ms: float, sr: int) -> np.ndarray:
+    threshold_lin = 10 ** (threshold_db / 20)
+    attack_coeff = np.exp(-1 / (attack_ms * 0.001 * sr))
+    release_coeff = np.exp(-1 / (release_ms * 0.001 * sr))
+
+    envelope = np.zeros(len(band))
+    envelope[0] = np.abs(band[0])
+    for i in range(1, len(band)):
+        sample_abs = np.abs(band[i])
+        coeff = attack_coeff if sample_abs > envelope[i-1] else release_coeff
+        envelope[i] = coeff * envelope[i-1] + (1 - coeff) * sample_abs
+
+    gain = np.ones(len(band))
+    over = envelope > threshold_lin
+    if np.any(over):
+        over_db = 20 * np.log10(envelope[over] / threshold_lin)
+        compressed_db = over_db / ratio
+        gain[over] = 10 ** ((compressed_db - over_db) / 20)
+
+    return band * gain
+
+
+def _apply_softness(y: np.ndarray, sr: int, intensity: float) -> np.ndarray:
     cutoff = max(8000, 18000 - intensity * 8000)
     cutoff = min(cutoff, sr / 2 - 100)
 
-    board = Pedalboard([
-        LowpassFilter(cutoff_frequency_hz=cutoff),
-    ])
-
     blend = intensity * 0.25
 
-    if y.shape[0] == 1:
-        filtered = board(y[0], sr)
-        return (filtered * blend + y[0] * (1 - blend)).reshape(1, -1)
+    if HAS_PEDALBOARD:
+        board = Pedalboard([
+            LowpassFilter(cutoff_frequency_hz=cutoff),
+        ])
+        if y.shape[0] == 1:
+            filtered = board(y[0], sr)
+            return (filtered * blend + y[0] * (1 - blend)).reshape(1, -1)
+        else:
+            filtered = board(y, sr)
+            if filtered.ndim == 1:
+                filtered = filtered.reshape(2, -1)
+            filtered = filtered[:, :y.shape[1]]
+            return filtered * blend + y * (1 - blend)
     else:
-        filtered = board(y, sr)
-        if filtered.ndim == 1:
-            filtered = filtered.reshape(2, -1)
-        filtered = filtered[:, :y.shape[1]]
-        return filtered * blend + y * (1 - blend)
+        b, a = butter(4, cutoff / (sr / 2), btype='low')
+        result = y.copy()
+        for ch in range(y.shape[0]):
+            filtered = filtfilt(b, a, result[ch])
+            result[ch] = filtered * blend + result[ch] * (1 - blend)
+        return result
 
 
 def _apply_dither(y: np.ndarray, bit_depth: int) -> np.ndarray:
-    """添加 TPDF 抖动（三角概率密度函数）以减少量化失真"""
     if bit_depth >= 32:
         return y
 
-    # 计算量化步长
     quant_step = 2.0 / (2 ** bit_depth)
 
-    # 生成 TPDF 抖动噪声（两个独立均匀分布的卷积）
     noise = (np.random.random(y.shape) - 0.5) + (np.random.random(y.shape) - 0.5)
     noise *= quant_step
 
-    # 添加噪声
     y_dithered = y + noise
 
-    # 量化
     y_quantized = np.round(y_dithered / quant_step) * quant_step
 
-    # 限制在有效范围
     y_quantized = np.clip(y_quantized, -1.0, 1.0 - quant_step)
 
     return y_quantized

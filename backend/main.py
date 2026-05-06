@@ -1,12 +1,19 @@
 import sys
 import subprocess
+import os
+
+# 限制 BLAS/OpenMP 线程数，避免与 ThreadPoolExecutor 冲突
+os.environ['OPENBLAS_NUM_THREADS'] = '1'
+os.environ['MKL_NUM_THREADS'] = '1'
+os.environ['OMP_NUM_THREADS'] = '1'
+os.environ['VECLIB_MAXIMUM_THREADS'] = '1'
+os.environ['NUMEXPR_NUM_THREADS'] = '1'
 
 def check_dependencies():
     print("检查依赖...")
     try:
         import librosa
         import soundfile
-        import soxr
         import scipy
         import numpy
         print("  核心依赖已安装")
@@ -24,6 +31,12 @@ def check_dependencies():
         print("  noisereduce 已安装 (深度降噪)")
     except ImportError:
         print("  noisereduce 未安装，将使用基础降噪 (可选: pip install noisereduce)")
+
+    try:
+        import pedalboard
+        print("  pedalboard 已安装 (专业音效处理)")
+    except ImportError:
+        print("  pedalboard 未安装，将使用 scipy 降级算法 (可选: pip install pedalboard)")
 
 def main():
     check_dependencies()

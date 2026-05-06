@@ -1,0 +1,58 @@
+name: Android Release (Termux)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g. v2.0.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Package Android release
+        run: bash scripts/build_android_release.sh
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.version }}-android
+          name: Sono ${{ inputs.version }} (Android/Termux)
+          body: |
+            ## Sono ${{ inputs.version }} - Android (Termux)
+
+            ### 安装步骤
+            1. 下载 `release_android.tar.gz`
+            2. 传输到手机，在 Termux 中执行：
+               ```bash
+               tar -xzf release_android.tar.gz && cd sono-android && bash setup_android.sh
+               ```
+            3. 之后每次启动：`cd sono-android && ./start_android.sh`
+            4. 浏览器访问 http://localhost:8000
+
+            ### 注意事项
+            - 需要 Termux（已预装则无需额外操作）
+            - 建议关闭 Termux 电池优化
+          files: |
+            release_android.tar.gz

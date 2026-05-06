@@ -12,7 +12,7 @@ from config import UPLOAD_DIR, OUTPUT_DIR, ALLOWED_EXTENSIONS, MAX_UPLOAD_SIZE
 from database import create_task, get_task, find_task_by_hash, get_queue_status, mark_stuck_tasks
 from services.task_manager import generate_task_id, submit_detect_task, submit_repair_task
 from services.file_cache import evict_old_files
-from services.ai_detector import get_detector_versions
+from services.audio_repair import get_available_versions
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +20,7 @@ router = APIRouter(prefix="/api/v1")
 
 @router.get("/algorithm-versions")
 async def list_algorithm_versions():
-    return {"versions": get_detector_versions()}
+    return {"versions": get_available_versions()}
 
 class RepairRequest(BaseModel):
     task_id: str

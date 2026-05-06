@@ -113,7 +113,7 @@ export function AIRepairPanel({
         </div>
       )}
 
-      {availableAlgorithms.length > 0 && (
+      {availableAlgorithms.length > 0 ? (
         <div className="mb-4 p-3 bg-gradient-to-r from-cyan-900/30 to-purple-900/30 rounded-lg border border-cyan-500/20">
           <div className="flex items-center justify-between">
             <h4 className="text-cyan-400 text-sm font-medium flex items-center gap-1.5">
@@ -140,6 +140,10 @@ export function AIRepairPanel({
               </svg>
             </div>
           </div>
+        </div>
+      ) : (
+        <div className="mb-4 p-3 bg-yellow-900/20 rounded-lg border border-yellow-500/20">
+          <p className="text-yellow-400/70 text-xs">算法版本加载中，请稍候或刷新页面...</p>
         </div>
       )}
 

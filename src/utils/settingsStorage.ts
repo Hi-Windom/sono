@@ -12,6 +12,8 @@ export interface AppSettings {
     vocalBalance: number;
   };
   selectedMode: string;
+  algorithmVersion: string;
+  detectorVersion: string;
 }
 
 const SETTINGS_KEY = 'ai-music-repair-settings';
@@ -28,6 +30,8 @@ export const defaultSettings: AppSettings = {
     vocalBalance: 0,
   },
   selectedMode: '全面修复',
+  algorithmVersion: 'v1.2',
+  detectorVersion: 'v1.1',
 };
 
 export function loadSettings(): AppSettings {
@@ -46,6 +50,9 @@ export function loadSettings(): AppSettings {
           ...defaultSettings.exportOptions,
           ...parsed.exportOptions,
         },
+        // 确保版本字段有默认值
+        algorithmVersion: parsed.algorithmVersion || defaultSettings.algorithmVersion,
+        detectorVersion: parsed.detectorVersion || defaultSettings.detectorVersion,
       };
     }
   } catch (error) {

@@ -654,11 +654,15 @@ export async function checkBackendHealth(): Promise<boolean> {
 
 export async function fetchAlgorithmVersions(): Promise<AlgorithmVersion[]> {
   try {
-    const res = await fetch(`${API_BASE}/algorithm-versions`, { signal: AbortSignal.timeout(5000) });
-    if (!res.ok) return [];
+    const res = await fetch(`${API_BASE}/algorithm-versions`, { signal: AbortSignal.timeout(10000) });
+    if (!res.ok) {
+      console.warn(`[fetchAlgorithmVersions] HTTP ${res.status}`);
+      return [];
+    }
     const data = await res.json();
     return data.versions || [];
-  } catch {
+  } catch (e) {
+    console.warn('[fetchAlgorithmVersions] failed:', e);
     return [];
   }
 }

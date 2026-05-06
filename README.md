@@ -9,16 +9,34 @@ AI 音频检测与修复工具
 - **前后对比**: 直观对比修复前后的 AI 检测概率变化
 - **浏览器处理**: 支持纯浏览器端处理，无需上传文件
 - **后端处理**: 支持 Python 后端高性能处理
+- **Android 支持**: 通过 Termux 在 Android 设备上运行完整后端
 
 ## 技术栈
 
 - **前端**: React + TypeScript + Vite + Tailwind CSS
 - **后端**: Python + FastAPI + SQLite
-- **音频处理**: Web Audio API / Librosa + NumPy
+- **音频处理**: Web Audio API / Librosa + NumPy + SciPy
+- **包管理**: uv（桌面端）/ pkg + pip（Android）
 
 ## 快速开始
 
-### 安装依赖
+### 前置要求
+
+- Node.js >= 18
+- Python >= 3.10
+- [uv](https://docs.astral.sh/uv/)（推荐）或 pip
+
+### 安装 uv
+
+```bash
+# macOS / Linux
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Windows
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+
+### 安装前端依赖
 
 ```bash
 npm install
@@ -30,19 +48,55 @@ npm install
 npm run dev
 ```
 
-### 启动后端服务
+### 启动后端服务（桌面端）
 
 ```bash
 cd backend
-pip install -r requirements.txt
+uv venv .venv
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
+uv pip install -r requirements.txt
 python main.py
 ```
+
+后端启动后访问 http://localhost:8000，API 文档 http://localhost:8000/docs
 
 ### 构建生产版本
 
 ```bash
 npm run build
 ```
+
+## Android (Termux) 部署
+
+详细指南请参阅 [docs/android.md](docs/android.md)。
+
+### 快速部署
+
+1. 从 [GitHub Releases](../../releases) 下载 `release_android.tar.gz`
+2. 传输到手机，在 Termux 中执行：
+
+```bash
+tar -xzf release_android.tar.gz && cd sono-android && bash setup_android.sh
+```
+
+3. 之后每次启动：`cd sono-android && ./start_android.sh`
+4. 手机浏览器访问 http://localhost:8000
+
+### 本地打包
+
+```bash
+npm run build
+bash scripts/build_android_release.sh
+```
+
+### 与桌面端的差异
+
+| 特性 | 桌面端 | Android |
+|------|--------|---------|
+| 包管理 | uv + venv | pkg + pip（系统级） |
+| numpy/scipy | pip 预编译 wheel | pkg 预编译 |
+| noisereduce | 可用 | 不可用，回退内置算法 |
+| 前端访问 | 开发服务器 | FastAPI 静态文件服务 |
 
 ## 使用说明
 
@@ -78,7 +132,16 @@ npm run build
 ├── backend/               # 后端源代码
 │   ├── api/              # API 路由
 │   ├── services/         # 业务逻辑
-│   └── database.py       # 数据库操作
+│   ├── training/         # 训练工具
+│   ├── requirements.txt        # 桌面端依赖
+│   └── requirements_android.txt # Android 依赖
+├── scripts/              # 部署脚本
+│   ├── setup_android.sh  # Termux 一键部署
+│   ├── start_android.sh  # Termux 启动脚本
+│   └── build_android_release.sh  # PC 端打包
+├── docs/                 # 文档
+│   └── android.md        # Android 部署详细指南
+├── android-app/          # Android APP (Chaquopy 方案，保留回档)
 ├── public/               # 静态资源
 └── dist/                 # 构建输出
 ```

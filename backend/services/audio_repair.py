@@ -1,5 +1,6 @@
-from services.audio_repair_v10 import repair_audio as repair_audio_v10
-from services.audio_repair_v11 import repair_audio as repair_audio_v11
+from services.audio_repair_v1_0 import repair_audio as repair_audio_v1_0
+from services.audio_repair_v1_1 import repair_audio as repair_audio_v1_1
+from services.audio_repair_v1_2 import repair_audio as repair_audio_v1_2
 
 PARAM_DEFINITIONS = {
     "de_clipping": {"key": "deClipping", "label": "去削波", "min": 0, "max": 1, "step": 0.01},
@@ -14,6 +15,9 @@ PARAM_DEFINITIONS = {
     "bass_enhance": {"key": "bassEnhance", "label": "低音增强", "min": 0, "max": 1, "step": 0.01},
     "spatial_enhance": {"key": "spatialEnhance", "label": "空间感", "min": 0, "max": 1, "step": 0.01},
     "transient_repair": {"key": "transientRepair", "label": "瞬态修复", "min": 0, "max": 1, "step": 0.01},
+    "loudness_optimize": {"key": "loudnessOptimize", "label": "响度优化", "min": 0, "max": 1, "step": 0.01},
+    "stereo_width": {"key": "stereoWidth", "label": "立体声宽度", "min": 0, "max": 1, "step": 0.01},
+    "harmonic_richness": {"key": "harmonicRichness", "label": "谐波丰富度", "min": 0, "max": 1, "step": 0.01},
 }
 
 ALGORITHM_VERSIONS = {
@@ -21,7 +25,7 @@ ALGORITHM_VERSIONS = {
         "name": "v1.0",
         "label": "v1.0",
         "description": "基础修复算法，稳定可靠",
-        "repair_fn": repair_audio_v10,
+        "repair_fn": repair_audio_v1_0,
         "default_params": {
             "de_clipping": 0.25, "noise_reduction": 0.18, "de_essing": 0.22,
             "de_crackle": 0.2, "de_pop": 0.15, "harmonic_enhance": 0.12,
@@ -79,7 +83,7 @@ ALGORITHM_VERSIONS = {
         "name": "v1.1",
         "label": "v1.1",
         "description": "多频段压缩、自适应降噪、响度归一化",
-        "repair_fn": repair_audio_v11,
+        "repair_fn": repair_audio_v1_1,
         "default_params": {
             "de_clipping": 0.3, "noise_reduction": 0.22, "de_essing": 0.2,
             "de_crackle": 0.22, "de_pop": 0.18, "harmonic_enhance": 0.1,
@@ -129,6 +133,69 @@ ALGORITHM_VERSIONS = {
                     "de_crackle": 0.22, "de_pop": 0.18, "harmonic_enhance": 0.08,
                     "dynamic_range": 0.15, "softness": 0.05, "presence_boost": 0.08,
                     "bass_enhance": 0.12, "spatial_enhance": 0.15, "transient_repair": 0.15,
+                },
+            },
+        ],
+    },
+    "v1.2": {
+        "name": "v1.2",
+        "label": "v1.2",
+        "description": "深度学习辅助修复，智能谐波增强",
+        "repair_fn": repair_audio_v1_2,
+        "default_params": {
+            "de_clipping": 0.35, "noise_reduction": 0.25, "de_essing": 0.25,
+            "de_crackle": 0.28, "de_pop": 0.2, "harmonic_enhance": 0.15,
+            "dynamic_range": 0.15, "softness": 0.04, "presence_boost": 0.08,
+            "bass_enhance": 0.12, "spatial_enhance": 0.15, "transient_repair": 0.15,
+            "loudness_optimize": 0.6, "stereo_width": 0.4, "harmonic_richness": 0.5,
+        },
+        "modes": [
+            {
+                "name": "AI人声修复v3",
+                "description": "深度学习辅助修复AI人声，智能齿音抑制+谐波增强",
+                "icon": "🎤",
+                "params": {
+                    "de_clipping": 0.3, "noise_reduction": 0.18, "de_essing": 0.3,
+                    "de_crackle": 0.25, "de_pop": 0.18, "harmonic_enhance": 0.2,
+                    "dynamic_range": 0.1, "softness": 0.02, "presence_boost": 0.12,
+                    "bass_enhance": 0.08, "spatial_enhance": 0.12, "transient_repair": 0.15,
+                    "loudness_optimize": 0.5, "stereo_width": 0.3, "harmonic_richness": 0.6,
+                },
+            },
+            {
+                "name": "专业母带处理",
+                "description": "模拟专业母带流程，响度优化+立体声增强+动态控制",
+                "icon": "🎛️",
+                "params": {
+                    "de_clipping": 0.2, "noise_reduction": 0.12, "de_essing": 0.15,
+                    "de_crackle": 0.15, "de_pop": 0.1, "harmonic_enhance": 0.12,
+                    "dynamic_range": 0.25, "softness": 0.02, "presence_boost": 0.1,
+                    "bass_enhance": 0.15, "spatial_enhance": 0.2, "transient_repair": 0.1,
+                    "loudness_optimize": 0.9, "stereo_width": 0.6, "harmonic_richness": 0.4,
+                },
+            },
+            {
+                "name": "深度修复",
+                "description": "最强修复力度，适合严重损坏的AI音频",
+                "icon": "🔧",
+                "params": {
+                    "de_clipping": 0.45, "noise_reduction": 0.4, "de_essing": 0.35,
+                    "de_crackle": 0.4, "de_pop": 0.3, "harmonic_enhance": 0.2,
+                    "dynamic_range": 0.2, "softness": 0.06, "presence_boost": 0.1,
+                    "bass_enhance": 0.15, "spatial_enhance": 0.18, "transient_repair": 0.25,
+                    "loudness_optimize": 0.7, "stereo_width": 0.4, "harmonic_richness": 0.6,
+                },
+            },
+            {
+                "name": "温和优化",
+                "description": "轻微处理，保留原始音质特征，适合质量较好的AI音频",
+                "icon": "🌿",
+                "params": {
+                    "de_clipping": 0.12, "noise_reduction": 0.08, "de_essing": 0.1,
+                    "de_crackle": 0.1, "de_pop": 0.06, "harmonic_enhance": 0.06,
+                    "dynamic_range": 0.08, "softness": 0.02, "presence_boost": 0.04,
+                    "bass_enhance": 0.05, "spatial_enhance": 0.06, "transient_repair": 0.06,
+                    "loudness_optimize": 0.4, "stereo_width": 0.2, "harmonic_richness": 0.3,
                 },
             },
         ],

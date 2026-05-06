@@ -85,10 +85,10 @@ export function useAudioProcessor() {
   const [backendAvailable, setBackendAvailable] = useState(false);
   const [backendDiag, setBackendDiag] = useState<string>('未检测');
   const [taskId, setTaskId] = useState<string | null>(null);
-  const [algorithmVersion, setAlgorithmVersionState] = useState<string>('v1.1');
+  const [algorithmVersion, setAlgorithmVersionState] = useState<string>(savedSettings.algorithmVersion);
   const [availableAlgorithms, setAvailableAlgorithms] = useState<AlgorithmVersion[]>([]);
   const [repairModes, setRepairModes] = useState<RepairMode[]>([]);
-  const [detectorVersion, setDetectorVersion] = useState<string>('v1.1');
+  const [detectorVersion, setDetectorVersion] = useState<string>(savedSettings.detectorVersion);
   const taskIdRef = useRef<string | null>(null);
   const [wavInfo, setWavInfo] = useState<WavInfo | null>(null);
   const [repairResult, setRepairResult] = useState<{
@@ -176,8 +176,59 @@ export function useAudioProcessor() {
         vocalBalance: 0,
       },
       selectedMode,
+      algorithmVersion,
+      detectorVersion,
     });
-  }, [params, processingOptions, selectedMode]);
+  }, [params, processingOptions, selectedMode, algorithmVersion, detectorVersion]);
+
+  // 定期健康检查（每10秒）- 使用 ref 避免依赖项变化导致重新创建定时器
+  const backendAvailableRef = useRef(backendAvailable);
+  backendAvailableRef.current = backendAvailable;
+
+  useEffect(() => {
+    const checkHealth = async () => {
+      try {
+        const res = await fetch('/health', { signal: AbortSignal.timeout(5000) });
+        const wasAvailable = backendAvailableRef.current;
+        const isAvailable = res.ok;
+        setBackendAvailable(isAvailable);
+
+        if (!wasAvailable && isAvailable) {
+          console.log('[useAudioProcessor] 后端恢复可用');
+          fetchAlgorithmVersions().then(versions => {
+            if (versions.length > 0) {
+              setAvailableAlgorithms(versions);
+              const current = versions.find(v => v.name === algorithmVersion) || versions[0];
+              if (current.modes && current.modes.length > 0) {
+                const modes: RepairMode[] = current.modes.map(m => ({
+                  name: m.name,
+                  description: m.description,
+                  icon: m.icon,
+                  params: { ...defaultAIRepairParams, ...m.params } as AIRepairParams,
+                }));
+                setRepairModes(modes);
+                setSelectedMode(modes[0].name);
+              }
+            }
+          });
+        } else if (wasAvailable && !isAvailable) {
+          console.warn('[useAudioProcessor] 后端变为不可用');
+        }
+      } catch {
+        if (backendAvailableRef.current) {
+          console.warn('[useAudioProcessor] 后端健康检查失败，标记为不可用');
+          setBackendAvailable(false);
+        }
+      }
+    };
+
+    // 立即检查一次
+    checkHealth();
+
+    // 每10秒检查一次
+    const interval = setInterval(checkHealth, 10000);
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -197,34 +248,65 @@ export function useAudioProcessor() {
     return audioContextRef.current;
   }, []);
 
+  // 会话恢复逻辑 - 监听后端可用性变化来触发恢复
+  const pendingSessionRef = useRef<{
+    file: File;
+    fileName: string;
+    fileHash: string;
+    taskId: string;
+    hasBeenProcessed: boolean;
+    wavInfo?: string;
+    repairResult?: string;
+  } | null>(null);
+
   useEffect(() => {
     if (sessionRestoredRef.current) return;
-    sessionRestoredRef.current = true;
 
     (async () => {
       const session = await loadSession();
-      if (!session || !session.file || !session.taskId) return;
+      if (!session || !session.file || !session.taskId) {
+        sessionRestoredRef.current = true; // 没有会话需要恢复，标记为已完成
+        return;
+      }
 
       console.log(`[useAudioProcessor] 发现保存的会话: file=${session.fileName} taskId=${session.taskId}`);
 
-      try {
-        const healthRes = await fetch('/health', { signal: AbortSignal.timeout(5000) });
-        if (!healthRes.ok) {
-          console.log('[useAudioProcessor] 后端不可用，跳过会话恢复');
-          return;
-        }
+      // 保存会话数据到 ref，等待后端可用时恢复
+      pendingSessionRef.current = {
+        file: session.file,
+        fileName: session.fileName,
+        fileHash: session.fileHash,
+        taskId: session.taskId,
+        hasBeenProcessed: session.hasBeenProcessed,
+        wavInfo: session.wavInfo,
+        repairResult: session.repairResult,
+      };
+    })();
+  }, []);
 
+  // 当后端变为可用时，尝试恢复会话
+  useEffect(() => {
+    if (!backendAvailable || !pendingSessionRef.current || sessionRestoredRef.current) return;
+
+    const session = pendingSessionRef.current;
+
+    (async () => {
+      try {
         const statusRes = await fetch(`/api/v1/status/${session.taskId}`);
         if (!statusRes.ok) {
-          console.log(`[useAudioProcessor] 任务不存在 taskId=${session.taskId}，跳过恢复`);
+          console.log(`[useAudioProcessor] 任务不存在 taskId=${session.taskId}，清除会话`);
           await clearSession();
+          pendingSessionRef.current = null;
+          sessionRestoredRef.current = true;
           return;
         }
 
         const taskStatus = await statusRes.json();
         if (taskStatus.status === 'error') {
-          console.log(`[useAudioProcessor] 任务已出错，跳过恢复`);
+          console.log(`[useAudioProcessor] 任务已出错，清除会话`);
           await clearSession();
+          pendingSessionRef.current = null;
+          sessionRestoredRef.current = true;
           return;
         }
 
@@ -250,7 +332,6 @@ export function useAudioProcessor() {
 
         setTaskId(session.taskId);
         taskIdRef.current = session.taskId;
-        setBackendAvailable(true);
 
         if (session.hasBeenProcessed && taskStatus.status === 'completed') {
           try {
@@ -272,12 +353,17 @@ export function useAudioProcessor() {
         if (session.repairResult) {
           try { setRepairResult(JSON.parse(session.repairResult)); } catch {}
         }
+
+        sessionRestoredRef.current = true;
+        pendingSessionRef.current = null;
       } catch (e) {
         console.warn('[useAudioProcessor] 会话恢复失败:', e);
         await clearSession();
+        pendingSessionRef.current = null;
+        sessionRestoredRef.current = true;
       }
     })();
-  }, [getAudioContext, processingOptions.sampleRate]);
+  }, [backendAvailable, getAudioContext, processingOptions.sampleRate]);
 
   const stopPlaying = useCallback(() => {
     if (sourceNodeRef.current) {
@@ -629,13 +715,9 @@ export function useAudioProcessor() {
 
     const browserRepairPromise = (async () => {
       try {
-        const { checkAISong } = await import('../utils/aiSongChecker');
         const { enhanceHighFrequencies } = await import('../utils/highFrequencyEnhancer');
 
-        if (!originalAIDetection) {
-          setOriginalAIDetection(checkAISong(audioBuffer));
-        }
-
+        // 修复流程不自动触发AI检测，由用户手动触发
         browserProg.value = 0.05;
         updateCombinedProgress();
 
@@ -1066,7 +1148,9 @@ export function useAudioProcessor() {
       ? `${baseName}_backend_repaired.wav`
       : `${baseName}_browser_repaired.wav`;
 
-    if (source === 'backend' && backendAvailable && taskId) {
+    // 导出后端修复音频时，只要有 taskId 和 buffer 就可以尝试导出
+    // 不依赖 backendAvailable，因为修复完成后后端可能标记为不可用
+    if (source === 'backend' && taskId && backendProcessedBuffer) {
       try {
         const url = getDownloadUrl(taskId);
         setIsProcessing(true);

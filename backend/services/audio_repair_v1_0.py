@@ -1,9 +1,8 @@
 import numpy as np
 import librosa
 import soundfile as sf
-import soxr
 from scipy.interpolate import CubicSpline
-from scipy.signal import medfilt, butter, sosfilt
+from scipy.signal import medfilt, butter, sosfilt, resample_poly
 
 
 def repair_audio(input_path: str, output_path: str, params: dict, progress_callback=None) -> dict:
@@ -98,10 +97,10 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
 
     if target_sr != sr:
         if progress_callback:
-            progress_callback(0.93, f"重采样到 {target_sr//1000} kHz (soxr VHQ)...")
+            progress_callback(0.93, f"重采样到 {target_sr//1000} kHz...")
         y_resampled = np.zeros((y.shape[0], int(y.shape[1] * target_sr / sr)))
         for ch in range(y.shape[0]):
-            y_resampled[ch] = soxr.resample(y[ch], sr, target_sr, quality="VHQ")
+            y_resampled[ch] = resample_poly(y[ch], target_sr, sr)
         y = y_resampled
         sr = target_sr
 
