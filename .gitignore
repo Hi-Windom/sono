@@ -41,12 +41,6 @@ backend/soxr.py
 # Old Chaquopy approach (removed)
 android-app/
 
-# Trae internal
-.trae/
-
-# Dev scripts (local only)
-dev.sh
-
 # PM2
 ecosystem.config.cjs
 
