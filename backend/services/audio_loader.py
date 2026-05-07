@@ -4,19 +4,12 @@ import numpy as np
 def load_audio_with_fallback(file_path: str, sr=None, mono=False) -> tuple:
     import miniaudio
 
-    sound = miniaudio.read_file(file_path)
+    sound = miniaudio.decode_file(file_path, output_format=miniaudio.SampleFormat.FLOAT32)
 
     nchannels = sound.nchannels
     sample_rate = sound.sample_rate
 
-    if sound.sample_format == miniaudio.SampleFormat.FLOAT32:
-        raw = np.frombuffer(sound.samples, dtype=np.float32)
-    elif sound.sample_format == miniaudio.SampleFormat.SIGNED16:
-        raw = np.frombuffer(sound.samples, dtype=np.int16).astype(np.float32) / 32768.0
-    elif sound.sample_format == miniaudio.SampleFormat.SIGNED32:
-        raw = np.frombuffer(sound.samples, dtype=np.int32).astype(np.float32) / 2147483648.0
-    else:
-        raw = np.frombuffer(sound.samples, dtype=np.int16).astype(np.float32) / 32768.0
+    raw = np.frombuffer(sound.samples, dtype=np.float32).copy()
 
     if nchannels > 1:
         raw = raw.reshape(-1, nchannels).T
