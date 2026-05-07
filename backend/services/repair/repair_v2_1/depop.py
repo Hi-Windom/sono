@@ -38,11 +38,13 @@ def apply_de_pop_v4(y, sr, intensity):
                     ratio = target_rms / current_rms
                     blend = intensity * 0.7
                     fade_len = min(block_size // 4, end - start)
-                    for i in range(start, end):
-                        local_blend = blend
-                        if i - start < fade_len:
-                            local_blend *= (i - start) / fade_len
-                        elif end - i < fade_len:
-                            local_blend *= (end - i) / fade_len
-                        result[ch, i] = data[i] * (ratio * local_blend + 1.0 * (1 - local_blend))
+                    n_samples = end - start
+                    fade_in = np.linspace(0, 1, min(fade_len, n_samples))
+                    fade_out = np.linspace(1, 0, min(fade_len, n_samples))
+                    fade_mask = np.ones(n_samples)
+                    if fade_len > 0:
+                        fade_mask[:len(fade_in)] = np.minimum(fade_mask[:len(fade_in)], fade_in)
+                        fade_mask[-len(fade_out):] = np.minimum(fade_mask[-len(fade_out):], fade_out)
+                    local_blend = blend * fade_mask
+                    result[ch, start:end] = data[start:end] * (ratio * local_blend + 1.0 * (1 - local_blend))
     return result

@@ -24,6 +24,13 @@ def apply_spatial_enhance_v5(y, sr, intensity):
         side_low = filtfilt(b, a, side)
         side = side_low * 0.3 + (side - side_low)
 
+    high_cutoff = 4000
+    if sr > high_cutoff * 2:
+        b_h, a_h = butter(4, high_cutoff / (sr / 2), btype='high')
+        side_high = filtfilt(b_h, a_h, side)
+        high_boost = 1 + intensity * 0.15
+        side = side_high * high_boost + (side - side_high)
+
     enhanced_mid = mid * (1 - intensity * 0.02)
     enhanced_side = side * side_gain
 

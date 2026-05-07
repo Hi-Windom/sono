@@ -1,5 +1,5 @@
 import numpy as np
-from scipy.signal import medfilt
+from scipy.signal import medfilt, lfilter
 
 
 def apply_transient_repair_v4(y, sr, intensity):
@@ -20,11 +20,15 @@ def apply_transient_repair_v4(y, sr, intensity):
         attack_coeff = np.exp(-1 / (0.01 * sr / frame_size))
         release_coeff = np.exp(-1 / (0.1 * sr / frame_size))
 
-        envelope = np.zeros(n_frames)
-        envelope[0] = frame_rms[0]
-        for i in range(1, n_frames):
-            coeff = attack_coeff if frame_rms[i] > envelope[i - 1] else release_coeff
-            envelope[i] = coeff * envelope[i - 1] + (1 - coeff) * frame_rms[i]
+        b_atk = np.array([1.0 - attack_coeff])
+        a_atk = np.array([1.0, -attack_coeff])
+        attack_env = lfilter(b_atk, a_atk, frame_rms)
+
+        b_rel = np.array([1.0 - release_coeff])
+        a_rel = np.array([1.0, -release_coeff])
+        release_env = lfilter(b_rel, a_rel, frame_rms)
+
+        envelope = np.maximum(attack_env, release_env)
 
         deviation = np.abs(envelope - smooth_rms) / (smooth_rms + 1e-10)
         anomaly_threshold = 0.3 + (1 - intensity) * 0.5
@@ -41,11 +45,13 @@ def apply_transient_repair_v4(y, sr, intensity):
                 ratio = target_rms / current_rms
                 blend = intensity * 0.6
                 fade_len = min(frame_size // 4, end - start)
-                for i in range(start, end):
-                    local_blend = blend
-                    if i - start < fade_len:
-                        local_blend *= (i - start) / fade_len
-                    elif end - i < fade_len:
-                        local_blend *= (end - i) / fade_len
-                    result[ch, i] = data[i] * (ratio * local_blend + 1.0 * (1 - local_blend))
+                n_samples = end - start
+                fade_in = np.linspace(0, 1, min(fade_len, n_samples))
+                fade_out = np.linspace(1, 0, min(fade_len, n_samples))
+                fade_mask = np.ones(n_samples)
+                if fade_len > 0:
+                    fade_mask[:len(fade_in)] = np.minimum(fade_mask[:len(fade_in)], fade_in)
+                    fade_mask[-len(fade_out):] = np.minimum(fade_mask[-len(fade_out):], fade_out)
+                local_blend = blend * fade_mask
+                result[ch, start:end] = data[start:end] * (ratio * local_blend + 1.0 * (1 - local_blend))
     return result

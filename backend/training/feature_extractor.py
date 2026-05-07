@@ -16,6 +16,7 @@ import librosa
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
+from services.audio_loader import load_audio_with_fallback
 
 # 添加父目录到路径
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -237,7 +238,7 @@ def process_single_file(filepath: str) -> Optional[Dict]:
             return None
         
         # 加载音频
-        y, sr = librosa.load(filepath, sr=None, mono=True)
+        y, sr = load_audio_with_fallback(filepath, sr=None, mono=True)
         duration = len(y) / sr
         
         # 检测类型（纯音乐 vs 歌唱）

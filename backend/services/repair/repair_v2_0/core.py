@@ -4,6 +4,7 @@ import soundfile as sf
 from scipy.signal import butter, filtfilt, resample_poly
 from config import MOBILE_MODE
 import gc
+from services.audio_loader import load_audio_with_fallback
 
 from services.repair.repair_v2_0.declip import apply_de_clipping_v4
 from services.repair.repair_v2_0.depop import apply_de_pop_v4

@@ -1,5 +1,5 @@
 import numpy as np
-from scipy.signal import butter, filtfilt
+from scipy.signal import butter, filtfilt, lfilter
 
 
 def apply_multiband_compression_v2(y, sr, intensity):
@@ -32,8 +32,8 @@ def apply_multiband_compression_v2(y, sr, intensity):
         ]
 
         compressed_bands = []
-        for band, thresh_db, ratio, attack_ms, release_ms in bands:
-            compressed_bands.append(_simple_compress(band, thresh_db, ratio, attack_ms, release_ms, sr))
+        for band, thresh_db, ratio, attack_ms, release_ms, sr_comp in [(b[0], b[1], b[2], b[3], b[4], sr) for b in bands]:
+            compressed_bands.append(_vectorized_compress(band, thresh_db, ratio, attack_ms, release_ms, sr_comp))
 
         result[ch] = sum(compressed_bands)
 
@@ -43,17 +43,22 @@ def apply_multiband_compression_v2(y, sr, intensity):
     return result
 
 
-def _simple_compress(band, threshold_db, ratio, attack_ms, release_ms, sr):
+def _vectorized_compress(band, threshold_db, ratio, attack_ms, release_ms, sr):
     threshold_lin = 10 ** (threshold_db / 20)
     attack_coeff = np.exp(-1 / (attack_ms * 0.001 * sr))
     release_coeff = np.exp(-1 / (release_ms * 0.001 * sr))
 
-    envelope = np.zeros(len(band))
-    envelope[0] = np.abs(band[0])
-    for i in range(1, len(band)):
-        sample_abs = np.abs(band[i])
-        coeff = attack_coeff if sample_abs > envelope[i - 1] else release_coeff
-        envelope[i] = coeff * envelope[i - 1] + (1 - coeff) * sample_abs
+    abs_band = np.abs(band)
+
+    b_atk = np.array([1.0 - attack_coeff])
+    a_atk = np.array([1.0, -attack_coeff])
+    attack_env = lfilter(b_atk, a_atk, abs_band)
+
+    b_rel = np.array([1.0 - release_coeff])
+    a_rel = np.array([1.0, -release_coeff])
+    release_env = lfilter(b_rel, a_rel, abs_band)
+
+    envelope = np.maximum(attack_env, release_env)
 
     gain = np.ones(len(band))
     over = envelope > threshold_lin
