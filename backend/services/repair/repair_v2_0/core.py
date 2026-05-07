@@ -1,5 +1,4 @@
 import numpy as np
-import librosa
 import soundfile as sf
 from scipy.signal import butter, filtfilt, resample_poly
 from config import MOBILE_MODE

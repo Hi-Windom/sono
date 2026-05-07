@@ -1,26 +1,43 @@
 import numpy as np
-import librosa
-import soundfile as sf
 from concurrent.futures import ThreadPoolExecutor
 from services.audio_loader import load_audio_with_fallback
+from services.librosa_compat import (
+    stft,
+    spectral_flatness,
+    spectral_centroid,
+    spectral_bandwidth,
+    spectral_rolloff,
+    chroma_stft,
+    zero_crossing_rate,
+    rms,
+    mfcc,
+    delta,
+    onset_strength,
+    onset_detect,
+    harmonic,
+    frame,
+    pyin,
+    note_to_hz,
+    hpss,
+)
 
 # 音高检测使用代表性片段，避免长音频耗时过长
 MAX_PITCH_DURATION = 30  # 秒
 
 
 def _extract_spectral(y, sr):
-    S = np.abs(librosa.stft(y, n_fft=4096, hop_length=1024))
+    S = np.abs(stft(y, n_fft=4096, hop_length=1024))
     S_power = S ** 2
     S_norm = S_power / (np.sum(S_power, axis=0, keepdims=True) + 1e-10)
     log_S = np.log(S_power + 1e-10)
 
-    spectral_flatness = float(np.mean(librosa.feature.spectral_flatness(y=y, S=S)))
-    spectral_centroids = librosa.feature.spectral_centroid(y=y, sr=sr, S=S)
+    spectral_flatness_val = float(np.mean(spectral_flatness(y=y, S=S)))
+    spectral_centroids = spectral_centroid(y=y, sr=sr, S=S)
     centroid_mean = float(np.mean(spectral_centroids))
     centroid_std = float(np.std(spectral_centroids))
     centroid_cv = float(np.std(spectral_centroids) / (np.mean(spectral_centroids) + 1e-10))
 
-    spectral_bandwidths = librosa.feature.spectral_bandwidth(y=y, sr=sr, S=S)
+    spectral_bandwidths = spectral_bandwidth(y=y, sr=sr, S=S)
     bandwidth_mean = float(np.mean(spectral_bandwidths))
     bandwidth_var = float(np.var(spectral_bandwidths))
     bandwidth_cv = float(np.std(spectral_bandwidths) / (np.mean(spectral_bandwidths) + 1e-10))
@@ -30,21 +47,21 @@ def _extract_spectral(y, sr):
     log_S_var = float(np.mean(np.var(log_S, axis=1)))
     log_S_mean = float(np.mean(log_S_var))
 
-    spec_rolloff = librosa.feature.spectral_rolloff(y=y, sr=sr, S=S)
+    spec_rolloff = spectral_rolloff(y=y, sr=sr, S=S)
     high_freq_attenuation = float(np.mean(spec_rolloff) / (sr / 2))
     rolloff_cv = float(np.std(spec_rolloff) / (np.mean(spec_rolloff) + 1e-10))
 
-    chroma = librosa.feature.chroma_stft(y=y, sr=sr, S=S)
+    chroma = chroma_stft(y=y, sr=sr, S=S)
     chroma_var = float(np.mean(np.std(chroma, axis=1)))
     chroma_mean = float(np.mean(chroma))
 
-    zero_crossings = librosa.feature.zero_crossing_rate(y)
+    zero_crossings = zero_crossing_rate(y)
     zcr_mean = float(np.mean(zero_crossings))
     zcr_std = float(np.std(zero_crossings))
 
-    rms = librosa.feature.rms(y=y)
-    rms_mean = float(np.mean(rms))
-    rms_std = float(np.std(rms))
+    rms_val = rms(y=y)
+    rms_mean = float(np.mean(rms_val))
+    rms_std = float(np.std(rms_val))
     rms_cv = float(rms_std / (rms_mean + 1e-10))
 
     # 频谱相关性 - AI各帧频谱过于相似或过于不同
@@ -59,7 +76,7 @@ def _extract_spectral(y, sr):
     return {
         "S": S,
         "S_power": S_power,
-        "spectral_flatness": spectral_flatness,
+        "spectral_flatness": spectral_flatness_val,
         "spectral_entropy": spectral_entropy,
         "centroid_mean": centroid_mean,
         "centroid_std": centroid_std,
@@ -83,10 +100,10 @@ def _extract_spectral(y, sr):
 
 def _extract_mfcc(y, sr, S=None):
     if S is None:
-        S = np.abs(librosa.stft(y, n_fft=4096, hop_length=1024))
-    mfccs = librosa.feature.mfcc(y=y, sr=sr, S=S, n_mfcc=20)
-    mfcc_delta = librosa.feature.delta(mfccs)
-    mfcc_delta2 = librosa.feature.delta(mfccs, order=2)
+        S = np.abs(stft(y, n_fft=4096, hop_length=1024))
+    mfccs = mfcc(y=y, sr=sr, S=S, n_mfcc=20)
+    mfcc_delta = delta(mfccs)
+    mfcc_delta2 = delta(mfccs, order=2)
     mfcc_variability = float(np.mean(np.std(mfcc_delta, axis=1)))
     mfcc_accel = float(np.mean(np.std(mfcc_delta2, axis=1)))
     mfcc_mean = float(np.mean(np.abs(mfccs)))
@@ -98,8 +115,8 @@ def _extract_mfcc(y, sr, S=None):
 
 
 def _extract_rhythm(y, sr):
-    onset_env = librosa.onset.onset_strength(y=y, sr=sr)
-    onset_frames = librosa.onset.onset_detect(onset_envelope=onset_env, sr=sr)
+    onset_env = onset_strength(y=y, sr=sr)
+    onset_frames = onset_detect(onset_envelope=onset_env, sr=sr)
     if len(onset_frames) > 2:
         onset_intervals = np.diff(onset_frames)
         micro_rhythm_consistency = float(1.0 - np.std(onset_intervals) / (np.mean(onset_intervals) + 1e-10))
@@ -108,13 +125,13 @@ def _extract_rhythm(y, sr):
         micro_rhythm_consistency = 0.5
         onset_cv = 1.0
 
-    env = np.abs(librosa.effects.harmonic(y))
-    env_frames = librosa.util.frame(env, frame_length=4096, hop_length=1024)
+    env = np.abs(harmonic(y))
+    env_frames = frame(env, frame_length=4096, hop_length=1024)
     env_means = np.mean(env_frames, axis=0)
     temporal_regularity = float(1.0 - np.std(np.diff(env_means)) / (np.mean(np.abs(np.diff(env_means))) + 1e-10))
 
-    rms = librosa.feature.rms(y=y)
-    dynamic_range = float(np.percentile(rms, 95) - np.percentile(rms, 5))
+    rms_val = rms(y=y)
+    dynamic_range = float(np.percentile(rms_val, 95) - np.percentile(rms_val, 5))
 
     return {
         "micro_rhythm_consistency": micro_rhythm_consistency,
@@ -133,7 +150,7 @@ def _extract_pitch(y, sr):
     else:
         y_pitch = y
 
-    f0, voiced_flag, _ = librosa.pyin(y_pitch, fmin=librosa.note_to_hz('C2'), fmax=librosa.note_to_hz('C7'), sr=sr)
+    f0, voiced_flag, _ = pyin(y_pitch, fmin=note_to_hz('C2'), fmax=note_to_hz('C7'), sr=sr)
     voiced_f0 = f0[voiced_flag] if f0 is not None else np.array([])
     pitch_variability = float(np.std(voiced_f0) / (np.mean(voiced_f0) + 1e-10)) if len(voiced_f0) > 0 else 0
     voiced_ratio = float(len(voiced_f0) / len(f0)) if f0 is not None and len(f0) > 0 else 0
@@ -145,8 +162,8 @@ def _extract_pitch(y, sr):
 
 
 def _extract_harmonic(y):
-    harmonic, percussive = librosa.effects.hpss(y)
-    harmonic_ratio = float(np.mean(np.abs(harmonic)) / (np.mean(np.abs(percussive)) + 1e-10))
+    harmonic_out, percussive = hpss(y)
+    harmonic_ratio = float(np.mean(np.abs(harmonic_out)) / (np.mean(np.abs(percussive)) + 1e-10))
     return {"harmonic_ratio": harmonic_ratio}
 
 

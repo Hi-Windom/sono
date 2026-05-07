@@ -1,5 +1,5 @@
 import numpy as np
-import librosa
+from services.librosa_compat import stft, istft, fft_frequencies
 from scipy.signal import medfilt
 
 
@@ -15,7 +15,7 @@ def apply_spectral_group_a(y, sr, params, n_fft, hop_length, issues_found):
 
     for ch in range(y.shape[0]):
         data = result[ch]
-        S = librosa.stft(data, n_fft=n_fft, hop_length=hop_length)
+        S = stft(data, n_fft=n_fft, hop_length=hop_length)
         mag = np.abs(S)
 
         if de_crackle > 0:
@@ -38,13 +38,13 @@ def apply_spectral_group_a(y, sr, params, n_fft, hop_length, issues_found):
                 issues_found.append("智能降噪v4")
                 noise_added = True
 
-        result[ch] = librosa.istft(S, hop_length=hop_length, length=len(data))
+        result[ch] = istft(S, hop_length=hop_length, length=len(data))
 
     return result
 
 
 def _apply_de_crackle_v4_inplace(S, mag, sr, n_fft, hop_length, intensity):
-    freqs = librosa.fft_frequencies(sr=sr, n_fft=n_fft)
+    freqs = fft_frequencies(sr=sr, n_fft=n_fft)
 
     frame_energy = np.sum(mag ** 2, axis=0)
     med_energy = medfilt(frame_energy, kernel_size=5)
@@ -70,7 +70,7 @@ def _apply_de_crackle_v4_inplace(S, mag, sr, n_fft, hop_length, intensity):
 
 
 def _apply_de_essing_v4_inplace(S, mag, sr, n_fft, hop_length, intensity):
-    freqs = librosa.fft_frequencies(sr=sr, n_fft=n_fft)
+    freqs = fft_frequencies(sr=sr, n_fft=n_fft)
     n_frames = mag.shape[1]
 
     centroid = np.sum(freqs[:, np.newaxis] * mag, axis=0) / (np.sum(mag, axis=0) + 1e-10)

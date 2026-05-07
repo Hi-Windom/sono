@@ -12,7 +12,7 @@ os.environ['NUMEXPR_NUM_THREADS'] = '1'
 def check_dependencies():
     print("检查依赖...")
     try:
-        import librosa
+        import miniaudio
         import soundfile
         import scipy
         import numpy

@@ -1,5 +1,5 @@
 import numpy as np
-import librosa
+from services.librosa_compat import stft, istft, fft_frequencies
 import soundfile as sf
 from scipy.interpolate import CubicSpline
 from scipy.signal import medfilt, butter, sosfilt, resample_poly
@@ -190,7 +190,7 @@ def _apply_de_crackle(y: np.ndarray, sr: int, intensity: float, n_fft: int, hop_
     result = y.copy()
     for ch in range(y.shape[0]):
         data = result[ch]
-        S = librosa.stft(data, n_fft=n_fft, hop_length=hop_length)
+        S = stft(data, n_fft=n_fft, hop_length=hop_length)
         mag = np.abs(S)
         phase = np.exp(1j * np.angle(S))
 
@@ -205,7 +205,7 @@ def _apply_de_crackle(y: np.ndarray, sr: int, intensity: float, n_fft: int, hop_
                 blend = min(1.0, intensity * 0.7 * (energy_ratio[j] - 1) / 2)
                 S[:, j] = (smooth_mag[:, j] * blend + mag[:, j] * (1 - blend)) * phase[:, j]
 
-        result[ch] = librosa.istft(S, hop_length=hop_length, length=len(data))
+        result[ch] = istft(S, hop_length=hop_length, length=len(data))
     return result
 
 
@@ -255,9 +255,9 @@ def _apply_de_essing(y: np.ndarray, sr: int, intensity: float, n_fft: int, hop_l
     result = y.copy()
     for ch in range(y.shape[0]):
         data = result[ch]
-        S = librosa.stft(data, n_fft=n_fft, hop_length=hop_length)
+        S = stft(data, n_fft=n_fft, hop_length=hop_length)
         mag = np.abs(S)
-        freqs = librosa.fft_frequencies(sr=sr, n_fft=n_fft)
+        freqs = fft_frequencies(sr=sr, n_fft=n_fft)
 
         sibilant_bands = [
             (3000, 5000),
@@ -283,7 +283,7 @@ def _apply_de_essing(y: np.ndarray, sr: int, intensity: float, n_fft: int, hop_l
                 reduction = max(reduction, 0.3)
                 S[band_mask, j] *= reduction
 
-        result[ch] = librosa.istft(S, hop_length=hop_length, length=len(data))
+        result[ch] = istft(S, hop_length=hop_length, length=len(data))
     return result
 
 
@@ -308,7 +308,7 @@ def _apply_noise_reduction(y: np.ndarray, sr: int, intensity: float, n_fft: int,
 def _apply_noise_reduction_fallback(y: np.ndarray, sr: int, intensity: float, n_fft: int, hop_length: int) -> np.ndarray:
     result = y.copy()
     for ch in range(y.shape[0]):
-        S = librosa.stft(result[ch], n_fft=n_fft, hop_length=hop_length)
+        S = stft(result[ch], n_fft=n_fft, hop_length=hop_length)
         mag = np.abs(S)
 
         noise_frames = max(1, mag.shape[1] // 20)
@@ -322,7 +322,7 @@ def _apply_noise_reduction_fallback(y: np.ndarray, sr: int, intensity: float, n_
             smooth_mask[:, i] = smooth_mask[:, i] * 0.6 + (smooth_mask[:, i-1] + smooth_mask[:, i+1]) * 0.2
 
         S_clean = S * smooth_mask + S * (1 - smooth_mask) * (1 - intensity * 0.7)
-        result[ch] = librosa.istft(S_clean, hop_length=hop_length, length=y.shape[1])
+        result[ch] = istft(S_clean, hop_length=hop_length, length=y.shape[1])
     return result
 
 
@@ -368,9 +368,9 @@ def _apply_harmonic_enhance(y: np.ndarray, sr: int, intensity: float, n_fft: int
     result = y.copy()
     for ch in range(y.shape[0]):
         data = result[ch]
-        S = librosa.stft(data, n_fft=n_fft, hop_length=hop_length)
+        S = stft(data, n_fft=n_fft, hop_length=hop_length)
         mag = np.abs(S)
-        freqs = librosa.fft_frequencies(sr=sr, n_fft=n_fft)
+        freqs = fft_frequencies(sr=sr, n_fft=n_fft)
 
         fundamental_mask = freqs < 4000
         harmonic_boost = np.ones_like(mag)
@@ -388,7 +388,7 @@ def _apply_harmonic_enhance(y: np.ndarray, sr: int, intensity: float, n_fft: int
 
         harmonic_boost = np.clip(harmonic_boost, 1.0, 1.0 + intensity * 0.5)
         S_enhanced = S * harmonic_boost
-        result[ch] = librosa.istft(S_enhanced, hop_length=hop_length, length=len(data))
+        result[ch] = istft(S_enhanced, hop_length=hop_length, length=len(data))
     return result
 
 

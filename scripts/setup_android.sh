@@ -16,26 +16,26 @@ echo -e "${GREEN}============================================${NC}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
-echo -e "${YELLOW}[1/8] 清理缓存文件...${NC}"
+echo -e "${YELLOW}[1/5] 清理缓存文件...${NC}"
 if [ -d "backend/__pycache__" ]; then
     echo "  清理 Python 缓存..."
     rm -rf backend/__pycache__
     rm -rf backend/api/__pycache__
     rm -rf backend/services/__pycache__
 fi
+rm -f backend/numba.py backend/soxr.py
 echo "  清理完成。"
 
-echo -e "${YELLOW}[2/8] 检查 Termux 环境...${NC}"
+echo -e "${YELLOW}[2/5] 检查 Termux 环境...${NC}"
 if [ ! -d "/data/data/com.termux" ]; then
     echo -e "${RED}错误: 未检测到 Termux 环境，此脚本仅适用于 Termux。${NC}"
     exit 1
 fi
 echo "  Termux 环境确认。"
 
-echo -e "${YELLOW}[3/8] 更新软件源...${NC}"
+echo -e "${YELLOW}[3/5] 安装系统依赖（含预编译 C/Rust 扩展包）...${NC}"
 pkg update -y 2>/dev/null || true
 
-echo -e "${YELLOW}[4/8] 安装系统依赖（含预编译 C/Rust 扩展包）...${NC}"
 MISSING_PKGS=""
 for pkg in python clang make pkg-config libc++ libffi openssl curl ca-certificates \
     python-numpy python-scipy rust; do
@@ -52,11 +52,7 @@ else
     echo "  系统包已满足。"
 fi
 
-echo -e "${YELLOW}[5/8] 安装 Python 构建工具...${NC}"
-pip install setuptools maturin -i "$PYPI_MIRROR_URL" --trusted-host "$PYPI_MIRROR_HOST" 2>/dev/null || \
-    pip install setuptools maturin
-
-echo -e "${YELLOW}[6/8] 安装 Python 依赖...${NC}"
+echo -e "${YELLOW}[4/5] 安装 Python 依赖...${NC}"
 cd backend
 
 export TMPDIR="$HOME/.tmp"
@@ -73,105 +69,18 @@ if ! pip install --no-build-isolation -r requirements_android.txt -i "$PYPI_MIRR
     pip install --no-build-isolation -r requirements_android.txt
 fi
 
-echo "  安装 librosa（跳过 scikit-learn 依赖）..."
-if ! pip install --no-build-isolation --no-deps librosa -i "$PYPI_MIRROR_URL" --trusted-host "$PYPI_MIRROR_HOST"; then
-    pip install --no-build-isolation --no-deps librosa
-fi
-
-echo "  创建 soxr stub 模块（让 librosa 能导入但不使用 soxr）..."
-SOXR_STUB="$SCRIPT_DIR/backend/soxr.py"
-cat > "$SOXR_STUB" << 'STUBEOF'
-import numpy as np
-from scipy.signal import resample_poly
-
-def resample(x, in_rate, out_rate, quality="HQ"):
-    if x.ndim == 1:
-        return resample_poly(x, out_rate, in_rate).astype(x.dtype)
-    elif x.ndim == 2:
-        out = np.zeros((x.shape[0], int(x.shape[1] * out_rate / in_rate)), dtype=x.dtype)
-        for ch in range(x.shape[0]):
-            out[ch] = resample_poly(x[ch], out_rate, in_rate).astype(x.dtype)
-        return out
-    return resample_poly(x, out_rate, in_rate).astype(x.dtype)
-STUBEOF
-
-echo "  创建 numba stub 模块（让 librosa 能导入但不使用 numba JIT）..."
-NUMBA_STUB="$SCRIPT_DIR/backend/numba.py"
-cat > "$NUMBA_STUB" << 'STUBEOF'
-def jit(*args, **kwargs):
-    if len(args) == 1 and callable(args[0]):
-        return args[0]
-    def decorator(fn):
-        return fn
-    return decorator
-
-def stencil(*args, **kwargs):
-    if len(args) == 1 and callable(args[0]):
-        return args[0]
-    def decorator(fn):
-        return fn
-    return decorator
-
-def guvectorize(*args, **kwargs):
-    if len(args) == 1 and callable(args[0]):
-        return args[0]
-    def decorator(fn):
-        return fn
-    return decorator
-
-def vectorize(*args, **kwargs):
-    if len(args) == 1 and callable(args[0]):
-        return args[0]
-    def decorator(fn):
-        return fn
-    return decorator
-
-def njit(*args, **kwargs):
-    if len(args) == 1 and callable(args[0]):
-        return args[0]
-    def decorator(fn):
-        return fn
-    return decorator
-
-def prange(*args, **kwargs):
-    return range(*args) if args else range(0)
-
-float32 = "float32"
-float64 = "float64"
-int32 = "int32"
-int64 = "int64"
-void = "void"
-boolean = "boolean"
-
-class types:
-    float32 = "float32"
-    float64 = "float64"
-    int32 = "int32"
-    int64 = "int64"
-    void = "void"
-    boolean = "boolean"
-    Array = object
-    UniTuple = object
-
-class config:
-    DISABLE_JIT = True
-STUBEOF
-
 cd ..
 
-echo -e "${YELLOW}[7/8] 验证关键依赖...${NC}"
+echo -e "${YELLOW}[5/5] 验证关键依赖...${NC}"
 cd backend
 python -c "import numpy; print(f'  numpy {numpy.__version__} OK')" 2>/dev/null || echo -e "${RED}  numpy 未安装！${NC}"
 python -c "import scipy; print(f'  scipy {scipy.__version__} OK')" 2>/dev/null || echo -e "${RED}  scipy 未安装！${NC}"
 python -c "import pydantic; print(f'  pydantic {pydantic.__version__} OK')" 2>/dev/null || echo -e "${RED}  pydantic 未安装！${NC}"
 python -c "import fastapi; print(f'  fastapi {fastapi.__version__} OK')" 2>/dev/null || echo -e "${RED}  fastapi 未安装！${NC}"
-python -c "import soxr; print(f'  soxr (stub) OK')" 2>/dev/null || echo -e "${RED}  soxr stub 未创建！${NC}"
-python -c "import numba; print(f'  numba (stub) OK')" 2>/dev/null || echo -e "${RED}  numba stub 未创建！${NC}"
-python -c "import librosa; print(f'  librosa {librosa.__version__} OK')" 2>/dev/null || echo -e "${RED}  librosa 未安装！${NC}"
-python -c "import miniaudio; print(f'  miniaudio {miniaudio.__version__} OK')" 2>/dev/null || echo -e "${RED}  miniaudio 未安装！MP3解码将不可用${NC}"
+python -c "import miniaudio; print(f'  miniaudio {miniaudio.__version__} OK')" 2>/dev/null || echo -e "${RED}  miniaudio 未安装！音频加载将不可用${NC}"
+python -c "import soundfile; print(f'  soundfile {soundfile.__version__} OK')" 2>/dev/null || echo -e "${RED}  soundfile 未安装！${NC}"
 cd ..
 
-echo -e "${YELLOW}[8/8] 生成启动脚本 start_android.sh...${NC}"
 cat > start_android.sh << 'STARTEOF'
 #!/data/data/com.termux/files/usr/bin/bash
 set -e

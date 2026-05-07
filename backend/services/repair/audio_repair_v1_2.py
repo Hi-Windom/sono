@@ -1,5 +1,5 @@
 import numpy as np
-import librosa
+from services.librosa_compat import stft, istft, fft_frequencies
 import soundfile as sf
 try:
     from pedalboard import Pedalboard, Compressor, Gain, LowShelfFilter, HighShelfFilter, PeakFilter, Reverb, Limiter, HighpassFilter, LowpassFilter, Chorus
@@ -187,7 +187,7 @@ def _apply_de_crackle_v3(y, sr, intensity, n_fft, hop_length):
 
     for ch in range(y.shape[0]):
         data = result[ch]
-        S = librosa.stft(data, n_fft=n_fft, hop_length=hop_length)
+        S = stft(data, n_fft=n_fft, hop_length=hop_length)
         mag = np.abs(S)
         phase = np.exp(1j * np.angle(S))
 
@@ -210,7 +210,7 @@ def _apply_de_crackle_v3(y, sr, intensity, n_fft, hop_length):
                 blend = intensity * 0.7
                 S[:, j] = (local_avg * blend + mag[:, j] * (1 - blend)) * phase[:, j]
 
-        result[ch] = librosa.istft(S, hop_length=hop_length, length=len(data))
+        result[ch] = istft(S, hop_length=hop_length, length=len(data))
 
     return result
 
@@ -241,9 +241,9 @@ def _apply_de_essing_v3(y, sr, intensity, n_fft, hop_length):
 
     for ch in range(y.shape[0]):
         data = result[ch]
-        S = librosa.stft(data, n_fft=n_fft, hop_length=hop_length)
+        S = stft(data, n_fft=n_fft, hop_length=hop_length)
         mag = np.abs(S)
-        freqs = librosa.fft_frequencies(sr=sr, n_fft=n_fft)
+        freqs = fft_frequencies(sr=sr, n_fft=n_fft)
 
         # 简化频段
         sibilant_bands = [
@@ -269,7 +269,7 @@ def _apply_de_essing_v3(y, sr, intensity, n_fft, hop_length):
                 mag[band_mask, :] *= np.where(sibilant_frames, reduction, 1.0)
 
         S = mag * np.exp(1j * np.angle(S))
-        result[ch] = librosa.istft(S, hop_length=hop_length, length=len(data))
+        result[ch] = istft(S, hop_length=hop_length, length=len(data))
 
     return result
 
@@ -307,10 +307,10 @@ def _apply_harmonic_enhance_v4(y, sr, intensity, n_fft, hop_length):
 
     for ch in range(y.shape[0]):
         data = result[ch]
-        S = librosa.stft(data, n_fft=n_fft, hop_length=hop_length)
+        S = stft(data, n_fft=n_fft, hop_length=hop_length)
         mag = np.abs(S)
         phase = np.angle(S)
-        freqs = librosa.fft_frequencies(sr=sr, n_fft=n_fft)
+        freqs = fft_frequencies(sr=sr, n_fft=n_fft)
 
         harmonic_content = np.zeros_like(mag)
 
@@ -342,7 +342,7 @@ def _apply_harmonic_enhance_v4(y, sr, intensity, n_fft, hop_length):
 
         enhanced_mag = mag + harmonic_content * intensity * 0.5
         S_enhanced = enhanced_mag * np.exp(1j * phase)
-        result[ch] = librosa.istft(S_enhanced, hop_length=hop_length, length=len(data))
+        result[ch] = istft(S_enhanced, hop_length=hop_length, length=len(data))
 
     return result
 
@@ -414,10 +414,10 @@ def _apply_harmonic_richness(y, sr, intensity, n_fft, hop_length):
 
     for ch in range(y.shape[0]):
         data = result[ch]
-        S = librosa.stft(data, n_fft=n_fft, hop_length=hop_length)
+        S = stft(data, n_fft=n_fft, hop_length=hop_length)
         mag = np.abs(S)
         phase = np.angle(S)
-        freqs = librosa.fft_frequencies(sr=sr, n_fft=n_fft)
+        freqs = fft_frequencies(sr=sr, n_fft=n_fft)
 
         harmonic_enhancement = np.zeros_like(mag)
         base_indices = np.where((freqs >= 100) & (freqs <= 5000))[0]
@@ -448,7 +448,7 @@ def _apply_harmonic_richness(y, sr, intensity, n_fft, hop_length):
 
         enhanced_mag = mag + harmonic_enhancement
         S_enhanced = enhanced_mag * np.exp(1j * phase)
-        result[ch] = librosa.istft(S_enhanced, hop_length=hop_length, length=len(data))
+        result[ch] = istft(S_enhanced, hop_length=hop_length, length=len(data))
 
     return result
 

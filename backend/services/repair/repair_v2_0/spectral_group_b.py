@@ -1,5 +1,5 @@
 import numpy as np
-import librosa
+from services.librosa_compat import stft, istft, fft_frequencies
 
 
 def apply_spectral_group_b(y, sr, params, n_fft, hop_length, issues_found):
@@ -12,7 +12,7 @@ def apply_spectral_group_b(y, sr, params, n_fft, hop_length, issues_found):
 
     for ch in range(y.shape[0]):
         data = result[ch]
-        S = librosa.stft(data, n_fft=n_fft, hop_length=hop_length)
+        S = stft(data, n_fft=n_fft, hop_length=hop_length)
         mag = np.abs(S)
 
         if harmonic_enhance > 0:
@@ -28,13 +28,13 @@ def apply_spectral_group_b(y, sr, params, n_fft, hop_length, issues_found):
                 issues_found.append("谐波丰富度v2")
                 richness_added = True
 
-        result[ch] = librosa.istft(S, hop_length=hop_length, length=len(data))
+        result[ch] = istft(S, hop_length=hop_length, length=len(data))
 
     return result
 
 
 def _apply_harmonic_enhance_v5_inplace(S, mag, sr, n_fft, hop_length, intensity):
-    freqs = librosa.fft_frequencies(sr=sr, n_fft=n_fft)
+    freqs = fft_frequencies(sr=sr, n_fft=n_fft)
     nyquist = sr / 2
 
     base_mask = (freqs >= 80) & (freqs <= 4000)
@@ -61,7 +61,7 @@ def _apply_harmonic_enhance_v5_inplace(S, mag, sr, n_fft, hop_length, intensity)
 
 
 def _apply_harmonic_richness_v2_inplace(S, mag, sr, n_fft, hop_length, intensity):
-    freqs = librosa.fft_frequencies(sr=sr, n_fft=n_fft)
+    freqs = fft_frequencies(sr=sr, n_fft=n_fft)
     nyquist = sr / 2
 
     base_mask = (freqs >= 100) & (freqs <= 5000)

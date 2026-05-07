@@ -1,7 +1,21 @@
 import numpy as np
-import librosa
-import soundfile as sf
 from services.audio_loader import load_audio_with_fallback
+from services.librosa_compat import (
+    stft,
+    spectral_flatness,
+    spectral_centroid,
+    mfcc,
+    delta,
+    rms,
+    pyin,
+    note_to_hz,
+    onset_strength,
+    beat_track,
+    onset_detect,
+    spectral_rolloff,
+    harmonic,
+    frame,
+)
 
 def detect_ai_audio(audio_path: str, progress_callback=None) -> dict:
     y, sr = load_audio_with_fallback(audio_path, sr=None, mono=True)
@@ -9,26 +23,26 @@ def detect_ai_audio(audio_path: str, progress_callback=None) -> dict:
     # 不再立即更新步骤，让 API 端点设置的初始步骤保持更长时间
     # 第一个有意义的更新在 0.15 进度时
 
-    S = np.abs(librosa.stft(y, n_fft=2048, hop_length=512))
+    S = np.abs(stft(y, n_fft=2048, hop_length=512))
     S_power = S ** 2
 
     if progress_callback:
         progress_callback(0.15, "v1.0 计算频谱平坦度...")
 
-    spectral_flatness = float(np.mean(librosa.feature.spectral_flatness(y=y, S=S)))
+    spectral_flatness_val = float(np.mean(spectral_flatness(y=y, S=S)))
 
     if progress_callback:
         progress_callback(0.25, "v1.0 计算频谱质心...")
 
-    spectral_centroids = librosa.feature.spectral_centroid(y=y, sr=sr, S=S)
+    spectral_centroids = spectral_centroid(y=y, sr=sr, S=S)
     centroid_mean = float(np.mean(spectral_centroids))
     centroid_std = float(np.std(spectral_centroids))
 
     if progress_callback:
         progress_callback(0.35, "v1.0 计算MFCC特征...")
 
-    mfccs = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13)
-    mfcc_delta = librosa.feature.delta(mfccs)
+    mfccs = mfcc(y=y, sr=sr, n_mfcc=13)
+    mfcc_delta = delta(mfccs)
     mfcc_variability = float(np.mean(np.std(mfcc_delta, axis=1)))
 
     if progress_callback:
@@ -40,22 +54,22 @@ def detect_ai_audio(audio_path: str, progress_callback=None) -> dict:
     if progress_callback:
         progress_callback(0.55, "v1.0 分析动态范围...")
 
-    rms = librosa.feature.rms(y=y)
-    dynamic_range = float(np.percentile(rms, 95) - np.percentile(rms, 5))
+    rms_val = rms(y=y)
+    dynamic_range = float(np.percentile(rms_val, 95) - np.percentile(rms_val, 5))
 
     if progress_callback:
         progress_callback(0.65, "v1.0 计算音高变化...")
 
-    f0, voiced_flag, _ = librosa.pyin(y, fmin=librosa.note_to_hz('C2'), fmax=librosa.note_to_hz('C7'), sr=sr)
+    f0, voiced_flag, _ = pyin(y, fmin=note_to_hz('C2'), fmax=note_to_hz('C7'), sr=sr)
     voiced_f0 = f0[voiced_flag] if f0 is not None else np.array([])
     pitch_variability = float(np.std(voiced_f0) / (np.mean(voiced_f0) + 1e-10)) if len(voiced_f0) > 0 else 0
 
     if progress_callback:
         progress_callback(0.75, "v1.0 分析微节奏一致性...")
 
-    onset_env = librosa.onset.onset_strength(y=y, sr=sr)
-    tempo, _ = librosa.beat.beat_track(onset_envelope=onset_env, sr=sr)
-    onset_frames = librosa.onset.onset_detect(onset_envelope=onset_env, sr=sr)
+    onset_env = onset_strength(y=y, sr=sr)
+    tempo, _ = beat_track(onset_envelope=onset_env, sr=sr)
+    onset_frames = onset_detect(onset_envelope=onset_env, sr=sr)
     if len(onset_frames) > 2:
         onset_intervals = np.diff(onset_frames)
         micro_rhythm_consistency = float(1.0 - np.std(onset_intervals) / (np.mean(onset_intervals) + 1e-10))
@@ -65,14 +79,14 @@ def detect_ai_audio(audio_path: str, progress_callback=None) -> dict:
     if progress_callback:
         progress_callback(0.85, "v1.0 分析高频衰减特征...")
 
-    spec_rolloff = librosa.feature.spectral_rolloff(y=y, sr=sr, S=S)
+    spec_rolloff = spectral_rolloff(y=y, sr=sr, S=S)
     high_freq_attenuation = float(np.mean(spec_rolloff) / (sr / 2))
 
     if progress_callback:
         progress_callback(0.90, "v1.0 分析时域规律性...")
 
-    env = np.abs(librosa.effects.harmonic(y))
-    env_frames = librosa.util.frame(env, frame_length=2048, hop_length=512)
+    env = np.abs(harmonic(y))
+    env_frames = frame(env, frame_length=2048, hop_length=512)
     env_means = np.mean(env_frames, axis=0)
     temporal_regularity = float(1.0 - np.std(np.diff(env_means)) / (np.mean(np.abs(np.diff(env_means))) + 1e-10))
 
@@ -82,7 +96,7 @@ def detect_ai_audio(audio_path: str, progress_callback=None) -> dict:
     score = 0.0
     reasons = []
 
-    if spectral_flatness > 0.15:
+    if spectral_flatness_val > 0.15:
         score += 0.12
         reasons.append("频谱过于平坦")
     if spectral_entropy > 0.7:
@@ -122,7 +136,7 @@ def detect_ai_audio(audio_path: str, progress_callback=None) -> dict:
         "ai_probability": round(confidence, 4),
         "reasons": reasons[:6],
         "features": {
-            "spectral_flatness": round(spectral_flatness, 4),
+            "spectral_flatness": round(spectral_flatness_val, 4),
             "spectral_entropy": round(spectral_entropy, 4),
             "mfcc_variability": round(mfcc_variability, 4),
             "micro_rhythm_consistency": round(micro_rhythm_consistency, 4),

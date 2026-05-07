@@ -1,5 +1,5 @@
 import numpy as np
-import librosa
+from services.librosa_compat import stft, istft, fft_frequencies
 import soundfile as sf
 try:
     from pedalboard import Pedalboard, Compressor, Gain, LowShelfFilter, HighShelfFilter, PeakFilter, Reverb, Limiter, HighpassFilter, LowpassFilter, Chorus, Clipping
@@ -241,7 +241,7 @@ def _apply_de_crackle_v2(y: np.ndarray, sr: int, intensity: float, n_fft: int, h
     result = y.copy()
     for ch in range(y.shape[0]):
         data = result[ch]
-        S = librosa.stft(data, n_fft=n_fft, hop_length=hop_length)
+        S = stft(data, n_fft=n_fft, hop_length=hop_length)
         mag = np.abs(S)
         phase = np.exp(1j * np.angle(S))
 
@@ -260,7 +260,7 @@ def _apply_de_crackle_v2(y: np.ndarray, sr: int, intensity: float, n_fft: int, h
                 blend = min(1.0, intensity * 0.8 * (energy_ratio[j] - 1) / 1.5)
                 S[:, j] = (local_avg * blend + mag[:, j] * (1 - blend)) * phase[:, j]
 
-        result[ch] = librosa.istft(S, hop_length=hop_length, length=len(data))
+        result[ch] = istft(S, hop_length=hop_length, length=len(data))
     return result
 
 
@@ -314,9 +314,9 @@ def _apply_de_essing_v2(y: np.ndarray, sr: int, intensity: float, n_fft: int, ho
     result = y.copy()
     for ch in range(y.shape[0]):
         data = result[ch]
-        S = librosa.stft(data, n_fft=n_fft, hop_length=hop_length)
+        S = stft(data, n_fft=n_fft, hop_length=hop_length)
         mag = np.abs(S)
-        freqs = librosa.fft_frequencies(sr=sr, n_fft=n_fft)
+        freqs = fft_frequencies(sr=sr, n_fft=n_fft)
 
         sibilant_bands = [
             (2000, 4000, 1.0),
@@ -342,7 +342,7 @@ def _apply_de_essing_v2(y: np.ndarray, sr: int, intensity: float, n_fft: int, ho
                 reduction = max(reduction, 0.25)
                 S[band_mask, j] *= reduction
 
-        result[ch] = librosa.istft(S, hop_length=hop_length, length=len(data))
+        result[ch] = istft(S, hop_length=hop_length, length=len(data))
     return result
 
 
@@ -368,7 +368,7 @@ def _apply_noise_reduction(y: np.ndarray, sr: int, intensity: float) -> np.ndarr
 def _apply_noise_reduction_spectral_v2(y: np.ndarray, sr: int, intensity: float, n_fft: int, hop_length: int) -> np.ndarray:
     result = y.copy()
     for ch in range(y.shape[0]):
-        S = librosa.stft(result[ch], n_fft=n_fft, hop_length=hop_length)
+        S = stft(result[ch], n_fft=n_fft, hop_length=hop_length)
         mag = np.abs(S)
         noise_frames = max(1, mag.shape[1] // 20)
         noise_profile = np.mean(mag[:, :noise_frames], axis=1, keepdims=True)
@@ -377,7 +377,7 @@ def _apply_noise_reduction_spectral_v2(y: np.ndarray, sr: int, intensity: float,
         for i in range(1, mask.shape[1] - 1):
             mask[:, i] = mask[:, i] * 0.5 + (mask[:, i-1] + mask[:, i+1]) * 0.25
         S_clean = S * mask
-        result[ch] = librosa.istft(S_clean, hop_length=hop_length, length=y.shape[1])
+        result[ch] = istft(S_clean, hop_length=hop_length, length=y.shape[1])
     return result
 
 
@@ -434,10 +434,10 @@ def _apply_harmonic_enhance_v3(y: np.ndarray, sr: int, intensity: float, n_fft: 
     result = y.copy()
     for ch in range(y.shape[0]):
         data = result[ch]
-        S = librosa.stft(data, n_fft=n_fft, hop_length=hop_length)
+        S = stft(data, n_fft=n_fft, hop_length=hop_length)
         mag = np.abs(S)
         phase = np.angle(S)
-        freqs = librosa.fft_frequencies(sr=sr, n_fft=n_fft)
+        freqs = fft_frequencies(sr=sr, n_fft=n_fft)
 
         harmonic_content = np.zeros_like(mag)
         for i, f in enumerate(freqs):
@@ -458,7 +458,7 @@ def _apply_harmonic_enhance_v3(y: np.ndarray, sr: int, intensity: float, n_fft: 
         enhanced_mag = mag + harmonic_content * (1 - mix_ratio) * intensity * 0.5
 
         S_enhanced = enhanced_mag * np.exp(1j * phase)
-        result[ch] = librosa.istft(S_enhanced, hop_length=hop_length, length=len(data))
+        result[ch] = istft(S_enhanced, hop_length=hop_length, length=len(data))
 
         result[ch] = _apply_tube_saturation(result[ch], intensity * 0.3)
     return result
