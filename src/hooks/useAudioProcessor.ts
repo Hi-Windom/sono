@@ -66,19 +66,6 @@ function formatBytes(bytes: number): string {
 }
 
 function downloadBlob(blob: Blob, fileName: string) {
-  const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-
-  if (isMobile && navigator.share && typeof navigator.share === 'function') {
-    const file = new File([blob], fileName, { type: 'audio/wav' });
-    navigator.share({ files: [file] }).catch(() => {
-      fallbackDownload(blob, fileName);
-    });
-  } else {
-    fallbackDownload(blob, fileName);
-  }
-}
-
-function fallbackDownload(blob: Blob, fileName: string) {
   const blobUrl = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = blobUrl;
@@ -89,7 +76,7 @@ function fallbackDownload(blob: Blob, fileName: string) {
   setTimeout(() => {
     document.body.removeChild(a);
     URL.revokeObjectURL(blobUrl);
-  }, 3000);
+  }, 5000);
 }
 
 async function computeFileHash(file: File): Promise<string> {

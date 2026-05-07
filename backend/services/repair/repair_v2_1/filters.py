@@ -1,5 +1,5 @@
 import numpy as np
-from scipy.signal import butter, filtfilt
+from scipy.signal import butter, filtfilt, lfilter
 
 
 def apply_presence_boost_v4(y, sr, intensity):
@@ -52,13 +52,22 @@ def apply_warmth(y, sr, intensity):
 def apply_clarity(y, sr, intensity):
     result = y.copy()
     nyq = sr / 2
-    cutoff = 4000 / nyq
-    if cutoff >= 1.0:
-        return result
-    boost_db = intensity * 3.0
-    gain = 10 ** (boost_db / 20) - 1
-    b, a = butter(2, cutoff, btype='high')
-    for ch in range(y.shape[0]):
-        high_freq = filtfilt(b, a, result[ch])
-        result[ch] += high_freq * gain
+
+    bands = [
+        (2000, 4000, 0.4),
+        (4000, 8000, 1.0),
+        (8000, 12000, 0.6),
+    ]
+
+    for freq_low, freq_high, weight in bands:
+        low = freq_low / nyq
+        high = freq_high / nyq
+        if high >= 1.0 or high <= low:
+            continue
+        b, a = butter(2, [low, high], btype='band')
+        band_gain = intensity * weight * 0.5
+        for ch in range(y.shape[0]):
+            band_signal = filtfilt(b, a, result[ch])
+            result[ch] += band_signal * band_gain
+
     return result

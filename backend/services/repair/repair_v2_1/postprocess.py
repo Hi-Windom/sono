@@ -1,5 +1,5 @@
 import numpy as np
-from scipy.signal import butter, filtfilt
+from scipy.signal import butter, filtfilt, lfilter
 
 
 def apply_loudness_normalize_v3(y, sr, target_lufs):
@@ -7,7 +7,7 @@ def apply_loudness_normalize_v3(y, sr, target_lufs):
 
     try:
         for ch in range(y.shape[0]):
-            data = result[ch]
+            data = result[ch].copy()
 
             if 60 < sr / 2:
                 b_hp, a_hp = butter(2, 60 / (sr / 2), btype='high')
@@ -49,24 +49,39 @@ def apply_peak_limit_v3(y, sr, threshold_db=-0.5):
 
     for ch in range(y.shape[0]):
         data = result[ch]
-        envelope = np.zeros(len(data))
-        envelope[0] = np.abs(data[0])
+        abs_data = np.abs(data)
 
-        for i in range(1, len(data)):
-            sample_abs = np.abs(data[i])
-            coeff = attack_coeff if sample_abs > envelope[i - 1] else release_coeff
-            envelope[i] = coeff * envelope[i - 1] + (1 - coeff) * sample_abs
+        b_env = np.array([1.0 - attack_coeff])
+        a_env = np.array([1.0, -attack_coeff])
+        attack_env = lfilter(b_env, a_env, abs_data)
+
+        b_rel = np.array([1.0 - release_coeff])
+        a_rel = np.array([1.0, -release_coeff])
+        release_env = lfilter(b_rel, a_rel, abs_data)
+
+        envelope = np.maximum(attack_env, release_env)
 
         over = envelope > threshold
-        if np.any(over):
-            gain_reduction = np.ones(len(data))
-            gain_reduction[over] = threshold / envelope[over]
-            for i in range(1, len(gain_reduction)):
-                if gain_reduction[i] < gain_reduction[i - 1]:
-                    gain_reduction[i] = attack_coeff * gain_reduction[i - 1] + (1 - attack_coeff) * gain_reduction[i]
-                else:
-                    gain_reduction[i] = release_coeff * gain_reduction[i - 1] + (1 - release_coeff) * gain_reduction[i]
-            result[ch] = data * gain_reduction
+        if not np.any(over):
+            max_val = np.max(np.abs(result[ch]))
+            if max_val > 1.0:
+                result[ch] /= max_val
+            continue
+
+        gain_reduction = np.ones(len(data))
+        gain_reduction[over] = threshold / envelope[over]
+
+        b_atk = np.array([1.0 - attack_coeff])
+        a_atk = np.array([1.0, -attack_coeff])
+        smooth_atk = lfilter(b_atk, a_atk, gain_reduction)
+
+        b_rel2 = np.array([1.0 - release_coeff])
+        a_rel2 = np.array([1.0, -release_coeff])
+        smooth_rel = lfilter(b_rel2, a_rel2, gain_reduction)
+
+        smooth_gain = np.minimum(smooth_atk, smooth_rel)
+        smooth_gain = np.clip(smooth_gain, 0, 1)
+        result[ch] = data * smooth_gain
 
         max_val = np.max(np.abs(result[ch]))
         if max_val > threshold:
