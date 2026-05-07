@@ -9,9 +9,35 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 from database import create_task, update_task, get_task
 from services.ai_detector import detect_ai_audio
 from services.audio_repair import repair_audio
+from services.ws_manager import ws_manager
 from config import MAX_WORKERS, OUTPUT_DIR
 
 logger = logging.getLogger(__name__)
+
+_loop = None
+
+def _get_loop():
+    global _loop
+    if _loop is None:
+        try:
+            _loop = asyncio.get_event_loop()
+        except RuntimeError:
+            _loop = asyncio.new_event_loop()
+    if _loop.is_closed():
+        _loop = asyncio.new_event_loop()
+    return _loop
+
+def _ws_send_progress(task_id, data):
+    try:
+        asyncio.run_coroutine_threadsafe(ws_manager.send_progress(task_id, data), _get_loop())
+    except Exception:
+        pass
+
+def _ws_send_final(task_id, data):
+    try:
+        asyncio.run_coroutine_threadsafe(ws_manager.send_final(task_id, data), _get_loop())
+    except Exception:
+        pass
 
 executor = ThreadPoolExecutor(max_workers=MAX_WORKERS)
 
@@ -68,6 +94,7 @@ def _run_detect(task_id: str, audio_path: str, detect_type: str, detector_versio
         def progress_callback(p, s):
             elapsed = time.time() - start_time
             update_task(task_id, progress=p, step=s)
+            _ws_send_progress(task_id, {"task_id": task_id, "status": "detecting", "progress": p, "step": s})
 
         result = detect_ai_audio(audio_path, progress_callback, version=detector_version)
         result["detect_type"] = detect_type
@@ -77,8 +104,10 @@ def _run_detect(task_id: str, audio_path: str, detect_type: str, detector_versio
 
         if detect_type == "repaired":
             update_task(task_id, status=final_status, progress=1, step=f"修复后检测完成 ({elapsed:.1f}s)", repaired_detection_result=result)
+            _ws_send_final(task_id, {"task_id": task_id, "status": final_status, "progress": 1, "step": f"修复后检测完成 ({elapsed:.1f}s)", "repaired_detection_result": result})
         else:
             update_task(task_id, status=final_status, progress=1, step=f"原始检测完成 ({elapsed:.1f}s)", detection_result=result)
+            _ws_send_final(task_id, {"task_id": task_id, "status": final_status, "progress": 1, "step": f"原始检测完成 ({elapsed:.1f}s)", "detection_result": result})
 
         logger.info(f"[detect] 完成 task_id={task_id} elapsed={elapsed:.1f}s")
 
@@ -87,6 +116,7 @@ def _run_detect(task_id: str, audio_path: str, detect_type: str, detector_versio
         error_msg = f"{type(e).__name__}: {e}\n{traceback.format_exc()}"
         logger.error(f"[detect] 失败 task_id={task_id} elapsed={elapsed:.1f}s: {error_msg}")
         update_task(task_id, status="error", error=error_msg[:500], step=f"检测失败 ({elapsed:.1f}s)")
+        _ws_send_final(task_id, {"task_id": task_id, "status": "error", "progress": 0, "step": f"检测失败 ({elapsed:.1f}s)", "error": f"{type(e).__name__}: {e}"})
         raise
 
 
@@ -113,6 +143,7 @@ def _run_repair(task_id: str, audio_path: str, params: dict):
         def progress_callback(p, s):
             elapsed = time.time() - start_time
             update_task(task_id, progress=p, step=s)
+            _ws_send_progress(task_id, {"task_id": task_id, "status": "repairing", "progress": p, "step": s})
 
         repair_result = repair_audio(
             audio_path,
@@ -135,6 +166,7 @@ def _run_repair(task_id: str, audio_path: str, params: dict):
             output_path=output_path if os.path.exists(output_path) else None,
             repair_result=repair_result
         )
+        _ws_send_final(task_id, {"task_id": task_id, "status": "completed", "progress": 1, "step": f"修复完成 ({elapsed:.1f}s)", "repair_result": repair_result})
 
         logger.info(f"[repair] 完成 task_id={task_id} elapsed={elapsed:.1f}s issues={repair_result.get('issues_found', [])}")
 
@@ -143,6 +175,7 @@ def _run_repair(task_id: str, audio_path: str, params: dict):
         error_msg = f"{type(e).__name__}: {e}\n{traceback.format_exc()}"
         logger.error(f"[repair] 失败 task_id={task_id} elapsed={elapsed:.1f}s: {error_msg}")
         update_task(task_id, status="error", error=error_msg[:500], step=f"修复失败 ({elapsed:.1f}s)")
+        _ws_send_final(task_id, {"task_id": task_id, "status": "error", "progress": 0, "step": f"修复失败 ({elapsed:.1f}s)", "error": f"{type(e).__name__}: {e}"})
         raise
 
 

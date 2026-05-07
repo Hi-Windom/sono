@@ -5,8 +5,9 @@ from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from api.routes import router
+from config import MOBILE_MODE
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -58,7 +59,7 @@ def create_app() -> FastAPI:
     @app.get("/health")
     async def health():
         logger.info("Health check OK")
-        return {"status": "ok", "version": "2.0.0"}
+        return {"status": "ok", "version": "2.0.0", "mobile": MOBILE_MODE}
 
     dist_dir = BASE_DIR / "dist"
     serve_static = os.getenv("SERVE_STATIC", "").lower() in ("1", "true", "yes")
@@ -69,8 +70,17 @@ def create_app() -> FastAPI:
         async def serve_spa(full_path: str):
             file_path = dist_dir / full_path
             if full_path and file_path.is_file():
-                return FileResponse(str(file_path))
-            return FileResponse(str(dist_dir / "index.html"))
+                response = FileResponse(str(file_path))
+                if full_path.endswith('.html') or full_path == '':
+                    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+                    response.headers["Pragma"] = "no-cache"
+                    response.headers["Expires"] = "0"
+                return response
+            response = FileResponse(str(dist_dir / "index.html"))
+            response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
+            return response
 
         logger.info(f"Static file serving enabled: {dist_dir}")
 

@@ -6,7 +6,6 @@ YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m'
 
-TERMUX_MIRROR_URL="https://mirrors.tuna.tsinghua.edu.cn/termux"
 PYPI_MIRROR_URL="https://pypi.tuna.tsinghua.edu.cn/simple"
 PYPI_MIRROR_HOST="pypi.tuna.tsinghua.edu.cn"
 
@@ -24,13 +23,7 @@ if [ ! -d "/data/data/com.termux" ]; then
 fi
 echo "  Termux 环境确认。"
 
-echo -e "${YELLOW}[2/7] 配置 Termux 软件源镜像...${NC}"
-if ! grep -q "$TERMUX_MIRROR_URL" $PREFIX/etc/apt/sources.list 2>/dev/null; then
-    sed -i "s@^\(deb.*stable main\)\$@#\1\ndeb ${TERMUX_MIRROR_URL}/apt/termux-main stable main@" $PREFIX/etc/apt/sources.list
-    echo "  已切换到清华镜像源。"
-else
-    echo "  镜像源已配置。"
-fi
+echo -e "${YELLOW}[2/7] 更新软件源...${NC}"
 pkg update -y 2>/dev/null || true
 
 echo -e "${YELLOW}[3/7] 安装系统依赖（含预编译 C/Rust 扩展包）...${NC}"
@@ -93,6 +86,68 @@ def resample(x, in_rate, out_rate, quality="HQ"):
     return resample_poly(x, out_rate, in_rate).astype(x.dtype)
 STUBEOF
 
+echo "  创建 numba stub 模块（让 librosa 能导入但不使用 numba JIT）..."
+NUMBA_STUB="$SCRIPT_DIR/backend/numba.py"
+cat > "$NUMBA_STUB" << 'STUBEOF'
+def jit(*args, **kwargs):
+    if len(args) == 1 and callable(args[0]):
+        return args[0]
+    def decorator(fn):
+        return fn
+    return decorator
+
+def stencil(*args, **kwargs):
+    if len(args) == 1 and callable(args[0]):
+        return args[0]
+    def decorator(fn):
+        return fn
+    return decorator
+
+def guvectorize(*args, **kwargs):
+    if len(args) == 1 and callable(args[0]):
+        return args[0]
+    def decorator(fn):
+        return fn
+    return decorator
+
+def vectorize(*args, **kwargs):
+    if len(args) == 1 and callable(args[0]):
+        return args[0]
+    def decorator(fn):
+        return fn
+    return decorator
+
+def njit(*args, **kwargs):
+    if len(args) == 1 and callable(args[0]):
+        return args[0]
+    def decorator(fn):
+        return fn
+    return decorator
+
+def prange(*args, **kwargs):
+    return range(*args) if args else range(0)
+
+float32 = "float32"
+float64 = "float64"
+int32 = "int32"
+int64 = "int64"
+void = "void"
+boolean = "boolean"
+
+class types:
+    float32 = "float32"
+    float64 = "float64"
+    int32 = "int32"
+    int64 = "int64"
+    void = "void"
+    boolean = "boolean"
+    Array = object
+    UniTuple = object
+
+class config:
+    DISABLE_JIT = True
+STUBEOF
+
 cd ..
 
 echo -e "${YELLOW}[6/7] 验证关键依赖...${NC}"
@@ -102,6 +157,7 @@ python -c "import scipy; print(f'  scipy {scipy.__version__} OK')" 2>/dev/null |
 python -c "import pydantic; print(f'  pydantic {pydantic.__version__} OK')" 2>/dev/null || echo -e "${RED}  pydantic 未安装！${NC}"
 python -c "import fastapi; print(f'  fastapi {fastapi.__version__} OK')" 2>/dev/null || echo -e "${RED}  fastapi 未安装！${NC}"
 python -c "import soxr; print(f'  soxr (stub) OK')" 2>/dev/null || echo -e "${RED}  soxr stub 未创建！${NC}"
+python -c "import numba; print(f'  numba (stub) OK')" 2>/dev/null || echo -e "${RED}  numba stub 未创建！${NC}"
 python -c "import librosa; print(f'  librosa {librosa.__version__} OK')" 2>/dev/null || echo -e "${RED}  librosa 未安装！${NC}"
 cd ..
 
@@ -114,6 +170,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR/backend"
 
 export SERVE_STATIC=1
+export MOBILE_MODE=1
 export OPENBLAS_NUM_THREADS=1
 export MKL_NUM_THREADS=1
 export OMP_NUM_THREADS=1

@@ -225,7 +225,7 @@ export function AIDetectionComparison({ before, browserAfter, backendAfter, onDe
   // 当检测完成时记录版本
   React.useEffect(() => {
     if (before && !isProcessing) {
-      setLastDetectedVersion(detectorVersion || 'v1.1');
+      setLastDetectedVersion(detectorVersion || 'v1.0');
       setShowVersionWarning(false);
     }
   }, [before, isProcessing, detectorVersion]);

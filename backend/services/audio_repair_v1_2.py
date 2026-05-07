@@ -31,9 +31,11 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
 
     # 升采样到 96kHz
     if sr != WORKING_SR:
-        y_96k = np.zeros((y.shape[0], int(y.shape[1] * WORKING_SR / sr)))
+        target_len = int(y.shape[1] * WORKING_SR / sr)
+        y_96k = np.zeros((y.shape[0], target_len))
         for ch in range(y.shape[0]):
-            y_96k[ch] = resample_poly(y[ch], WORKING_SR, sr)
+            resampled = resample_poly(y[ch], WORKING_SR, sr)
+            y_96k[ch, :len(resampled)] = resampled[:target_len]
         y = y_96k
         sr = WORKING_SR
         gc.collect()  # 释放内存
@@ -88,7 +90,8 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
 
         y_resampled = np.zeros((y.shape[0], int(y.shape[1] * target_sr / WORKING_SR)))
         for ch in range(y.shape[0]):
-            y_resampled[ch] = resample_poly(y[ch], target_sr, WORKING_SR)
+            resampled = resample_poly(y[ch], target_sr, WORKING_SR)
+            y_resampled[ch, :len(resampled)] = resampled[:y_resampled.shape[1]]
         y = y_resampled
         sr = target_sr
         gc.collect()

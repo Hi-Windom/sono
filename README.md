@@ -5,17 +5,18 @@ AI 音频检测与修复工具
 ## 功能
 
 - **AI 检测**: 检测音频是否由 AI 生成，支持 v1.0/v1.1 双版本算法
-- **音频修复**: 修复 AI 音频的常见问题（毛刺、撕裂、数字伪影等），支持 v1.0/v1.1 双版本算法
+- **音频修复**: 修复 AI 音频的常见问题（毛刺、撕裂、数字伪影等），支持 v1.0/v1.1/v1.2 三版本算法
 - **前后对比**: 直观对比修复前后的 AI 检测概率变化
 - **浏览器处理**: 支持纯浏览器端处理，无需上传文件
 - **后端处理**: 支持 Python 后端高性能处理
+- **实时进度**: WebSocket 实时推送任务进度，自动降级到 HTTP 轮询
 - **Android 支持**: 通过 Termux 在 Android 设备上运行完整后端
 
 ## 技术栈
 
 - **前端**: React + TypeScript + Vite + Tailwind CSS
-- **后端**: Python + FastAPI + SQLite
-- **音频处理**: Web Audio API / Librosa + NumPy + SciPy
+- **后端**: Python + FastAPI + SQLite + WebSocket
+- **音频处理**: Web Audio API / Librosa + NumPy + SciPy (+ Pedalboard 可选)
 - **包管理**: uv（桌面端）/ pkg + pip（Android）
 
 ## 快速开始
@@ -95,7 +96,9 @@ bash scripts/build_android_release.sh
 |------|--------|---------|
 | 包管理 | uv + venv | pkg + pip（系统级） |
 | numpy/scipy | pip 预编译 wheel | pkg 预编译 |
-| noisereduce | 可用 | 不可用，回退内置算法 |
+| noisereduce | 可用 | 不可用，回退内置频谱算法 |
+| pedalboard | 可用 | 不可用，回退 scipy 滤波算法 |
+| soxr | 可用 | 不可用，回退 scipy.signal.resample_poly |
 | 前端访问 | 开发服务器 | FastAPI 静态文件服务 |
 
 ## 使用说明
@@ -116,7 +119,8 @@ bash scripts/build_android_release.sh
 ### 修复算法版本
 
 - **v1.0**: 基础修复算法，稳定可靠
-- **v1.1**: 多频段压缩、自适应降噪、响度归一化
+- **v1.1**: 多频段压缩、自适应降噪、响度归一化（pedalboard 可选，缺失时自动降级到 scipy）
+- **v1.2**: 深度学习辅助修复、智能谐波增强、自适应响度优化
 
 ## 项目结构
 
@@ -126,12 +130,14 @@ bash scripts/build_android_release.sh
 │   ├── components/         # React 组件
 │   ├── hooks/             # 自定义 Hooks
 │   ├── pages/             # 页面组件
-│   ├── services/          # API 服务
+│   ├── services/          # API 服务 + WebSocket
 │   ├── utils/             # 工具函数
 │   └── workers/           # Web Workers
 ├── backend/               # 后端源代码
-│   ├── api/              # API 路由
+│   ├── api/              # API 路由（含 WebSocket）
 │   ├── services/         # 业务逻辑
+│   │   ├── ws_manager.py # WebSocket 连接管理器
+│   │   └── ...           # 音频处理服务
 │   ├── training/         # 训练工具
 │   ├── requirements.txt        # 桌面端依赖
 │   └── requirements_android.txt # Android 依赖
@@ -141,7 +147,6 @@ bash scripts/build_android_release.sh
 │   └── build_android_release.sh  # PC 端打包
 ├── docs/                 # 文档
 │   └── android.md        # Android 部署详细指南
-├── android-app/          # Android APP (Chaquopy 方案，保留回档)
 ├── public/               # 静态资源
 └── dist/                 # 构建输出
 ```

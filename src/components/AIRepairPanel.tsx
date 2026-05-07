@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { AIRepairParams, RepairMode } from '../utils/advancedAudioProcessing';
 import { ProcessingOptions, AlgorithmVersion } from '../services/backendApi';
 
@@ -16,26 +16,72 @@ interface AIRepairPanelProps {
   processingOptions: ProcessingOptions;
   algorithmVersion: string;
   availableAlgorithms: AlgorithmVersion[];
+  enableBrowserRepair: boolean;
   onAlgorithmChange: (version: string) => void;
   onParamChange: (key: keyof AIRepairParams, value: number) => void;
   onReset: () => void;
   onModeSelect: (mode: RepairMode) => void;
   onApply?: () => void;
   onOptionsChange?: (options: ProcessingOptions) => void;
+  onEnableBrowserRepairChange?: (enabled: boolean) => void;
   disabled?: boolean;
+  duration?: number;
+  channels?: number;
 }
 
 const sampleRateOptions = [
-  { value: 44100, label: '44.1k' },
-  { value: 48000, label: '48k' },
-  { value: 96000, label: '96k' },
+  { value: 44100, label: '44.1k', recommended: true },
+  { value: 48000, label: '48k', recommended: true },
+  { value: 96000, label: '96k', recommended: false },
 ];
 
-const bitDepthOptions: { value: 16 | 24 | 32; label: string }[] = [
-  { value: 16, label: '16bit' },
-  { value: 24, label: '24bit' },
-  { value: 32, label: '32bit' },
+const bitDepthOptions: { value: 16 | 24 | 32; label: string; recommended?: boolean }[] = [
+  { value: 16, label: '16bit', recommended: false },
+  { value: 24, label: '24bit', recommended: true },
+  { value: 32, label: '32bit', recommended: false },
 ];
+
+// 平台检测
+const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+
+// 计算预估文件大小（MB）
+function estimateFileSize(
+  duration: number,
+  sampleRate: number,
+  bitDepth: number,
+  channels: number
+): { size: number; sizeMiB: number; sizeMB: number } {
+  // 原始字节数 = 采样率 × 时长 × 位深/8 × 通道数
+  const bytes = sampleRate * duration * (bitDepth / 8) * channels;
+  // WAV文件头约44字节
+  const totalBytes = bytes + 44;
+  // MiB (1024进制) - 操作系统显示的大小
+  const sizeMiB = totalBytes / (1024 * 1024);
+  // MB (1000进制) - 存储厂商使用
+  const sizeMB = totalBytes / (1000 * 1000);
+  // 返回MB值（根据平台选择）
+  const size = isMobile ? sizeMB : sizeMiB;
+  return { size, sizeMiB, sizeMB };
+}
+
+// 格式化大小显示
+function formatSize(size: number, sizeMiB: number, sizeMB: number): string {
+  if (isMobile) {
+    // 移动端显示MB（1000进制），因为存储厂商使用此标准
+    return `${sizeMB.toFixed(1)} MB`;
+  }
+  // 桌面端显示MiB（1024进制），因为操作系统使用此标准
+  return `${sizeMiB.toFixed(1)} MiB (${sizeMB.toFixed(1)} MB)`;
+}
+
+// 判断是否为推荐组合
+function isRecommendedCombo(sampleRate: number, bitDepth: number): boolean {
+  // 推荐组合：48k/24bit 或 44.1k/24bit
+  return (sampleRate === 48000 || sampleRate === 44100) && bitDepth === 24;
+}
+
+// 警告阈值 186MB（留出余量）
+const WARNING_THRESHOLD_MB = 186;
 
 export function AIRepairPanel({
   params,
@@ -45,13 +91,17 @@ export function AIRepairPanel({
   processingOptions,
   algorithmVersion,
   availableAlgorithms,
+  enableBrowserRepair,
   onAlgorithmChange,
   onParamChange,
   onReset,
   onModeSelect,
   onApply,
   onOptionsChange,
+  onEnableBrowserRepairChange,
   disabled,
+  duration = 0,
+  channels = 2,
 }: AIRepairPanelProps) {
   const [showParams, setShowParams] = useState(false);
 
@@ -68,9 +118,58 @@ export function AIRepairPanel({
     bassEnhance: '低音增强',
     spatialEnhance: '空间感',
     transientRepair: '瞬态修复',
+    warmth: '温暖度',
+    clarity: '清晰度',
   };
 
   const paramKeys = Object.keys(paramLabels) as (keyof AIRepairParams)[];
+
+  // 计算当前预估大小
+  const currentEstimate = useMemo(() => {
+    if (duration <= 0) return null;
+    return estimateFileSize(
+      duration,
+      processingOptions.sampleRate,
+      processingOptions.bitDepth,
+      channels
+    );
+  }, [duration, processingOptions.sampleRate, processingOptions.bitDepth, channels]);
+
+  // 计算所有组合的预估大小
+  const allEstimates = useMemo(() => {
+    if (duration <= 0) return [];
+    const estimates: Array<{
+      sampleRate: number;
+      bitDepth: number;
+      size: number;
+      sizeMiB: number;
+      sizeMB: number;
+      isWarning: boolean;
+      isRecommended: boolean;
+    }> = [];
+
+    for (const sr of sampleRateOptions) {
+      for (const bd of bitDepthOptions) {
+        const est = estimateFileSize(duration, sr.value, bd.value, channels);
+        estimates.push({
+          sampleRate: sr.value,
+          bitDepth: bd.value,
+          ...est,
+          isWarning: est.size > WARNING_THRESHOLD_MB,
+          isRecommended: isRecommendedCombo(sr.value, bd.value),
+        });
+      }
+    }
+    return estimates;
+  }, [duration, channels]);
+
+  // 检查当前选择是否警告
+  const isCurrentWarning = currentEstimate ? currentEstimate.size > WARNING_THRESHOLD_MB : false;
+
+  // 获取当前选择的详细信息
+  const currentCombo = allEstimates.find(
+    e => e.sampleRate === processingOptions.sampleRate && e.bitDepth === processingOptions.bitDepth
+  );
 
   return (
     <div className="bg-gradient-to-br from-primary/80 to-dark/80 rounded-xl p-5 border border-secondary/20">
@@ -143,7 +242,7 @@ export function AIRepairPanel({
         </div>
       ) : (
         <div className="mb-4 p-3 bg-yellow-900/20 rounded-lg border border-yellow-500/20">
-          <p className="text-yellow-400/70 text-xs">算法版本加载中，请稍候或刷新页面...</p>
+          <p className="text-yellow-400/70 text-xs">当前平台暂无可用算法版本，移动端优化版本开发中...</p>
         </div>
       )}
 
@@ -182,44 +281,169 @@ export function AIRepairPanel({
         <h4 className="text-secondary text-sm font-medium mb-3">处理选项</h4>
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="text-gray-400 text-xs mb-2 block">目标采样率</label>
+            <label className="text-gray-400 text-xs mb-2 block flex items-center gap-1">
+              目标采样率
+              {/* 推荐标记 */}
+              {sampleRateOptions.find(o => o.value === processingOptions.sampleRate)?.recommended && (
+                <span className="text-emerald-400 text-[10px] bg-emerald-500/20 px-1 rounded">推荐</span>
+              )}
+            </label>
             <div className="flex gap-1">
-              {sampleRateOptions.map((option) => (
-                <button
-                  key={option.value}
-                  onClick={() => onOptionsChange?.({ ...processingOptions, sampleRate: option.value })}
-                  disabled={disabled}
-                  className={`flex-1 py-1.5 px-2 rounded-lg text-xs transition-all ${
-                    processingOptions.sampleRate === option.value
-                      ? 'bg-secondary/30 text-white border border-secondary/50'
-                      : 'bg-primary/30 text-gray-400 border border-gray-700 hover:border-secondary/30'
-                  } ${disabled ? 'opacity-50' : ''}`}
-                >
-                  {option.label}
-                </button>
-              ))}
+              {sampleRateOptions.map((option) => {
+                const isSelected = processingOptions.sampleRate === option.value;
+                const isRecommended = option.recommended;
+                // 检查与当前位深的组合是否推荐
+                const comboRecommended = isRecommended && processingOptions.bitDepth === 24;
+
+                return (
+                  <button
+                    key={option.value}
+                    onClick={() => onOptionsChange?.({ ...processingOptions, sampleRate: option.value })}
+                    disabled={disabled}
+                    className={`flex-1 py-1.5 px-2 rounded-lg text-xs transition-all relative
+                      ${isSelected
+                        ? 'bg-secondary/30 text-white border border-secondary/50'
+                        : isRecommended
+                          ? 'bg-primary/30 text-gray-300 border border-emerald-500/30 hover:border-emerald-400/50'
+                          : 'bg-primary/30 text-gray-400 border border-gray-700 hover:border-secondary/30'
+                      } ${disabled ? 'opacity-50' : ''}
+                    `}
+                  >
+                    {option.label}
+                    {/* 推荐小圆点 */}
+                    {!isSelected && isRecommended && (
+                      <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-emerald-500 rounded-full" />
+                    )}
+                  </button>
+                );
+              })}
             </div>
           </div>
           <div>
-            <label className="text-gray-400 text-xs mb-2 block">位深</label>
+            <label className="text-gray-400 text-xs mb-2 block flex items-center gap-1">
+              位深
+              {/* 推荐标记 */}
+              {processingOptions.bitDepth === 24 && (
+                <span className="text-emerald-400 text-[10px] bg-emerald-500/20 px-1 rounded">推荐</span>
+              )}
+            </label>
             <div className="flex gap-1">
-              {bitDepthOptions.map((option) => (
-                <button
-                  key={option.value}
-                  onClick={() => onOptionsChange?.({ ...processingOptions, bitDepth: option.value })}
-                  disabled={disabled}
-                  className={`flex-1 py-1.5 px-2 rounded-lg text-xs transition-all ${
-                    processingOptions.bitDepth === option.value
-                      ? 'bg-secondary/30 text-white border border-secondary/50'
-                      : 'bg-primary/30 text-gray-400 border border-gray-700 hover:border-secondary/30'
-                  } ${disabled ? 'opacity-50' : ''}`}
-                >
-                  {option.label}
-                </button>
-              ))}
+              {bitDepthOptions.map((option) => {
+                const isSelected = processingOptions.bitDepth === option.value;
+                const isRecommended = option.recommended;
+                // 检查与当前采样率的组合是否推荐
+                const comboRecommended = isRecommended &&
+                  (processingOptions.sampleRate === 44100 || processingOptions.sampleRate === 48000);
+
+                return (
+                  <button
+                    key={option.value}
+                    onClick={() => onOptionsChange?.({ ...processingOptions, bitDepth: option.value })}
+                    disabled={disabled}
+                    className={`flex-1 py-1.5 px-2 rounded-lg text-xs transition-all relative
+                      ${isSelected
+                        ? 'bg-secondary/30 text-white border border-secondary/50'
+                        : isRecommended
+                          ? 'bg-primary/30 text-gray-300 border border-emerald-500/30 hover:border-emerald-400/50'
+                          : 'bg-primary/30 text-gray-400 border border-gray-700 hover:border-secondary/30'
+                      } ${disabled ? 'opacity-50' : ''}
+                    `}
+                  >
+                    {option.label}
+                    {/* 推荐小圆点 */}
+                    {!isSelected && isRecommended && (
+                      <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-emerald-500 rounded-full" />
+                    )}
+                  </button>
+                );
+              })}
             </div>
           </div>
         </div>
+
+        {/* 预估大小显示 */}
+        {duration > 0 && currentEstimate && (
+          <div className={`mt-3 p-2.5 rounded-lg border ${
+            isCurrentWarning
+              ? 'bg-red-500/10 border-red-500/30'
+              : currentCombo?.isRecommended
+                ? 'bg-emerald-500/10 border-emerald-500/30'
+                : 'bg-gray-800/50 border-gray-700'
+          }`}>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                {isCurrentWarning ? (
+                  <svg className="w-4 h-4 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                ) : currentCombo?.isRecommended ? (
+                  <svg className="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                  </svg>
+                ) : (
+                  <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                )}
+                <span className={`text-sm font-medium ${
+                  isCurrentWarning ? 'text-red-400' : currentCombo?.isRecommended ? 'text-emerald-400' : 'text-gray-300'
+                }`}>
+                  预估文件大小
+                </span>
+              </div>
+              <span className={`text-sm font-bold ${
+                isCurrentWarning ? 'text-red-400' : currentCombo?.isRecommended ? 'text-emerald-400' : 'text-white'
+              }`}>
+                {formatSize(currentEstimate.size, currentEstimate.sizeMiB, currentEstimate.sizeMB)}
+              </span>
+            </div>
+
+            {/* 警告信息 */}
+            {isCurrentWarning && (
+              <div className="mt-2 text-xs text-red-400/80">
+                <span className="font-medium">⚠️ 超过平台限制：</span>
+                音乐平台通常限制上传最大200MB，当前设置可能无法上传。
+                建议使用 48k/24bit 或 44.1k/24bit 组合。
+              </div>
+            )}
+
+            {/* 推荐信息 */}
+            {!isCurrentWarning && currentCombo?.isRecommended && (
+              <div className="mt-2 text-xs text-emerald-400/80">
+                <span className="font-medium">✓ 推荐设置：</span>
+                音质与文件大小的最佳平衡，兼容大多数音乐平台。
+              </div>
+            )}
+
+            {/* 所有组合大小参考 */}
+            <div className="mt-3 pt-2 border-t border-gray-700/50">
+              <div className="text-[10px] text-gray-500 mb-1.5">各组合预估大小参考：</div>
+              <div className="grid grid-cols-3 gap-1 text-[10px]">
+                {allEstimates.map((est) => {
+                  const isCurrent = est.sampleRate === processingOptions.sampleRate && est.bitDepth === processingOptions.bitDepth;
+                  return (
+                    <div
+                      key={`${est.sampleRate}-${est.bitDepth}`}
+                      className={`px-1.5 py-1 rounded text-center ${
+                        isCurrent
+                          ? 'bg-secondary/30 text-white border border-secondary/50'
+                          : est.isWarning
+                            ? 'bg-red-500/10 text-red-400/70'
+                            : est.isRecommended
+                              ? 'bg-emerald-500/10 text-emerald-400/70'
+                              : 'bg-gray-800/50 text-gray-500'
+                      }`}
+                    >
+                      <div className="font-medium">{est.sampleRate / 1000}k/{est.bitDepth}bit</div>
+                      <div>{isMobile ? est.sizeMB.toFixed(0) : est.sizeMiB.toFixed(0)}{isMobile ? 'MB' : 'MiB'}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+
         <p className="text-gray-500 text-xs mt-2">采样率和位深在修复时应用，修改后需重新修复</p>
       </div>
 
@@ -265,6 +489,18 @@ export function AIRepairPanel({
         )}
       </div>
 
+      <div className="mb-3">
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={enableBrowserRepair}
+            onChange={(e) => onEnableBrowserRepairChange?.(e.target.checked)}
+            disabled={disabled}
+            className="w-4 h-4 rounded bg-gray-700 border-gray-600 text-cyan-500 focus:ring-cyan-500 focus:ring-offset-0"
+          />
+          <span className="text-gray-300 text-sm">同时进行浏览器修复</span>
+        </label>
+      </div>
       <div className="grid grid-cols-2 gap-3">
         <button
           onClick={onReset}

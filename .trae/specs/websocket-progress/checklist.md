@@ -1,0 +1,11 @@
+- [x] WebSocket 端点 `/ws/progress/{task_id}` 可正常连接并推送进度
+- [x] 任务不存在时 WebSocket 返回错误消息并关闭连接
+- [x] 同一 task_id 重连时旧连接被正确关闭
+- [x] 任务终态后 WebSocket 推送最终消息并关闭连接
+- [x] `task_manager.py` 的 `progress_callback` 同时更新数据库和推送 WebSocket
+- [x] 前端优先使用 WebSocket 获取进度，不启动 HTTP 轮询
+- [x] WebSocket 连接失败时自动降级到 HTTP 轮询，控制台有降级日志
+- [x] WebSocket 断线后自动重连（最多3次），重连失败降级到轮询
+- [x] 组件卸载或新任务提交时旧 WebSocket 连接被正确关闭
+- [x] SSE 端点 `/api/v1/stream/{task_id}` 已移除
+- [x] 桌面端和 Termux 环境下 WebSocket 均可正常工作

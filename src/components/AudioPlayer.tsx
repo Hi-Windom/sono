@@ -24,7 +24,6 @@ export function AudioPlayer({
   hasBackendResult,
   onPlay,
   onPause,
-  onSeek,
   onSwitchPlayMode,
 }: AudioPlayerProps) {
   const hasAnyResult = hasBrowserResult || hasBackendResult;
@@ -80,20 +79,12 @@ export function AudioPlayer({
           </button>
         </div>
 
+        {/* 时间显示 - 简化版，因为波形组件已包含进度 */}
         {duration > 0 && (
-          <div className="flex items-center gap-4">
-            <span className="text-gray-400 text-sm w-12 text-right">
-              {formatTime(currentTime)}
-            </span>
-            <div className="flex-1 h-2 bg-gray-700 rounded-full overflow-hidden">
-              <div
-                className="h-full bg-gradient-to-r from-secondary to-accent transition-all duration-100"
-                style={{ width: `${(currentTime / duration) * 100}%` }}
-              />
-            </div>
-            <span className="text-gray-400 text-sm w-12">
-              {formatTime(duration)}
-            </span>
+          <div className="flex items-center justify-center gap-3 text-sm">
+            <span className="text-gray-400 font-mono">{formatTime(currentTime)}</span>
+            <span className="text-gray-600">/</span>
+            <span className="text-gray-400 font-mono">{formatTime(duration)}</span>
           </div>
         )}
       </div>

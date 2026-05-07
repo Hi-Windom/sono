@@ -41,9 +41,10 @@ def evict_old_files():
             logger.info(f"释放输出文件: {output_path} ({released} bytes)")
 
         if original_path and os.path.exists(original_path):
-            released += os.path.getsize(original_path)
+            orig_size = os.path.getsize(original_path)
             os.remove(original_path)
-            logger.info(f"释放源文件: {original_path} ({os.path.getsize(original_path)} bytes)")
+            released += orig_size
+            logger.info(f"释放源文件: {original_path} ({orig_size} bytes)")
 
         delete_task(task_id)
         logger.info(f"删除任务记录: {task_id}")

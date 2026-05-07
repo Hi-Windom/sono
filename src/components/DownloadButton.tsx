@@ -20,6 +20,10 @@ interface DownloadButtonProps {
   } | null;
   audioFileName?: string;
   bitDepth: number;
+  backendAlgorithmVersion?: string;
+  browserAlgorithmVersion?: string;
+  backendCompletedAt?: string;
+  browserCompletedAt?: string;
 }
 
 export function DownloadButton({
@@ -31,6 +35,10 @@ export function DownloadButton({
   browserBufferInfo,
   audioFileName,
   bitDepth,
+  backendAlgorithmVersion,
+  browserAlgorithmVersion,
+  backendCompletedAt,
+  browserCompletedAt,
 }: DownloadButtonProps) {
   const baseName = audioFileName
     ? audioFileName.replace(/\.[^/.]+$/, '')
@@ -63,13 +71,21 @@ export function DownloadButton({
                 <span className="text-white">{estimateSize(backendRepairResult.duration, backendRepairResult.output_sample_rate, backendRepairResult.channels, backendRepairResult.output_bit_depth)} MB</span>
               </div>
               <div className="flex justify-between text-xs">
-                <span className="text-gray-400">采样率</span>
-                <span className="text-cyan-400">{backendRepairResult.output_sample_rate / 1000} kHz</span>
+                <span className="text-gray-400">音频格式</span>
+                <span className="text-cyan-400">{backendRepairResult.output_sample_rate / 1000} kHz / {backendRepairResult.output_bit_depth} bit</span>
               </div>
-              <div className="flex justify-between text-xs">
-                <span className="text-gray-400">位深</span>
-                <span className="text-cyan-400">{backendRepairResult.output_bit_depth} bit</span>
-              </div>
+              {backendAlgorithmVersion && (
+                <div className="flex justify-between text-xs">
+                  <span className="text-gray-400">修复算法</span>
+                  <span className="text-cyan-400">{backendAlgorithmVersion}</span>
+                </div>
+              )}
+              {backendCompletedAt && (
+                <div className="flex justify-between text-xs">
+                  <span className="text-gray-400">完成时间</span>
+                  <span className="text-cyan-400">{new Date(backendCompletedAt).toLocaleString('zh-CN')}</span>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -97,13 +113,21 @@ export function DownloadButton({
                 <span className="text-white">{estimateSize(browserBufferInfo.duration, browserBufferInfo.sampleRate, browserBufferInfo.channels, bitDepth)} MB</span>
               </div>
               <div className="flex justify-between text-xs">
-                <span className="text-gray-400">采样率</span>
-                <span className="text-purple-400">{browserBufferInfo.sampleRate / 1000} kHz</span>
+                <span className="text-gray-400">音频格式</span>
+                <span className="text-purple-400">{browserBufferInfo.sampleRate / 1000} kHz / {bitDepth} bit</span>
               </div>
-              <div className="flex justify-between text-xs">
-                <span className="text-gray-400">位深</span>
-                <span className="text-purple-400">{bitDepth} bit</span>
-              </div>
+              {browserAlgorithmVersion && (
+                <div className="flex justify-between text-xs">
+                  <span className="text-gray-400">修复算法</span>
+                  <span className="text-purple-400">{browserAlgorithmVersion}</span>
+                </div>
+              )}
+              {browserCompletedAt && (
+                <div className="flex justify-between text-xs">
+                  <span className="text-gray-400">完成时间</span>
+                  <span className="text-purple-400">{new Date(browserCompletedAt).toLocaleString('zh-CN')}</span>
+                </div>
+              )}
             </div>
           )}
         </div>

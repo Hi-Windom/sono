@@ -16,6 +16,8 @@ MAX_WORKERS = int(os.getenv("MAX_WORKERS", "4"))  # 增加线程数避免检测�
 
 SOURCE_FILE_CACHE_LIMIT = int(os.getenv("SOURCE_FILE_CACHE_LIMIT", str(1024 * 1024 * 1024)))
 
+MOBILE_MODE = os.getenv("MOBILE_MODE", "").lower() in ("1", "true", "yes")
+
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 os.makedirs(TRAINING_DIR, exist_ok=True)  # 创建训练素材目录

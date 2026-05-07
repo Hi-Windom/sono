@@ -1,6 +1,7 @@
 from services.audio_repair_v1_0 import repair_audio as repair_audio_v1_0
 from services.audio_repair_v1_1 import repair_audio as repair_audio_v1_1
 from services.audio_repair_v1_2 import repair_audio as repair_audio_v1_2
+from services.repair_v2_0 import repair_audio as repair_audio_v2_0
 
 PARAM_DEFINITIONS = {
     "de_clipping": {"key": "deClipping", "label": "去削波", "min": 0, "max": 1, "step": 0.01},
@@ -18,6 +19,8 @@ PARAM_DEFINITIONS = {
     "loudness_optimize": {"key": "loudnessOptimize", "label": "响度优化", "min": 0, "max": 1, "step": 0.01},
     "stereo_width": {"key": "stereoWidth", "label": "立体声宽度", "min": 0, "max": 1, "step": 0.01},
     "harmonic_richness": {"key": "harmonicRichness", "label": "谐波丰富度", "min": 0, "max": 1, "step": 0.01},
+    "warmth": {"key": "warmth", "label": "温暖度", "min": 0, "max": 1, "step": 0.01},
+    "clarity": {"key": "clarity", "label": "清晰度", "min": 0, "max": 1, "step": 0.01},
 }
 
 ALGORITHM_VERSIONS = {
@@ -25,6 +28,7 @@ ALGORITHM_VERSIONS = {
         "name": "v1.0",
         "label": "v1.0",
         "description": "基础修复算法，稳定可靠",
+        "mobile_compatible": False,
         "repair_fn": repair_audio_v1_0,
         "default_params": {
             "de_clipping": 0.25, "noise_reduction": 0.18, "de_essing": 0.22,
@@ -83,6 +87,7 @@ ALGORITHM_VERSIONS = {
         "name": "v1.1",
         "label": "v1.1",
         "description": "多频段压缩、自适应降噪、响度归一化",
+        "mobile_compatible": False,
         "repair_fn": repair_audio_v1_1,
         "default_params": {
             "de_clipping": 0.3, "noise_reduction": 0.22, "de_essing": 0.2,
@@ -141,6 +146,7 @@ ALGORITHM_VERSIONS = {
         "name": "v1.2",
         "label": "v1.2",
         "description": "深度学习辅助修复，智能谐波增强",
+        "mobile_compatible": False,
         "repair_fn": repair_audio_v1_2,
         "default_params": {
             "de_clipping": 0.35, "noise_reduction": 0.25, "de_essing": 0.25,
@@ -200,14 +206,80 @@ ALGORITHM_VERSIONS = {
             },
         ],
     },
+    "v2.0": {
+        "name": "v2.0",
+        "label": "v2.0",
+        "description": "移动端友好，自适应采样率，频域合并优化",
+        "mobile_compatible": True,
+        "repair_fn": repair_audio_v2_0,
+        "default_params": {
+            "de_clipping": 0.4, "noise_reduction": 0.3, "de_essing": 0.3,
+            "de_crackle": 0.3, "de_pop": 0.25, "harmonic_enhance": 0.18,
+            "dynamic_range": 0.18, "softness": 0.04, "presence_boost": 0.1,
+            "bass_enhance": 0.15, "spatial_enhance": 0.18, "transient_repair": 0.18,
+            "warmth": 0.3, "clarity": 0.3,
+        },
+        "modes": [
+            {
+                "name": "AI人声修复",
+                "description": "针对AI人声优化，去齿音+去毛刺+清晰度增强",
+                "icon": "🎤",
+                "params": {
+                    "de_clipping": 0.3, "noise_reduction": 0.2, "de_essing": 0.35,
+                    "de_crackle": 0.3, "de_pop": 0.2, "harmonic_enhance": 0.15,
+                    "dynamic_range": 0.1, "softness": 0.02, "presence_boost": 0.15,
+                    "bass_enhance": 0.08, "spatial_enhance": 0.12, "transient_repair": 0.15,
+                    "warmth": 0.2, "clarity": 0.4,
+                },
+            },
+            {
+                "name": "深度修复",
+                "description": "最强修复力度，适合严重损坏的AI音频",
+                "icon": "🔧",
+                "params": {
+                    "de_clipping": 0.55, "noise_reduction": 0.45, "de_essing": 0.4,
+                    "de_crackle": 0.45, "de_pop": 0.35, "harmonic_enhance": 0.25,
+                    "dynamic_range": 0.25, "softness": 0.06, "presence_boost": 0.12,
+                    "bass_enhance": 0.18, "spatial_enhance": 0.2, "transient_repair": 0.28,
+                    "warmth": 0.35, "clarity": 0.35,
+                },
+            },
+            {
+                "name": "温和优化",
+                "description": "轻微处理，保留原始音质特征",
+                "icon": "🌿",
+                "params": {
+                    "de_clipping": 0.15, "noise_reduction": 0.1, "de_essing": 0.12,
+                    "de_crackle": 0.1, "de_pop": 0.08, "harmonic_enhance": 0.06,
+                    "dynamic_range": 0.08, "softness": 0.02, "presence_boost": 0.04,
+                    "bass_enhance": 0.05, "spatial_enhance": 0.06, "transient_repair": 0.06,
+                    "warmth": 0.15, "clarity": 0.2,
+                },
+            },
+            {
+                "name": "专业母带",
+                "description": "模拟专业母带处理，响度归一化+动态范围+空间感",
+                "icon": "🎛️",
+                "params": {
+                    "de_clipping": 0.2, "noise_reduction": 0.15, "de_essing": 0.18,
+                    "de_crackle": 0.15, "de_pop": 0.12, "harmonic_enhance": 0.15,
+                    "dynamic_range": 0.3, "softness": 0.02, "presence_boost": 0.12,
+                    "bass_enhance": 0.18, "spatial_enhance": 0.25, "transient_repair": 0.12,
+                    "warmth": 0.4, "clarity": 0.3,
+                },
+            },
+        ],
+    },
 }
 
-DEFAULT_VERSION = "v1.1"
+DEFAULT_VERSION = "v2.0"
 
 
-def get_available_versions() -> list[dict]:
+def get_available_versions(mobile_mode: bool = False) -> list[dict]:
     result = []
     for v in ALGORITHM_VERSIONS.values():
+        if mobile_mode and not v.get("mobile_compatible", True):
+            continue
         version_data = {
             "name": v["name"],
             "label": v["label"],

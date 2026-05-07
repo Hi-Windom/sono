@@ -11,6 +11,8 @@ interface RepairParams {
   deEssing: number;
   presenceBoost: number;
   bassEnhance: number;
+  warmth: number;
+  clarity: number;
 }
 
 let aborted = false;
@@ -585,6 +587,39 @@ function applyBassEnhanceChannel(data: Float32Array, sampleRate: number, intensi
   return result;
 }
 
+function applyWarmthChannel(data: Float32Array, sampleRate: number, intensity: number): Float32Array {
+  const lowFilter = new BiquadFilter('lowpass', 500, 0.707, 0, sampleRate);
+  const lowSignal = lowFilter.processBuffer(data);
+  const rectFilter = new BiquadFilter('lowpass', 1000, 0.707, 0, sampleRate);
+
+  const result = new Float32Array(data.length);
+  for (let i = 0; i < data.length; i++) {
+    const rectified = Math.abs(lowSignal[i]);
+    result[i] = data[i];
+    lowSignal[i] = rectified;
+  }
+
+  const evenHarmonics = rectFilter.processBuffer(lowSignal);
+  const gain = intensity * 0.15;
+  for (let i = 0; i < data.length; i++) {
+    result[i] += evenHarmonics[i] * gain;
+  }
+  return result;
+}
+
+function applyClarityChannel(data: Float32Array, sampleRate: number, intensity: number): Float32Array {
+  const boostDb = intensity * 3.0;
+  const gain = Math.pow(10, boostDb / 20) - 1;
+  const highFilter = new BiquadFilter('highpass', 4000, 0.707, 0, sampleRate);
+  const highFreq = highFilter.processBuffer(data);
+
+  const result = new Float32Array(data.length);
+  for (let i = 0; i < data.length; i++) {
+    result[i] = data[i] + highFreq[i] * gain;
+  }
+  return result;
+}
+
 function encodeWav(channels: Float32Array[], sampleRate: number, bitDepth: number): ArrayBuffer {
   const numChannels = channels.length;
   const bytesPerSample = bitDepth / 8;
@@ -658,6 +693,8 @@ function handleRepair(channels: Float32Array[], sampleRate: number, params: Repa
     if (params.deEssing > 0) activeSteps.push('deEssing');
     if (params.presenceBoost > 0) activeSteps.push('presenceBoost');
     if (params.bassEnhance > 0) activeSteps.push('bassEnhance');
+    if (params.warmth > 0) activeSteps.push('warmth');
+    if (params.clarity > 0) activeSteps.push('clarity');
 
     const totalSteps = activeSteps.length || 1;
     let currentStep = 0;
@@ -675,6 +712,8 @@ function handleRepair(channels: Float32Array[], sampleRate: number, params: Repa
       deEssing: '去齿音...',
       presenceBoost: '临场感增强...',
       bassEnhance: '低音增强...',
+      warmth: '温暖度...',
+      clarity: '清晰度...',
     };
 
     const updateProgress = (stepName: string) => {
@@ -758,6 +797,18 @@ function handleRepair(channels: Float32Array[], sampleRate: number, params: Repa
         case 'bassEnhance':
           for (let ch = 0; ch < processedChannels.length; ch++) {
             processedChannels[ch] = applyBassEnhanceChannel(processedChannels[ch], sampleRate, params.bassEnhance);
+          }
+          break;
+
+        case 'warmth':
+          for (let ch = 0; ch < processedChannels.length; ch++) {
+            processedChannels[ch] = applyWarmthChannel(processedChannels[ch], sampleRate, params.warmth);
+          }
+          break;
+
+        case 'clarity':
+          for (let ch = 0; ch < processedChannels.length; ch++) {
+            processedChannels[ch] = applyClarityChannel(processedChannels[ch], sampleRate, params.clarity);
           }
           break;
       }

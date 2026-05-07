@@ -50,6 +50,8 @@ export default function RepairPage() {
     stuckInfo,
     queueStatus,
     resetStuckState,
+    backendError,
+    clearBackendError,
     loadAudioFile,
     play,
     pause,
@@ -63,6 +65,10 @@ export default function RepairPage() {
     setProcessingOptions,
     downloadProcessedAudio,
     analyserRef,
+    // 浏览器修复信息
+    browserRepairInfo,
+    enableBrowserRepair,
+    setEnableBrowserRepair,
   } = useAudioProcessor();
 
   const [showDiag, setShowDiag] = useState(false);
@@ -114,13 +120,25 @@ export default function RepairPage() {
       {/* 返回首页按钮 */}
       <div className="container mx-auto px-4 max-w-7xl mt-4">
         <button
-          onClick={() => navigate('/')}
+          onClick={() => {
+            // 如果有正在进行的任务，显示二次确认
+            if (isProcessing) {
+              const confirmed = window.confirm('当前有正在进行的修复任务，返回首页将中断任务。是否确认返回？');
+              if (!confirmed) return;
+            }
+            navigate('/');
+          }}
           className="flex items-center gap-2 text-gray-400 hover:text-white transition-colors"
         >
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
           </svg>
           <span>返回首页</span>
+          {isProcessing && (
+            <span className="ml-2 px-1.5 py-0.5 bg-yellow-500/20 text-yellow-400 text-[10px] rounded">
+              处理中
+            </span>
+          )}
         </button>
       </div>
 
@@ -298,6 +316,21 @@ export default function RepairPage() {
                 )}
               </div>
 
+              {backendError && (
+                <div className="mt-4 p-4 bg-red-500/10 border border-red-500/30 rounded-lg">
+                  <div className="flex items-start gap-3">
+                    <svg className="w-5 h-5 text-red-400 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <div className="flex-1">
+                      <p className="text-red-400 text-sm font-medium">后端处理出错</p>
+                      <p className="text-gray-400 text-xs mt-1">{backendError}</p>
+                    </div>
+                    <button onClick={clearBackendError} className="text-gray-500 hover:text-white text-lg">×</button>
+                  </div>
+                </div>
+              )}
+
               <AIDetectionComparison
                 before={originalAIDetection}
                 browserAfter={browserAIDetection}
@@ -318,13 +351,17 @@ export default function RepairPage() {
                 processingOptions={processingOptions}
                 algorithmVersion={algorithmVersion}
                 availableAlgorithms={availableAlgorithms}
+                enableBrowserRepair={enableBrowserRepair}
                 onAlgorithmChange={applyAlgorithmVersion}
                 onParamChange={updateParam}
                 onReset={resetParams}
                 onModeSelect={applyRepairMode}
                 onApply={applySettings}
                 onOptionsChange={setProcessingOptions}
+                onEnableBrowserRepairChange={setEnableBrowserRepair}
                 disabled={isProcessing}
+                duration={duration}
+                channels={audioBuffer?.numberOfChannels ?? 2}
               />
 
               <DownloadButton
@@ -336,6 +373,10 @@ export default function RepairPage() {
                 browserBufferInfo={browserBufferInfo}
                 audioFileName={audioFile?.name}
                 bitDepth={processingOptions.bitDepth}
+                backendAlgorithmVersion={algorithmVersion}
+                browserAlgorithmVersion={browserRepairInfo?.algorithmVersion}
+                backendCompletedAt={repairResult?.completed_at}
+                browserCompletedAt={browserRepairInfo?.completedAt}
               />
             </div>
           </div>

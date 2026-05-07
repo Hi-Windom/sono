@@ -96,9 +96,11 @@ function mapParamsToBackend(params: AIRepairParams, options: ProcessingOptions, 
     bass_enhance: params.bassEnhance,
     spatial_enhance: params.spatialEnhance,
     transient_repair: params.transientRepair,
+    warmth: params.warmth,
+    clarity: params.clarity,
     sample_rate: options.sampleRate,
     bit_depth: options.bitDepth,
-    algorithm_version: algorithmVersion || 'v1.1',
+    algorithm_version: algorithmVersion || 'v2.0',
   };
 }
 
@@ -245,7 +247,7 @@ export async function uploadAudio(file: File, onProgress?: ProgressCallback, fil
 
 export async function detectAudio(taskId: string, type: 'original' | 'repaired' = 'original', detectorVersion?: string): Promise<{ task_id: string; message: string }> {
   const url = `${API_BASE}/detect`;
-  const versionToSend = detectorVersion || 'v1.1';
+  const versionToSend = detectorVersion || 'v1.0';
   log('detect', `POST ${url} task_id=${taskId} type=${type} detector_version=${versionToSend}`);
 
   try {
@@ -751,6 +753,139 @@ export async function uploadTrainingAudio(
 
     xhr.send(formData);
   });
+}
+
+export interface WSProgressControl {
+  close: () => void;
+}
+
+export function connectProgressWS(
+  taskId: string,
+  callbacks: PollCallbacks,
+  terminalStates?: Set<string>,
+): WSProgressControl {
+  const terminals = terminalStates || DEFAULT_TERMINAL_STATES;
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const wsUrl = `${protocol}//${window.location.host}/api/v1/ws/progress/${taskId}`;
+
+  let ws: WebSocket | null = null;
+  let reconnectAttempts = 0;
+  const maxReconnectAttempts = 3;
+  let closed = false;
+  let stuckDetected = false;
+  let lastProgress = -1;
+  let lastStep = '';
+  let lastProgressTime = Date.now();
+
+  const checkStuck = (progress: number, step: string) => {
+    const now = Date.now();
+    if (progress !== lastProgress || step !== lastStep) {
+      if (stuckDetected) {
+        stuckDetected = false;
+        callbacks.onUnstuck?.();
+      }
+      lastProgress = progress;
+      lastStep = step;
+      lastProgressTime = now;
+    } else {
+      const timeSinceProgress = (now - lastProgressTime) / 1000;
+      if (timeSinceProgress > 30 && !stuckDetected) {
+        stuckDetected = true;
+        callbacks.onStuck?.({
+          taskId,
+          lastProgress: progress,
+          lastStep: step,
+          duration: timeSinceProgress,
+        });
+      }
+    }
+  };
+
+  const fallbackToPolling = () => {
+    console.warn(`[WS] 降级到 HTTP 轮询 task_id=${taskId}`);
+    pollProgress(taskId, callbacks, terminals);
+  };
+
+  const connect = () => {
+    if (closed) return;
+
+    try {
+      ws = new WebSocket(wsUrl);
+    } catch (e) {
+      console.warn(`[WS] 创建连接失败:`, e);
+      fallbackToPolling();
+      return;
+    }
+
+    const connectTimeout = setTimeout(() => {
+      if (ws && ws.readyState === WebSocket.CONNECTING) {
+        console.warn(`[WS] 连接超时 task_id=${taskId}`);
+        ws.close();
+      }
+    }, 5000);
+
+    ws.onopen = () => {
+      clearTimeout(connectTimeout);
+      reconnectAttempts = 0;
+      console.log(`[WS] 连接成功 task_id=${taskId}`);
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.error && !data.task_id) {
+          callbacks.onError?.(new Error(data.error));
+          return;
+        }
+        checkStuck(data.progress, data.step);
+        callbacks.onProgress(data);
+        if (terminals.has(data.status)) {
+          console.log(`[WS] 任务终态 task_id=${taskId} status=${data.status}`);
+          if (data.status === 'error') {
+            callbacks.onError?.(new Error(data.error || data.step || '任务失败'));
+          } else {
+            callbacks.onComplete?.(data);
+          }
+          closed = true;
+          ws?.close();
+        }
+      } catch (e) {
+        console.warn(`[WS] 消息解析失败:`, e);
+      }
+    };
+
+    ws.onerror = (e) => {
+      clearTimeout(connectTimeout);
+      console.warn(`[WS] 连接错误 task_id=${taskId}`, e);
+    };
+
+    ws.onclose = (event) => {
+      clearTimeout(connectTimeout);
+      if (closed) return;
+
+      if (reconnectAttempts < maxReconnectAttempts) {
+        reconnectAttempts++;
+        const delay = Math.pow(2, reconnectAttempts - 1) * 1000;
+        console.log(`[WS] 重连 #${reconnectAttempts} task_id=${taskId} 延迟=${delay}ms`);
+        setTimeout(connect, delay);
+      } else {
+        console.warn(`[WS] 重连耗尽 task_id=${taskId}`);
+        fallbackToPolling();
+      }
+    };
+  };
+
+  connect();
+
+  return {
+    close: () => {
+      closed = true;
+      if (ws) {
+        ws.close();
+        ws = null;
+      }
+    },
+  };
 }
 
 export { mapDetectionResult, type BackendDetectionResult, type BackendRepairResult, type ProgressEvent, type TaskStatus };

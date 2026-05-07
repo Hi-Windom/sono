@@ -30,8 +30,8 @@ export const defaultSettings: AppSettings = {
     vocalBalance: 0,
   },
   selectedMode: '全面修复',
-  algorithmVersion: 'v1.2',
-  detectorVersion: 'v1.1',
+  algorithmVersion: 'v2.0',
+  detectorVersion: 'v1.0',
 };
 
 export function loadSettings(): AppSettings {

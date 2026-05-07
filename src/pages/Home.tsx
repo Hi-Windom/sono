@@ -7,6 +7,7 @@ import { SpectrumVisualizer } from '../components/SpectrumVisualizer';
 import { AIRepairPanel } from '../components/AIRepairPanel';
 import { DownloadButton } from '../components/DownloadButton';
 import { AIDetectionComparison } from '../components/AIDetectionComparison';
+import { CacheManager } from '../components/CacheManager';
 import { useAudioProcessor } from '../hooks/useAudioProcessor';
 
 export default function Home() {
@@ -56,6 +57,8 @@ export default function Home() {
     setProcessingOptions,
     downloadProcessedAudio,
     analyserRef,
+    enableBrowserRepair,
+    setEnableBrowserRepair,
   } = useAudioProcessor();
 
   const [showDiag, setShowDiag] = useState(false);
@@ -79,17 +82,20 @@ export default function Home() {
 
       <div className="container mx-auto px-4 py-8 max-w-7xl">
         {!audioFile ? (
-          <div className="flex flex-col items-center justify-center py-20">
-            <div className="mb-4 text-sm">
-              <span
-                className={backendAvailable ? 'text-green-400' : 'text-yellow-400'}
-                style={{ cursor: 'pointer', textDecoration: 'underline' }}
-                onClick={async () => { await runBackendDiag(); setShowDiag(true); }}
-              >
-                {backendAvailable ? '● 后端已连接' : '● 后端不可用(点击诊断)'}
-              </span>
+          <div className="max-w-2xl mx-auto space-y-6">
+            <div className="flex flex-col items-center justify-center py-12">
+              <div className="mb-4 text-sm">
+                <span
+                  className={backendAvailable ? 'text-green-400' : 'text-yellow-400'}
+                  style={{ cursor: 'pointer', textDecoration: 'underline' }}
+                  onClick={async () => { await runBackendDiag(); setShowDiag(true); }}
+                >
+                  {backendAvailable ? '● 后端已连接' : '● 后端不可用(点击诊断)'}
+                </span>
+              </div>
+              <AudioUploader onFileSelect={loadAudioFile} />
             </div>
-            <AudioUploader onFileSelect={loadAudioFile} />
+            <CacheManager />
           </div>
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -219,13 +225,17 @@ export default function Home() {
                 processingOptions={processingOptions}
                 algorithmVersion={algorithmVersion}
                 availableAlgorithms={availableAlgorithms}
+                enableBrowserRepair={enableBrowserRepair}
                 onAlgorithmChange={applyAlgorithmVersion}
                 onParamChange={updateParam}
                 onReset={resetParams}
                 onModeSelect={applyRepairMode}
                 onApply={applySettings}
                 onOptionsChange={setProcessingOptions}
+                onEnableBrowserRepairChange={setEnableBrowserRepair}
                 disabled={isProcessing}
+                duration={duration}
+                channels={audioBuffer?.numberOfChannels ?? 2}
               />
 
               <DownloadButton
@@ -238,6 +248,8 @@ export default function Home() {
                 audioFileName={audioFile?.name}
                 bitDepth={processingOptions.bitDepth}
               />
+
+              <CacheManager />
             </div>
           </div>
         )}

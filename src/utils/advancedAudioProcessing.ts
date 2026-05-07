@@ -11,6 +11,8 @@ export interface AIRepairParams {
   bassEnhance: number;
   spatialEnhance: number;
   transientRepair: number;
+  warmth: number;
+  clarity: number;
 }
 
 export const defaultAIRepairParams: AIRepairParams = {
@@ -26,6 +28,8 @@ export const defaultAIRepairParams: AIRepairParams = {
   bassEnhance: 0.08,
   spatialEnhance: 0.1,
   transientRepair: 0.1,
+  warmth: 0,
+  clarity: 0,
 };
 
 export interface RepairMode {
@@ -53,6 +57,8 @@ export const repairModes: RepairMode[] = [
       bassEnhance: 0.05,
       spatialEnhance: 0.08,
       transientRepair: 0.1,
+      warmth: 0,
+      clarity: 0,
     },
   },
   {
@@ -72,6 +78,8 @@ export const repairModes: RepairMode[] = [
       bassEnhance: 0.03,
       spatialEnhance: 0.05,
       transientRepair: 0.06,
+      warmth: 0,
+      clarity: 0,
     },
   },
   {
@@ -91,6 +99,8 @@ export const repairModes: RepairMode[] = [
       bassEnhance: 0.02,
       spatialEnhance: 0.02,
       transientRepair: 0.03,
+      warmth: 0,
+      clarity: 0,
     },
   },
   {
@@ -110,6 +120,8 @@ export const repairModes: RepairMode[] = [
       bassEnhance: 0.1,
       spatialEnhance: 0.12,
       transientRepair: 0.15,
+      warmth: 0,
+      clarity: 0,
     },
   },
 ];

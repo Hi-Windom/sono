@@ -3,13 +3,13 @@ import hashlib
 import json
 import asyncio
 import logging
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Query
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 from typing import Optional
 
-from config import UPLOAD_DIR, OUTPUT_DIR, ALLOWED_EXTENSIONS, MAX_UPLOAD_SIZE
-from database import create_task, get_task, find_task_by_hash, get_queue_status, mark_stuck_tasks
+from config import UPLOAD_DIR, OUTPUT_DIR, ALLOWED_EXTENSIONS, MAX_UPLOAD_SIZE, MOBILE_MODE
+from database import create_task, get_task, find_task_by_hash, get_queue_status, mark_stuck_tasks, delete_task
 from services.task_manager import generate_task_id, submit_detect_task, submit_repair_task
 from services.file_cache import evict_old_files
 from services.audio_repair import get_available_versions
@@ -20,7 +20,7 @@ router = APIRouter(prefix="/api/v1")
 
 @router.get("/algorithm-versions")
 async def list_algorithm_versions():
-    return {"versions": get_available_versions()}
+    return {"versions": get_available_versions(mobile_mode=MOBILE_MODE)}
 
 class RepairRequest(BaseModel):
     task_id: str
@@ -175,39 +175,68 @@ async def queue_status():
     mark_stuck_tasks(timeout_seconds=300)
     return get_queue_status()
 
-@router.get("/stream/{task_id}")
-async def stream_progress(task_id: str):
+@router.websocket("/ws/progress/{task_id}")
+async def websocket_progress(websocket: WebSocket, task_id: str):
+    await websocket.accept()
     task = get_task(task_id)
     if not task:
-        raise HTTPException(404, "任务不存在")
-
-    async def event_generator():
+        await websocket.send_json({"error": "任务不存在"})
+        await websocket.close()
+        return
+    from services.ws_manager import ws_manager
+    await ws_manager.connect(task_id, websocket)
+    try:
+        current = {
+            "task_id": task_id,
+            "status": task["status"],
+            "progress": task["progress"],
+            "step": task["step"],
+        }
+        if task.get("detection_result"):
+            current["detection_result"] = task["detection_result"]
+        if task.get("repaired_detection_result"):
+            current["repaired_detection_result"] = task["repaired_detection_result"]
+        if task.get("repair_result"):
+            current["repair_result"] = task["repair_result"]
+        if task.get("error"):
+            current["error"] = task["error"]
+        await websocket.send_json(current)
+        if task["status"] in ("completed", "detected", "error"):
+            await websocket.close()
+            return
+        
         while True:
-            t = get_task(task_id)
-            if t is None:
-                break
-            data = {
-                "task_id": task_id,
-                "status": t["status"],
-                "progress": t["progress"],
-                "step": t["step"],
-            }
-            if t.get("detection_result"):
-                data["detection_result"] = t["detection_result"]
-            if t.get("repaired_detection_result"):
-                data["repaired_detection_result"] = t["repaired_detection_result"]
-            if t.get("repair_result"):
-                data["repair_result"] = t["repair_result"]
-            if t.get("error"):
-                data["error"] = t["error"]
-
-            yield f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
-
-            if t["status"] in ("completed", "detected", "error"):
-                break
-            await asyncio.sleep(0.3)
-
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
+            try:
+                await asyncio.wait_for(websocket.receive_text(), timeout=10.0)
+            except asyncio.TimeoutError:
+                current_task = get_task(task_id)
+                if not current_task:
+                    await websocket.send_json({"error": "任务不存在"})
+                    await websocket.close()
+                    return
+                heartbeat_msg = {
+                    "task_id": task_id,
+                    "status": current_task["status"],
+                    "progress": current_task["progress"],
+                    "step": current_task["step"],
+                    "heartbeat": True,
+                }
+                if current_task.get("detection_result"):
+                    heartbeat_msg["detection_result"] = current_task["detection_result"]
+                if current_task.get("repaired_detection_result"):
+                    heartbeat_msg["repaired_detection_result"] = current_task["repaired_detection_result"]
+                if current_task.get("repair_result"):
+                    heartbeat_msg["repair_result"] = current_task["repair_result"]
+                if current_task.get("error"):
+                    heartbeat_msg["error"] = current_task["error"]
+                await websocket.send_json(heartbeat_msg)
+                if current_task["status"] in ("completed", "detected", "error"):
+                    await websocket.close()
+                    return
+    except WebSocketDisconnect:
+        pass
+    finally:
+        ws_manager.disconnect(task_id, websocket)
 
 @router.get("/download/{task_id}")
 async def download_audio(task_id: str):
@@ -334,6 +363,269 @@ async def upload_training_audio(file: UploadFile = File(...), file_hash: str = F
         "message": "训练素材上传成功",
         "cached": False,
     }
+
+@router.get("/cache/info")
+async def get_cache_info():
+    """获取缓存详细信息"""
+    from database import get_db, get_all_tasks_ordered
+    from services.file_cache import get_dir_size
+    from config import UPLOAD_DIR, OUTPUT_DIR
+    
+    upload_size = get_dir_size(UPLOAD_DIR)
+    output_size = get_dir_size(OUTPUT_DIR)
+    
+    conn = get_db()
+    all_tasks = conn.execute(
+        """SELECT id, original_filename, status, progress, step, 
+                  original_path, output_path, file_size, file_hash,
+                  created_at, updated_at, error
+           FROM tasks 
+           ORDER BY created_at DESC"""
+    ).fetchall()
+    conn.close()
+    
+    tasks = []
+    invalid_tasks = []
+    
+    for row in all_tasks:
+        task = dict(row)
+        orig_path = task.get("original_path", "")
+        out_path = task.get("output_path", "")
+        
+        # 检查文件是否存在
+        orig_exists = bool(orig_path) and os.path.exists(orig_path)
+        out_exists = bool(out_path) and os.path.exists(out_path)
+        
+        # 计算文件大小
+        orig_size = os.path.getsize(orig_path) if orig_exists else 0
+        out_size = os.path.getsize(out_path) if out_exists else 0
+        
+        task_info = {
+            "id": task["id"],
+            "filename": task["original_filename"],
+            "status": task["status"],
+            "progress": task["progress"],
+            "step": task["step"],
+            "original_path": orig_path,
+            "output_path": out_path,
+            "original_exists": orig_exists,
+            "output_exists": out_exists,
+            "original_size": orig_size,
+            "output_size": out_size,
+            "total_size": orig_size + out_size,
+            "file_hash": task.get("file_hash", ""),
+            "created_at": task["created_at"],
+            "updated_at": task["updated_at"],
+            "error": task.get("error", ""),
+        }
+        
+        # 判断是否为无效任务
+        is_invalid = False
+        # 状态异常
+        if task["status"] in ["error", "timeout"]:
+            is_invalid = True
+        # 文件丢失
+        elif (task["status"] == "completed" and not out_exists) or not orig_exists:
+            is_invalid = True
+        
+        if is_invalid:
+            invalid_tasks.append(task_info)
+        tasks.append(task_info)
+    
+    return {
+        "total_size": upload_size + output_size,
+        "upload_size": upload_size,
+        "output_size": output_size,
+        "task_count": len(tasks),
+        "invalid_count": len(invalid_tasks),
+        "tasks": tasks,
+        "invalid_tasks": invalid_tasks,
+    }
+
+
+@router.post("/cache/clean-invalid")
+async def clean_invalid_cache():
+    """清理无效缓存（损坏文件、失败任务等）"""
+    from database import get_db
+    from config import UPLOAD_DIR, OUTPUT_DIR
+    
+    conn = get_db()
+    try:
+        all_tasks = conn.execute(
+            "SELECT id, original_path, output_path, status FROM tasks"
+        ).fetchall()
+        
+        cleaned_count = 0
+        released_bytes = 0
+        
+        for row in all_tasks:
+            task_id = row["id"]
+            orig_path = row["original_path"] if row["original_path"] else ""
+            out_path = row["output_path"] if row["output_path"] else ""
+            status = row["status"]
+            
+            should_delete = False
+            # 状态异常的任务
+            if status in ["error", "timeout"]:
+                should_delete = True
+            # 文件丢失的任务
+            elif not (bool(orig_path) and os.path.exists(orig_path)):
+                should_delete = True
+            # 已完成但输出文件丢失的任务
+            elif status == "completed" and not (bool(out_path) and os.path.exists(out_path)):
+                should_delete = True
+            
+            if should_delete:
+                # 删除文件
+                released = 0
+                if orig_path and os.path.exists(orig_path):
+                    released += os.path.getsize(orig_path)
+                    try:
+                        os.remove(orig_path)
+                    except Exception as e:
+                        logger.warning(f"删除文件失败: {orig_path}, {e}")
+                if out_path and os.path.exists(out_path):
+                    released += os.path.getsize(out_path)
+                    try:
+                        os.remove(out_path)
+                    except Exception as e:
+                        logger.warning(f"删除文件失败: {out_path}, {e}")
+                
+                # 删除数据库记录（直接删除，不调用 delete_task 避免连接冲突）
+                conn.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
+                conn.commit()
+                cleaned_count += 1
+                released_bytes += released
+        
+        return {
+            "cleaned_count": cleaned_count,
+            "released_bytes": released_bytes,
+        }
+    except Exception as e:
+        logger.error(f"清理无效缓存出错: {e}", exc_info=True)
+        raise
+    finally:
+        conn.close()
+
+
+@router.post("/cache/clear-all")
+async def clear_all_cache():
+    """清空全部缓存"""
+    from database import get_db
+    from config import UPLOAD_DIR, OUTPUT_DIR
+    
+    conn = get_db()
+    
+    # 删除所有文件
+    total_released = 0
+    
+    for dir_path in [UPLOAD_DIR, OUTPUT_DIR]:
+        if os.path.exists(dir_path):
+            for filename in os.listdir(dir_path):
+                filepath = os.path.join(dir_path, filename)
+                if os.path.isfile(filepath):
+                    try:
+                        total_released += os.path.getsize(filepath)
+                        os.remove(filepath)
+                    except Exception as e:
+                        logger.warning(f"删除文件失败: {filepath}, {e}")
+    
+    # 清空数据库
+    conn.execute("DELETE FROM tasks")
+    conn.commit()
+    conn.close()
+    
+    return {
+        "released_bytes": total_released,
+    }
+
+
+@router.post("/cache/clear-output")
+async def clear_output_cache():
+    """清空输出文件缓存"""
+    from database import get_db
+    
+    conn = get_db()
+    
+    released_bytes = 0
+    
+    if os.path.exists(OUTPUT_DIR):
+        for filename in os.listdir(OUTPUT_DIR):
+            filepath = os.path.join(OUTPUT_DIR, filename)
+            if os.path.isfile(filepath):
+                try:
+                    released_bytes += os.path.getsize(filepath)
+                    os.remove(filepath)
+                except Exception as e:
+                    logger.warning(f"删除输出文件失败: {filepath}, {e}")
+    
+    conn.execute("UPDATE tasks SET output_path = ''")
+    conn.commit()
+    conn.close()
+    
+    return {
+        "released_bytes": released_bytes,
+    }
+
+
+@router.post("/cache/clear-upload")
+async def clear_upload_cache():
+    """清空上传文件缓存（保留输出文件）"""
+    from database import get_db
+    from config import UPLOAD_DIR
+    
+    conn = get_db()
+    
+    released_bytes = 0
+    
+    if os.path.exists(UPLOAD_DIR):
+        for filename in os.listdir(UPLOAD_DIR):
+            filepath = os.path.join(UPLOAD_DIR, filename)
+            if os.path.isfile(filepath):
+                try:
+                    released_bytes += os.path.getsize(filepath)
+                    os.remove(filepath)
+                    logger.info(f"删除上传文件: {filepath}")
+                except Exception as e:
+                    logger.warning(f"删除上传文件失败: {filepath}, {e}")
+    
+    # 清空数据库中的所有任务记录
+    conn.execute("DELETE FROM tasks")
+    conn.commit()
+    conn.close()
+    
+    return {
+        "released_bytes": released_bytes,
+    }
+
+
+@router.post("/cache/delete/{task_id}")
+async def delete_cache_task(task_id: str):
+    """删除指定缓存任务"""
+    from database import get_db, get_task, delete_task
+    
+    task = get_task(task_id)
+    if not task:
+        raise HTTPException(404, "任务不存在")
+    
+    released = 0
+    orig_path = task.get("original_path", "")
+    out_path = task.get("output_path", "")
+    
+    if orig_path and os.path.exists(orig_path):
+        released += os.path.getsize(orig_path)
+        os.remove(orig_path)
+    if out_path and os.path.exists(out_path):
+        released += os.path.getsize(out_path)
+        os.remove(out_path)
+    
+    delete_task(task_id)
+    
+    return {
+        "task_id": task_id,
+        "released_bytes": released,
+    }
+
 
 @router.get("/training/list")
 async def list_training_files():

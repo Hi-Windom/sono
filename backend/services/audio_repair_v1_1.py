@@ -113,7 +113,8 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
 
         y_resampled = np.zeros((y.shape[0], int(y.shape[1] * target_sr / sr)))
         for ch in range(y.shape[0]):
-            y_resampled[ch] = resample_poly(y[ch], target_sr, sr)
+            resampled = resample_poly(y[ch], target_sr, sr)
+            y_resampled[ch, :len(resampled)] = resampled[:y_resampled.shape[1]]
         y = y_resampled
         sr = target_sr
 

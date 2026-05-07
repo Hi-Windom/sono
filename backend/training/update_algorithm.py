@@ -13,7 +13,7 @@ from feature_extractor import FEATURE_DB_PATH, get_feature_db
 
 # v1.1 算法文件路径
 V11_DETECTOR_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 
-                                  'services', 'ai_detector_v11.py')
+                                  'services', 'ai_detector_v1_1.py')
 
 
 def get_training_thresholds():
@@ -88,7 +88,7 @@ def update_v11_thresholds():
     
     print()
     print("=" * 60)
-    print("阈值建议已生成，请根据上述数据手动更新 ai_detector_v11.py")
+    print("阈值建议已生成，请根据上述数据手动更新 ai_detector_v1_1.py")
     print(f"文件路径: {V11_DETECTOR_PATH}")
     print("=" * 60)
     
