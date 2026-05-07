@@ -6,6 +6,8 @@ AI 音频检测与修复工具
 
 - **AI 检测**: 检测音频是否由 AI 生成，支持 v1.0/v1.1/v1.2 三版本算法
 - **音频修复**: 修复 AI 音频的常见问题（毛刺、撕裂、数字伪影等），支持 v1.0/v1.1/v1.2/v2.0/v2.1 五版本算法
+- **智能缓存**: 上传层按文件 hash 去重，修复结果按文件+算法+参数三重匹配命中，避免重复上传和冗余计算
+- **任务取消**: 全栈取消机制（前端按钮 + 后端 cancel_task），卡住任务可随时终止
 - **前后对比**: 直观对比修复前后的 AI 检测概率变化
 - **浏览器处理**: 支持纯浏览器端处理，无需上传文件
 - **后端处理**: 支持 Python 后端高性能处理
@@ -15,9 +17,10 @@ AI 音频检测与修复工具
 ## 技术栈
 
 - **前端**: React + TypeScript + Vite + Tailwind CSS
-- **后端**: Python + FastAPI + SQLite + WebSocket
+- **后端**: Python 3.10+ (pyright strict mode 类型检查) + FastAPI + SQLite + WebSocket
 - **音频处理**: Web Audio API / NumPy + SciPy (librosa 已移除，使用自研 dsp_utils)
 - **包管理**: uv（桌面端）/ pkg + pip（Android）
+- **类型检查**: pyright strict mode（核心基础设施），算法模块按需降级
 
 ## 快速开始
 
@@ -148,6 +151,24 @@ bash scripts/build_android_release.sh
 - **v2.0**: 移动端优化版，自适应采样率，频域合并优化
 - **v2.1**: 移动端优化升级版，增强降噪和清晰度
 
+## 最近更新 (2026-05-07)
+
+### 智能缓存系统重构
+- 上传缓存与修复结果缓存完全解耦：上传层仅按文件 hash 去重，修复结果层按文件+算法+参数三重匹配命中
+- 修复默认算法版本硬编码为 `v2.0` 的问题，新用户自动选择后端最新版本
+- 修复 Session 持久化不完整问题，浏览器-only 修复结果也能正确保存和恢复
+
+### 任务取消 + 移动端导出修复
+- 新增全栈任务取消机制：前端取消按钮 → `POST /cancel/{task_id}` → 后端 `cancel_task()` + `TaskCancelledError`
+- 修复移动端音频导出无反应（Worker 超时保护、AudioContext 恢复、进度反馈）
+- 修复导出文件名异常（`<a>` 元素 + 真实 URL + download 属性）
+- 修复 AI 检测完成后进度显示残留
+
+### Python 强制类型检查
+- 引入 pyright strict mode，配置 [pyproject.toml](pyproject.toml)
+- 核心基础设施全量类型注解：database.py / task_manager.py / ws_manager.py / file_cache.py
+- 后端 repair params 持久化到数据库，支持修复结果缓存比对
+
 ## 项目结构
 
 ```
@@ -175,6 +196,7 @@ bash scripts/build_android_release.sh
 │   └── start_android.sh  # Termux 启动脚本
 ├── docs/                 # 文档
 │   └── android.md        # Android 部署详细指南
+├── pyproject.toml        # Python 类型检查配置 (pyright strict)
 ├── public/               # 静态资源
 └── dist/                 # 构建输出
 ```

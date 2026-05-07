@@ -88,7 +88,7 @@ export interface DetectorVersion {
   description: string;
 }
 
-function mapParamsToBackend(params: AIRepairParams, options: ProcessingOptions, algorithmVersion?: string): Record<string, unknown> {
+export function mapParamsToBackend(params: AIRepairParams, options: ProcessingOptions, algorithmVersion?: string): Record<string, unknown> {
   return {
     de_clipping: params.deClipping,
     noise_reduction: params.noiseReduction,
@@ -556,6 +556,25 @@ export function getDownloadUrl(taskId: string): string {
 
 export function getPreviewUrl(taskId: string, type: 'original' | 'repaired'): string {
   return `${API_BASE}/preview/${taskId}?type=${type}`;
+}
+
+export async function cancelTask(taskId: string): Promise<{ task_id: string; status: string; message: string }> {
+  const url = `${API_BASE}/cancel/${taskId}`;
+  log('cancel', `POST ${url}`);
+
+  try {
+    const res = await fetch(url, { method: 'POST' });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: '取消请求失败' }));
+      throw new Error(err.detail || '取消请求失败');
+    }
+    const data = await res.json();
+    log('cancel', `success: ${data.message}`);
+    return data;
+  } catch (e) {
+    log('cancel', `ERROR: ${e instanceof Error ? e.message : String(e)}`);
+    throw e;
+  }
 }
 
 export async function downloadWithProgress(url: string, onProgress?: ProgressCallback, maxRetries: number = 3): Promise<ArrayBuffer> {

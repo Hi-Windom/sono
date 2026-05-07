@@ -83,7 +83,7 @@ def spectral_bandwidth(y=None, sr=22050, S=None, n_fft=2048, hop_length=512, p=2
     mag = np.abs(S)
     freqs = fft_frequencies(sr=sr, n_fft=2 * (S.shape[0] - 1))
     centroid = np.dot(freqs, mag) / (np.sum(mag, axis=0) + 1e-10)
-    deviation = np.dot(mag, np.abs(freqs[:, np.newaxis] - centroid[np.newaxis, :]) ** p) / (np.sum(mag, axis=0) + 1e-10)
+    deviation = np.sum(mag * np.abs(freqs[:, np.newaxis] - centroid[np.newaxis, :]) ** p, axis=0) / (np.sum(mag, axis=0) + 1e-10)
     bandwidth = deviation ** (1.0 / p)
     return bandwidth.reshape(1, -1)
 

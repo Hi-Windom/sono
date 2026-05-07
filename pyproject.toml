@@ -1,0 +1,69 @@
+[tool.pyright]
+include = ["backend"]
+exclude = [
+    "**/__pycache__",
+    "backend/storage",
+]
+
+typeCheckingMode = "strict"
+
+pythonVersion = "3.10"
+
+reportMissingImports = "warning"
+reportMissingModuleSource = "warning"
+reportUndefinedVariable = "error"
+reportGeneralTypeIssues = "error"
+reportOptionalMemberAccess = "error"
+reportArgumentType = "error"
+
+reportUnnecessaryIsInstance = "warning"
+reportUnnecessaryCast = "warning"
+
+
+[[tool.pyright.overrides]]
+path = "backend/services/repair/**"
+reportOperatorIssue = "warning"
+reportIndexIssue = "warning"
+reportArgumentType = "warning"
+reportPossiblyUnboundVariable = "warning"
+reportGeneralTypeIssues = "warning"
+
+[[tool.pyright.overrides]]
+path = "backend/services/dsp_utils.py"
+reportOperatorIssue = "warning"
+reportIndexIssue = "warning"
+reportArgumentType = "warning"
+reportGeneralTypeIssues = "warning"
+
+[[tool.pyright.overrides]]
+path = "backend/training/**"
+reportMissingImports = "warning"
+reportOperatorIssue = "warning"
+reportGeneralTypeIssues = "warning"
+
+[[tool.pyright.overrides]]
+path = "backend/services/repair/audio_repair_v1_1.py"
+reportMissingImports = "warning"
+reportPossiblyUnboundVariable = "warning"
+reportGeneralTypeIssues = "warning"
+reportAssignmentType = "warning"
+
+[[tool.pyright.overrides]]
+path = "backend/services/repair/audio_repair_v1_0.py"
+reportOperatorIssue = "warning"
+reportGeneralTypeIssues = "warning"
+
+[[tool.pyright.overrides]]
+path = "backend/services/librosa_compat.py"
+reportUnusedImport = "none"
+
+[[tool.pyright.overrides]]
+path = "backend/services/detectors/**"
+reportGeneralTypeIssues = "warning"
+reportCallIssue = "warning"
+
+[[tool.pyright.overrides]]
+path = "backend/api/routes.py"
+reportMissingTypeStubs = "warning"
+reportUnknownVariableType = "warning"
+reportUnknownParameterType = "warning"

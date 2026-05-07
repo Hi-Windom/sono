@@ -1,3 +1,7 @@
+from __future__ import annotations
+
+from typing import Any
+
 from services.repair.audio_repair_v1_0 import repair_audio as repair_audio_v1_0
 from services.repair.audio_repair_v1_1 import repair_audio as repair_audio_v1_1
 from services.repair.audio_repair_v1_2 import repair_audio as repair_audio_v1_2
@@ -340,7 +344,7 @@ ALGORITHM_VERSIONS = {
 DEFAULT_VERSION = "v2.1"
 
 
-def get_available_versions(mobile_mode: bool = False) -> list[dict]:
+def get_available_versions(mobile_mode: bool = False) -> list[dict[str, Any]]:
     result = []
     for v in ALGORITHM_VERSIONS.values():
         if mobile_mode and not v.get("mobile_compatible", True):
@@ -364,7 +368,7 @@ def get_available_versions(mobile_mode: bool = False) -> list[dict]:
     return result
 
 
-def repair_audio(input_path: str, output_path: str, params: dict, progress_callback=None, mobile_mode: bool = False) -> dict:
+def repair_audio(input_path: str, output_path: str, params: dict[str, Any], progress_callback: Any = None, mobile_mode: bool = False) -> dict[str, Any]:
     version = params.get("algorithm_version", DEFAULT_VERSION)
     version_info = ALGORITHM_VERSIONS.get(version)
     if not version_info:

@@ -278,32 +278,43 @@ export default function LandingPage() {
                 <div className="flex-shrink-0 w-2 h-2 mt-2 rounded-full bg-cyan-400"></div>
                 <div className="flex-1">
                   <div className="flex items-center justify-between mb-1">
-                    <h4 className="text-white font-semibold">检测 v1.2 / 修复 v2.1 支持</h4>
+                    <h4 className="text-white font-semibold">智能缓存系统重构</h4>
                     <span className="text-gray-500 text-xs">2026-05-07</span>
                   </div>
-                  <p className="text-gray-400 text-sm">新增检测 v1.2 和修复 v2.1 算法，整理文件结构（detectors/ 和 repair/ 目录）。</p>
+                  <p className="text-gray-400 text-sm">上传缓存与修复结果缓存解耦：上传层仅按文件 hash 去重，修复结果层按文件+算法+参数三重匹配命中。修复默认算法版本硬编码、Session 持久化不完整等问题。</p>
                 </div>
               </div>
-              
+
+              <div className="flex items-start gap-4 p-4 bg-black/20 rounded-xl border border-white/5">
+                <div className="flex-shrink-0 w-2 h-2 mt-2 rounded-full bg-red-400"></div>
+                <div className="flex-1">
+                  <div className="flex items-center justify-between mb-1">
+                    <h4 className="text-white font-semibold">任务取消 + 移动端导出修复</h4>
+                    <span className="text-gray-500 text-xs">2026-05-07</span>
+                  </div>
+                  <p className="text-gray-400 text-sm">新增全栈任务取消机制（前端按钮 + 后端 cancel_task）；修复移动端音频导出无反应、文件名异常、浏览器崩溃等问题；Worker 编码超时保护。</p>
+                </div>
+              </div>
+
               <div className="flex items-start gap-4 p-4 bg-black/20 rounded-xl border border-white/5">
                 <div className="flex-shrink-0 w-2 h-2 mt-2 rounded-full bg-purple-400"></div>
                 <div className="flex-1">
                   <div className="flex items-center justify-between mb-1">
-                    <h4 className="text-white font-semibold">移动端 MP3 支持</h4>
+                    <h4 className="text-white font-semibold">Python 强制类型检查</h4>
                     <span className="text-gray-500 text-xs">2026-05-07</span>
                   </div>
-                  <p className="text-gray-400 text-sm">移动端上传 MP3 等格式时自动转换为 WAV，解决 librosa 无法解码的问题。</p>
+                  <p className="text-gray-400 text-sm">引入 pyright strict mode，核心基础设施（database/task_manager/ws_manager/file_cache）全量类型注解，算法模块按需降级。</p>
                 </div>
               </div>
-              
+
               <div className="flex items-start gap-4 p-4 bg-black/20 rounded-xl border border-white/5">
                 <div className="flex-shrink-0 w-2 h-2 mt-2 rounded-full bg-emerald-400"></div>
                 <div className="flex-1">
                   <div className="flex items-center justify-between mb-1">
-                    <h4 className="text-white font-semibold">PM2 支持</h4>
+                    <h4 className="text-white font-semibold">检测 v1.2 / 修复 v2.1 支持</h4>
                     <span className="text-gray-500 text-xs">2026-05-07</span>
                   </div>
-                  <p className="text-gray-400 text-sm">ecosystem.config.cjs 从 .gitignore 移除，支持 PM2 进程管理。</p>
+                  <p className="text-gray-400 text-sm">新增检测 v1.2 和修复 v2.1 算法，整理文件结构（detectors/ 和 repair/ 目录）。</p>
                 </div>
               </div>
             </div>

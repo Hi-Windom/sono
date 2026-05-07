@@ -1,3 +1,7 @@
+from __future__ import annotations
+
+from typing import Any
+
 from services.detectors.ai_detector_v1_0 import detect_ai_audio as detect_ai_audio_v1_0
 from services.detectors.ai_detector_v1_1 import detect_ai_audio as detect_ai_audio_v1_1
 from services.detectors.ai_detector_v1_2 import detect_ai_audio as detect_ai_audio_v1_2
@@ -26,7 +30,7 @@ DETECTOR_VERSIONS = {
 DEFAULT_VERSION = "v1.1"
 
 
-def get_detector_versions() -> list[dict]:
+def get_detector_versions() -> list[dict[str, Any]]:
     return [
         {"name": v["name"], "label": v["label"], "description": v["description"]}
         for v in DETECTOR_VERSIONS.values()

@@ -13,8 +13,11 @@ import {
   connectProgressWS,
   WSProgressControl,
   getPreviewUrl,
+  getDownloadUrl,
+  cancelTask,
   downloadWithProgress,
   mapDetectionResult,
+  mapParamsToBackend,
   ProcessingOptions,
   fetchAlgorithmVersions,
   fetchDetectorVersions,
@@ -30,6 +33,22 @@ function writeLog(message: string) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ message })
   }).catch(() => {});
+}
+
+function _compareRepairParams(current: Record<string, unknown>, cached: Record<string, unknown>): boolean {
+  const keysToCompare = [
+    'algorithm_version', 'de_clipping', 'noise_reduction', 'de_essing',
+    'de_crackle', 'de_pop', 'harmonic_enhance', 'dynamic_range',
+    'softness', 'presence_boost', 'bass_enhance', 'spatial_enhance',
+    'transient_repair', 'warmth', 'clarity', 'sample_rate', 'bit_depth',
+  ];
+  for (const key of keysToCompare) {
+    if (current[key] !== cached[key]) {
+      writeLog(`[cache] 参数不匹配: ${key} current=${current[key]} cached=${cached[key]}`);
+      return false;
+    }
+  }
+  return true;
 }
 
 export interface AudioAnalysis {
@@ -76,6 +95,18 @@ function downloadBlob(blob: Blob, fileName: string) {
   setTimeout(() => {
     document.body.removeChild(a);
     URL.revokeObjectURL(blobUrl);
+  }, 5000);
+}
+
+function downloadUrl(url: string, fileName: string) {
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = fileName;
+  a.style.display = 'none';
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => {
+    document.body.removeChild(a);
   }, 5000);
 }
 
@@ -194,7 +225,7 @@ export function useAudioProcessor() {
             if (versions.length > 0) {
               setAvailableAlgorithms(versions);
               const current = versions.find(v => v.name === algorithmVersion);
-              if (current) {
+              if (current && algorithmVersion) {
                 if (current.modes && current.modes.length > 0) {
                   const modes: RepairMode[] = current.modes.map(m => ({
                     name: m.name,
@@ -208,11 +239,12 @@ export function useAudioProcessor() {
                 versionInitializedRef.current = true;
                 writeLog(`[useAudioProcessor] 版本 ${current.name} 可用，已加载模式`);
               } else {
-                const defaultVersion = versions[0];
-                writeLog(`[useAudioProcessor] 当前版本 ${algorithmVersion} 不可用，自动切换到 ${defaultVersion.name}`);
-                setAlgorithmVersionState(defaultVersion.name);
-                if (defaultVersion.modes && defaultVersion.modes.length > 0) {
-                  const modes: RepairMode[] = defaultVersion.modes.map(m => ({
+                const latestVersion = versions[0];
+                writeLog(`[useAudioProcessor] 当前版本 '${algorithmVersion}' 无效或未设置，自动选择最新: ${latestVersion.name}`);
+                setAlgorithmVersionState(latestVersion.name);
+                saveSettings({ algorithmVersion: latestVersion.name });
+                if (latestVersion.modes && latestVersion.modes.length > 0) {
+                  const modes: RepairMode[] = latestVersion.modes.map(m => ({
                     name: m.name,
                     description: m.description,
                     icon: m.icon,
@@ -681,6 +713,9 @@ export function useAudioProcessor() {
     }
 
     const context = getAudioContext();
+    if (context.state === 'suspended') {
+      await context.resume();
+    }
     return context.decodeAudioData(arrayBuffer);
   }, [getAudioContext]);
 
@@ -769,7 +804,7 @@ export function useAudioProcessor() {
 
     const requestId = Date.now().toString();
 
-    const wavData = await new Promise<ArrayBuffer>((resolve, reject) => {
+    const workerPromise = new Promise<ArrayBuffer>((resolve, reject) => {
       worker.onmessage = (e: MessageEvent) => {
         const { type, ...data } = e.data;
 
@@ -795,10 +830,20 @@ export function useAudioProcessor() {
       });
     });
 
-    worker.terminate();
-    workerRef.current = null;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      setTimeout(() => reject(new Error('Worker编码超时(30s)')), 30000);
+    });
 
-    return wavData;
+    try {
+      const wavData = await Promise.race([workerPromise, timeoutPromise]);
+      worker.terminate();
+      workerRef.current = null;
+      return wavData;
+    } catch (err) {
+      worker.terminate();
+      workerRef.current = null;
+      throw err;
+    }
   }, []);
 
   const applySettings = useCallback(async () => {
@@ -811,6 +856,7 @@ export function useAudioProcessor() {
     const REPAIR_TERMINALS = new Set(['completed', 'error']);
     let currentTaskId = taskIdRef.current;
     let needsNewTask = false;
+    let backendSkipped = false;
     const backendProg = { value: 0 };
     const browserProg = { value: 0 };
     
@@ -856,60 +902,42 @@ export function useAudioProcessor() {
         setIsProcessing(false);
         return;
       }
-      
-      // 检查是否命中缓存
-      writeLog(`[applySettings] 检查后端缓存: fileHash=${fileHashRef.current}`);
-      const hashCheck = await fetch(`/api/check-file-hash`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ file_hash: fileHashRef.current })
-      });
-      
-      if (hashCheck.ok) {
-        const cached = await hashCheck.json();
-        if (cached.task_id) {
-          writeLog(`[applySettings] 后端缓存命中: taskId=${cached.task_id}`);
-          currentTaskId = cached.task_id;
-          setTaskId(currentTaskId);
-          taskIdRef.current = currentTaskId;
-          backendProg.value = 1.0;
-          setProcessingStep('后端缓存命中');
-          setProcessingProgress(0.5);
-        } else {
-          writeLog(`[applySettings] 缓存未命中，需要上传`);
-          setProcessingStep('上传到后端...');
-          setProcessingProgress(0.01);
-          const uploadRes = await uploadAudio(audioFile, undefined, fileHashRef.current || undefined);
-          currentTaskId = uploadRes.task_id;
-          setTaskId(currentTaskId);
-          taskIdRef.current = currentTaskId;
-          setBackendAvailable(true);
-          writeLog(`[applySettings] 上传成功: currentTaskId=${currentTaskId}, cached=${uploadRes.cached}`);
-          
-          if (uploadRes.cached) {
-            writeLog(`[applySettings] 后端缓存命中，标记后端完成`);
+
+      setProcessingStep('上传到后端...');
+      setProcessingProgress(0.01);
+      const uploadRes = await uploadAudio(audioFile, undefined, fileHashRef.current || undefined);
+      currentTaskId = uploadRes.task_id;
+      setTaskId(currentTaskId);
+      taskIdRef.current = currentTaskId;
+      setBackendAvailable(true);
+      writeLog(`[applySettings] 上传完成: taskId=${currentTaskId}, cached=${uploadRes.cached}`);
+
+      const currentParamsForCache = mapParamsToBackend(params, processingOptions, effectiveAlgorithmVersion);
+
+      try {
+        const statusRes = await fetch(`/api/v1/status/${currentTaskId}`);
+        if (statusRes.ok) {
+          const taskStatus = await statusRes.json();
+          const cachedParams = taskStatus.params || {};
+          const paramsMatch = _compareRepairParams(currentParamsForCache, cachedParams);
+          const outputValid = !!taskStatus.output_path && taskStatus.status === 'completed';
+
+          writeLog(`[applySettings] 修复结果检查: paramsMatch=${paramsMatch} outputValid=${outputValid} status=${taskStatus.status}`);
+
+          if (paramsMatch && outputValid) {
             backendProg.value = 1.0;
+            backendSkipped = true;
             setProcessingStep('后端缓存命中');
             setProcessingProgress(0.5);
+            writeLog(`[applySettings] ✅ 修复结果缓存命中(参数+输出一致)，跳过后端修复`);
+          } else {
+            writeLog(`[applySettings] 需要执行修复: ${!paramsMatch ? '参数不一致' : '输出无效或未完成'}`);
           }
+        } else {
+          writeLog(`[applySettings] 任务状态查询失败(${statusRes.status})，将执行修复`);
         }
-      } else {
-        writeLog(`[applySettings] 缓存检查失败，需要上传`);
-        setProcessingStep('上传到后端...');
-        setProcessingProgress(0.01);
-        const uploadRes = await uploadAudio(audioFile, undefined, fileHashRef.current || undefined);
-        currentTaskId = uploadRes.task_id;
-        setTaskId(currentTaskId);
-        taskIdRef.current = currentTaskId;
-        setBackendAvailable(true);
-        writeLog(`[applySettings] 上传成功: currentTaskId=${currentTaskId}, cached=${uploadRes.cached}`);
-        
-        if (uploadRes.cached) {
-          writeLog(`[applySettings] 后端缓存命中，标记后端完成`);
-          backendProg.value = 1.0;
-          setProcessingStep('后端缓存命中');
-          setProcessingProgress(0.5);
-        }
+      } catch (e) {
+        writeLog(`[applySettings] 任务状态查询异常，将执行修复`);
       }
     } else {
       writeLog(`[applySettings] 跳过上传: currentTaskId=${currentTaskId}, audioFile=${!!audioFile}`);
@@ -928,7 +956,7 @@ export function useAudioProcessor() {
       setProcessingProgress(combinedProgress);
     };
 
-    const backendRepairPromise = taskIdRef.current ? (async () => {
+    const backendRepairPromise = (taskIdRef.current && !backendSkipped) ? (async () => {
       try {
         setBackendAvailable(true);
         const taskId = taskIdRef.current!;
@@ -1085,21 +1113,31 @@ export function useAudioProcessor() {
 
     let anySuccess = false;
 
-    if (backendResult.status === 'rejected') {
-      setBackendError(backendResult.reason?.message || '后端修复失败');
+    let effectiveBackendResult = backendResult;
+    if (backendSkipped && backendResult.status === 'fulfilled' && backendResult.value === null) {
+      const skippedPreviewUrl = getPreviewUrl(taskIdRef.current!, 'repaired');
+      setBackendPreviewUrl(skippedPreviewUrl);
+      effectiveBackendResult = {
+        status: 'fulfilled' as const,
+        value: { previewUrl: skippedPreviewUrl, repairResult: undefined },
+      };
     }
 
-    if (backendResult.status === 'fulfilled' && backendResult.value) {
-      if (backendResult.value.repairResult) {
+    if (effectiveBackendResult.status === 'rejected') {
+      setBackendError(effectiveBackendResult.reason?.message || '后端修复失败');
+    }
+
+    if (effectiveBackendResult.status === 'fulfilled' && effectiveBackendResult.value) {
+      if (effectiveBackendResult.value.repairResult) {
         setRepairResult({
-          ...backendResult.value.repairResult,
+          ...effectiveBackendResult.value.repairResult,
           completed_at: new Date().toISOString(),
         });
       }
       anySuccess = true;
       setPlayMode('backend');
 
-      const previewUrl = backendResult.value.previewUrl;
+      const previewUrl = effectiveBackendResult.value.previewUrl;
       if (previewUrl) {
         startStreamingPlayback(previewUrl);
       }
@@ -1111,20 +1149,6 @@ export function useAudioProcessor() {
           console.warn('[applySettings] 后台下载修复后音频失败:', err);
         });
       }
-
-      if (audioFile && taskIdRef.current) {
-        saveSession({
-          file: audioFile,
-          fileName: audioFile.name,
-          fileSize: audioFile.size,
-          fileHash: fileHashRef.current || '',
-          taskId: taskIdRef.current,
-          backendAvailable: true,
-          hasBeenProcessed: true,
-          wavInfo: wavInfo ? JSON.stringify(wavInfo) : '',
-          repairResult: backendResult.value.repairResult ? JSON.stringify(backendResult.value.repairResult) : '',
-        });
-      }
     }
 
     if (browserResult.status === 'fulfilled' && browserResult.value) {
@@ -1134,12 +1158,29 @@ export function useAudioProcessor() {
 
     if (anySuccess) {
       setHasBeenProcessed(true);
-      if (!(backendResult.status === 'fulfilled' && backendResult.value)) {
+      if (!(effectiveBackendResult.status === 'fulfilled' && effectiveBackendResult.value)) {
         setPlayMode('browser');
+      }
+
+      if (audioFile && taskIdRef.current) {
+        const _backendValue = effectiveBackendResult.status === 'fulfilled' ? effectiveBackendResult.value : null;
+        saveSession({
+          file: audioFile,
+          fileName: audioFile.name,
+          fileSize: audioFile.size,
+          fileHash: fileHashRef.current || '',
+          taskId: taskIdRef.current,
+          backendAvailable: effectiveBackendResult.status === 'fulfilled' && !!_backendValue,
+          hasBeenProcessed: true,
+          wavInfo: wavInfo ? JSON.stringify(wavInfo) : '',
+          repairResult: _backendValue?.repairResult
+            ? JSON.stringify(_backendValue.repairResult)
+            : '',
+        });
       }
     }
 
-    const backendFailed = backendResult.status === 'rejected' || (backendResult.status === 'fulfilled' && backendResult.value === null);
+    const backendFailed = effectiveBackendResult.status === 'rejected' || (effectiveBackendResult.status === 'fulfilled' && (effectiveBackendResult as PromiseFulfilledResult<{previewUrl?: string; repairResult?: unknown}>).value === null);
     if (!backendFailed) {
       setProcessingStep('完成!');
     }
@@ -1207,6 +1248,8 @@ export function useAudioProcessor() {
               currentTaskId,
               {
                 onProgress: (evt) => {
+                  setProcessingProgress(evt.progress);
+                  setProcessingStep(evt.step);
                   if (evt.repaired_detection_result) {
                     setBackendAIDetection(mapDetectionResult(evt.repaired_detection_result));
                   }
@@ -1266,6 +1309,22 @@ export function useAudioProcessor() {
   }, []);
 
   const clearBackendError = useCallback(() => setBackendError(null), []);
+
+  const cancelCurrentTask = useCallback(async () => {
+    const currentTaskId = taskIdRef.current;
+    if (currentTaskId) {
+      try {
+        await cancelTask(currentTaskId);
+      } catch (e) {
+        console.warn('[cancelCurrentTask] 后端取消失败:', e);
+      }
+    }
+    closeWS();
+    resetStuckState();
+    setIsProcessing(false);
+    setProcessingStep('');
+    setProcessingProgress(0);
+  }, [taskIdRef, resetStuckState]);
 
   const runBackendDiag = useCallback(async () => {
     const lines: string[] = [];
@@ -1522,8 +1581,6 @@ export function useAudioProcessor() {
   }, [currentTime, stopPlaying]);
 
   const downloadProcessedAudio = useCallback(async (source: 'browser' | 'backend') => {
-    const targetBuffer = source === 'backend' ? backendProcessedBuffer : browserProcessedBuffer;
-    
     const baseName = audioFile
       ? audioFile.name.replace(/\.[^/.]+$/, '')
       : 'audio';
@@ -1531,72 +1588,49 @@ export function useAudioProcessor() {
       ? `${baseName}_backend_repaired.wav`
       : `${baseName}_browser_repaired.wav`;
 
+    if (source === 'backend' && taskIdRef.current) {
+      const url = getDownloadUrl(taskIdRef.current);
+      downloadUrl(url, fileName);
+      return;
+    }
+
+    const targetBuffer = source === 'backend' ? backendProcessedBuffer : browserProcessedBuffer;
+
     if (targetBuffer) {
+      setProcessingStep('正在编码导出...');
+      setProcessingProgress(0);
       try {
         const wavData = await encodeWavWithWorker(targetBuffer, processingOptions.bitDepth);
         const blob = new Blob([wavData], { type: 'audio/wav' });
         downloadBlob(blob, fileName);
+        setProcessingStep('');
+        setProcessingProgress(0);
         return;
       } catch (workerErr) {
         console.warn('[downloadProcessedAudio] Worker编码失败，使用fallback:', workerErr);
         try {
+          setProcessingStep('正在编码导出(主线程)...');
           const wav = await audioBufferToWav(targetBuffer, {
             sampleRate: targetBuffer.sampleRate,
             bitDepth: processingOptions.bitDepth,
           });
           const blob = new Blob([wav], { type: 'audio/wav' });
           downloadBlob(blob, fileName);
+          setProcessingStep('');
+          setProcessingProgress(0);
           return;
         } catch (fallbackErr) {
           console.error('[downloadProcessedAudio] Fallback编码也失败:', fallbackErr);
+          setProcessingStep('');
+          setProcessingProgress(0);
           alert(`导出失败: ${fallbackErr instanceof Error ? fallbackErr.message : '编码错误'}`);
           return;
         }
       }
     }
 
-    if (source === 'backend' && taskIdRef.current) {
-      const previewUrl = backendPreviewUrl || getPreviewUrl(taskIdRef.current, 'repaired');
-      setProcessingStep('下载中...');
-      setProcessingProgress(0);
-      
-      try {
-        const arrayBuffer = await downloadWithProgress(previewUrl, (loaded, total) => {
-          const pct = total > 0 ? loaded / total : 0;
-          setProcessingProgress(pct);
-        });
-        
-        const context = getAudioContext();
-        const decoded = await context.decodeAudioData(arrayBuffer);
-        setBackendProcessedBuffer(decoded);
-        
-        try {
-          const wavData = await encodeWavWithWorker(decoded, processingOptions.bitDepth);
-          const blob = new Blob([wavData], { type: 'audio/wav' });
-          downloadBlob(blob, fileName);
-        } catch {
-          const wav = await audioBufferToWav(decoded, {
-            sampleRate: decoded.sampleRate,
-            bitDepth: processingOptions.bitDepth,
-          });
-          const blob = new Blob([wav], { type: 'audio/wav' });
-          downloadBlob(blob, fileName);
-        }
-        
-        setProcessingStep('');
-        setProcessingProgress(0);
-        return;
-      } catch (err) {
-        console.error('[downloadProcessedAudio] 下载失败:', err);
-        setProcessingStep('');
-        setProcessingProgress(0);
-        alert(`下载失败: ${err instanceof Error ? err.message : '未知错误'}\n\n请检查网络连接后重试`);
-        return;
-      }
-    }
-
     alert('请先完成修复后再下载');
-  }, [backendProcessedBuffer, browserProcessedBuffer, audioFile, processingOptions, encodeWavWithWorker, getAudioContext, taskIdRef, backendPreviewUrl]);
+  }, [backendProcessedBuffer, browserProcessedBuffer, audioFile, processingOptions, encodeWavWithWorker, taskIdRef]);
 
   useEffect(() => {
     return () => {
@@ -1651,6 +1685,7 @@ export function useAudioProcessor() {
     stuckInfo,
     queueStatus,
     resetStuckState,
+    cancelCurrentTask,
     backendError,
     clearBackendError,
     loadAudioFile,

@@ -1,17 +1,20 @@
+from __future__ import annotations
+
 import asyncio
-import uuid
-import os
-import traceback
 import logging
-import time
-import functools
+import os
 import threading
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
-from database import create_task, update_task, get_task
+import time
+import traceback
+import uuid
+from concurrent.futures import Future, ThreadPoolExecutor, TimeoutError as FutureTimeoutError
+from typing import Any
+
+from config import MAX_WORKERS, MOBILE_MODE, OUTPUT_DIR
+from database import TaskDict, create_task, get_task, update_task
 from services.ai_detector import detect_ai_audio
-from services.audio_repair import repair_audio, ALGORITHM_VERSIONS, DEFAULT_VERSION
+from services.audio_repair import ALGORITHM_VERSIONS, DEFAULT_VERSION, repair_audio
 from services.ws_manager import ws_manager
-from config import MAX_WORKERS, OUTPUT_DIR, MOBILE_MODE
 
 logger = logging.getLogger(__name__)
 
@@ -28,13 +31,13 @@ def _get_loop():
         _loop = asyncio.new_event_loop()
     return _loop
 
-def _ws_send_progress(task_id, data):
+def _ws_send_progress(task_id: str, data: dict[str, Any]) -> None:
     try:
         asyncio.run_coroutine_threadsafe(ws_manager.send_progress(task_id, data), _get_loop())
     except Exception:
         pass
 
-def _ws_send_final(task_id, data):
+def _ws_send_final(task_id: str, data: dict[str, Any]) -> None:
     try:
         asyncio.run_coroutine_threadsafe(ws_manager.send_final(task_id, data), _get_loop())
     except Exception:
@@ -47,7 +50,24 @@ TASK_TIMEOUTS = {
     "repair": 600,
 }
 
-STUCK_THRESHOLD = 60  # 60秒无进度视为卡住
+STUCK_THRESHOLD = 60
+
+_cancelled_tasks: set[str] = set()
+_cancelled_lock = threading.Lock()
+
+
+def cancel_task(task_id: str) -> bool:
+    with _cancelled_lock:
+        if task_id in _cancelled_tasks:
+            return False
+        _cancelled_tasks.add(task_id)
+    update_task(task_id, status="cancelled", step="已取消", progress=0)
+    logger.info(f"[cancel] 任务已取消 task_id={task_id}")
+    return True
+
+
+class TaskCancelledError(Exception):
+    pass
 
 
 def generate_task_id() -> str:
@@ -60,13 +80,14 @@ def submit_detect_task(task_id: str, audio_path: str, detect_type: str = "origin
     future.add_done_callback(lambda f: _handle_future_exception(f, task_id, "detect"))
 
 
-def submit_repair_task(task_id: str, audio_path: str, params: dict):
+def submit_repair_task(task_id: str, audio_path: str, params: dict[str, Any]) -> None:
     logger.info(f"[submit_repair_task] task_id={task_id} params_keys={list(params.keys())}")
+    update_task(task_id, params=params)
     future = executor.submit(_run_repair, task_id, audio_path, params, MOBILE_MODE)
     future.add_done_callback(lambda f: _handle_future_exception(f, task_id, "repair"))
 
 
-def _handle_future_exception(future, task_id: str, task_type: str):
+def _handle_future_exception(future: Future[Any], task_id: str, task_type: str) -> None:
     try:
         future.result()
     except FutureTimeoutError:
@@ -77,7 +98,7 @@ def _handle_future_exception(future, task_id: str, task_type: str):
         update_task(task_id, status="error", error=f"任务执行异常: {str(e)}", step="执行异常")
 
 
-def _run_detect(task_id: str, audio_path: str, detect_type: str, detector_version: str):
+def _run_detect(task_id: str, audio_path: str, detect_type: str, detector_version: str) -> None:
     start_time = time.time()
     logger.info(f"[detect] 开始 task_id={task_id} type={detect_type} version={detector_version}")
 
@@ -121,6 +142,9 @@ def _run_detect(task_id: str, audio_path: str, detect_type: str, detector_versio
         logger.info(f"[detect] 音频文件 task_id={task_id} size={file_size/1024/1024:.2f}MB")
 
         def progress_callback(p, s):
+            with _cancelled_lock:
+                if task_id in _cancelled_tasks:
+                    raise TaskCancelledError(f"任务已取消: {task_id}")
             elapsed = time.time() - start_time
             last_progress_time[0] = time.time()
             last_progress[0] = p
@@ -144,6 +168,10 @@ def _run_detect(task_id: str, audio_path: str, detect_type: str, detector_versio
 
         logger.info(f"[detect] 完成 task_id={task_id} elapsed={elapsed:.1f}s")
 
+    except TaskCancelledError:
+        elapsed = time.time() - start_time
+        logger.info(f"[detect] 已取消 task_id={task_id} elapsed={elapsed:.1f}s")
+        _ws_send_final(task_id, {"task_id": task_id, "status": "cancelled", "progress": 0, "step": f"已取消 ({elapsed:.1f}s)"})
     except Exception as e:
         elapsed = time.time() - start_time
         error_msg = f"{type(e).__name__}: {e}\n{traceback.format_exc()}"
@@ -153,9 +181,13 @@ def _run_detect(task_id: str, audio_path: str, detect_type: str, detector_versio
         raise
     finally:
         stop_monitor[0] = True
+        with _cancelled_lock:
+            _cancelled_tasks.discard(task_id)
+        with _cancelled_lock:
+            _cancelled_tasks.discard(task_id)
 
 
-def _run_repair(task_id: str, audio_path: str, params: dict, mobile_mode: bool = False):
+def _run_repair(task_id: str, audio_path: str, params: dict[str, Any], mobile_mode: bool = False) -> None:
     start_time = time.time()
     algorithm_version = params.get("algorithm_version", DEFAULT_VERSION)
     
@@ -212,6 +244,9 @@ def _run_repair(task_id: str, audio_path: str, params: dict, mobile_mode: bool =
         logger.info(f"[repair] 参数 task_id={task_id} active_params={active_params}")
 
         def progress_callback(p, s):
+            with _cancelled_lock:
+                if task_id in _cancelled_tasks:
+                    raise TaskCancelledError(f"任务已取消: {task_id}")
             elapsed = time.time() - start_time
             last_progress_time[0] = time.time()
             last_progress[0] = p
@@ -246,6 +281,10 @@ def _run_repair(task_id: str, audio_path: str, params: dict, mobile_mode: bool =
 
         logger.info(f"[repair] 完成 task_id={task_id} elapsed={elapsed:.1f}s issues={repair_result.get('issues_found', [])}")
 
+    except TaskCancelledError:
+        elapsed = time.time() - start_time
+        logger.info(f"[repair] 已取消 task_id={task_id} elapsed={elapsed:.1f}s")
+        _ws_send_final(task_id, {"task_id": task_id, "status": "cancelled", "progress": 0, "step": f"已取消 ({elapsed:.1f}s)"})
     except Exception as e:
         elapsed = time.time() - start_time
         error_msg = f"{type(e).__name__}: {e}\n{traceback.format_exc()}"
@@ -257,7 +296,7 @@ def _run_repair(task_id: str, audio_path: str, params: dict, mobile_mode: bool =
         stop_monitor[0] = True
 
 
-def get_task_status(task_id: str) -> dict | None:
+def get_task_status(task_id: str) -> TaskDict | None:
     return get_task(task_id)
 
 

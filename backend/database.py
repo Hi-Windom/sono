@@ -1,14 +1,21 @@
-import sqlite3
+from __future__ import annotations
+
 import json
 import os
+import sqlite3
+from typing import Any
+
 from config import DB_PATH
 
-def get_db():
+TaskDict = dict[str, Any]
+
+
+def get_db() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
 
-def init_db():
+def init_db() -> None:
     conn = get_db()
     conn.execute("""
         CREATE TABLE IF NOT EXISTS tasks (
@@ -41,7 +48,7 @@ def init_db():
     conn.commit()
     conn.close()
 
-def create_task(task_id: str, filename: str, filepath: str, params: dict, file_hash: str = "", file_size: int = 0):
+def create_task(task_id: str, filename: str, filepath: str, params: dict[str, Any], file_hash: str = "", file_size: int = 0) -> None:
     conn = get_db()
     conn.execute(
         "INSERT INTO tasks (id, original_filename, original_path, params, file_hash, file_size) VALUES (?, ?, ?, ?, ?, ?)",
@@ -50,10 +57,10 @@ def create_task(task_id: str, filename: str, filepath: str, params: dict, file_h
     conn.commit()
     conn.close()
 
-def update_task(task_id: str, **kwargs):
+def update_task(task_id: str, **kwargs: Any) -> None:
     conn = get_db()
-    sets = []
-    values = []
+    sets: list[str] = []
+    values: list[Any] = []
     for k, v in kwargs.items():
         sets.append(f"{k} = ?")
         values.append(json.dumps(v) if isinstance(v, (dict, list)) else v)
@@ -63,24 +70,17 @@ def update_task(task_id: str, **kwargs):
     conn.commit()
     conn.close()
 
-def get_task(task_id: str) -> dict | None:
+def get_task(task_id: str) -> TaskDict | None:
     conn = get_db()
     row = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
     conn.close()
     if row is None:
         return None
-    result = dict(row)
-    if result.get("params"):
-        result["params"] = json.loads(result["params"])
-    if result.get("detection_result"):
-        result["detection_result"] = json.loads(result["detection_result"])
-    if result.get("repaired_detection_result"):
-        result["repaired_detection_result"] = json.loads(result["repaired_detection_result"])
-    if result.get("repair_result"):
-        result["repair_result"] = json.loads(result["repair_result"])
+    result: TaskDict = dict(row)
+    _parse_json_fields(result)
     return result
 
-def find_task_by_hash(file_hash: str) -> dict | None:
+def find_task_by_hash(file_hash: str) -> TaskDict | None:
     conn = get_db()
     row = conn.execute(
         "SELECT * FROM tasks WHERE file_hash = ? ORDER BY created_at DESC LIMIT 1",
@@ -89,36 +89,36 @@ def find_task_by_hash(file_hash: str) -> dict | None:
     conn.close()
     if row is None:
         return None
-    result = dict(row)
+    result: TaskDict = dict(row)
     if result.get("original_path") and not os.path.exists(result["original_path"]):
         return None
-    if result.get("params"):
-        result["params"] = json.loads(result["params"])
+    output_path = result.get("output_path")
+    if output_path and not os.path.exists(output_path):
+        result["output_path"] = ""
+    _parse_json_fields(result)
     return result
 
-def get_all_tasks_ordered() -> list[dict]:
+def get_all_tasks_ordered() -> list[TaskDict]:
     conn = get_db()
     rows = conn.execute("SELECT id, original_path, output_path, file_size, created_at FROM tasks ORDER BY created_at ASC").fetchall()
     conn.close()
     return [dict(r) for r in rows]
 
-def delete_task(task_id: str):
+def delete_task(task_id: str) -> None:
     conn = get_db()
     conn.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
     conn.commit()
     conn.close()
 
 
-def get_queue_status() -> dict:
+def get_queue_status() -> dict[str, Any]:
     """获取任务队列状态"""
     conn = get_db()
     
-    # 统计各状态任务数
     status_counts = conn.execute(
         "SELECT status, COUNT(*) as count FROM tasks GROUP BY status"
     ).fetchall()
     
-    # 获取正在运行的任务
     running_tasks = conn.execute(
         """SELECT id, status, step, progress, 
                   (julianday('now') - julianday(updated_at)) * 24 * 60 * 60 as elapsed_seconds
@@ -127,7 +127,6 @@ def get_queue_status() -> dict:
            ORDER BY updated_at DESC"""
     ).fetchall()
     
-    # 获取等待中的任务
     pending_tasks = conn.execute(
         "SELECT id, status, original_filename FROM tasks WHERE status = 'pending' ORDER BY created_at"
     ).fetchall()
@@ -154,7 +153,7 @@ def get_queue_status() -> dict:
     }
 
 
-def mark_stuck_tasks(timeout_seconds: int = 300):
+def mark_stuck_tasks(timeout_seconds: int = 300) -> None:
     """标记卡住的任务（超过timeout_seconds没有更新）"""
     conn = get_db()
     conn.execute(
@@ -169,15 +168,26 @@ def mark_stuck_tasks(timeout_seconds: int = 300):
     conn.commit()
     conn.close()
 
+
+def _parse_json_fields(result: TaskDict) -> None:
+    for field in ("params", "detection_result", "repaired_detection_result", "repair_result"):
+        raw = result.get(field)
+        if raw and isinstance(raw, str):
+            try:
+                result[field] = json.loads(raw)
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+
 # 训练素材相关数据库操作
 TRAINING_DB_PATH = os.path.join(os.path.dirname(DB_PATH), "training.db")
 
-def get_training_db():
+def get_training_db() -> sqlite3.Connection:
     conn = sqlite3.connect(TRAINING_DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
 
-def init_training_db():
+def init_training_db() -> None:
     conn = get_training_db()
     conn.execute("""
         CREATE TABLE IF NOT EXISTS training_files (
@@ -192,7 +202,7 @@ def init_training_db():
     conn.commit()
     conn.close()
 
-def create_training_record(file_id: str, filename: str, filepath: str, file_hash: str, file_size: int = 0):
+def create_training_record(file_id: str, filename: str, filepath: str, file_hash: str, file_size: int = 0) -> None:
     conn = get_training_db()
     conn.execute(
         "INSERT OR REPLACE INTO training_files (id, filename, filepath, file_hash, file_size) VALUES (?, ?, ?, ?, ?)",
@@ -201,7 +211,7 @@ def create_training_record(file_id: str, filename: str, filepath: str, file_hash
     conn.commit()
     conn.close()
 
-def find_training_by_hash(file_hash: str) -> dict | None:
+def find_training_by_hash(file_hash: str) -> TaskDict | None:
     conn = get_training_db()
     row = conn.execute(
         "SELECT * FROM training_files WHERE file_hash = ? LIMIT 1",
@@ -210,8 +220,7 @@ def find_training_by_hash(file_hash: str) -> dict | None:
     conn.close()
     if row is None:
         return None
-    result = dict(row)
-    # 检查文件是否还存在
+    result: TaskDict = dict(row)
     if result.get("filepath") and not os.path.exists(result["filepath"]):
         return None
     return result

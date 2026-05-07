@@ -1,14 +1,12 @@
 import os
 import logging
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Query, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from typing import Optional
 
-from config import UPLOAD_DIR, OUTPUT_DIR, ALLOWED_EXTENSIONS, MAX_UPLOAD_SIZE, MOBILE_MODE
-from database import create_task, get_task, find_task_by_hash, get_queue_status, mark_stuck_tasks, delete_task
-from services.task_manager import generate_task_id, submit_detect_task, submit_repair_task
-from services.file_cache import evict_old_files
+from config import ALLOWED_EXTENSIONS, MAX_UPLOAD_SIZE, MOBILE_MODE, OUTPUT_DIR, UPLOAD_DIR
+from database import create_task, find_task_by_hash, get_queue_status, get_task
+from services.task_manager import generate_task_id, submit_detect_task, submit_repair_task, cancel_task
 from services.audio_repair import get_available_versions
 from services.ai_detector import get_detector_versions
 
@@ -66,13 +64,15 @@ async def check_file_hash(request: CheckHashRequest):
         return {
             "exists": True,
             "task_id": existing["id"],
-            "output_path": existing["output_path"],
+            "output_path": existing.get("output_path", ""),
+            "status": existing.get("status", ""),
+            "params": existing.get("params", {}),
         }
     return {"exists": False}
 
 @router.post("/upload")
 async def upload_audio(file: UploadFile = File(...)):
-    ext = os.path.splitext(file.filename)[1].lower()
+    ext = os.path.splitext(file.filename or '')[1].lower()
     if ext not in ALLOWED_EXTENSIONS:
         raise HTTPException(status_code=400, detail=f"不支持的文件格式: {ext}")
     
@@ -246,6 +246,22 @@ async def download_audio(task_id: str):
         media_type="audio/wav",
         filename=download_name,
     )
+
+@router.post("/cancel/{task_id}")
+async def cancel_task_endpoint(task_id: str):
+    task = get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    
+    status = task.get("status", "")
+    if status in ("completed", "error", "cancelled"):
+        return {"task_id": task_id, "status": status, "message": "任务已结束，无需取消"}
+    
+    success = cancel_task(task_id)
+    if success:
+        return {"task_id": task_id, "status": "cancelled", "message": "任务已取消"}
+    else:
+        return {"task_id": task_id, "status": "cancelling", "message": "任务正在取消中"}
 
 @router.get("/preview/{task_id}")
 async def preview_audio(task_id: str):

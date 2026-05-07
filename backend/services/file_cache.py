@@ -1,7 +1,11 @@
-import os
+from __future__ import annotations
+
 import logging
-from database import get_all_tasks_ordered, delete_task
-from config import UPLOAD_DIR, OUTPUT_DIR, SOURCE_FILE_CACHE_LIMIT
+import os
+from typing import Any
+
+from config import OUTPUT_DIR, SOURCE_FILE_CACHE_LIMIT, UPLOAD_DIR
+from database import TaskDict, delete_task, get_all_tasks_ordered
 
 logger = logging.getLogger(__name__)
 
@@ -14,7 +18,7 @@ def get_dir_size(path: str) -> int:
                 total += os.path.getsize(fp)
     return total
 
-def evict_old_files():
+def evict_old_files() -> None:
     upload_size = get_dir_size(UPLOAD_DIR)
     output_size = get_dir_size(OUTPUT_DIR)
     total = upload_size + output_size
@@ -24,15 +28,15 @@ def evict_old_files():
 
     logger.info(f"缓存超限: upload={upload_size} output={output_size} total={total} limit={SOURCE_FILE_CACHE_LIMIT}")
 
-    tasks = get_all_tasks_ordered()
+    tasks: list[TaskDict] = get_all_tasks_ordered()
 
     for task in tasks:
         if total <= SOURCE_FILE_CACHE_LIMIT:
             break
 
-        task_id = task["id"]
-        original_path = task.get("original_path", "")
-        output_path = task.get("output_path", "")
+        task_id: str = task["id"]
+        original_path: str = task.get("original_path", "")
+        output_path: str = task.get("output_path", "")
 
         released = 0
         if output_path and os.path.exists(output_path):

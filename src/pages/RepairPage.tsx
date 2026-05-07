@@ -51,6 +51,7 @@ export default function RepairPage() {
     stuckInfo,
     queueStatus,
     resetStuckState,
+    cancelCurrentTask,
     backendError,
     clearBackendError,
     loadAudioFile,
@@ -288,6 +289,12 @@ export default function RepairPage() {
                               这可能是由于服务器繁忙或任务执行超时导致的。
                             </p>
                             <div className="flex gap-2 mt-3">
+                              <button
+                                onClick={cancelCurrentTask}
+                                className="px-3 py-1.5 bg-red-500/20 hover:bg-red-500/30 text-red-400 text-xs rounded transition-colors"
+                              >
+                                取消任务
+                              </button>
                               <button
                                 onClick={() => {
                                   resetStuckState();
