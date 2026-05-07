@@ -1,15 +1,7 @@
 import numpy as np
-import librosa
-import soundfile as sf
 
 
 def load_audio_with_fallback(file_path: str, sr=None, mono=False) -> tuple:
-    try:
-        y, sample_rate = librosa.load(file_path, sr=sr, mono=mono)
-        return y, sample_rate
-    except Exception:
-        pass
-
     try:
         import miniaudio
 
@@ -55,5 +47,12 @@ def load_audio_with_fallback(file_path: str, sr=None, mono=False) -> tuple:
 
         return raw, sample_rate
 
+    except Exception:
+        pass
+
+    try:
+        import librosa
+        y, sample_rate = librosa.load(file_path, sr=sr, mono=mono)
+        return y, sample_rate
     except Exception:
         raise RuntimeError(f"Failed to load audio file: {file_path}")

@@ -8,4 +8,4 @@ noisereduce>=3,<4
 numpy>=2,<3
 scipy>=1,<2
 aiofiles>=24,<25
-pydub>=0.25,<0.26
+miniaudio>=0.5
