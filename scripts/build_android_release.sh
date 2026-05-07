@@ -14,21 +14,37 @@ echo -e "${GREEN}============================================${NC}"
 echo -e "${GREEN}  Sono Android Release 打包脚本${NC}"
 echo -e "${GREEN}============================================${NC}"
 
-echo -e "${YELLOW}[1/3] 检查前端构建产物...${NC}"
-if [ ! -d "dist" ] || [ ! -f "dist/index.html" ]; then
-    echo -e "${RED}错误: dist/ 目录不存在或不完整。请先运行 npm run build。${NC}"
+echo -e "${YELLOW}[1/4] 清理旧的前端构建产物...${NC}"
+if [ -d "dist" ]; then
+    echo "  清理旧的 dist/ 目录..."
+    rm -rf dist
+fi
+if [ -d "backend/dist" ]; then
+    echo "  清理旧的 backend/dist/ 目录..."
+    rm -rf backend/dist
+fi
+
+echo -e "${YELLOW}[2/4] 重新构建前端...${NC}"
+if [ ! -f "package.json" ]; then
+    echo -e "${RED}错误: package.json 不存在。${NC}"
     exit 1
 fi
-echo "  前端构建产物确认: dist/"
+echo "  运行 npm run build..."
+npm run build
+if [ ! -d "dist" ] || [ ! -f "dist/index.html" ]; then
+    echo -e "${RED}错误: 前端构建失败，dist/ 目录不存在或不完整。${NC}"
+    exit 1
+fi
+echo "  前端构建成功"
 
-echo -e "${YELLOW}[2/3] 检查后端代码...${NC}"
+echo -e "${YELLOW}[3/4] 检查后端代码...${NC}"
 if [ ! -d "backend" ] || [ ! -f "backend/main.py" ]; then
     echo -e "${RED}错误: backend/ 目录不存在或不完整。${NC}"
     exit 1
 fi
 echo "  后端代码确认: backend/"
 
-echo -e "${YELLOW}[3/3] 打包 release_android.tar.gz...${NC}"
+echo -e "${YELLOW}[4/4] 打包 release_android.tar.gz...${NC}"
 
 TMP_DIR=$(mktemp -d)
 trap "rm -rf $TMP_DIR" EXIT

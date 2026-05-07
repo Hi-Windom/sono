@@ -16,17 +16,26 @@ echo -e "${GREEN}============================================${NC}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
-echo -e "${YELLOW}[1/7] 检查 Termux 环境...${NC}"
+echo -e "${YELLOW}[1/8] 清理缓存文件...${NC}"
+if [ -d "backend/__pycache__" ]; then
+    echo "  清理 Python 缓存..."
+    rm -rf backend/__pycache__
+    rm -rf backend/api/__pycache__
+    rm -rf backend/services/__pycache__
+fi
+echo "  清理完成。"
+
+echo -e "${YELLOW}[2/8] 检查 Termux 环境...${NC}"
 if [ ! -d "/data/data/com.termux" ]; then
     echo -e "${RED}错误: 未检测到 Termux 环境，此脚本仅适用于 Termux。${NC}"
     exit 1
 fi
 echo "  Termux 环境确认。"
 
-echo -e "${YELLOW}[2/7] 更新软件源...${NC}"
+echo -e "${YELLOW}[3/8] 更新软件源...${NC}"
 pkg update -y 2>/dev/null || true
 
-echo -e "${YELLOW}[3/7] 安装系统依赖（含预编译 C/Rust 扩展包）...${NC}"
+echo -e "${YELLOW}[4/8] 安装系统依赖（含预编译 C/Rust 扩展包）...${NC}"
 MISSING_PKGS=""
 for pkg in python clang make pkg-config libc++ libffi openssl curl ca-certificates \
     python-numpy python-scipy rust; do
@@ -43,11 +52,11 @@ else
     echo "  系统包已满足。"
 fi
 
-echo -e "${YELLOW}[4/7] 安装 Python 构建工具...${NC}"
+echo -e "${YELLOW}[5/8] 安装 Python 构建工具...${NC}"
 pip install setuptools maturin -i "$PYPI_MIRROR_URL" --trusted-host "$PYPI_MIRROR_HOST" 2>/dev/null || \
     pip install setuptools maturin
 
-echo -e "${YELLOW}[5/7] 安装 Python 依赖...${NC}"
+echo -e "${YELLOW}[6/8] 安装 Python 依赖...${NC}"
 cd backend
 
 export TMPDIR="$HOME/.tmp"
@@ -150,7 +159,7 @@ STUBEOF
 
 cd ..
 
-echo -e "${YELLOW}[6/7] 验证关键依赖...${NC}"
+echo -e "${YELLOW}[7/8] 验证关键依赖...${NC}"
 cd backend
 python -c "import numpy; print(f'  numpy {numpy.__version__} OK')" 2>/dev/null || echo -e "${RED}  numpy 未安装！${NC}"
 python -c "import scipy; print(f'  scipy {scipy.__version__} OK')" 2>/dev/null || echo -e "${RED}  scipy 未安装！${NC}"
@@ -161,7 +170,7 @@ python -c "import numba; print(f'  numba (stub) OK')" 2>/dev/null || echo -e "${
 python -c "import librosa; print(f'  librosa {librosa.__version__} OK')" 2>/dev/null || echo -e "${RED}  librosa 未安装！${NC}"
 cd ..
 
-echo -e "${YELLOW}[7/7] 生成启动脚本 start_android.sh...${NC}"
+echo -e "${YELLOW}[8/8] 生成启动脚本 start_android.sh...${NC}"
 cat > start_android.sh << 'STARTEOF'
 #!/data/data/com.termux/files/usr/bin/bash
 set -e

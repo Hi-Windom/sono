@@ -258,6 +258,69 @@ export default function LandingPage() {
           </div>
         </div>
 
+        {/* Recent Updates Section */}
+        <div className="mt-16 max-w-4xl mx-auto">
+          <div className="bg-primary/50 border border-white/10 rounded-2xl p-8">
+            <div className="flex items-center gap-3 mb-6">
+              <div className="w-12 h-12 bg-gradient-to-br from-pink-500/20 to-cyan-500/20 rounded-xl flex items-center justify-center border border-pink-400/20">
+                <svg className="w-6 h-6 text-pink-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+              <div>
+                <h3 className="text-white font-bold text-xl">最近更新</h3>
+                <p className="text-gray-400 text-sm">功能更新与优化</p>
+              </div>
+            </div>
+            
+            <div className="space-y-4">
+              <div className="flex items-start gap-4 p-4 bg-black/20 rounded-xl border border-white/5">
+                <div className="flex-shrink-0 w-2 h-2 mt-2 rounded-full bg-cyan-400"></div>
+                <div className="flex-1">
+                  <div className="flex items-center justify-between mb-1">
+                    <h4 className="text-white font-semibold">算法优化</h4>
+                    <span className="text-gray-500 text-xs">2026-05-07</span>
+                  </div>
+                  <p className="text-gray-400 text-sm">修复 v2.0 音频修复算法的低频失真问题，优化 AI 检测算法准确率。</p>
+                </div>
+              </div>
+              
+              <div className="flex items-start gap-4 p-4 bg-black/20 rounded-xl border border-white/5">
+                <div className="flex-shrink-0 w-2 h-2 mt-2 rounded-full bg-purple-400"></div>
+                <div className="flex-1">
+                  <div className="flex items-center justify-between mb-1">
+                    <h4 className="text-white font-semibold">移动端部署优化</h4>
+                    <span className="text-gray-500 text-xs">2026-05-06</span>
+                  </div>
+                  <p className="text-gray-400 text-sm">优化 Android 端资源占用，提升前端加载速度，修复 /api/log 路由问题。</p>
+                </div>
+              </div>
+              
+              <div className="flex items-start gap-4 p-4 bg-black/20 rounded-xl border border-white/5">
+                <div className="flex-shrink-0 w-2 h-2 mt-2 rounded-full bg-pink-400"></div>
+                <div className="flex-1">
+                  <div className="flex items-center justify-between mb-1">
+                    <h4 className="text-white font-semibold">缓存清理功能</h4>
+                    <span className="text-gray-500 text-xs">2026-05-05</span>
+                  </div>
+                  <p className="text-gray-400 text-sm">新增无效缓存自动检测与清理功能，只检查文件本身，不关联任务状态。</p>
+                </div>
+              </div>
+              
+              <div className="flex items-start gap-4 p-4 bg-black/20 rounded-xl border border-white/5">
+                <div className="flex-shrink-0 w-2 h-2 mt-2 rounded-full bg-emerald-400"></div>
+                <div className="flex-1">
+                  <div className="flex items-center justify-between mb-1">
+                    <h4 className="text-white font-semibold">任务卡住检测</h4>
+                    <span className="text-gray-500 text-xs">2026-05-04</span>
+                  </div>
+                  <p className="text-gray-400 text-sm">通过 WebSocket 心跳机制实时检测后端任务是否卡住，主动通知前端。</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
         {/* Cache Manager Section */}
         <div className="mt-16 max-w-4xl mx-auto">
           <div className="bg-primary/50 border border-white/10 rounded-2xl p-8">
@@ -356,12 +419,12 @@ export default function LandingPage() {
                   </button>
                 </div>
 
-                {cacheInfo.tasks.length > 0 && (
+                {cacheInfo.tasks?.length > 0 && (
                   <div className="mt-6">
                     <div className="text-gray-400 text-sm mb-3">最近任务 ({cacheInfo.tasks.length})</div>
                     <div className="max-h-64 overflow-y-auto bg-black/20 rounded-lg border border-white/10">
                       {cacheInfo.tasks.slice(0, 10).map((task) => {
-                        const isInvalid = cacheInfo.invalid_tasks.some(t => t.id === task.id);
+                        const isInvalid = Array.isArray(cacheInfo.invalid_tasks) && cacheInfo.invalid_tasks.some(t => t.id === task.id);
                         return (
                           <div key={task.id} className={`p-3 hover:bg-white/5 ${isInvalid ? 'bg-red-500/5' : ''}`}>
                             <div className="flex items-center justify-between mb-1">

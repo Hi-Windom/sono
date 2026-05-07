@@ -2,12 +2,13 @@ import os
 import time
 import logging
 from pathlib import Path
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, Response
 from api.routes import router
 from config import MOBILE_MODE
+from pydantic import BaseModel
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -21,6 +22,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+class LogRequest(BaseModel):
+    message: str
+    level: str = "info"
+
+
 def create_app() -> FastAPI:
     from database import init_db, init_training_db
     init_db()
@@ -31,6 +37,20 @@ def create_app() -> FastAPI:
         version="2.0.0",
         description="AI音频修复与检测后端服务",
     )
+
+    # 添加 /api/log 路由（不带 v1 前缀）
+    @app.post("/api/log")
+    async def log_message(request: LogRequest):
+        level = request.level.lower()
+        if level == "error":
+            logger.error(request.message)
+        elif level == "warning":
+            logger.warning(request.message)
+        elif level == "debug":
+            logger.debug(request.message)
+        else:
+            logger.info(request.message)
+        return {"status": "ok"}
 
     @app.middleware("http")
     async def log_requests(request: Request, call_next):
@@ -64,17 +84,26 @@ def create_app() -> FastAPI:
     dist_dir = BASE_DIR / "dist"
     serve_static = os.getenv("SERVE_STATIC", "").lower() in ("1", "true", "yes")
     if serve_static and dist_dir.is_dir():
-        app.mount("/assets", StaticFiles(directory=str(dist_dir / "assets")), name="static-assets")
+        # --- 自定义静态文件服务（禁用缓存）---
+        @app.get("/assets/{file_path:path}")
+        async def serve_asset(file_path: str):
+            full_path = dist_dir / "assets" / file_path
+            if full_path.is_file():
+                response = FileResponse(str(full_path))
+                response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+                response.headers["Pragma"] = "no-cache"
+                response.headers["Expires"] = "0"
+                return response
+            raise HTTPException(status_code=404, detail="Asset not found")
 
         @app.get("/{full_path:path}")
         async def serve_spa(full_path: str):
             file_path = dist_dir / full_path
             if full_path and file_path.is_file():
                 response = FileResponse(str(file_path))
-                if full_path.endswith('.html') or full_path == '':
-                    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
-                    response.headers["Pragma"] = "no-cache"
-                    response.headers["Expires"] = "0"
+                response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+                response.headers["Pragma"] = "no-cache"
+                response.headers["Expires"] = "0"
                 return response
             response = FileResponse(str(dist_dir / "index.html"))
             response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"

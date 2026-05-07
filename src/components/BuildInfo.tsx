@@ -12,39 +12,55 @@ export function BuildInfo() {
   const [hmrTime, setHmrTime] = useState<string | null>(null);
 
   useEffect(() => {
-    // 检测当前模式
-    const isDev = import.meta.env.DEV;
-    const isDevServer = import.meta.env.MODE === 'development';
-    
-    // 获取构建时间（从 Vite 的 import.meta.env）
-    const buildTime = new Date().toISOString();
-    
-    setInfo({
-      buildTime,
-      mode: isDev ? 'development' : 'production',
-      isDevServer,
-      lastHmrTime: null,
-    });
-
-    // 开发模式下监听 HMR
-    if (isDev && import.meta.hot) {
-      import.meta.hot.on('vite:beforeUpdate', () => {
-        setHmrTime(new Date().toLocaleTimeString());
+    try {
+      // 检测当前模式
+      const isDev = typeof import.meta !== 'undefined' && import.meta.env?.DEV === true;
+      const isDevServer = typeof import.meta !== 'undefined' && import.meta.env?.MODE === 'development';
+      
+      // 获取构建时间（从 Vite 构建时注入的常量）
+      let buildTime: string;
+      try {
+        // 安全地访问 __BUILD_TIME__
+        const g = typeof globalThis !== 'undefined' ? globalThis : (typeof window !== 'undefined' ? window : {} as any);
+        buildTime = typeof g.__BUILD_TIME__ === 'string' ? g.__BUILD_TIME__ : new Date().toISOString();
+      } catch {
+        buildTime = new Date().toISOString();
+      }
+      
+      setInfo({
+        buildTime,
+        mode: isDev ? 'development' : 'production',
+        isDevServer,
+        lastHmrTime: null,
       });
+
+      // 开发模式下监听 HMR
+      if (isDev && typeof import.meta !== 'undefined' && import.meta.hot) {
+        import.meta.hot.on('vite:beforeUpdate', () => {
+          setHmrTime(new Date().toLocaleTimeString());
+        });
+      }
+    } catch (e) {
+      // 如果出错，就不显示这个组件，避免影响整个页面
+      console.error('BuildInfo error:', e);
     }
   }, []);
 
   if (!info) return null;
 
   const formatTime = (timeStr: string) => {
-    const date = new Date(timeStr);
-    return date.toLocaleString('zh-CN', {
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-    });
+    try {
+      const date = new Date(timeStr);
+      return date.toLocaleString('zh-CN', {
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+      });
+    } catch {
+      return timeStr;
+    }
   };
 
   return (

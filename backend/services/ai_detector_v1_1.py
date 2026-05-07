@@ -152,9 +152,6 @@ def _extract_harmonic(y):
 def detect_ai_audio(audio_path: str, progress_callback=None) -> dict:
     y, sr = librosa.load(audio_path, sr=None, mono=True)
 
-    # 串行执行特征提取，避免 ThreadPoolExecutor 死锁问题
-    # librosa 内部可能使用多线程，嵌套使用会导致死锁
-
     if progress_callback:
         progress_callback(0.05, "v1.1 分析频谱特征...")
     spectral = _extract_spectral(y, sr)
@@ -301,7 +298,7 @@ def detect_ai_audio(audio_path: str, progress_callback=None) -> dict:
     elif dyn_range > 0.25:
         ai_score += 8
         ai_reasons.append("动态范围过大")
-    elif 0.08 < dyn_range < 0.18:
+    elif 0.08 < dyn_range and dyn_range < 0.18:
         human_score += 8
         human_reasons.append("动态范围自然")
     else:

@@ -26,9 +26,16 @@ def get_detector_versions() -> list[dict]:
     ]
 
 
+import logging
+
+logger = logging.getLogger(__name__)
+
+
 def detect_ai_audio(audio_path: str, progress_callback=None, version: str | None = None) -> dict:
     ver = version or DEFAULT_VERSION
+    logger.info(f"[detect_ai_audio] 使用版本: {ver}, 请求版本: {version}")
     version_info = DETECTOR_VERSIONS.get(ver)
     if not version_info:
+        logger.warning(f"[detect_ai_audio] 版本 {ver} 不存在，使用默认版本 {DEFAULT_VERSION}")
         version_info = DETECTOR_VERSIONS[DEFAULT_VERSION]
     return version_info["detect_fn"](audio_path, progress_callback)

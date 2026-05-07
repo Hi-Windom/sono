@@ -299,10 +299,14 @@ def get_available_versions(mobile_mode: bool = False) -> list[dict]:
     return result
 
 
-def repair_audio(input_path: str, output_path: str, params: dict, progress_callback=None) -> dict:
+def repair_audio(input_path: str, output_path: str, params: dict, progress_callback=None, mobile_mode: bool = False) -> dict:
     version = params.get("algorithm_version", DEFAULT_VERSION)
     version_info = ALGORITHM_VERSIONS.get(version)
     if not version_info:
         version_info = ALGORITHM_VERSIONS[DEFAULT_VERSION]
-
+    
+    if mobile_mode and not version_info.get("mobile_compatible", True):
+        raise ValueError(f"算法版本 {version} 不支持移动端，请使用 v2.0")
+    
     return version_info["repair_fn"](input_path, output_path, params, progress_callback)
+

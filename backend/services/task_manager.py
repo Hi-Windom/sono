@@ -5,12 +5,13 @@ import traceback
 import logging
 import time
 import functools
+import threading
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from database import create_task, update_task, get_task
 from services.ai_detector import detect_ai_audio
-from services.audio_repair import repair_audio
+from services.audio_repair import repair_audio, ALGORITHM_VERSIONS, DEFAULT_VERSION
 from services.ws_manager import ws_manager
-from config import MAX_WORKERS, OUTPUT_DIR
+from config import MAX_WORKERS, OUTPUT_DIR, MOBILE_MODE
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +47,8 @@ TASK_TIMEOUTS = {
     "repair": 600,
 }
 
+STUCK_THRESHOLD = 60  # 60秒无进度视为卡住
+
 
 def generate_task_id() -> str:
     return uuid.uuid4().hex[:16]
@@ -59,7 +62,7 @@ def submit_detect_task(task_id: str, audio_path: str, detect_type: str = "origin
 
 def submit_repair_task(task_id: str, audio_path: str, params: dict):
     logger.info(f"[submit_repair_task] task_id={task_id} params_keys={list(params.keys())}")
-    future = executor.submit(_run_repair, task_id, audio_path, params)
+    future = executor.submit(_run_repair, task_id, audio_path, params, MOBILE_MODE)
     future.add_done_callback(lambda f: _handle_future_exception(f, task_id, "repair"))
 
 
@@ -78,6 +81,32 @@ def _run_detect(task_id: str, audio_path: str, detect_type: str, detector_versio
     start_time = time.time()
     logger.info(f"[detect] 开始 task_id={task_id} type={detect_type} version={detector_version}")
 
+    last_progress_time = [time.time()]
+    last_progress = [-1.0]
+    is_stuck = [False]
+    stop_monitor = [False]
+
+    def monitor_stuck():
+        while not stop_monitor[0]:
+            time.sleep(2)
+            if stop_monitor[0]:
+                break
+            elapsed = time.time() - last_progress_time[0]
+            if elapsed > STUCK_THRESHOLD and not is_stuck[0]:
+                is_stuck[0] = True
+                logger.warning(f"[detect] 任务疑似卡住 task_id={task_id} elapsed={elapsed:.1f}s")
+                _ws_send_progress(task_id, {
+                    "task_id": task_id,
+                    "status": "detecting",
+                    "progress": last_progress[0],
+                    "step": f"任务疑似卡住，请重试",
+                    "stuck": True,
+                    "stuck_duration": elapsed,
+                })
+
+    monitor_thread = threading.Thread(target=monitor_stuck, daemon=True)
+    monitor_thread.start()
+
     try:
         prev_task = get_task(task_id)
         prev_status = prev_task["status"] if prev_task else "pending"
@@ -93,6 +122,10 @@ def _run_detect(task_id: str, audio_path: str, detect_type: str, detector_versio
 
         def progress_callback(p, s):
             elapsed = time.time() - start_time
+            last_progress_time[0] = time.time()
+            last_progress[0] = p
+            if is_stuck[0]:
+                is_stuck[0] = False
             update_task(task_id, progress=p, step=s)
             _ws_send_progress(task_id, {"task_id": task_id, "status": "detecting", "progress": p, "step": s})
 
@@ -118,12 +151,50 @@ def _run_detect(task_id: str, audio_path: str, detect_type: str, detector_versio
         update_task(task_id, status="error", error=error_msg[:500], step=f"检测失败 ({elapsed:.1f}s)")
         _ws_send_final(task_id, {"task_id": task_id, "status": "error", "progress": 0, "step": f"检测失败 ({elapsed:.1f}s)", "error": f"{type(e).__name__}: {e}"})
         raise
+    finally:
+        stop_monitor[0] = True
 
 
-def _run_repair(task_id: str, audio_path: str, params: dict):
+def _run_repair(task_id: str, audio_path: str, params: dict, mobile_mode: bool = False):
     start_time = time.time()
-    algorithm_version = params.get("algorithm_version", "v1.1")
+    algorithm_version = params.get("algorithm_version", DEFAULT_VERSION)
+    
+    if mobile_mode:
+        version_info = ALGORITHM_VERSIONS.get(algorithm_version)
+        if version_info and not version_info.get("mobile_compatible", True):
+            error_msg = f"算法版本 {algorithm_version} 不支持移动端，请刷新页面后重试"
+            elapsed = time.time() - start_time
+            update_task(task_id, status="error", error=error_msg, step=f"不支持的版本 ({elapsed:.1f}s)")
+            _ws_send_final(task_id, {"task_id": task_id, "status": "error", "progress": 0, "step": f"不支持的版本 ({elapsed:.1f}s)", "error": error_msg})
+            raise ValueError(error_msg)
+    
     logger.info(f"[repair] 开始 task_id={task_id} version={algorithm_version}")
+
+    last_progress_time = [time.time()]
+    last_progress = [-1.0]
+    is_stuck = [False]
+    stop_monitor = [False]
+
+    def monitor_stuck():
+        while not stop_monitor[0]:
+            time.sleep(2)
+            if stop_monitor[0]:
+                break
+            elapsed = time.time() - last_progress_time[0]
+            if elapsed > STUCK_THRESHOLD and not is_stuck[0]:
+                is_stuck[0] = True
+                logger.warning(f"[repair] 任务疑似卡住 task_id={task_id} elapsed={elapsed:.1f}s")
+                _ws_send_progress(task_id, {
+                    "task_id": task_id,
+                    "status": "repairing",
+                    "progress": last_progress[0],
+                    "step": f"任务疑似卡住，请重试",
+                    "stuck": True,
+                    "stuck_duration": elapsed,
+                })
+
+    monitor_thread = threading.Thread(target=monitor_stuck, daemon=True)
+    monitor_thread.start()
 
     try:
         output_filename = f"{task_id}_repaired.wav"
@@ -142,6 +213,10 @@ def _run_repair(task_id: str, audio_path: str, params: dict):
 
         def progress_callback(p, s):
             elapsed = time.time() - start_time
+            last_progress_time[0] = time.time()
+            last_progress[0] = p
+            if is_stuck[0]:
+                is_stuck[0] = False
             update_task(task_id, progress=p, step=s)
             _ws_send_progress(task_id, {"task_id": task_id, "status": "repairing", "progress": p, "step": s})
 
@@ -149,7 +224,8 @@ def _run_repair(task_id: str, audio_path: str, params: dict):
             audio_path,
             output_path,
             params,
-            progress_callback
+            progress_callback,
+            mobile_mode=mobile_mode
         )
 
         elapsed = time.time() - start_time
@@ -177,6 +253,8 @@ def _run_repair(task_id: str, audio_path: str, params: dict):
         update_task(task_id, status="error", error=error_msg[:500], step=f"修复失败 ({elapsed:.1f}s)")
         _ws_send_final(task_id, {"task_id": task_id, "status": "error", "progress": 0, "step": f"修复失败 ({elapsed:.1f}s)", "error": f"{type(e).__name__}: {e}"})
         raise
+    finally:
+        stop_monitor[0] = True
 
 
 def get_task_status(task_id: str) -> dict | None:

@@ -1,7 +1,6 @@
 import { defineConfig, Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import tsconfigPaths from "vite-tsconfig-paths";
-import { traeBadgePlugin } from 'vite-plugin-trae-solo-badge';
 import fs from 'fs';
 import path from 'path';
 
@@ -111,8 +110,19 @@ function requestLogPlugin(): Plugin {
 }
 
 export default defineConfig({
+  define: {
+    '__BUILD_TIME__': JSON.stringify(new Date().toISOString()),
+  },
   build: {
     sourcemap: 'hidden',
+    // 每次 build 都生成唯一文件名，强制浏览器刷新
+    rollupOptions: {
+      output: {
+        entryFileNames: `assets/[name].[hash].js`,
+        chunkFileNames: `assets/[name].[hash].js`,
+        assetFileNames: `assets/[name].[hash].[ext]`,
+      },
+    },
   },
   server: {
     allowedHosts: true,
@@ -162,15 +172,6 @@ export default defineConfig({
           'react-dev-locator',
         ],
       },
-    }),
-    traeBadgePlugin({
-      variant: 'dark',
-      position: 'bottom-right',
-      prodOnly: true,
-      clickable: true,
-      clickUrl: 'https://www.trae.ai/solo?showJoin=1',
-      autoTheme: true,
-      autoThemeTarget: '#root'
     }),
     tsconfigPaths()
   ],

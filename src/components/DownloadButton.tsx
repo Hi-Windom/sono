@@ -44,8 +44,10 @@ export function DownloadButton({
     ? audioFileName.replace(/\.[^/.]+$/, '')
     : 'audio';
 
-  const estimateSize = (duration: number, sampleRate: number, channels: number, bd: number) =>
-    ((duration * sampleRate * channels * (bd / 8)) / (1024 * 1024)).toFixed(2);
+  const estimateSize = (duration: number, sampleRate: number, channels: number, bd: number) => {
+    if (!duration || !sampleRate || !channels || !bd) return '0.00';
+    return ((duration * sampleRate * channels * (bd / 8)) / (1024 * 1024)).toFixed(2);
+  };
 
   return (
     <div className="space-y-3">
@@ -72,7 +74,7 @@ export function DownloadButton({
               </div>
               <div className="flex justify-between text-xs">
                 <span className="text-gray-400">音频格式</span>
-                <span className="text-cyan-400">{backendRepairResult.output_sample_rate / 1000} kHz / {backendRepairResult.output_bit_depth} bit</span>
+                <span className="text-cyan-400">{backendRepairResult?.output_sample_rate ? `${(backendRepairResult.output_sample_rate / 1000).toFixed(1)} kHz` : 'N/A'} / {backendRepairResult?.output_bit_depth || 32} bit</span>
               </div>
               {backendAlgorithmVersion && (
                 <div className="flex justify-between text-xs">
