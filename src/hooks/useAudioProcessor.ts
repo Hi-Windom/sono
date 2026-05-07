@@ -66,14 +66,30 @@ function formatBytes(bytes: number): string {
 }
 
 function downloadBlob(blob: Blob, fileName: string) {
+  const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+
+  if (isMobile && navigator.share && typeof navigator.share === 'function') {
+    const file = new File([blob], fileName, { type: 'audio/wav' });
+    navigator.share({ files: [file] }).catch(() => {
+      fallbackDownload(blob, fileName);
+    });
+  } else {
+    fallbackDownload(blob, fileName);
+  }
+}
+
+function fallbackDownload(blob: Blob, fileName: string) {
   const blobUrl = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = blobUrl;
   a.download = fileName;
+  a.style.display = 'none';
   document.body.appendChild(a);
   a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(blobUrl);
+  setTimeout(() => {
+    document.body.removeChild(a);
+    URL.revokeObjectURL(blobUrl);
+  }, 3000);
 }
 
 async function computeFileHash(file: File): Promise<string> {
@@ -1534,14 +1550,21 @@ export function useAudioProcessor() {
         const blob = new Blob([wavData], { type: 'audio/wav' });
         downloadBlob(blob, fileName);
         return;
-      } catch {
-        const wav = await audioBufferToWav(targetBuffer, {
-          sampleRate: targetBuffer.sampleRate,
-          bitDepth: processingOptions.bitDepth,
-        });
-        const blob = new Blob([wav], { type: 'audio/wav' });
-        downloadBlob(blob, fileName);
-        return;
+      } catch (workerErr) {
+        console.warn('[downloadProcessedAudio] Worker编码失败，使用fallback:', workerErr);
+        try {
+          const wav = await audioBufferToWav(targetBuffer, {
+            sampleRate: targetBuffer.sampleRate,
+            bitDepth: processingOptions.bitDepth,
+          });
+          const blob = new Blob([wav], { type: 'audio/wav' });
+          downloadBlob(blob, fileName);
+          return;
+        } catch (fallbackErr) {
+          console.error('[downloadProcessedAudio] Fallback编码也失败:', fallbackErr);
+          alert(`导出失败: ${fallbackErr instanceof Error ? fallbackErr.message : '编码错误'}`);
+          return;
+        }
       }
     }
 

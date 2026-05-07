@@ -40,7 +40,7 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
 
     if sr != working_sr:
         if progress_callback:
-            progress_callback(0.02, f"v2.0 重采样到 {working_sr//1000}kHz...")
+            progress_callback(0.02, f"v2.1 重采样到 {working_sr//1000}kHz...")
         target_len = int(y.shape[1] * working_sr / sr)
         y_new = np.zeros((y.shape[0], target_len))
         for ch in range(y.shape[0]):
@@ -56,14 +56,14 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
     step_idx = 0
 
     if progress_callback:
-        progress_callback(0.05, f"v2.0 处理({active_steps}步)...")
+        progress_callback(0.05, f"v2.1 处理({active_steps}步)...")
 
     def advance(label):
         nonlocal step_idx
         step_idx += 1
         gc.collect()
         if progress_callback:
-            progress_callback(0.05 + 0.85 * step_idx / total_steps, f"v2.0 {label}...")
+            progress_callback(0.05 + 0.85 * step_idx / total_steps, f"v2.1 {label}...")
 
     if params.get("de_clipping", 0) > 0:
         y = apply_de_clipping_v4(y, sr, params["de_clipping"])
@@ -146,7 +146,7 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
 
     if target_sr != sr:
         if progress_callback:
-            progress_callback(0.92, f"v2.0 重采样到 {target_sr//1000}kHz...")
+            progress_callback(0.92, f"v2.1 重采样到 {target_sr//1000}kHz...")
         if target_sr < sr:
             nyquist = target_sr / 2
             cutoff = nyquist * 0.95
@@ -162,7 +162,7 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
         gc.collect()
 
     if progress_callback:
-        progress_callback(0.95, "v2.0 响度归一化...")
+        progress_callback(0.95, "v2.1 响度归一化...")
 
     y = apply_loudness_normalize_v3(y, sr, -16.0)
     y = apply_peak_limit_v3(y, sr)
@@ -180,7 +180,7 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
     sf.write(output_path, y.T if y.ndim > 1 else y, sr, subtype=subtype)
 
     if progress_callback:
-        progress_callback(1.0, "v2.0 修复完成")
+        progress_callback(1.0, "v2.1 修复完成")
 
     return {
         "issues_found": issues_found,
