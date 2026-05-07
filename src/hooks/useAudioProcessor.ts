@@ -1535,11 +1535,13 @@ export function useAudioProcessor() {
       }
     }
 
-    if (source === 'backend' && taskIdRef.current && backendPreviewUrl) {
+    if (source === 'backend' && taskIdRef.current) {
+      const previewUrl = backendPreviewUrl || getPreviewUrl(taskIdRef.current, 'repaired');
+      setProcessingStep('下载中...');
+      setProcessingProgress(0);
+      
       try {
-        setProcessingStep('下载中...');
-        setProcessingProgress(0);
-        const arrayBuffer = await downloadWithProgress(backendPreviewUrl, (loaded, total) => {
+        const arrayBuffer = await downloadWithProgress(previewUrl, (loaded, total) => {
           const pct = total > 0 ? loaded / total : 0;
           setProcessingProgress(pct);
         });
@@ -1560,15 +1562,17 @@ export function useAudioProcessor() {
           const blob = new Blob([wav], { type: 'audio/wav' });
           downloadBlob(blob, fileName);
         }
+        
         setProcessingStep('');
         setProcessingProgress(0);
+        return;
       } catch (err) {
         console.error('[downloadProcessedAudio] 下载失败:', err);
         setProcessingStep('');
         setProcessingProgress(0);
-        alert('下载失败，请重试');
+        alert(`下载失败: ${err instanceof Error ? err.message : '未知错误'}\n\n请检查网络连接后重试`);
+        return;
       }
-      return;
     }
 
     alert('请先完成修复后再下载');
