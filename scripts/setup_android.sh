@@ -168,6 +168,7 @@ python -c "import fastapi; print(f'  fastapi {fastapi.__version__} OK')" 2>/dev/
 python -c "import soxr; print(f'  soxr (stub) OK')" 2>/dev/null || echo -e "${RED}  soxr stub 未创建！${NC}"
 python -c "import numba; print(f'  numba (stub) OK')" 2>/dev/null || echo -e "${RED}  numba stub 未创建！${NC}"
 python -c "import librosa; print(f'  librosa {librosa.__version__} OK')" 2>/dev/null || echo -e "${RED}  librosa 未安装！${NC}"
+python -c "import miniaudio; print(f'  miniaudio {miniaudio.__version__} OK')" 2>/dev/null || echo -e "${RED}  miniaudio 未安装！MP3解码将不可用${NC}"
 cd ..
 
 echo -e "${YELLOW}[8/8] 生成启动脚本 start_android.sh...${NC}"
