@@ -32,7 +32,9 @@ jobs:
         run: npm run build
 
       - name: Package Android release
-        run: bash scripts/build_android_release.sh
+        run: |
+          set -euo pipefail
+          bash scripts/build_android_release.sh
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

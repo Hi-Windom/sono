@@ -54,7 +54,7 @@ mkdir -p "$PKG_DIR"
 
 cp -r backend "$PKG_DIR/"
 cp -r dist "$PKG_DIR/backend/dist"
-cp scripts/setup_android.sh "$PKG_DIR/"
+cp deploy/setup_android.sh "$PKG_DIR/"
 
 rm -rf "$PKG_DIR/backend/__pycache__"
 rm -rf "$PKG_DIR/backend/api/__pycache__"

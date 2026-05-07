@@ -16,7 +16,7 @@ AI 音频检测与修复工具
 
 - **前端**: React + TypeScript + Vite + Tailwind CSS
 - **后端**: Python + FastAPI + SQLite + WebSocket
-- **音频处理**: Web Audio API / Librosa + NumPy + SciPy (+ Pedalboard 可选)
+- **音频处理**: Web Audio API / NumPy + SciPy (librosa 已移除，使用自研 dsp_utils)
 - **包管理**: uv（桌面端）/ pkg + pip（Android）
 
 ## 快速开始
@@ -121,7 +121,7 @@ bash scripts/build_android_release.sh
 | numpy/scipy | pip 预编译 wheel | pkg 预编译 |
 | noisereduce | 可用 | 不可用，回退内置频谱算法 |
 | pedalboard | 可用 | 不可用，回退 scipy 滤波算法 |
-| soxr | 可用 | 不可用，回退 scipy.signal.resample_poly |
+| librosa | 可用(仅训练) | 不需要，已用自研 dsp_utils 替代 |
 | 前端访问 | 开发服务器 | FastAPI 静态文件服务 |
 
 ## 使用说明
@@ -167,10 +167,12 @@ bash scripts/build_android_release.sh
 │   ├── training/         # 训练工具
 │   ├── requirements.txt        # 桌面端依赖
 │   └── requirements_android.txt # Android 依赖
-├── scripts/              # 部署脚本
+├── scripts/              # 开发构建脚本
+│   ├── build_android_release.sh  # PC端打包Android发布包
+│   └── build_android.sh          # Termux端完整构建部署
+├── deploy/               # 运行时部署脚本（打包进Android发布包）
 │   ├── setup_android.sh  # Termux 一键部署
-│   ├── start_android.sh  # Termux 启动脚本
-│   └── build_android_release.sh  # PC 端打包
+│   └── start_android.sh  # Termux 启动脚本
 ├── docs/                 # 文档
 │   └── android.md        # Android 部署详细指南
 ├── public/               # 静态资源

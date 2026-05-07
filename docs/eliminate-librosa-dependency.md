@@ -183,7 +183,7 @@ def istft(S, hop_length=512, length=None, window='hann'):
 - `requirements_android.txt` → 删除 librosa 相关依赖（joblib, decorator, lazy_loader, msgpack, platformdirs, pooch, audioread）
 
 ### 步骤8：更新部署脚本
-- `scripts/setup_android.sh` → 删除 librosa `--no-deps` 安装步骤、删除 soxr stub 创建步骤、删除 numba stub 创建步骤、删除 soxr/numba 验证步骤
+- `deploy/setup_android.sh` → 删除 librosa `--no-deps` 安装步骤、删除 soxr stub 创建步骤、删除 numba stub 创建步骤、删除 soxr/numba 验证步骤
 - 删除 `backend/numba.py` stub 文件
 
 ### 步骤9：验证
