@@ -471,7 +471,7 @@ async def clear_output_cache():
                     logger.warning(f"删除文件失败: {filepath}, {e}")
     
     conn = get_db()
-    conn.execute("UPDATE tasks SET output_path = NULL")
+    conn.execute("UPDATE tasks SET output_path = ''")
     conn.commit()
     conn.close()
     
