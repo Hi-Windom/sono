@@ -41,7 +41,7 @@ def detect_ai_audio(audio_path: str, progress_callback=None) -> dict:
     if progress_callback:
         progress_callback(0.35, "v1.0 计算MFCC特征...")
 
-    mfccs = mfcc(y=y, sr=sr, n_mfcc=13)
+    mfccs = mfcc(y=y, sr=sr, S=S, n_mfcc=13)
     mfcc_delta = delta(mfccs)
     mfcc_variability = float(np.mean(np.std(mfcc_delta, axis=1)))
 
@@ -67,7 +67,7 @@ def detect_ai_audio(audio_path: str, progress_callback=None) -> dict:
     if progress_callback:
         progress_callback(0.75, "v1.0 分析微节奏一致性...")
 
-    onset_env = onset_strength(y=y, sr=sr)
+    onset_env = onset_strength(y=y, sr=sr, S=S)
     tempo, _ = beat_track(onset_envelope=onset_env, sr=sr)
     onset_frames = onset_detect(onset_envelope=onset_env, sr=sr)
     if len(onset_frames) > 2:

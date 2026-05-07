@@ -114,8 +114,8 @@ def _extract_mfcc(y, sr, S=None):
     }
 
 
-def _extract_rhythm(y, sr):
-    onset_env = onset_strength(y=y, sr=sr)
+def _extract_rhythm(y, sr, S=None):
+    onset_env = onset_strength(y=y, sr=sr, S=S)
     onset_frames = onset_detect(onset_envelope=onset_env, sr=sr)
     if len(onset_frames) > 2:
         onset_intervals = np.diff(onset_frames)
@@ -184,7 +184,7 @@ def detect_ai_audio(audio_path: str, progress_callback=None) -> dict:
 
     if progress_callback:
         progress_callback(0.50, "v1.1 分析节奏...")
-    rhythm = _extract_rhythm(y, sr)
+    rhythm = _extract_rhythm(y, sr, spectral.get("S"))
     if progress_callback:
         progress_callback(0.65, "v1.1 节奏与时域分析完成...")
 
