@@ -9,11 +9,12 @@ except ImportError:
 from scipy.signal import medfilt, butter, filtfilt, resample_poly
 from scipy.fftpack import fft, ifft
 import gc
+from services.audio_loader import load_audio_with_fallback
 
 
 def repair_audio(input_path: str, output_path: str, params: dict, progress_callback=None) -> dict:
     """v1.2 修复算法 - 96kHz全频带处理，流式分块优化"""
-    y, sr = librosa.load(input_path, sr=None, mono=False)
+    y, sr = load_audio_with_fallback(input_path, sr=None, mono=False)
     was_mono = False
     if y.ndim == 1:
         y = y.reshape(1, -1)

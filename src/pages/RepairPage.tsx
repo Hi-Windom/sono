@@ -44,6 +44,7 @@ export default function RepairPage() {
     availableAlgorithms,
     applyAlgorithmVersion,
     detectorVersion,
+    availableDetectors,
     setDetectorVersion,
     // 任务卡住相关
     isTaskStuck,
@@ -339,6 +340,7 @@ export default function RepairPage() {
                 isProcessing={isProcessing}
                 detectorVersion={detectorVersion}
                 onDetectorVersionChange={setDetectorVersion}
+                availableDetectors={availableDetectors}
               />
             </div>
 

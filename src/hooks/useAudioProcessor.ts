@@ -17,7 +17,9 @@ import {
   mapDetectionResult,
   ProcessingOptions,
   fetchAlgorithmVersions,
+  fetchDetectorVersions,
   AlgorithmVersion,
+  DetectorVersion,
   QueueStatus,
 } from '../services/backendApi';
 
@@ -110,6 +112,7 @@ export function useAudioProcessor() {
   const [availableAlgorithms, setAvailableAlgorithms] = useState<AlgorithmVersion[]>([]);
   const [repairModes, setRepairModes] = useState<RepairMode[]>([]);
   const [detectorVersion, setDetectorVersion] = useState<string>(savedSettings.detectorVersion);
+  const [availableDetectors, setAvailableDetectors] = useState<DetectorVersion[]>([]);
   const versionInitializedRef = useRef(false);
   const taskIdRef = useRef<string | null>(null);
   const wsControlRef = useRef<WSProgressControl | null>(null);
@@ -219,6 +222,10 @@ export function useAudioProcessor() {
               }
             }
           });
+          fetchDetectorVersions().then(detectors => {
+            setAvailableDetectors(detectors);
+            writeLog(`[useAudioProcessor] 检测器版本: ${JSON.stringify(detectors.map(d => d.name))}`);
+          });
         }
       })
       .catch(() => {
@@ -306,6 +313,9 @@ export function useAudioProcessor() {
                 setSelectedMode(modes[0].name);
               }
             }
+          });
+          fetchDetectorVersions().then(detectors => {
+            setAvailableDetectors(detectors);
           });
         } else if (wasAvailable && !isAvailable) {
           console.warn('[useAudioProcessor] 后端变为不可用');
@@ -1624,6 +1634,7 @@ export function useAudioProcessor() {
     availableAlgorithms,
     applyAlgorithmVersion,
     detectorVersion,
+    availableDetectors,
     setDetectorVersion,
     // 任务卡住相关状态
     isTaskStuck,

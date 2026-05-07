@@ -10,6 +10,7 @@ from database import create_task, get_task, find_task_by_hash, get_queue_status,
 from services.task_manager import generate_task_id, submit_detect_task, submit_repair_task
 from services.file_cache import evict_old_files
 from services.audio_repair import get_available_versions
+from services.ai_detector import get_detector_versions
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +52,10 @@ async def log_message_root(request: LogRequest):
 async def list_algorithm_versions():
     return {"versions": get_available_versions(mobile_mode=MOBILE_MODE)}
 
+@router.get("/detector-versions")
+async def list_detector_versions():
+    return {"versions": get_detector_versions()}
+
 class CheckHashRequest(BaseModel):
     file_hash: str
 
@@ -83,7 +88,7 @@ async def upload_audio(file: UploadFile = File(...)):
             raise HTTPException(status_code=413, detail=f"文件过大，最大支持 {MAX_UPLOAD_SIZE // 1024 // 1024}MB")
         f.write(content)
     
-    create_task(task_id, upload_path, file.filename or "audio")
+    create_task(task_id, file.filename or "audio", upload_path, {})
     
     return {
         "task_id": task_id,

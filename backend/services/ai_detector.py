@@ -1,5 +1,6 @@
-from services.ai_detector_v1_0 import detect_ai_audio as detect_ai_audio_v1_0
-from services.ai_detector_v1_1 import detect_ai_audio as detect_ai_audio_v1_1
+from services.detectors.ai_detector_v1_0 import detect_ai_audio as detect_ai_audio_v1_0
+from services.detectors.ai_detector_v1_1 import detect_ai_audio as detect_ai_audio_v1_1
+from services.detectors.ai_detector_v1_2 import detect_ai_audio as detect_ai_audio_v1_2
 
 DETECTOR_VERSIONS = {
     "v1.0": {
@@ -13,6 +14,12 @@ DETECTOR_VERSIONS = {
         "label": "v1.1",
         "description": "多维特征分析+混合创作判定",
         "detect_fn": detect_ai_audio_v1_1,
+    },
+    "v1.2": {
+        "name": "v1.2",
+        "label": "v1.2",
+        "description": "增强版特征分析，更精准的AI检测",
+        "detect_fn": detect_ai_audio_v1_2,
     },
 }
 

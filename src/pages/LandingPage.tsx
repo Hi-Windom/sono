@@ -278,10 +278,10 @@ export default function LandingPage() {
                 <div className="flex-shrink-0 w-2 h-2 mt-2 rounded-full bg-cyan-400"></div>
                 <div className="flex-1">
                   <div className="flex items-center justify-between mb-1">
-                    <h4 className="text-white font-semibold">算法优化</h4>
+                    <h4 className="text-white font-semibold">检测 v1.2 / 修复 v2.1 支持</h4>
                     <span className="text-gray-500 text-xs">2026-05-07</span>
                   </div>
-                  <p className="text-gray-400 text-sm">修复 v2.0 音频修复算法的低频失真问题，优化 AI 检测算法准确率。</p>
+                  <p className="text-gray-400 text-sm">新增检测 v1.2 和修复 v2.1 算法，整理文件结构（detectors/ 和 repair/ 目录）。</p>
                 </div>
               </div>
               
@@ -289,21 +289,10 @@ export default function LandingPage() {
                 <div className="flex-shrink-0 w-2 h-2 mt-2 rounded-full bg-purple-400"></div>
                 <div className="flex-1">
                   <div className="flex items-center justify-between mb-1">
-                    <h4 className="text-white font-semibold">移动端部署优化</h4>
-                    <span className="text-gray-500 text-xs">2026-05-06</span>
+                    <h4 className="text-white font-semibold">移动端 MP3 支持</h4>
+                    <span className="text-gray-500 text-xs">2026-05-07</span>
                   </div>
-                  <p className="text-gray-400 text-sm">优化 Android 端资源占用，提升前端加载速度，修复 /api/log 路由问题。</p>
-                </div>
-              </div>
-              
-              <div className="flex items-start gap-4 p-4 bg-black/20 rounded-xl border border-white/5">
-                <div className="flex-shrink-0 w-2 h-2 mt-2 rounded-full bg-pink-400"></div>
-                <div className="flex-1">
-                  <div className="flex items-center justify-between mb-1">
-                    <h4 className="text-white font-semibold">缓存清理功能</h4>
-                    <span className="text-gray-500 text-xs">2026-05-05</span>
-                  </div>
-                  <p className="text-gray-400 text-sm">新增无效缓存自动检测与清理功能，只检查文件本身，不关联任务状态。</p>
+                  <p className="text-gray-400 text-sm">移动端上传 MP3 等格式时自动转换为 WAV，解决 librosa 无法解码的问题。</p>
                 </div>
               </div>
               
@@ -311,10 +300,10 @@ export default function LandingPage() {
                 <div className="flex-shrink-0 w-2 h-2 mt-2 rounded-full bg-emerald-400"></div>
                 <div className="flex-1">
                   <div className="flex items-center justify-between mb-1">
-                    <h4 className="text-white font-semibold">任务卡住检测</h4>
-                    <span className="text-gray-500 text-xs">2026-05-04</span>
+                    <h4 className="text-white font-semibold">PM2 支持</h4>
+                    <span className="text-gray-500 text-xs">2026-05-07</span>
                   </div>
-                  <p className="text-gray-400 text-sm">通过 WebSocket 心跳机制实时检测后端任务是否卡住，主动通知前端。</p>
+                  <p className="text-gray-400 text-sm">ecosystem.config.cjs 从 .gitignore 移除，支持 PM2 进程管理。</p>
                 </div>
               </div>
             </div>

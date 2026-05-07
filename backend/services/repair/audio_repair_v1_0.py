@@ -3,10 +3,11 @@ import librosa
 import soundfile as sf
 from scipy.interpolate import CubicSpline
 from scipy.signal import medfilt, butter, sosfilt, resample_poly
+from services.audio_loader import load_audio_with_fallback
 
 
 def repair_audio(input_path: str, output_path: str, params: dict, progress_callback=None) -> dict:
-    y, sr = librosa.load(input_path, sr=None, mono=False)
+    y, sr = load_audio_with_fallback(input_path, sr=None, mono=False)
     was_mono = False
     if y.ndim == 1:
         y = y.reshape(1, -1)

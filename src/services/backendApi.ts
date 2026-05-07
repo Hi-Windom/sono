@@ -82,6 +82,12 @@ export interface AlgorithmVersion {
   }[];
 }
 
+export interface DetectorVersion {
+  name: string;
+  label: string;
+  description: string;
+}
+
 function mapParamsToBackend(params: AIRepairParams, options: ProcessingOptions, algorithmVersion?: string): Record<string, unknown> {
   return {
     de_clipping: params.deClipping,
@@ -665,6 +671,21 @@ export async function fetchAlgorithmVersions(): Promise<AlgorithmVersion[]> {
     return data.versions || [];
   } catch (e) {
     console.warn('[fetchAlgorithmVersions] failed:', e);
+    return [];
+  }
+}
+
+export async function fetchDetectorVersions(): Promise<DetectorVersion[]> {
+  try {
+    const res = await fetch(`${API_BASE}/detector-versions`, { signal: AbortSignal.timeout(10000) });
+    if (!res.ok) {
+      console.warn(`[fetchDetectorVersions] HTTP ${res.status}`);
+      return [];
+    }
+    const data = await res.json();
+    return data.versions || [];
+  } catch (e) {
+    console.warn('[fetchDetectorVersions] failed:', e);
     return [];
   }
 }

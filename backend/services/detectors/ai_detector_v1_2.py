@@ -1,11 +1,8 @@
 import numpy as np
 import librosa
 import soundfile as sf
-from concurrent.futures import ThreadPoolExecutor
 
-# 音高检测使用代表性片段，避免长音频耗时过长
-MAX_PITCH_DURATION = 30  # 秒
-
+MAX_PITCH_DURATION = 30
 
 def _extract_spectral(y, sr):
     S = np.abs(librosa.stft(y, n_fft=4096, hop_length=1024))
@@ -25,9 +22,7 @@ def _extract_spectral(y, sr):
     bandwidth_cv = float(np.std(spectral_bandwidths) / (np.mean(spectral_bandwidths) + 1e-10))
 
     spectral_entropy = float(np.mean(-np.sum(S_norm * np.log2(S_norm + 1e-10), axis=0)) / np.log2(S.shape[0]))
-
     log_S_var = float(np.mean(np.var(log_S, axis=1)))
-    log_S_mean = float(np.mean(log_S_var))
 
     spec_rolloff = librosa.feature.spectral_rolloff(y=y, sr=sr, S=S)
     high_freq_attenuation = float(np.mean(spec_rolloff) / (sr / 2))
@@ -46,8 +41,6 @@ def _extract_spectral(y, sr):
     rms_std = float(np.std(rms))
     rms_cv = float(rms_std / (rms_mean + 1e-10))
 
-    # 频谱相关性 - AI各帧频谱过于相似或过于不同
-    # 采样计算避免内存问题
     S_sample = S[:, ::max(1, S.shape[1]//100)]
     if S_sample.shape[1] > 1:
         spec_corr_matrix = np.corrcoef(S_sample.T)
@@ -150,38 +143,38 @@ def _extract_harmonic(y):
 
 
 def detect_ai_audio(audio_path: str, progress_callback=None) -> dict:
-    y, sr = librosa.load(audio_path, sr=None, mono=True)
+    y, sr = load_audio_with_fallback(audio_path, sr=None, mono=True)
 
     if progress_callback:
-        progress_callback(0.05, "v1.1 分析频谱特征...")
+        progress_callback(0.05, "v1.2 分析频谱特征...")
     spectral = _extract_spectral(y, sr)
     if progress_callback:
-        progress_callback(0.25, "v1.1 频谱特征分析完成...")
+        progress_callback(0.25, "v1.2 频谱特征分析完成...")
 
     if progress_callback:
-        progress_callback(0.30, "v1.1 分析MFCC...")
+        progress_callback(0.30, "v1.2 分析MFCC...")
     mfcc = _extract_mfcc(y, sr, spectral.get("S"))
     if progress_callback:
-        progress_callback(0.45, "v1.1 MFCC深度分析完成...")
+        progress_callback(0.45, "v1.2 MFCC深度分析完成...")
 
     if progress_callback:
-        progress_callback(0.50, "v1.1 分析节奏...")
+        progress_callback(0.50, "v1.2 分析节奏...")
     rhythm = _extract_rhythm(y, sr)
     if progress_callback:
-        progress_callback(0.65, "v1.1 节奏与时域分析完成...")
+        progress_callback(0.65, "v1.2 节奏与时域分析完成...")
 
     if progress_callback:
-        progress_callback(0.70, "v1.1 分析音高...")
+        progress_callback(0.70, "v1.2 分析音高...")
     pitch = _extract_pitch(y, sr)
     if progress_callback:
-        progress_callback(0.80, "v1.1 音高分析完成...")
+        progress_callback(0.80, "v1.2 音高分析完成...")
 
     if progress_callback:
-        progress_callback(0.82, "v1.1 分析谐波...")
+        progress_callback(0.82, "v1.2 分析谐波...")
     harmonic = _extract_harmonic(y)
 
     if progress_callback:
-        progress_callback(0.85, "v1.1 计算综合评分...")
+        progress_callback(0.85, "v1.2 计算综合评分...")
 
     features = {
         "spectral_flatness": round(spectral["spectral_flatness"], 4),
@@ -206,160 +199,146 @@ def detect_ai_audio(audio_path: str, progress_callback=None) -> dict:
         "rms_cv": round(spectral["rms_cv"], 4),
     }
 
-    # 基于原理的AI检测评分
-    # 核心洞察：AI音乐变化剧烈但不规律，人类音乐稳定且规律
     ai_score = 0.0
     human_score = 0.0
     ai_reasons = []
     human_reasons = []
 
-    # 1. 频谱相关性 - 人类音乐各帧频谱更相似（结构稳定）
     spec_corr = spectral["spectral_correlation"]
-    if spec_corr > 0.90:
-        human_score += 20
-        human_reasons.append("频谱结构稳定，符合人类创作特征")
-    elif spec_corr < 0.50:
-        ai_score += 18
-        ai_reasons.append("频谱结构变化剧烈，疑似AI生成")
+    if spec_corr > 0.92:
+        human_score += 22
+        human_reasons.append("频谱结构高度稳定")
+    elif spec_corr < 0.45:
+        ai_score += 20
+        ai_reasons.append("频谱结构突变明显")
     else:
-        human_score += 10 * spec_corr
-        ai_score += 10 * (1 - spec_corr)
+        human_score += 12 * spec_corr
+        ai_score += 12 * (1 - spec_corr)
 
-    # 2. 频谱质心变异系数 - 人类音乐更稳定
     centroid_cv = spectral["centroid_cv"]
-    if centroid_cv < 0.30:
-        human_score += 15
-        human_reasons.append("频谱质心稳定")
-    elif centroid_cv > 0.80:
-        ai_score += 15
-        ai_reasons.append("频谱质心变化过大")
-    else:
-        norm = (centroid_cv - 0.30) / 0.50
-        ai_score += 12 * norm
-        human_score += 12 * (1 - norm)
-
-    # 3. 微节奏一致性 - 人类音乐节奏更规律
-    rhythm_consistency = rhythm["micro_rhythm_consistency"]
-    if rhythm_consistency > 0.85:
-        human_score += 18
-        human_reasons.append("节奏规律稳定")
-    elif rhythm_consistency < 0.40:
+    if centroid_cv < 0.25:
+        human_score += 16
+        human_reasons.append("频谱质心非常稳定")
+    elif centroid_cv > 0.75:
         ai_score += 16
-        ai_reasons.append("节奏不规律，疑似AI生成")
+        ai_reasons.append("频谱质心突变")
     else:
-        norm = max(0, (rhythm_consistency - 0.40) / 0.45)
-        human_score += 14 * norm
-        ai_score += 14 * (1 - norm)
+        norm = (centroid_cv - 0.25) / 0.50
+        ai_score += 14 * norm
+        human_score += 14 * (1 - norm)
 
-    # 4. 频谱平坦度 - AI通常极低
+    rhythm_consistency = rhythm["micro_rhythm_consistency"]
+    if rhythm_consistency > 0.88:
+        human_score += 20
+        human_reasons.append("节奏高度规律")
+    elif rhythm_consistency < 0.35:
+        ai_score += 18
+        ai_reasons.append("节奏混乱")
+    else:
+        norm = max(0, (rhythm_consistency - 0.35) / 0.53)
+        human_score += 16 * norm
+        ai_score += 16 * (1 - norm)
+
     flatness = spectral["spectral_flatness"]
-    if flatness < 0.001:
-        ai_score += 12
-        ai_reasons.append("频谱过于平坦")
-    elif flatness > 0.01:
-        human_score += 8
-        human_reasons.append("频谱有自然起伏")
+    if flatness < 0.0008:
+        ai_score += 14
+        ai_reasons.append("频谱异常平坦")
+    elif flatness > 0.012:
+        human_score += 10
+        human_reasons.append("频谱自然起伏")
     else:
-        norm = (0.01 - flatness) / 0.009
-        ai_score += 8 * norm
-        human_score += 8 * (1 - norm)
+        norm = (0.012 - flatness) / 0.0112
+        ai_score += 10 * norm
+        human_score += 10 * (1 - norm)
 
-    # 5. RMS变异系数 - 人类音乐响度变化更稳定
     rms_cv = spectral["rms_cv"]
-    if rms_cv < 0.40:
-        human_score += 10
-        human_reasons.append("响度变化稳定")
-    elif rms_cv > 0.80:
-        ai_score += 10
-        ai_reasons.append("响度变化剧烈")
+    if rms_cv < 0.35:
+        human_score += 12
+        human_reasons.append("响度稳定")
+    elif rms_cv > 0.75:
+        ai_score += 12
+        ai_reasons.append("响度波动剧烈")
     else:
-        norm = (rms_cv - 0.40) / 0.40
-        ai_score += 8 * norm
-        human_score += 8 * (1 - norm)
+        norm = (rms_cv - 0.35) / 0.40
+        ai_score += 10 * norm
+        human_score += 10 * (1 - norm)
 
-    # 6. 时域规律性
     temporal_reg = rhythm["temporal_regularity"]
-    if temporal_reg > 0.60:
-        human_score += 10
-        human_reasons.append("时域包络稳定")
-    elif temporal_reg < 0.20:
-        ai_score += 8
-        ai_reasons.append("时域包络变化剧烈")
+    if temporal_reg > 0.65:
+        human_score += 12
+        human_reasons.append("时域包络平滑")
+    elif temporal_reg < 0.15:
+        ai_score += 10
+        ai_reasons.append("时域包络突变")
     else:
-        norm = max(0, (temporal_reg - 0.20) / 0.40)
+        norm = max(0, (temporal_reg - 0.15) / 0.50)
+        human_score += 10 * norm
+        ai_score += 10 * (1 - norm)
+
+    dyn_range = rhythm["dynamic_range"]
+    if dyn_range < 0.04:
+        ai_score += 10
+        ai_reasons.append("动态范围过窄")
+    elif dyn_range > 0.28:
+        ai_score += 10
+        ai_reasons.append("动态范围异常")
+    elif 0.07 < dyn_range < 0.20:
+        human_score += 10
+        human_reasons.append("动态范围自然")
+    else:
+        if dyn_range <= 0.07:
+            norm = dyn_range / 0.07
+        else:
+            norm = (0.28 - dyn_range) / 0.08
         human_score += 8 * norm
         ai_score += 8 * (1 - norm)
 
-    # 7. 动态范围
-    dyn_range = rhythm["dynamic_range"]
-    if dyn_range < 0.05:
-        ai_score += 8
-        ai_reasons.append("动态范围过窄")
-    elif dyn_range > 0.25:
-        ai_score += 8
-        ai_reasons.append("动态范围过大")
-    elif 0.08 < dyn_range and dyn_range < 0.18:
-        human_score += 8
-        human_reasons.append("动态范围自然")
-    else:
-        if dyn_range <= 0.08:
-            norm = dyn_range / 0.08
-        else:
-            norm = (0.25 - dyn_range) / 0.07
-        human_score += 6 * norm
-        ai_score += 6 * (1 - norm)
-
-    # 8. 频谱熵
     entropy = spectral["spectral_entropy"]
-    if entropy > 0.75:
-        ai_score += 8
+    if entropy > 0.78:
+        ai_score += 10
         ai_reasons.append("频谱熵过高")
-    elif entropy < 0.45:
-        human_score += 6
+    elif entropy < 0.42:
+        human_score += 8
         human_reasons.append("频谱熵自然")
     else:
-        norm = (entropy - 0.45) / 0.30
-        ai_score += 6 * norm
-        human_score += 6 * (1 - norm)
+        norm = (entropy - 0.42) / 0.36
+        ai_score += 8 * norm
+        human_score += 8 * (1 - norm)
 
-    # 9. MFCC变化
     mfcc_var = mfcc["mfcc_variability"]
-    if mfcc_var > 2.5:
-        ai_score += 8
-        ai_reasons.append("MFCC变化过大")
-    elif mfcc_var < 1.0:
-        human_score += 6
-        human_reasons.append("MFCC变化稳定")
+    if mfcc_var > 2.8:
+        ai_score += 10
+        ai_reasons.append("MFCC突变")
+    elif mfcc_var < 0.8:
+        human_score += 8
+        human_reasons.append("MFCC稳定")
     else:
-        norm = (mfcc_var - 1.0) / 1.5
-        ai_score += 6 * norm
-        human_score += 6 * (1 - norm)
+        norm = (mfcc_var - 0.8) / 2.0
+        ai_score += 8 * norm
+        human_score += 8 * (1 - norm)
 
-    # 10. 谐波比（使用对数刻度）
     hr_log = np.log1p(harmonic["harmonic_ratio"])
-    if hr_log > 3.5:
-        ai_score += 6
+    if hr_log > 3.8:
+        ai_score += 8
         ai_reasons.append("谐波比例异常")
-    elif hr_log < 1.0:
-        ai_score += 4
+    elif hr_log < 0.8:
+        ai_score += 6
         ai_reasons.append("谐波比例过低")
     else:
-        human_score += 4
+        human_score += 6
 
-    # 11. 过零率标准差
     zcr_std = spectral["zcr_std"]
-    if zcr_std > 0.05:
-        ai_score += 4
+    if zcr_std > 0.055:
+        ai_score += 6
         ai_reasons.append("过零率波动过大")
-    elif zcr_std < 0.015:
-        human_score += 3
+    elif zcr_std < 0.012:
+        human_score += 5
         human_reasons.append("过零率稳定")
     else:
-        norm = (zcr_std - 0.015) / 0.035
-        ai_score += 3 * norm
-        human_score += 3 * (1 - norm)
+        norm = (zcr_std - 0.012) / 0.043
+        ai_score += 5 * norm
+        human_score += 5 * (1 - norm)
 
-    # 计算最终概率
     total_points = ai_score + human_score
     if total_points > 0:
         ai_probability = ai_score / total_points
@@ -370,20 +349,19 @@ def detect_ai_audio(audio_path: str, progress_callback=None) -> dict:
     ai_probability = max(0.05, min(0.95, ai_probability))
     human_probability = 1.0 - ai_probability
 
-    # 判定签名
-    if human_probability > 0.80:
+    if human_probability > 0.82:
         signature = "human"
-        confidence = min(0.95, 0.6 + (human_probability - 0.80) * 1.5)
-    elif ai_probability > 0.80:
+        confidence = min(0.96, 0.6 + (human_probability - 0.82) * 1.5)
+    elif ai_probability > 0.82:
         signature = "ai"
-        confidence = min(0.95, 0.6 + (ai_probability - 0.80) * 1.5)
+        confidence = min(0.96, 0.6 + (ai_probability - 0.82) * 1.5)
     elif human_probability > 0.50:
         signature = "mixed"
-        confidence = min(0.70, 0.4 + total_points / 200)
-        human_reasons.append("呈现人类与AI混合特征")
+        confidence = min(0.72, 0.4 + total_points / 200)
+        human_reasons.append("呈现混合特征")
     else:
         signature = "ai"
-        confidence = min(0.75, 0.5 + (ai_probability - 0.50))
+        confidence = min(0.76, 0.5 + (ai_probability - 0.50))
 
     is_ai = ai_probability > human_probability
 
@@ -394,7 +372,7 @@ def detect_ai_audio(audio_path: str, progress_callback=None) -> dict:
         all_reasons.extend(human_reasons[:3])
 
     if progress_callback:
-        progress_callback(1.0, "v1.1 检测完成")
+        progress_callback(1.0, "v1.2 检测完成")
 
     return {
         "is_ai_generated": is_ai,

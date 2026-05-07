@@ -203,9 +203,10 @@ interface AIDetectionComparisonProps {
   isProcessing?: boolean;
   detectorVersion?: string;
   onDetectorVersionChange?: (version: string) => void;
+  availableDetectors?: { name: string; label: string; description: string }[];
 }
 
-export function AIDetectionComparison({ before, browserAfter, backendAfter, onDetect, isProcessing, detectorVersion, onDetectorVersionChange }: AIDetectionComparisonProps) {
+export function AIDetectionComparison({ before, browserAfter, backendAfter, onDetect, isProcessing, detectorVersion, onDetectorVersionChange, availableDetectors }: AIDetectionComparisonProps) {
   const [lastDetectedVersion, setLastDetectedVersion] = React.useState<string | null>(null);
   const [showVersionWarning, setShowVersionWarning] = React.useState(false);
 
@@ -217,10 +218,12 @@ export function AIDetectionComparison({ before, browserAfter, backendAfter, onDe
   const isImproved = improvement > 3;
   const isNeutral = Math.abs(improvement) <= 3;
 
-  const DETECTOR_VERSIONS = [
-    { value: 'v1.0', label: 'v1.0' },
-    { value: 'v1.1', label: 'v1.1' },
-  ];
+  const detectorVersionList = availableDetectors && availableDetectors.length > 0
+    ? availableDetectors.map(v => ({ value: v.name, label: v.label }))
+    : [
+        { value: 'v1.0', label: 'v1.0' },
+        { value: 'v1.1', label: 'v1.1' },
+      ];
 
   // 当检测完成时记录版本
   React.useEffect(() => {
@@ -269,7 +272,7 @@ export function AIDetectionComparison({ before, browserAfter, backendAfter, onDe
                   backgroundSize: '1.5em 1.5em',
                 }}
               >
-                {DETECTOR_VERSIONS.map(v => (
+                {detectorVersionList.map(v => (
                   <option key={v.value} value={v.value} className="bg-gray-800">{v.label}</option>
                 ))}
               </select>

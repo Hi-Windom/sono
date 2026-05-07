@@ -42,8 +42,8 @@ backend/numba.py
 # Old Chaquopy approach (removed)
 android-app/
 
-# PM2
-ecosystem.config.cjs
+# PM2 (managed separately)
+# ecosystem.config.cjs
 
 # 思路笔记 (local only)
 思路.md

@@ -5,15 +5,15 @@ from scipy.signal import butter, filtfilt, resample_poly
 from config import MOBILE_MODE
 import gc
 
-from services.repair_v2_0.declip import apply_de_clipping_v4
-from services.repair_v2_0.depop import apply_de_pop_v4
-from services.repair_v2_0.spectral_group_a import apply_spectral_group_a
-from services.repair_v2_0.spectral_group_b import apply_spectral_group_b
-from services.repair_v2_0.transient import apply_transient_repair_v4
-from services.repair_v2_0.filters import apply_presence_boost_v4, apply_bass_enhance_v4, apply_warmth, apply_clarity
-from services.repair_v2_0.spatial import apply_spatial_enhance_v5, apply_stereo_width_v2
-from services.repair_v2_0.dynamics import apply_multiband_compression_v2, apply_softness_v2
-from services.repair_v2_0.postprocess import apply_loudness_normalize_v3, apply_peak_limit_v3
+from services.repair.repair_v2_0.declip import apply_de_clipping_v4
+from services.repair.repair_v2_0.depop import apply_de_pop_v4
+from services.repair.repair_v2_0.spectral_group_a import apply_spectral_group_a
+from services.repair.repair_v2_0.spectral_group_b import apply_spectral_group_b
+from services.repair.repair_v2_0.transient import apply_transient_repair_v4
+from services.repair.repair_v2_0.filters import apply_presence_boost_v4, apply_bass_enhance_v4, apply_warmth, apply_clarity
+from services.repair.repair_v2_0.spatial import apply_spatial_enhance_v5, apply_stereo_width_v2
+from services.repair.repair_v2_0.dynamics import apply_multiband_compression_v2, apply_softness_v2
+from services.repair.repair_v2_0.postprocess import apply_loudness_normalize_v3, apply_peak_limit_v3
 
 DESKTOP_WORKING_SR = 48000
 
@@ -22,7 +22,7 @@ HOP_LENGTH = 1024
 
 
 def repair_audio(input_path: str, output_path: str, params: dict, progress_callback=None) -> dict:
-    y, sr = librosa.load(input_path, sr=None, mono=False)
+    y, sr = load_audio_with_fallback(input_path, sr=None, mono=False)
     was_mono = False
     if y.ndim == 1:
         y = y.reshape(1, -1)

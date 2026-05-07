@@ -1,9 +1,10 @@
 import numpy as np
 import librosa
 import soundfile as sf
+from services.audio_loader import load_audio_with_fallback
 
 def detect_ai_audio(audio_path: str, progress_callback=None) -> dict:
-    y, sr = librosa.load(audio_path, sr=None, mono=True)
+    y, sr = load_audio_with_fallback(audio_path, sr=None, mono=True)
 
     # 不再立即更新步骤，让 API 端点设置的初始步骤保持更长时间
     # 第一个有意义的更新在 0.15 进度时
