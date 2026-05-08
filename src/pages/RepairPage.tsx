@@ -106,8 +106,8 @@ export default function RepairPage() {
   const hasBrowserResult = !!browserProcessedBuffer;
   const hasBackendResult = !!backendProcessedBuffer || !!repairResult;
 
-  const activeBuffer = playMode === 'browser' ? (browserProcessedBuffer ?? audioBuffer)
-    : playMode === 'backend' ? (backendProcessedBuffer ?? audioBuffer)
+  const activeBuffer = playMode === 'browser' ? browserProcessedBuffer
+    : playMode === 'backend' ? backendProcessedBuffer
     : audioBuffer;
 
   const browserBufferInfo = browserProcessedBuffer ? {

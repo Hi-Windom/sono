@@ -190,6 +190,14 @@ export function useAudioProcessor() {
     audioBufferRef.current = audioBuffer;
   }, [audioBuffer]);
 
+  useEffect(() => {
+    browserProcessedBufferRef.current = browserProcessedBuffer;
+  }, [browserProcessedBuffer]);
+
+  useEffect(() => {
+    backendProcessedBufferRef.current = backendProcessedBuffer;
+  }, [backendProcessedBuffer]);
+
   const applyAlgorithmVersion = useCallback((version: string) => {
     setAlgorithmVersionState(version);
     const algoInfo = availableAlgorithms.find(a => a.name === version);
@@ -1316,6 +1324,7 @@ export function useAudioProcessor() {
     }
 
     if (browserResult.status === 'fulfilled' && browserResult.value) {
+      browserProcessedBufferRef.current = browserResult.value;
       setBrowserProcessedBuffer(browserResult.value);
       anySuccess = true;
     }
@@ -1701,16 +1710,16 @@ export function useAudioProcessor() {
   }, []);
 
   const getCurrentBuffer = useCallback(() => {
-    if (playMode === 'original') return audioBuffer;
-    if (playMode === 'browser') return browserProcessedBuffer;
-    if (playMode === 'backend') return backendProcessedBuffer;
-    return audioBuffer;
-  }, [playMode, audioBuffer, browserProcessedBuffer, backendProcessedBuffer]);
+    if (playMode === 'original') return audioBufferRef.current;
+    if (playMode === 'browser') return browserProcessedBufferRef.current;
+    if (playMode === 'backend') return backendProcessedBufferRef.current;
+    return audioBufferRef.current;
+  }, [playMode]);
 
   const play = useCallback(async () => {
     writeLog(`[play] 开始播放: playMode=${playMode}, isPlaying=${isPlayingRef.current}, activeMode=${activeModeRef.current}`);
 
-    if (playMode === 'backend' && streamingAudioRef.current && !backendProcessedBuffer) {
+    if (playMode === 'backend' && streamingAudioRef.current && !backendProcessedBufferRef.current) {
       writeLog(`[play] 使用streaming播放`);
       streamingAudioRef.current.play().catch(() => {});
       isPlayingRef.current = true;
@@ -1837,7 +1846,7 @@ export function useAudioProcessor() {
       }
     };
     updateTime();
-  }, [playMode, backendProcessedBuffer, getCurrentBuffer, getAudioContext, stopPlaying, stopAllModeNodes]);
+  }, [playMode, getCurrentBuffer, getAudioContext, stopPlaying, stopAllModeNodes]);
 
   // 更新 playRef
   useEffect(() => {
@@ -1881,42 +1890,38 @@ export function useAudioProcessor() {
   const switchPlayMode = useCallback(async (mode: PlayMode) => {
     writeLog(`[switchPlayMode] 开始切换: target=${mode}, current=${activeModeRef.current}, isPlaying=${isPlayingRef.current}`);
 
-    // 如果目标模式没有音频数据，只切换状态
-    const targetBuffer = mode === 'browser' ? browserProcessedBuffer
-      : mode === 'backend' ? backendProcessedBuffer
-      : audioBuffer;
+    const targetBuffer = mode === 'browser' ? browserProcessedBufferRef.current
+      : mode === 'backend' ? backendProcessedBufferRef.current
+      : audioBufferRef.current;
     if (!targetBuffer) {
       writeLog(`[switchPlayMode] 目标buffer为空，只切换状态`);
       setPlayMode(mode);
       return;
     }
 
-    // 如果没有在播放，直接切换模式
     if (!isPlayingRef.current) {
       writeLog(`[switchPlayMode] 未在播放，直接切换状态`);
       setPlayMode(mode);
       return;
     }
 
-    // 如果切换到当前已激活的模式，无需操作
     if (activeModeRef.current === mode) {
       writeLog(`[switchPlayMode] 已是目标模式，无需操作`);
       setPlayMode(mode);
       return;
     }
 
-    const currentPosition = currentTime;
     const context = getAudioContext();
     if (context.state === 'suspended') {
       await context.resume();
     }
 
     const now = context.currentTime;
-    const startPosition = Math.min(currentPosition, targetBuffer.duration - 0.01);
+    const currentElapsed = now - startTimeRef.current;
+    const startPosition = Math.min(currentElapsed, targetBuffer.duration - 0.01);
 
-    writeLog(`[switchPlayMode] 停止当前节点: mode=${activeModeRef.current}, position=${currentPosition.toFixed(3)}`);
+    writeLog(`[switchPlayMode] 停止当前节点: mode=${activeModeRef.current}, position=${startPosition.toFixed(3)}`);
 
-    // 0. 先停止任何正在播放的streaming音频
     if (streamingAudioRef.current) {
       writeLog(`[switchPlayMode] 停止streaming音频`);
       try {
@@ -1930,7 +1935,6 @@ export function useAudioProcessor() {
       }
     }
 
-    // 1. 立即停止当前播放的buffer节点（不淡出，避免与新节点重叠）
     const currentNode = modeNodesRef.current[activeModeRef.current];
     if (currentNode) {
       try {
@@ -1944,12 +1948,10 @@ export function useAudioProcessor() {
       }
     }
 
-    // 2. 清理所有旧节点引用
     (Object.keys(modeNodesRef.current) as PlayMode[]).forEach((m) => {
       modeNodesRef.current[m] = null;
     });
 
-    // 3. 创建新节点
     writeLog(`[switchPlayMode] 创建新节点: mode=${mode}, bufferDuration=${targetBuffer.duration.toFixed(3)}`);
     const newSource = context.createBufferSource();
     const newGain = context.createGain();
@@ -1958,7 +1960,6 @@ export function useAudioProcessor() {
     newGain.connect(analyserRef.current!);
     analyserRef.current!.connect(context.destination);
 
-    // 使用极短淡入避免click
     newGain.gain.setValueAtTime(0, now);
     newGain.gain.linearRampToValueAtTime(1.0, now + 0.01);
 
@@ -2000,7 +2001,7 @@ export function useAudioProcessor() {
       }
     };
     updateTime();
-  }, [currentTime, stopPlaying, getAudioContext, audioBuffer, browserProcessedBuffer, backendProcessedBuffer]);
+  }, [stopPlaying, getAudioContext]);
 
   const downloadProcessedAudio = useCallback(async (source: 'browser' | 'backend') => {
     const baseName = audioFile

@@ -1,13 +1,11 @@
 import numpy as np
-from scipy.signal import butter, lfilter
+from scipy.signal import butter, sosfiltfilt
 import gc
 
 from services.audio_loader import load_audio_with_fallback
-from services.librosa_compat import rms
 
 
 def _detect_music_type_fast(y, sr):
-    """基于能量分布的快速音乐类型检测"""
     if y.ndim > 1:
         y_mono = y.mean(axis=0)
     else:
@@ -52,9 +50,9 @@ def _detect_music_type_fast(y, sr):
     return music_type, confidence
 
 
-def _smooth_compress(y, sr, amount, threshold_db=-22.0, ratio=3.0, attack_ms=15, release_ms=150):
-    """平滑单段压缩，使用纯RMS滑动窗口（无lfilter包络跟踪）
-    避免任何IIR滤波引入的artifacts/电流声"""
+def _transparent_compress(y, sr, amount, threshold_db=-18.0, ratio=2.0):
+    """透明压缩：使用长窗口帧级增益，避免逐样本增益调制产生AM伪影
+    核心思路：在帧级别计算增益，帧间做极重度平滑，确保增益变化极缓慢"""
     if amount <= 0:
         return y
 
@@ -62,56 +60,68 @@ def _smooth_compress(y, sr, amount, threshold_db=-22.0, ratio=3.0, attack_ms=15,
     if is_stereo:
         ch_out = np.zeros_like(y)
         for ch in range(y.shape[0]):
-            ch_out[ch] = _smooth_compress(y[ch], sr, amount, threshold_db, ratio, attack_ms, release_ms)
+            ch_out[ch] = _transparent_compress(y[ch], sr, amount, threshold_db, ratio)
         return ch_out
 
-    # 纯RMS滑动窗口计算本地响度（无滤波，无电流声）
-    # 窗口大小基于attack/release时间
-    attack_samples = max(int(sr * attack_ms / 1000), 1)
-    release_samples = max(int(sr * release_ms / 1000), 1)
-    window_size = max(attack_samples, release_samples)
+    n = len(y)
+    if n < 1024:
+        return y
 
-    # 使用平方均值计算RMS（更稳定）
-    y_sq = y.astype(np.float64) ** 2
+    frame_len = int(sr * 0.04)
+    hop_len = int(sr * 0.01)
+    n_frames = max(1, (n - frame_len) // hop_len + 1)
 
-    # 滑动窗口均值（使用cumsum实现O(n)复杂度）
-    cumsum = np.cumsum(np.pad(y_sq, (window_size, 0), mode='edge'))
-    rms = np.sqrt((cumsum[window_size:] - cumsum[:-window_size]) / window_size)
-    rms = np.maximum(rms, 1e-10)
+    y_64 = y.astype(np.float64)
+
+    frame_rms = np.zeros(n_frames, dtype=np.float64)
+    for i in range(n_frames):
+        start = i * hop_len
+        end = min(start + frame_len, n)
+        frame_rms[i] = np.sqrt(np.mean(y_64[start:end] ** 2))
+
+    frame_rms = np.maximum(frame_rms, 1e-10)
 
     threshold_lin = 10 ** (threshold_db / 20.0)
-    ratio = 1.0 + (ratio - 1.0) * amount
+    effective_ratio = 1.0 + (ratio - 1.0) * min(amount, 1.0)
 
-    # 计算增益：超过阈值的部分按ratio压缩
-    gain = np.ones_like(y, dtype=np.float64)
-    over_mask = rms > threshold_lin
-    # 增益 = 目标输出 / 输入
-    target_output = threshold_lin + (rms[over_mask] - threshold_lin) / ratio
-    gain[over_mask] = target_output / rms[over_mask]
+    frame_gain = np.ones(n_frames, dtype=np.float64)
+    over_mask = frame_rms > threshold_lin
+    target_output = threshold_lin + (frame_rms[over_mask] - threshold_lin) / effective_ratio
+    frame_gain[over_mask] = target_output / frame_rms[over_mask]
 
-    # 对增益曲线做重度平滑，消除任何步进
-    if len(gain) > 501:
-        kernel = np.hanning(501)
-        kernel = kernel / kernel.sum()
-        gain = np.convolve(gain, kernel, mode='same')
+    frame_gain = np.minimum(frame_gain, 1.0)
 
-    out = y * gain
+    smooth_kernel_size = min(31, max(5, n_frames // 10))
+    if smooth_kernel_size % 2 == 0:
+        smooth_kernel_size += 1
+    kernel = np.hanning(smooth_kernel_size)
+    kernel = kernel / kernel.sum()
+    frame_gain = np.convolve(frame_gain, kernel, mode='same')
 
-    # 保守的 makeup gain
+    for _ in range(3):
+        frame_gain = np.convolve(frame_gain, kernel, mode='same')
+
+    gain = np.ones(n, dtype=np.float64)
+    for i in range(n_frames):
+        start = i * hop_len
+        end = min(start + hop_len, n)
+        gain[start:end] = frame_gain[i]
+
+    gain[n_frames * hop_len:] = frame_gain[-1]
+
+    out = y_64 * gain
+
     compressed_rms = np.sqrt(np.mean(out ** 2))
-    input_rms = np.sqrt(np.mean(y ** 2))
+    input_rms = np.sqrt(np.mean(y_64 ** 2))
     if compressed_rms > 1e-10 and input_rms > 1e-10:
-        makeup_gain = min(input_rms / compressed_rms, 1.3)  # 最大 +2.3dB
+        makeup_gain = min(input_rms / compressed_rms, 1.2)
         out = out * makeup_gain
 
-    # 硬限幅到 0.95
     out = np.clip(out, -0.95, 0.95)
-
-    return out
+    return out.astype(y.dtype)
 
 
 def _simple_declip(y, amount):
-    """削波修复：使用平滑软限幅避免高频谐波"""
     if amount <= 0:
         return y
     threshold = 0.85
@@ -120,11 +130,7 @@ def _simple_declip(y, amount):
         return y
 
     y_out = y.copy()
-    # 软限幅：使用 sigmoid 曲线平滑过渡
-    # 超过阈值的部分逐渐被压缩到 threshold + 0.05
     over = np.abs(y_out[mask]) - threshold
-    # soft_clip: threshold + (1 - exp(-over * k)) * max_soft
-    # k 控制过渡速度，max_soft 控制最大超过量
     max_soft = 0.10
     k = 5.0
     soft_amount = (1.0 - np.exp(-over * k)) * max_soft
@@ -133,7 +139,6 @@ def _simple_declip(y, amount):
 
 
 def _simple_depop(y, sr, amount):
-    """爆音检测：基于幅度突变的脉冲修复"""
     if amount <= 0:
         return y
     is_stereo = y.ndim > 1 and y.shape[0] == 2
@@ -147,26 +152,24 @@ def _simple_depop(y, sr, amount):
     median_diff = np.median(diff)
     if median_diff < 1e-10:
         return y
-    threshold = median_diff * (15 + 25 * amount)
+    threshold = median_diff * (20 + 30 * amount)
     pop_mask = np.concatenate(([False], diff > threshold))
     if not np.any(pop_mask):
         return y
 
     y_out = y.copy()
-    window = int(sr * 0.002)
+    window = int(sr * 0.003)
     indices = np.where(pop_mask)[0]
     for idx in indices:
         left = max(0, idx - window)
         right = min(len(y), idx + window + 1)
         if right - left > 2:
-            # 使用余弦插值代替线性插值，更平滑
             t = np.linspace(0, 1, right - left)
             y_out[left:right] = y[left] + (y[right - 1] - y[left]) * 0.5 * (1 - np.cos(t * np.pi))
     return y_out
 
 
 def _remove_dc(y, sr):
-    """去除直流偏移和极低频噪声"""
     is_stereo = y.ndim > 1 and y.shape[0] == 2
     if is_stereo:
         for ch in range(y.shape[0]):
@@ -175,22 +178,50 @@ def _remove_dc(y, sr):
     return y - np.mean(y)
 
 
-def _lowpass_final(y, sr, cutoff_hz=17000):
-    """最终低通滤波：消除所有处理可能引入的高频 artifacts
-    使用单向滤波，避免 filtfilt 的前振铃"""
+def _gentle_lowpass(y, sr, cutoff_hz=16000):
+    """温和低通滤波：使用 sosfiltfilt 零相位滤波，避免 lfilter 的相位失真
+    使用1阶滤波器确保最平滑的过渡带，不产生振铃"""
     nyquist = sr / 2
     if nyquist <= cutoff_hz:
         return y
 
+    is_stereo = y.ndim > 1 and y.shape[0] == 2
+    if is_stereo:
+        ch_out = np.zeros_like(y)
+        for ch in range(y.shape[0]):
+            ch_out[ch] = _gentle_lowpass(y[ch], sr, cutoff_hz)
+        return ch_out
+
     cutoff_norm = cutoff_hz / nyquist
-    # 2 阶 Butterworth，足够平滑且不会引入过多相位失真
-    b, a = butter(2, cutoff_norm, btype='low')
-    y_filtered = lfilter(b, a, y)
+    sos = butter(1, cutoff_norm, btype='low', output='sos')
+    padlen = min(len(y) - 1, 3 * max(3, int(3 / cutoff_norm)))
+    y_filtered = sosfiltfilt(sos, y, padlen=padlen)
     return y_filtered
 
 
+def _apply_fade(y, sr, fade_ms=5):
+    """首尾淡入淡出，消除边界伪影"""
+    fade_samples = int(sr * fade_ms / 1000)
+    if fade_samples < 2:
+        return y
+
+    is_stereo = y.ndim > 1 and y.shape[0] == 2
+    if is_stereo:
+        fade_in = np.linspace(0, 1, fade_samples, dtype=np.float64)
+        fade_out = np.linspace(1, 0, fade_samples, dtype=np.float64)
+        for ch in range(y.shape[0]):
+            y[ch, :fade_samples] *= fade_in
+            y[ch, -fade_samples:] *= fade_out
+        return y
+
+    fade_in = np.linspace(0, 1, fade_samples, dtype=y.dtype)
+    fade_out = np.linspace(1, 0, fade_samples, dtype=y.dtype)
+    y[:fade_samples] *= fade_in
+    y[-fade_samples:] *= fade_out
+    return y
+
+
 def _loudness_normalize(y, sr, target_lufs=-16.0):
-    """基于 RMS 的响度归一化"""
     is_stereo = y.ndim > 1 and y.shape[0] == 2
     if is_stereo:
         y_mono = y.mean(axis=0)
@@ -203,8 +234,6 @@ def _loudness_normalize(y, sr, target_lufs=-16.0):
 
     target_rms = 10 ** (target_lufs / 20.0)
     gain = target_rms / rms_val
-
-    # 限制最大增益为 +6dB，避免过度放大噪声底
     gain = min(gain, 2.0)
 
     if is_stereo:
@@ -213,7 +242,6 @@ def _loudness_normalize(y, sr, target_lufs=-16.0):
 
 
 def _peak_limit(y, threshold=0.95):
-    """硬限幅，防止削波"""
     return np.clip(y, -threshold, threshold)
 
 
@@ -238,27 +266,23 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
     if progress_callback:
         progress_callback(0.15, f"v2.2a {music_type} 处理中...")
 
-    # 时域修复：削波修复
     if params.get("de_clipping", 0) > 0:
         y = _simple_declip(y, params["de_clipping"])
         issues_found.append("削波修复")
 
-    # 时域修复：爆音修复
     if params.get("de_pop", 0) > 0:
         y = _simple_depop(y, sr, params["de_pop"])
         issues_found.append("爆音修复")
 
     gc.collect()
 
-    # 时域压缩：平滑包络检测
     if params.get("dynamic_range", 0) > 0:
         if progress_callback:
             progress_callback(0.40, "v2.2a 动态压缩...")
-        y = _smooth_compress(y, sr, params["dynamic_range"])
+        y = _transparent_compress(y, sr, params["dynamic_range"])
         issues_found.append("动态压缩")
         gc.collect()
 
-    # v2.2a 移动端：去除直流偏移和极低频噪声
     if params.get("noise_reduction", 0) > 0:
         if progress_callback:
             progress_callback(0.60, "v2.2a 噪声抑制...")
@@ -266,19 +290,17 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
         issues_found.append("直流抑制")
         gc.collect()
 
-    # 最终低通滤波：消除所有处理步骤可能引入的高频 artifacts
-    # 这是彻底消除电流声的关键步骤
     if progress_callback:
         progress_callback(0.75, "v2.2a 平滑处理...")
-    y = _lowpass_final(y, sr, cutoff_hz=15000)  # 进一步降低截止频率消除高频artifacts
+    y = _gentle_lowpass(y, sr, cutoff_hz=16000)
     issues_found.append("高频平滑")
     gc.collect()
 
-    # 响度归一化
     if progress_callback:
         progress_callback(0.85, "v2.2a 响度归一化...")
     y = _loudness_normalize(y, sr, -16.0)
     y = _peak_limit(y, 0.95)
+    y = _apply_fade(y, sr, fade_ms=5)
     issues_found.append("响度归一化")
 
     if was_mono:
@@ -287,7 +309,6 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
     if progress_callback:
         progress_callback(0.95, "v2.2a 导出...")
 
-    # 导出 WAV
     try:
         import soundfile as sf
         bit_depth = params.get("bit_depth", 24)
