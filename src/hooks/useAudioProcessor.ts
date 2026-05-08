@@ -389,6 +389,7 @@ export function useAudioProcessor() {
       audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
       analyserRef.current = audioContextRef.current.createAnalyser();
       analyserRef.current.fftSize = 256;
+      analyserRef.current.connect(audioContextRef.current.destination);
     }
     return audioContextRef.current;
   }, []);
@@ -602,7 +603,6 @@ export function useAudioProcessor() {
 
     const source = context.createMediaElementSource(audio);
     source.connect(analyserRef.current!);
-    analyserRef.current!.connect(context.destination);
 
     streamingAudioRef.current = audio;
     mediaSourceRef.current = source;
@@ -1279,7 +1279,6 @@ export function useAudioProcessor() {
             newSource.buffer = repairedBuffer;
             newSource.connect(newGain);
             newGain.connect(analyserRef.current!);
-            analyserRef.current!.connect(context.destination);
             newGain.gain.setValueAtTime(0, context.currentTime);
             newGain.gain.linearRampToValueAtTime(1.0, context.currentTime + 0.015);
 
@@ -1796,7 +1795,6 @@ export function useAudioProcessor() {
     source.buffer = buffer;
     source.connect(gain);
     gain.connect(analyserRef.current!);
-    analyserRef.current!.connect(context.destination);
 
     // 使用淡入避免爆音
     const fadeInDuration = 0.015; // 15ms 淡入
@@ -1958,7 +1956,6 @@ export function useAudioProcessor() {
     newSource.buffer = targetBuffer;
     newSource.connect(newGain);
     newGain.connect(analyserRef.current!);
-    analyserRef.current!.connect(context.destination);
 
     newGain.gain.setValueAtTime(0, now);
     newGain.gain.linearRampToValueAtTime(1.0, now + 0.01);

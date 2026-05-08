@@ -138,27 +138,32 @@ def _simple_depop(y, sr, amount):
     if is_stereo:
         ch_out = np.zeros_like(y)
         for ch in range(y.shape[0]):
-            ch_out[ch] = _simple_depop(y[ch], sr, amount)
+            ch_out[ch] = _simple_depop_1d(y[ch], sr, amount)
         return ch_out
 
-    diff = np.abs(np.diff(y))
+    data = y.flatten() if y.ndim > 1 else y
+    return _simple_depop_1d(data, sr, amount).reshape(y.shape)
+
+
+def _simple_depop_1d(data, sr, amount):
+    diff = np.abs(np.diff(data))
     median_diff = np.median(diff)
     if median_diff < 1e-10:
-        return y
+        return data
     threshold = median_diff * (30 + 40 * amount)
     pop_mask = np.concatenate(([False], diff > threshold))
     if not np.any(pop_mask):
-        return y
+        return data
 
-    y_out = y.copy()
+    y_out = data.copy()
     window = int(sr * 0.003)
     indices = np.where(pop_mask)[0]
     for idx in indices:
         left = max(0, idx - window)
-        right = min(len(y), idx + window + 1)
+        right = min(len(data), idx + window + 1)
         if right - left > 2:
             t = np.linspace(0, 1, right - left)
-            y_out[left:right] = y[left] + (y[right - 1] - y[left]) * 0.5 * (1 - np.cos(t * np.pi))
+            y_out[left:right] = data[left] + (data[right - 1] - data[left]) * 0.5 * (1 - np.cos(t * np.pi))
     return y_out
 
 
