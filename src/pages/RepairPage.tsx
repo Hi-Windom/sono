@@ -106,8 +106,10 @@ export default function RepairPage() {
   const hasBrowserResult = !!browserProcessedBuffer;
   const hasBackendResult = !!backendProcessedBuffer || !!repairResult;
 
-  const activeBuffer = playMode === 'browser' ? browserProcessedBuffer
-    : playMode === 'backend' ? backendProcessedBuffer
+  // 计算当前播放模式对应的音频缓冲区
+  // 注意：只有当目标模式有数据时才切换，否则保持当前可见的缓冲区
+  const activeBuffer = playMode === 'browser' ? (browserProcessedBuffer || audioBuffer)
+    : playMode === 'backend' ? (backendProcessedBuffer || audioBuffer)
     : audioBuffer;
 
   const browserBufferInfo = browserProcessedBuffer ? {
@@ -290,8 +292,9 @@ export default function RepairPage() {
                 {audioBuffer && (
                   <div className="mt-6">
                     <WaveformVisualizer
-                      audioBuffer={activeBuffer ?? audioBuffer}
-                      label={playMode !== 'original' && activeBuffer ? '修复后波形' : '原始波形'}
+                      key={playMode}
+                      audioBuffer={activeBuffer}
+                      label={playMode !== 'original' && ((playMode === 'backend' && backendProcessedBuffer) || (playMode === 'browser' && browserProcessedBuffer)) ? '修复后波形' : '原始波形'}
                       currentTime={currentTime}
                       duration={duration}
                       onSeek={seek}

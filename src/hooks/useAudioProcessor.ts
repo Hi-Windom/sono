@@ -441,6 +441,15 @@ export function useAudioProcessor() {
 
     (async () => {
       try {
+        // 保护：如果用户已经加载了新文件（在会话恢复前），放弃恢复旧会话
+        if (audioFile) {
+          writeLog(`[useAudioProcessor] 用户已加载文件 ${audioFile.name}，跳过旧会话恢复`);
+          await clearSession();
+          pendingSessionRef.current = null;
+          sessionRestoredRef.current = true;
+          return;
+        }
+
         const statusRes = await fetch(`/api/v1/status/${session.taskId}`);
         if (!statusRes.ok) {
           writeLog(`[useAudioProcessor] 任务不存在 taskId=${session.taskId}，清除会话`);
