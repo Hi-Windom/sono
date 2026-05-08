@@ -1251,6 +1251,49 @@ export function useAudioProcessor() {
       if (audioFile && taskIdRef.current) {
         loadAudioFromUrl(previewUrl, processingOptions.sampleRate).then(repairedBuffer => {
           setBackendProcessedBuffer(repairedBuffer);
+          // 如果当前正在播放后端模式，需要切换到新音频
+          if (isPlayingRef.current && activeModeRef.current === 'backend') {
+            // 停止当前播放的旧节点
+            stopAllModeNodes();
+            // 重新创建新节点播放新音频
+            const context = getAudioContext();
+            const newSource = context.createBufferSource();
+            const newGain = context.createGain();
+            newSource.buffer = repairedBuffer;
+            newSource.connect(newGain);
+            newGain.connect(analyserRef.current!);
+            analyserRef.current!.connect(context.destination);
+            newGain.gain.setValueAtTime(0, context.currentTime);
+            newGain.gain.linearRampToValueAtTime(1.0, context.currentTime + 0.015);
+            newSource.onended = () => {
+              if (isPlayingRef.current) {
+                stopPlaying();
+                setCurrentTime(0);
+                pausedAtRef.current = 0;
+              }
+            };
+            modeNodesRef.current['backend'] = { source: newSource, gain: newGain };
+            sourceNodeRef.current = newSource;
+            gainNodeRef.current = newGain;
+            newSource.start(0, pausedAtRef.current);
+            playStartTimeRef.current = performance.now();
+            startTimeRef.current = context.currentTime - pausedAtRef.current;
+            const updateTime = () => {
+              if (isPlayingRef.current) {
+                const elapsed = (performance.now() - playStartTimeRef.current) / 1000;
+                const current = pausedAtRef.current + elapsed;
+                if (current >= repairedBuffer.duration) {
+                  stopPlaying();
+                  setCurrentTime(0);
+                  pausedAtRef.current = 0;
+                } else {
+                  setCurrentTime(current);
+                  animationFrameRef.current = requestAnimationFrame(updateTime);
+                }
+              }
+            };
+            updateTime();
+          }
           setPlayMode('backend');
         }).catch(err => {
           console.warn('[applySettings] 后台下载修复后音频失败:', err);
@@ -1699,36 +1742,9 @@ export function useAudioProcessor() {
       await new Promise(resolve => setTimeout(resolve, 50));
     }
 
-    // 静音策略：seek 时停止所有模式节点，重新创建；普通播放时复用已有节点
+    // seek 时停止所有模式节点，重新创建
     if (seekInProgressRef.current) {
       stopAllModeNodes();
-    } else if (!seekInProgressRef.current && modeNodesRef.current[playMode]) {
-      // 当前模式已有节点在运行，直接恢复播放（从暂停恢复）
-      const node = modeNodesRef.current[playMode]!;
-      sourceNodeRef.current = node.source;
-      gainNodeRef.current = node.gain;
-      isPlayingRef.current = true;
-      setIsPlaying(true);
-      playStartTimeRef.current = performance.now();
-      const playOffset = pausedAtRef.current;
-      startTimeRef.current = context.currentTime - playOffset;
-      activeModeRef.current = playMode;
-      const updateTime = () => {
-        if (isPlayingRef.current) {
-          const elapsed = (performance.now() - playStartTimeRef.current) / 1000;
-          const current = playOffset + elapsed;
-          if (current >= buffer.duration) {
-            stopPlaying();
-            setCurrentTime(0);
-            pausedAtRef.current = 0;
-          } else {
-            setCurrentTime(current);
-            animationFrameRef.current = requestAnimationFrame(updateTime);
-          }
-        }
-      };
-      updateTime();
-      return;
     }
     seekInProgressRef.current = false;
 
