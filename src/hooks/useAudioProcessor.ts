@@ -4,6 +4,7 @@ import { AISongDetectionResult } from '../utils/aiSongChecker';
 import { loadSettings, saveSettings, resetSettings as resetStoredSettings } from '../utils/settingsStorage';
 import { parseWavHeader, WavInfo } from '../utils/wavParser';
 import { saveSession, loadSession, clearSession } from '../utils/sessionDB';
+import { computeFileHash } from '../utils/fileHash';
 import {
   uploadAudio,
   detectAudio,
@@ -28,12 +29,8 @@ import {
 } from '../services/backendApi';
 
 function writeLog(message: string) {
+  // eslint-disable-next-line no-console
   console.log(message);
-  fetch('/api/log', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message })
-  }).catch(() => {});
 }
 
 function formatDetectTime(date: Date = new Date()): string {
@@ -103,13 +100,6 @@ function downloadUrl(url: string, fileName: string) {
   setTimeout(() => {
     document.body.removeChild(a);
   }, 5000);
-}
-
-async function computeFileHash(file: File): Promise<string> {
-  const buffer = await file.arrayBuffer();
-  const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
 export function useAudioProcessor() {
@@ -650,13 +640,10 @@ export function useAudioProcessor() {
     setBackendError(null);
     setAudioFile(file);
 
-    setProcessingStep('计算文件哈希...');
+    // 阶段1: 立即解码音频，让UI尽快显示波形和预估大小
+    setProcessingStep('加载音频...');
     setIsProcessing(true);
     setProcessingProgress(0);
-
-    const fileHash = await computeFileHash(file);
-    fileHashRef.current = fileHash;
-    writeLog(`[loadAudioFile] fileHash=${fileHash}`);
 
     const context = getAudioContext();
     const arrayBuf = await file.arrayBuffer();
@@ -664,6 +651,7 @@ export function useAudioProcessor() {
     setWavInfo(wavHeaderInfo);
     const buffer = await context.decodeAudioData(arrayBuf);
 
+    // 立即设置audioBuffer，让AIRepairPanel（含预估大小）显示
     setAudioBuffer(buffer);
     setBrowserProcessedBuffer(null);
     setBackendProcessedBuffer(null);
@@ -683,6 +671,13 @@ export function useAudioProcessor() {
     const analysis = detectAudioIssues(buffer);
     setAudioAnalysis(analysis);
 
+    // 阶段2: 后台计算哈希（不阻塞UI）
+    setProcessingStep('计算文件哈希...');
+    const fileHash = await computeFileHash(file);
+    fileHashRef.current = fileHash;
+    writeLog(`[loadAudioFile] fileHash=${fileHash}`);
+
+    // 阶段3: 上传文件
     try {
       setProcessingStep('上传到后端...');
       setProcessingProgress(0);
@@ -1913,7 +1908,21 @@ export function useAudioProcessor() {
 
     writeLog(`[switchPlayMode] 停止当前节点: mode=${activeModeRef.current}, position=${currentPosition.toFixed(3)}`);
 
-    // 1. 立即停止当前播放（不淡出，避免与新节点重叠）
+    // 0. 先停止任何正在播放的streaming音频
+    if (streamingAudioRef.current) {
+      writeLog(`[switchPlayMode] 停止streaming音频`);
+      try {
+        streamingAudioRef.current.pause();
+        streamingAudioRef.current.src = '';
+      } catch {}
+      streamingAudioRef.current = null;
+      if (mediaSourceRef.current) {
+        try { mediaSourceRef.current.disconnect(); } catch {}
+        mediaSourceRef.current = null;
+      }
+    }
+
+    // 1. 立即停止当前播放的buffer节点（不淡出，避免与新节点重叠）
     const currentNode = modeNodesRef.current[activeModeRef.current];
     if (currentNode) {
       try {

@@ -53,8 +53,8 @@ def _detect_music_type_fast(y, sr):
 
 
 def _smooth_compress(y, sr, amount, threshold_db=-22.0, ratio=3.0, attack_ms=15, release_ms=150):
-    """平滑单段压缩，使用向量化操作避免逐样本循环
-    使用单向低通滤波避免前振铃"""
+    """平滑单段压缩，使用纯RMS滑动窗口（无lfilter包络跟踪）
+    避免任何IIR滤波引入的artifacts/电流声"""
     if amount <= 0:
         return y
 
@@ -65,40 +65,46 @@ def _smooth_compress(y, sr, amount, threshold_db=-22.0, ratio=3.0, attack_ms=15,
             ch_out[ch] = _smooth_compress(y[ch], sr, amount, threshold_db, ratio, attack_ms, release_ms)
         return ch_out
 
-    # 包络检测：使用 scipy 的单向低通滤波，避免 Python 循环
-    rectified = np.abs(y).astype(np.float64)
+    # 纯RMS滑动窗口计算本地响度（无滤波，无电流声）
+    # 窗口大小基于attack/release时间
+    attack_samples = max(int(sr * attack_ms / 1000), 1)
+    release_samples = max(int(sr * release_ms / 1000), 1)
+    window_size = max(attack_samples, release_samples)
 
-    # 设计包络检测低通滤波器（更低截止频率减少高频调制/电流声）
-    nyquist = sr / 2
-    envelope_cutoff = min(30.0, nyquist * 0.3)  # 从100Hz降到30Hz
-    envelope_cutoff_norm = envelope_cutoff / nyquist
-    b, a = butter(2, envelope_cutoff_norm, btype='low')
-    envelope = lfilter(b, a, rectified)
+    # 使用平方均值计算RMS（更稳定）
+    y_sq = y.astype(np.float64) ** 2
+
+    # 滑动窗口均值（使用cumsum实现O(n)复杂度）
+    cumsum = np.cumsum(np.pad(y_sq, (window_size, 0), mode='edge'))
+    rms = np.sqrt((cumsum[window_size:] - cumsum[:-window_size]) / window_size)
+    rms = np.maximum(rms, 1e-10)
 
     threshold_lin = 10 ** (threshold_db / 20.0)
     ratio = 1.0 + (ratio - 1.0) * amount
 
-    # 计算增益曲线
+    # 计算增益：超过阈值的部分按ratio压缩
     gain = np.ones_like(y, dtype=np.float64)
-    over_mask = envelope > threshold_lin
-    gain[over_mask] = (threshold_lin + (envelope[over_mask] - threshold_lin) / ratio) / (envelope[over_mask] + 1e-10)
+    over_mask = rms > threshold_lin
+    # 增益 = 目标输出 / 输入
+    target_output = threshold_lin + (rms[over_mask] - threshold_lin) / ratio
+    gain[over_mask] = target_output / rms[over_mask]
 
-    # 对增益曲线做重度平滑，消除任何高频调制
-    if len(gain) > 201:
-        kernel = np.hanning(201)  # 从101增加到201，更平滑
+    # 对增益曲线做重度平滑，消除任何步进
+    if len(gain) > 501:
+        kernel = np.hanning(501)
         kernel = kernel / kernel.sum()
         gain = np.convolve(gain, kernel, mode='same')
 
     out = y * gain
 
-    # 根据实际压缩量计算 makeup gain，更合理
+    # 保守的 makeup gain
     compressed_rms = np.sqrt(np.mean(out ** 2))
     input_rms = np.sqrt(np.mean(y ** 2))
     if compressed_rms > 1e-10 and input_rms > 1e-10:
-        makeup_gain = min(input_rms / compressed_rms, 1.5)  # 最大 +3.5dB
+        makeup_gain = min(input_rms / compressed_rms, 1.3)  # 最大 +2.3dB
         out = out * makeup_gain
 
-    # 硬限幅到 0.95，避免任何削波
+    # 硬限幅到 0.95
     out = np.clip(out, -0.95, 0.95)
 
     return out
