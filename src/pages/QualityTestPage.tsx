@@ -1,7 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Header } from '../components/Header';
-import { connectProgressWS } from '../services/backendApi';
 
 interface TestResult {
   name: string;
@@ -168,12 +167,13 @@ export default function QualityTestPage() {
   const [showRaw, setShowRaw] = useState(false);
   const [liveLines, setLiveLines] = useState<string[]>([]);
 
-  const wsRef = useRef<ReturnType<typeof connectProgressWS> | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
 
-  const runTests = async () => {
+  const runTests = useCallback(async () => {
     setLoading(true);
     setError(null);
     setData(null);
+    setLiveLines([]);
     try {
       const startRes = await fetch('/api/v1/quality-tests/start', { method: 'POST' });
       if (!startRes.ok) {
@@ -183,44 +183,57 @@ export default function QualityTestPage() {
       }
       const { task_id } = await startRes.json();
 
-      if (wsRef.current) wsRef.current.close();
-      wsRef.current = connectProgressWS(
-        task_id,
-        {
-          onProgress: (event) => {
-            if (event.quality_test_line) {
-              setLiveLines(prev => [...prev.slice(-20), event.quality_test_line!]);
-            }
-          },
-          onComplete: (event) => {
-            const result = {
-              total: event.total || 0,
-              passed: event.passed || 0,
-              failed: event.failed || 0,
-              skipped: event.skipped || 0,
-              summary: event.summary || '',
-              tests: event.tests || [],
-              baseline: event.baseline || [],
-              per_step: event.per_step || [],
-              iron_rule: event.iron_rule || [],
-              raw_output: event.raw_output || '',
-              exit_code: event.exit_code ?? -1,
-            };
-            setData(result);
+      if (wsRef.current) { wsRef.current.close(); wsRef.current = null; }
+
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${protocol}//${window.location.host}/api/v1/ws/${task_id}`;
+      const ws = new WebSocket(wsUrl);
+      wsRef.current = ws;
+
+      ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.error && !msg.task_id) {
+            setError(msg.error);
             setLoading(false);
-          },
-          onError: (err) => {
-            setError(err.message);
+            return;
+          }
+          if (msg.quality_test_line) {
+            setLiveLines(prev => [...prev.slice(-25), msg.quality_test_line]);
+          }
+          if (msg.status === 'completed' && msg.total !== undefined) {
+            setData({
+              total: msg.total || 0,
+              passed: msg.passed || 0,
+              failed: msg.failed || 0,
+              skipped: msg.skipped || 0,
+              summary: msg.summary || '',
+              tests: msg.tests || [],
+              baseline: msg.baseline || [],
+              per_step: msg.per_step || [],
+              iron_rule: msg.iron_rule || [],
+              raw_output: msg.raw_output || '',
+              exit_code: msg.exit_code ?? -1,
+            });
             setLoading(false);
-          },
-        },
-        new Set(['completed']),
-      );
+            ws.close();
+          }
+        } catch { /* ignore parse errors */ }
+      };
+
+      ws.onerror = () => {
+        setError('WebSocket 连接失败');
+        setLoading(false);
+      };
+
+      ws.onclose = () => {
+        if (wsRef.current === ws) wsRef.current = null;
+      };
     } catch (err) {
       setError(`启动失败: ${err instanceof Error ? err.message : String(err)}`);
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => { runTests(); }, []);
 

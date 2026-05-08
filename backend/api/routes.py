@@ -729,38 +729,28 @@ def _run_quality_tests_background(task_id: str, loop):
     global _quality_test_cache
     try:
         project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        process = subprocess.Popen(
+        result = subprocess.run(
             ["python", "-m", "pytest", "backend/tests/test_repair_quality.py", "-v", "--tb=short"],
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, cwd=project_root,
+            capture_output=True, text=True, timeout=180, cwd=project_root,
         )
+        output = result.stdout + result.stderr
 
-        last_line_count = 0
-        while True:
-            line = process.stdout.readline()
-            if not line and process.poll() is not None:
-                break
-            if line:
-                last_line_count += 1
-                if " PASSED" in line or " FAILED" in line or " SKIPPED" in line:
-                    try:
-                        asyncio.run_coroutine_threadsafe(
-                            ws_manager.send_progress(task_id, {
-                                "task_id": task_id, "status": "running",
-                                "progress": min(95, last_line_count * 2),
-                                "step": line.strip().split()[0] if line.strip() else "running",
-                                "quality_test_line": line.strip(),
-                            }),
-                            loop,
-                        )
-                    except Exception:
-                        pass
-
-        process.wait(timeout=10)
-        output = process.stdout.read() if process.stdout else ""
-        exit_code = process.returncode
+        for line in output.strip().split("\n"):
+            if " PASSED" in line or " FAILED" in line or " SKIPPED" in line:
+                try:
+                    asyncio.run_coroutine_threadsafe(
+                        ws_manager.send_progress(task_id, {
+                            "task_id": task_id, "status": "running",
+                            "progress": 50, "step": "quality_test",
+                            "quality_test_line": line.strip(),
+                        }),
+                        loop,
+                    )
+                except Exception:
+                    pass
 
         parsed = _parse_pytest_output(output)
-        parsed["exit_code"] = exit_code
+        parsed["exit_code"] = result.returncode
         parsed["status"] = "completed"
         _quality_test_cache[task_id] = parsed
 
