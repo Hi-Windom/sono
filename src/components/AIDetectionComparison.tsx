@@ -130,7 +130,7 @@ export function AIDetectionCard({ title, result, color, algorithmVersion }: AIDe
 
       {algorithmVersion && (
         <div className="mt-3 pt-2 border-t border-white/5 flex justify-end">
-          <span className="text-gray-500 text-[10px]">修复算法 {algorithmVersion}</span>
+          <span className="text-gray-500 text-[10px]">检测算法 {algorithmVersion}</span>
         </div>
       )}
     </div>
@@ -161,10 +161,10 @@ export function AIDetectionComparison({ before, backendAfter, onDetect, isProces
   const isNeutral = Math.abs(improvement) <= 3;
 
   const detectorVersionList = availableDetectors && availableDetectors.length > 0
-    ? availableDetectors.map(v => ({ value: v.name, label: v.label }))
+    ? [...availableDetectors].reverse().map(v => ({ value: v.name, label: v.label }))
     : [
-        { value: 'v1.0', label: 'v1.0' },
         { value: 'v1.1', label: 'v1.1' },
+        { value: 'v1.0', label: 'v1.0' },
       ];
 
   // 当检测完成时记录版本
