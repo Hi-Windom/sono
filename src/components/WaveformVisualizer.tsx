@@ -20,14 +20,10 @@ export function WaveformVisualizer({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const waveformDataRef = useRef<{ min: number[]; max: number[] } | null>(null);
+  const waveformKeyRef = useRef(0);
 
-  // 预计算波形数据
-  useEffect(() => {
-    if (!audioBuffer) return;
-
-    const channelData = audioBuffer.getChannelData(0);
-    const container = containerRef.current;
-    const width = container ? container.clientWidth : 800;
+  const computeWaveformData = useCallback((buffer: AudioBuffer, width: number) => {
+    const channelData = buffer.getChannelData(0);
     const samplesPerPixel = Math.max(1, Math.floor(channelData.length / width));
 
     const minData: number[] = [];
@@ -57,7 +53,29 @@ export function WaveformVisualizer({
     }
 
     waveformDataRef.current = { min: minData, max: maxData };
-  }, [audioBuffer]);
+  }, []);
+
+  useEffect(() => {
+    if (!audioBuffer) return;
+
+    const container = containerRef.current;
+    const width = container ? container.clientWidth : 800;
+    computeWaveformData(audioBuffer, width);
+    waveformKeyRef.current++;
+  }, [audioBuffer, computeWaveformData]);
+
+  // 监听窗口大小变化，重新计算波形数据
+  useEffect(() => {
+    const handleResize = () => {
+      if (!audioBuffer || !containerRef.current) return;
+      const width = containerRef.current.clientWidth;
+      computeWaveformData(audioBuffer, width);
+      waveformKeyRef.current++;
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [audioBuffer, computeWaveformData]);
 
   // 绘制波形和进度
   useEffect(() => {
@@ -80,6 +98,12 @@ export function WaveformVisualizer({
     const width = actualWidth;
     const height = actualHeight;
     const { min, max } = waveformDataRef.current;
+
+    // 如果波形数据长度与画布宽度不匹配，需要重新计算
+    if (min.length !== width && audioBuffer) {
+      computeWaveformData(audioBuffer, width);
+      return;
+    }
 
     // 计算进度位置
     const progressRatio = duration > 0 ? currentTime / duration : 0;
@@ -109,7 +133,7 @@ export function WaveformVisualizer({
     // 绘制未播放部分（灰色）
     ctx.fillStyle = 'rgba(100, 116, 139, 0.5)';
     for (let x = 0; x < width; x++) {
-      if (x > progressX) {
+      if (x > progressX && x < min.length) {
         const y1 = (0.5 + min[x] * 0.4) * height;
         const y2 = (0.5 + max[x] * 0.4) * height;
         ctx.fillRect(x, y1, 1, y2 - y1 || 1);
@@ -119,7 +143,7 @@ export function WaveformVisualizer({
     // 绘制已播放部分（高亮）
     ctx.fillStyle = playedGradient;
     for (let x = 0; x < width; x++) {
-      if (x <= progressX) {
+      if (x <= progressX && x < min.length) {
         const y1 = (0.5 + min[x] * 0.4) * height;
         const y2 = (0.5 + max[x] * 0.4) * height;
         ctx.fillRect(x, y1, 1, y2 - y1 || 1);
@@ -160,7 +184,7 @@ export function WaveformVisualizer({
       ctx.lineTo(progressX, height - 8);
       ctx.stroke();
     }
-  }, [audioBuffer, color, currentTime, duration]);
+  }, [audioBuffer, color, currentTime, duration, waveformKeyRef.current]);
 
   // 点击跳转
   const handleClick = useCallback(

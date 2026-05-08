@@ -1,5 +1,5 @@
 const DB_NAME = 'audio_repair_session';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE_NAME = 'session';
 
 interface SessionData {
@@ -13,15 +13,25 @@ interface SessionData {
   hasBeenProcessed: boolean;
   wavInfo: string;
   repairResult: string;
+  originalDetectTime: string;
+  repairedDetectTime: string;
 }
 
 function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
-    request.onupgradeneeded = () => {
+    request.onupgradeneeded = (event) => {
       const db = request.result;
+      const oldVersion = event.oldVersion;
+
       if (!db.objectStoreNames.contains(STORE_NAME)) {
         db.createObjectStore(STORE_NAME, { keyPath: 'id' });
+      } else if (oldVersion < 2) {
+        // 版本升级时清除旧数据，确保新字段可用
+        const tx = request.transaction;
+        if (tx) {
+          tx.objectStore(STORE_NAME).clear();
+        }
       }
     };
     request.onsuccess = () => resolve(request.result);

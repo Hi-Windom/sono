@@ -36,6 +36,15 @@ function writeLog(message: string) {
   }).catch(() => {});
 }
 
+function formatDetectTime(date: Date = new Date()): string {
+  const now = date;
+  const month = (now.getMonth() + 1).toString().padStart(2, '0');
+  const day = now.getDate().toString().padStart(2, '0');
+  const hours = now.getHours().toString().padStart(2, '0');
+  const minutes = now.getMinutes().toString().padStart(2, '0');
+  return `${month}-${day} ${hours}:${minutes}`;
+}
+
 
 export interface AudioAnalysis {
   spectralFlatness: number;
@@ -123,6 +132,8 @@ export function useAudioProcessor() {
   const [processingOptions, setProcessingOptionsState] = useState<ProcessingOptions>(savedSettings.exportOptions);
   const [originalAIDetection, setOriginalAIDetection] = useState<AISongDetectionResult | null>(null);
   const [backendAIDetection, setBackendAIDetection] = useState<AISongDetectionResult | null>(null);
+  const [originalDetectTime, setOriginalDetectTime] = useState<string | null>(null);
+  const [repairedDetectTime, setRepairedDetectTime] = useState<string | null>(null);
   const [hasBeenProcessed, setHasBeenProcessed] = useState(false);
   const [backendAvailable, setBackendAvailable] = useState(false);
   const [backendDiag, setBackendDiag] = useState<string>('未检测');
@@ -384,6 +395,8 @@ export function useAudioProcessor() {
     hasBeenProcessed: boolean;
     wavInfo?: string;
     repairResult?: string;
+    originalDetectTime?: string;
+    repairedDetectTime?: string;
   } | null>(null);
 
   useEffect(() => {
@@ -407,6 +420,8 @@ export function useAudioProcessor() {
         hasBeenProcessed: session.hasBeenProcessed,
         wavInfo: session.wavInfo,
         repairResult: session.repairResult,
+        originalDetectTime: session.originalDetectTime,
+        repairedDetectTime: session.repairedDetectTime,
       };
     })();
   }, []);
@@ -486,6 +501,12 @@ export function useAudioProcessor() {
         if (taskStatus.repaired_detection_result) {
           try { setBackendAIDetection(mapDetectionResult(taskStatus.repaired_detection_result as import('../services/backendApi').BackendDetectionResult)); } catch {}
         }
+        if (session.originalDetectTime) {
+          setOriginalDetectTime(session.originalDetectTime);
+        }
+        if (session.repairedDetectTime) {
+          setRepairedDetectTime(session.repairedDetectTime);
+        }
 
         sessionRestoredRef.current = true;
         pendingSessionRef.current = null;
@@ -498,13 +519,36 @@ export function useAudioProcessor() {
     })();
   }, [backendAvailable, getAudioContext, processingOptions.sampleRate]);
 
-  const stopPlaying = useCallback(() => {
-    if (sourceNodeRef.current) {
-      try { sourceNodeRef.current.stop(); } catch {}
-      sourceNodeRef.current.onended = null;
-      sourceNodeRef.current.disconnect();
-      sourceNodeRef.current = null;
+  const stopPlaying = useCallback((immediate = true) => {
+    // 如果不需要立即停止，先淡出
+    if (!immediate && gainNodeRef.current && sourceNodeRef.current) {
+      const context = audioContextRef.current;
+      if (context) {
+        const fadeOutDuration = 0.03; // 30ms 淡出
+        const now = context.currentTime;
+        gainNodeRef.current.gain.setValueAtTime(gainNodeRef.current.gain.value, now);
+        gainNodeRef.current.gain.linearRampToValueAtTime(0, now + fadeOutDuration);
+
+        // 延迟停止
+        setTimeout(() => {
+          if (sourceNodeRef.current) {
+            try { sourceNodeRef.current.stop(); } catch {}
+            sourceNodeRef.current.onended = null;
+            sourceNodeRef.current.disconnect();
+            sourceNodeRef.current = null;
+          }
+        }, fadeOutDuration * 1000 + 10); // 添加10ms缓冲
+      }
+    } else {
+      // 立即停止
+      if (sourceNodeRef.current) {
+        try { sourceNodeRef.current.stop(); } catch {}
+        sourceNodeRef.current.onended = null;
+        sourceNodeRef.current.disconnect();
+        sourceNodeRef.current = null;
+      }
     }
+
     if (mediaSourceRef.current) {
       try { mediaSourceRef.current.disconnect(); } catch {}
       mediaSourceRef.current = null;
@@ -652,6 +696,8 @@ export function useAudioProcessor() {
         hasBeenProcessed: false,
         wavInfo: wavHeaderInfo ? JSON.stringify(wavHeaderInfo) : '',
         repairResult: '',
+        originalDetectTime: originalDetectTime || '',
+        repairedDetectTime: repairedDetectTime || '',
       });
 
       // 阻止旧会话恢复逻辑覆盖新上传的任务
@@ -934,6 +980,8 @@ export function useAudioProcessor() {
               repairResult: cacheResult.repair_result
                 ? JSON.stringify(cacheResult.repair_result)
                 : '',
+              originalDetectTime: originalDetectTime || '',
+              repairedDetectTime: repairedDetectTime || '',
             });
 
             setIsProcessing(false);
@@ -1228,6 +1276,8 @@ export function useAudioProcessor() {
           repairResult: _backendValue?.repairResult
             ? JSON.stringify(_backendValue.repairResult)
             : '',
+          originalDetectTime: originalDetectTime || '',
+          repairedDetectTime: repairedDetectTime || '',
         });
       }
     }
@@ -1302,6 +1352,7 @@ export function useAudioProcessor() {
               const mapped = tryMapDetection(statusData?.detection_result);
               if (mapped) {
                 setOriginalAIDetection(mapped);
+                setOriginalDetectTime(formatDetectTime());
                 writeLog(`[runAIDetection] 使用缓存的原始检测结果`);
               }
             }
@@ -1309,6 +1360,7 @@ export function useAudioProcessor() {
               const mapped = tryMapDetection(statusData?.repaired_detection_result);
               if (mapped) {
                 setBackendAIDetection(mapped);
+                setRepairedDetectTime(formatDetectTime());
                 writeLog(`[runAIDetection] 使用缓存的修复后检测结果`);
               }
             }
@@ -1388,6 +1440,7 @@ export function useAudioProcessor() {
 
           if (detectResult.detection_result) {
             setOriginalAIDetection(mapDetectionResult(detectResult.detection_result));
+            setOriginalDetectTime(formatDetectTime());
           }
         }
 
@@ -1397,6 +1450,7 @@ export function useAudioProcessor() {
           if (repairedRes.detection_result) {
             writeLog(`[runAIDetection] 修复后检测${repairedRes.cached ? '缓存命中' : '有结果'}，更新`);
             setBackendAIDetection(mapDetectionResult(repairedRes.detection_result));
+            setRepairedDetectTime(formatDetectTime());
           } else {
             closeWS();
             await new Promise<import('../services/backendApi').ProgressEvent>((resolve, reject) => {
@@ -1408,6 +1462,7 @@ export function useAudioProcessor() {
                     setProcessingStep(evt.step);
                     if (evt.repaired_detection_result) {
                       setBackendAIDetection(mapDetectionResult(evt.repaired_detection_result));
+                      setRepairedDetectTime(formatDetectTime());
                     }
                   },
                   onError: reject,
@@ -1635,7 +1690,10 @@ export function useAudioProcessor() {
     gain.connect(analyserRef.current!);
     analyserRef.current!.connect(context.destination);
 
-    gain.gain.value = 1.0;
+    // 使用淡入避免爆音 - 使用线性渐变更平滑
+    const fadeInDuration = 0.015; // 15ms 淡入
+    gain.gain.setValueAtTime(0, context.currentTime);
+    gain.gain.linearRampToValueAtTime(1.0, context.currentTime + fadeInDuration);
 
     let playOffset = pausedAtRef.current;
     if (playOffset >= buffer.duration) {
@@ -1717,19 +1775,115 @@ export function useAudioProcessor() {
     }
   }, [stopPlaying, playMode, audioBuffer]);
 
-  const switchPlayMode = useCallback((mode: PlayMode) => {
+  const switchPlayMode = useCallback(async (mode: PlayMode) => {
+    // 如果当前没有播放，直接切换模式
+    if (!isPlayingRef.current) {
+      setPlayMode(mode);
+      return;
+    }
+
+    // 获取当前播放位置
+    const currentPosition = currentTime;
+    const context = getAudioContext();
+
+    // 确保音频上下文处于运行状态
+    if (context.state === 'suspended') {
+      await context.resume();
+    }
+
+    // 获取新旧模式的音频缓冲区
+    const newBuffer = mode === 'browser' ? browserProcessedBuffer
+      : mode === 'backend' ? backendProcessedBuffer
+      : audioBuffer;
+
+    if (!newBuffer) {
+      setPlayMode(mode);
+      return;
+    }
+
+    // 优化交叉淡入淡出时间 - 使用更短的淡入淡出实现更无缝的切换
+    const fadeOutDuration = 0.03; // 30ms 淡出
+    const fadeInDuration = 0.03;  // 30ms 淡入
+    const overlapTime = 0.01;     // 10ms 重叠时间，确保无缝
+
+    // 保存旧的音频源引用，用于后续停止
+    const oldSource = sourceNodeRef.current;
+    const oldGain = gainNodeRef.current;
+
+    // 创建新的音频源（先创建，确保准备好后再切换）
+    const newSource = context.createBufferSource();
+    const newGain = context.createGain();
+
+    newSource.buffer = newBuffer;
+    newSource.connect(newGain);
+    newGain.connect(analyserRef.current!);
+    analyserRef.current!.connect(context.destination);
+
+    // 从新位置开始播放，确保无缝衔接
+    const startPosition = Math.min(currentPosition, newBuffer.duration - 0.01);
+
+    // 设置淡入 - 使用线性渐变更平滑
+    const now = context.currentTime;
+    newGain.gain.setValueAtTime(0, now);
+    newGain.gain.linearRampToValueAtTime(1.0, now + fadeInDuration);
+
+    // 设置结束回调
+    newSource.onended = () => {
+      if (isPlayingRef.current) {
+        stopPlaying();
+        setCurrentTime(0);
+        pausedAtRef.current = 0;
+      }
+    };
+
+    // 更新引用
+    sourceNodeRef.current = newSource;
+    gainNodeRef.current = newGain;
+
+    // 开始播放新音频
+    startTimeRef.current = now - startPosition;
+    newSource.start(now, startPosition);
+
+    // 淡出旧音频（在启动新音频后）
+    if (oldSource && oldGain) {
+      // 清除旧音频的 onended 回调，避免它调用 stopPlaying 影响新音频
+      oldSource.onended = null;
+      
+      oldGain.gain.setValueAtTime(oldGain.gain.value, now);
+      oldGain.gain.linearRampToValueAtTime(0.001, now + fadeOutDuration);
+
+      // 延迟停止旧音频
+      setTimeout(() => {
+        try {
+          oldSource.stop();
+          oldSource.disconnect();
+        } catch {}
+      }, fadeOutDuration * 1000 + overlapTime * 1000);
+    }
+
+    // 切换模式状态
     setPlayMode(mode);
 
-    if (isPlayingRef.current) {
-      const currentPosition = currentTime;
-      stopPlaying();
-      pausedAtRef.current = currentPosition;
-      setCurrentTime(currentPosition);
-      if (playRef.current) {
-        playRef.current();
-      }
+    // 更新时间跟踪 - 使用更精确的时间计算
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
     }
-  }, [currentTime, stopPlaying]);
+
+    const updateTime = () => {
+      if (isPlayingRef.current) {
+        const elapsed = context.currentTime - startTimeRef.current;
+        if (elapsed >= newBuffer.duration) {
+          stopPlaying();
+          setCurrentTime(0);
+          pausedAtRef.current = 0;
+        } else {
+          setCurrentTime(elapsed);
+          animationFrameRef.current = requestAnimationFrame(updateTime);
+        }
+      }
+    };
+    updateTime();
+  }, [currentTime, stopPlaying, getAudioContext, audioBuffer, browserProcessedBuffer, backendProcessedBuffer]);
 
   const downloadProcessedAudio = useCallback(async (source: 'browser' | 'backend') => {
     const baseName = audioFile
@@ -1816,6 +1970,8 @@ export function useAudioProcessor() {
     processingOptions,
     originalAIDetection,
     backendAIDetection,
+    originalDetectTime,
+    repairedDetectTime,
     hasBeenProcessed,
     originalSampleRate,
     currentSampleRate,

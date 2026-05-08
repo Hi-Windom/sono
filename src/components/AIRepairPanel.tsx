@@ -228,7 +228,7 @@ export function AIRepairPanel({
                 disabled={disabled}
                 className="appearance-none bg-cyan-500/20 text-white text-sm font-medium py-1.5 pl-3 pr-8 rounded-lg border border-cyan-400/40 focus:outline-none focus:border-cyan-400 cursor-pointer hover:bg-cyan-500/30 transition disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {availableAlgorithms.map((algo) => (
+                {[...availableAlgorithms].reverse().map((algo) => (
                   <option key={algo.name} value={algo.name} className="bg-gray-900 text-white">
                     {algo.label} — {algo.description}
                   </option>

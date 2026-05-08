@@ -57,13 +57,36 @@ def create_task(task_id: str, filename: str, filepath: str, params: dict[str, An
     conn.commit()
     conn.close()
 
+def _convert_to_json_serializable(obj: Any) -> Any:
+    """将 numpy 类型和其他不可序列化类型转换为 JSON 可序列化类型"""
+    import numpy as np
+    if isinstance(obj, np.bool_):
+        return bool(obj)
+    if isinstance(obj, np.integer):
+        return int(obj)
+    if isinstance(obj, np.floating):
+        return float(obj)
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    if isinstance(obj, dict):
+        return {k: _convert_to_json_serializable(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_convert_to_json_serializable(v) for v in obj]
+    return obj
+
+
 def update_task(task_id: str, **kwargs: Any) -> None:
     conn = get_db()
     sets: list[str] = []
     values: list[Any] = []
     for k, v in kwargs.items():
         sets.append(f"{k} = ?")
-        values.append(json.dumps(v) if isinstance(v, (dict, list)) else v)
+        if isinstance(v, (dict, list)):
+            # 先转换 numpy 类型，再序列化
+            serializable_v = _convert_to_json_serializable(v)
+            values.append(json.dumps(serializable_v))
+        else:
+            values.append(v)
     sets.append("updated_at = CURRENT_TIMESTAMP")
     values.append(task_id)
     conn.execute(f"UPDATE tasks SET {', '.join(sets)} WHERE id = ?", values)

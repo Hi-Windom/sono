@@ -31,6 +31,8 @@ export default function RepairPage() {
     processingOptions,
     originalAIDetection,
     backendAIDetection,
+    originalDetectTime,
+    repairedDetectTime,
     hasBeenProcessed,
     originalSampleRate,
     currentSampleRate,
@@ -321,6 +323,9 @@ export default function RepairPage() {
                 detectorVersion={detectorVersion}
                 onDetectorVersionChange={setDetectorVersion}
                 availableDetectors={availableDetectors}
+                algorithmVersion={algorithmVersion}
+                originalDetectTime={originalDetectTime || undefined}
+                repairedDetectTime={repairedDetectTime || undefined}
               />
             </div>
 
