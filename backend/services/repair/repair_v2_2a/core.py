@@ -1,5 +1,4 @@
 import numpy as np
-from scipy.signal import butter, sosfiltfilt
 import gc
 
 from services.audio_loader import load_audio_with_fallback
@@ -119,18 +118,17 @@ def _transparent_compress(y, sr, amount, threshold_db=-18.0, ratio=2.0):
 def _simple_declip(y, amount):
     if amount <= 0:
         return y
-    threshold = 0.85
+    threshold = 0.90
     mask = np.abs(y) > threshold
     if not np.any(mask):
         return y
 
-    y_out = y.copy()
-    over = np.abs(y_out[mask]) - threshold
-    max_soft = 0.10
-    k = 5.0
-    soft_amount = (1.0 - np.exp(-over * k)) * max_soft
-    y_out[mask] = np.sign(y_out[mask]) * (threshold + soft_amount)
-    return y_out
+    y_out = y.copy().astype(np.float64)
+    abs_y = np.abs(y_out[mask])
+    over = abs_y - threshold
+    headroom = 1.0 - threshold
+    y_out[mask] = np.sign(y_out[mask]) * (threshold + headroom * np.tanh(over / headroom))
+    return y_out.astype(y.dtype)
 
 
 def _simple_depop(y, sr, amount):
@@ -147,7 +145,7 @@ def _simple_depop(y, sr, amount):
     median_diff = np.median(diff)
     if median_diff < 1e-10:
         return y
-    threshold = median_diff * (20 + 30 * amount)
+    threshold = median_diff * (30 + 40 * amount)
     pop_mask = np.concatenate(([False], diff > threshold))
     if not np.any(pop_mask):
         return y
@@ -173,63 +171,44 @@ def _remove_dc(y, sr):
     return y - np.mean(y)
 
 
-def _smooth_gain_envelope(gain, attack_coeff, release_coeff):
-    n = len(gain)
-    smoothed = np.ones(n, dtype=np.float64)
-    g = 1.0
-    for i in range(n):
-        target = gain[i]
-        if target < g:
-            g = attack_coeff * g + (1 - attack_coeff) * target
-        else:
-            g = release_coeff * g + (1 - release_coeff) * target
-        smoothed[i] = g
-    return smoothed
+def _soft_peak_limit(y, threshold=0.9):
+    """tanh软削波峰值限制：无IIR、无增益包络、无AM伪影
+    阈值以下完全线性（零失真），阈值以上tanh平滑压缩"""
+    abs_max = np.max(np.abs(y))
+    if abs_max <= threshold:
+        return y
 
+    y_out = y.copy().astype(np.float64)
 
-def _peak_limit_smooth(y, sr, threshold_db=-1.0):
-    threshold = 10 ** (threshold_db / 20.0)
-
-    is_stereo = y.ndim > 1 and y.shape[0] == 2
+    is_stereo = y_out.ndim > 1 and y_out.shape[0] == 2
     if is_stereo:
-        result = y.copy().astype(np.float64)
-        for ch in range(y.shape[0]):
-            result[ch] = _peak_limit_smooth_channel(result[ch], sr, threshold)
-        return result.astype(y.dtype)
+        for ch in range(y_out.shape[0]):
+            y_out[ch] = _soft_peak_limit_1d(y_out[ch], threshold)
+    else:
+        data = y_out.flatten() if y_out.ndim > 1 else y_out
+        data = _soft_peak_limit_1d(data, threshold)
+        if y_out.ndim > 1:
+            y_out = data.reshape(y_out.shape)
+        else:
+            y_out = data
 
-    data_1d = y.flatten() if y.ndim > 1 else y
-    return _peak_limit_smooth_channel(data_1d.astype(np.float64), sr, threshold).astype(y.dtype)
+    return y_out.astype(y.dtype)
 
 
-def _peak_limit_smooth_channel(data, sr, threshold):
-    data = data.astype(np.float64)
+def _soft_peak_limit_1d(data, threshold):
+    """分段函数：|x| <= threshold 时线性，|x| > threshold 时tanh压缩
+    f(x) = sign(x) * (threshold + (1-threshold) * tanh((|x|-threshold)/(1-threshold)))
+    在 threshold 处函数值和一阶导数均连续，无任何突变"""
     abs_data = np.abs(data)
-    max_val = np.max(abs_data)
-
-    if max_val <= threshold:
+    mask = abs_data > threshold
+    if not np.any(mask):
         return data
 
-    gain = np.ones(len(data), dtype=np.float64)
-    over = abs_data > threshold
-    gain[over] = threshold / abs_data[over]
-
-    lookahead_samples = min(int(sr * 0.005), len(data) // 2)
-    if lookahead_samples > 0:
-        gain_shifted = np.ones_like(gain)
-        gain_shifted[lookahead_samples:] = gain[:-lookahead_samples]
-        gain_shifted[:lookahead_samples] = gain[0]
-        gain = np.minimum(gain, gain_shifted)
-
-    attack_coeff = np.exp(-1 / (0.0005 * sr))
-    release_coeff = np.exp(-1 / (0.05 * sr))
-
-    smoothed_gain = _smooth_gain_envelope(gain, attack_coeff, release_coeff)
-
-    result = data * smoothed_gain
-
-    result = np.clip(result, -1.0, 1.0)
-
-    return result
+    headroom = 1.0 - threshold
+    over = abs_data[mask] - threshold
+    scale = headroom * 0.98
+    data[mask] = np.sign(data[mask]) * (threshold + scale * np.tanh(over / scale))
+    return data
 
 
 def _loudness_normalize(y, sr, target_lufs=-16.0):
@@ -302,7 +281,7 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
 
     if progress_callback:
         progress_callback(0.85, "v2.2a 峰值限制...")
-    y = _peak_limit_smooth(y, sr, threshold_db=-1.0)
+    y = _soft_peak_limit(y, threshold=0.9)
     issues_found.append("峰值限制")
 
     if was_mono:

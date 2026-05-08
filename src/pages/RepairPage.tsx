@@ -106,9 +106,13 @@ export default function RepairPage() {
   const hasBrowserResult = !!browserProcessedBuffer;
   const hasBackendResult = !!backendProcessedBuffer || !!repairResult;
 
-  const activeBuffer = playMode === 'browser' ? browserProcessedBuffer
-    : playMode === 'backend' ? backendProcessedBuffer
+  const activeBuffer = playMode === 'browser' ? (browserProcessedBuffer ?? audioBuffer)
+    : playMode === 'backend' ? (backendProcessedBuffer ?? audioBuffer)
     : audioBuffer;
+
+  const isBufferReady = playMode === 'browser' ? !!browserProcessedBuffer
+    : playMode === 'backend' ? !!backendProcessedBuffer
+    : true;
 
   const browserBufferInfo = browserProcessedBuffer ? {
     sampleRate: browserProcessedBuffer.sampleRate,
@@ -290,10 +294,10 @@ export default function RepairPage() {
                 {activeBuffer && (
                   <div className="mt-6">
                     <WaveformVisualizer
-                      key={`waveform-${playMode}`}
+                      key={`waveform-${playMode}-${isBufferReady}`}
                       audioBuffer={activeBuffer}
                       color={playMode === 'original' ? '#6B7280' : playMode === 'browser' ? '#A855F7' : '#00D9FF'}
-                      label={playMode === 'original' ? '原始波形' : playMode === 'browser' ? '浏览器修复波形' : '后端修复波形'}
+                      label={playMode === 'original' ? '原始波形' : playMode === 'browser' ? (isBufferReady ? '浏览器修复波形' : '浏览器修复波形 (加载中...)') : (isBufferReady ? '后端修复波形' : '后端修复波形 (加载中...)')}
                       currentTime={currentTime}
                       duration={duration}
                       onSeek={seek}
