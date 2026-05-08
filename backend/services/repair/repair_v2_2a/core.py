@@ -4,14 +4,11 @@ import gc
 import os
 
 from services.audio_loader import load_audio_with_fallback
-from services.librosa_compat import stft, istft, fft_frequencies, rms
-
-N_FFT = 2048
-HOP_LENGTH = 512
+from services.librosa_compat import rms
 
 
 def _detect_music_type_fast(y, sr):
-    """基于能量分布的快速音乐类型检测，避免复杂特征提取"""
+    """基于能量分布的快速音乐类型检测"""
     if y.ndim > 1:
         y_mono = y.mean(axis=0)
     else:
@@ -26,21 +23,17 @@ def _detect_music_type_fast(y, sr):
     frame_energy = np.mean(frames ** 2, axis=1)
     frame_energy = np.maximum(frame_energy, 1e-10)
 
-    # 低频 vs 高频能量比（简单近似）
     low_cut = int(len(y_mono) * 0.1)
     high_start = int(len(y_mono) * 0.5)
     low_energy = np.mean(y_mono[:low_cut] ** 2) if low_cut > 0 else 1e-10
     high_energy = np.mean(y_mono[high_start:] ** 2) if high_start < len(y_mono) else 1e-10
 
-    # 动态范围
     db_energy = 10 * np.log10(frame_energy)
     dynamic_range = np.max(db_energy) - np.min(db_energy)
 
-    # 瞬态密度（过零率近似）
     zcr = np.mean(np.abs(np.diff(np.sign(y_mono))) > 0)
     transient_density = zcr / len(y_mono) * sr
 
-    # 分类逻辑
     if dynamic_range < 8 and transient_density < 5:
         music_type = "electronic"
         confidence = 0.75
@@ -60,8 +53,8 @@ def _detect_music_type_fast(y, sr):
     return music_type, confidence
 
 
-def _single_band_compress(y, sr, amount, threshold_db=-20.0, ratio=4.0, attack_ms=10, release_ms=100):
-    """单段压缩替代多段压缩，大幅降低计算量"""
+def _smooth_compress(y, sr, amount, threshold_db=-22.0, ratio=3.0, attack_ms=15, release_ms=150):
+    """平滑单段压缩，使用样条插值避免块级增益突变"""
     if amount <= 0:
         return y
 
@@ -69,201 +62,74 @@ def _single_band_compress(y, sr, amount, threshold_db=-20.0, ratio=4.0, attack_m
     if is_stereo:
         ch_out = np.zeros_like(y)
         for ch in range(y.shape[0]):
-            ch_out[ch] = _single_band_compress(y[ch], sr, amount, threshold_db, ratio, attack_ms, release_ms)
+            ch_out[ch] = _smooth_compress(y[ch], sr, amount, threshold_db, ratio, attack_ms, release_ms)
         return ch_out
 
+    # 计算包络：使用整流+低通滤波，比块级处理更平滑
+    rectified = np.abs(y)
+    # 设计包络检测低通滤波器
     attack_samples = max(1, int(sr * attack_ms / 1000))
     release_samples = max(1, int(sr * release_ms / 1000))
-    attack_coef = np.exp(-1.0 / attack_samples)
-    release_coef = np.exp(-1.0 / release_samples)
+    attack_coef = np.exp(-2.2 / attack_samples)
+    release_coef = np.exp(-2.2 / release_samples)
+
+    envelope = np.zeros_like(y)
+    env = 0.0
+    for i in range(len(y)):
+        if rectified[i] > env:
+            env = attack_coef * env + (1 - attack_coef) * rectified[i]
+        else:
+            env = release_coef * env + (1 - release_coef) * rectified[i]
+        envelope[i] = env
 
     threshold_lin = 10 ** (threshold_db / 20.0)
     ratio = 1.0 + (ratio - 1.0) * amount
 
-    # 向量化包络检测：使用分块处理减少 Python 循环开销
-    block_size = max(1, sr // 100)  # 10ms 块
-    n_blocks = (len(y) + block_size - 1) // block_size
+    # 计算增益曲线
+    gain = np.ones_like(y)
+    over_mask = envelope > threshold_lin
+    gain[over_mask] = (threshold_lin + (envelope[over_mask] - threshold_lin) / ratio) / (envelope[over_mask] + 1e-10)
 
-    envelope = 0.0
-    gain_array = np.ones(len(y))
-
-    for b in range(n_blocks):
-        start = b * block_size
-        end = min(start + block_size, len(y))
-        block = y[start:end]
-        block_abs = np.abs(block)
-        block_max = np.max(block_abs) if len(block) > 0 else 0
-
-        # 基于块最大值的包络更新
-        if block_max > envelope:
-            envelope = attack_coef * envelope + (1 - attack_coef) * block_max
-        else:
-            envelope = release_coef * envelope + (1 - release_coef) * block_max
-
-        if envelope > threshold_lin:
-            gain = (threshold_lin + (envelope - threshold_lin) / ratio) / (envelope + 1e-10)
-        else:
-            gain = 1.0
-
-        gain_array[start:end] = gain
-
-    # 增益平滑：使用更大的卷积核减少增益突变导致的高频噪声
-    if len(gain_array) > 11:
-        kernel = np.hanning(11)
+    # 对增益曲线做重度平滑，消除任何高频调制
+    if len(gain) > 101:
+        kernel = np.hanning(101)
         kernel = kernel / kernel.sum()
-        gain_array = np.convolve(gain_array, kernel, mode='same')
-    elif len(gain_array) > 5:
-        kernel = np.ones(5) / 5
-        gain_array = np.convolve(gain_array, kernel, mode='same')
+        gain = np.convolve(gain, kernel, mode='same')
 
-    out = y * gain_array
-    # 严格限制 makeup gain 最大 +0.5dB，避免过度增益放大噪声底
-    makeup_gain = 1.0 + min((1.0 - 1.0 / ratio) * amount * 0.04, 0.06)
+    out = y * gain
+
+    # 极保守的 makeup gain
+    makeup_gain = 1.0 + min((1.0 - 1.0 / ratio) * amount * 0.03, 0.04)
     out = out * makeup_gain
 
-    # 软限幅：防止压缩后削波
-    peak = np.max(np.abs(out))
-    if peak > 0.92:
-        out = out * (0.92 / peak)
+    # 硬限幅到 0.95，避免任何削波
+    out = np.clip(out, -0.95, 0.95)
 
     return out
-
-
-def _spectral_repair(y, sr, params):
-    """单次 STFT/ISTFT 完成降噪+去齿音，避免多次变换
-    重点消除音乐噪声（musical noise）导致的呲呲电流声"""
-    is_stereo = y.ndim > 1 and y.shape[0] == 2
-    if is_stereo:
-        ch_out = np.zeros_like(y)
-        for ch in range(y.shape[0]):
-            ch_out[ch] = _spectral_repair(y[ch], sr, params)
-        return ch_out
-
-    S = stft(y, n_fft=N_FFT, hop_length=HOP_LENGTH)
-    mag = np.abs(S)
-    phase = np.angle(S)
-
-    freqs = fft_frequencies(sr=sr, n_fft=N_FFT)
-    n_freqs, n_frames = mag.shape
-
-    nr_amount = params.get("noise_reduction", 0)
-    deess_amount = params.get("de_essing", 0)
-
-    if nr_amount > 0:
-        # 噪声估计：使用中位数而非均值，更鲁棒
-        noise_frames = max(3, n_frames // 15)
-        noise_profile = np.median(mag[:, :noise_frames], axis=1, keepdims=True)
-
-        # 计算 SNR
-        signal_power = mag ** 2
-        noise_power = noise_profile ** 2 + 1e-10
-        snr = signal_power / noise_power
-
-        # 软阈值增益 - 极保守的降噪，重点消除音乐噪声
-        gain = snr / (snr + 1.0)
-        # floor 提高到 0.65-0.75：即使是最强降噪也保留大部分信号
-        # 这是消除音乐噪声的关键：不能过度衰减任何频点
-        floor = 0.65 + 0.10 * (1 - nr_amount)
-        gain = np.maximum(gain, floor)
-
-        # 频谱时间平滑：使用前后帧平均，消除帧间增益突变
-        # 这是消除音乐噪声的第二关键步骤
-        gain_smooth = gain.copy()
-        for i in range(1, n_frames - 1):
-            gain_smooth[:, i] = 0.25 * gain[:, i-1] + 0.5 * gain[:, i] + 0.25 * gain[:, i+1]
-        gain = gain_smooth
-
-        # 额外的时间维度递归平滑
-        alpha = 0.70 + 0.15 * nr_amount
-        for i in range(1, n_frames):
-            gain[:, i] = alpha * gain[:, i-1] + (1 - alpha) * gain[:, i]
-
-        mag *= gain
-
-    # 去齿音：极保守地衰减 6kHz-10kHz 区域
-    if deess_amount > 0:
-        sibilance_mask = (freqs >= 6000) & (freqs <= 10000)
-        if np.any(sibilance_mask):
-            attenuation = 1.0 - 0.2 * deess_amount
-            mag[sibilance_mask, :] *= attenuation
-
-    S_repaired = mag * np.exp(1j * phase)
-    out = istft(S_repaired, hop_length=HOP_LENGTH, length=len(y))
-
-    # 时域轻微低通滤波：消除频谱处理引入的高频 artifacts
-    # 使用 6 阶 Butterworth，截止频率 18kHz（对 44.1k/48k 采样率都安全）
-    nyquist = sr / 2
-    if nyquist > 18000:
-        cutoff = 18000 / nyquist
-        b, a = butter(6, cutoff, btype='low')
-        out = filtfilt(b, a, out)
-
-    return out
-
-
-def _loudness_normalize(y, sr, target_lufs=-16.0):
-    """基于 RMS 的响度归一化，轻量快速"""
-    is_stereo = y.ndim > 1 and y.shape[0] == 2
-    if is_stereo:
-        y_mono = y.mean(axis=0)
-    else:
-        y_mono = y
-
-    rms_val = np.sqrt(np.mean(y_mono ** 2))
-    if rms_val < 1e-10:
-        return y
-
-    target_rms = 10 ** (target_lufs / 20.0)
-    gain = target_rms / rms_val
-
-    if is_stereo:
-        return y * gain
-    return y * gain
-
-
-def _peak_limit(y, threshold=0.99):
-    """软限幅，防止削波 - 使用平滑增益避免硬削波失真"""
-    peak = np.max(np.abs(y))
-    if peak <= threshold:
-        return y
-
-    # 软限幅：超过阈值的样本使用平滑过渡
-    abs_y = np.abs(y)
-    gain = np.ones_like(y)
-
-    # 对超过阈值的样本计算增益
-    over_mask = abs_y > threshold
-    if np.any(over_mask):
-        # 软限幅曲线：越接近阈值，压缩越轻
-        over_amount = abs_y[over_mask] - threshold
-        max_over = np.max(over_amount) if len(over_amount) > 0 else 1e-10
-        # 使用平方根曲线实现平滑过渡
-        compressed = threshold + np.sqrt(over_amount / (max_over + 1e-10)) * 0.01
-        gain[over_mask] = compressed / abs_y[over_mask]
-
-    return y * gain
 
 
 def _simple_declip(y, amount):
-    """简单削波检测与修复 - 使用平滑曲线避免高频失真"""
+    """削波修复：使用线性插值而非硬拐点"""
     if amount <= 0:
         return y
-    threshold = 0.92
+    threshold = 0.90
     mask = np.abs(y) > threshold
     if not np.any(mask):
         return y
+
     y_out = y.copy()
-    # 使用平方根曲线平滑过渡，避免硬拐点产生高频谐波
-    over = np.abs(y_out[mask]) - threshold
-    max_over = np.max(over) if len(over) > 0 else 1e-10
-    scale = 1.0 - amount * 0.4
-    smoothed = threshold + np.sqrt(over / (max_over + 1e-10)) * over * scale
-    y_out[mask] = np.sign(y_out[mask]) * np.minimum(smoothed, 0.99)
+    # 找到所有削波区域并做线性插值修复
+    indices = np.where(mask)[0]
+    if len(indices) == 0:
+        return y_out
+
+    # 将削波样本限制在阈值内，不做复杂非线性处理
+    y_out[mask] = np.sign(y_out[mask]) * threshold
     return y_out
 
 
 def _simple_depop(y, sr, amount):
-    """简单爆音检测：基于幅度突变的脉冲修复"""
+    """爆音检测：基于幅度突变的脉冲修复"""
     if amount <= 0:
         return y
     is_stereo = y.ndim > 1 and y.shape[0] == 2
@@ -277,13 +143,13 @@ def _simple_depop(y, sr, amount):
     median_diff = np.median(diff)
     if median_diff < 1e-10:
         return y
-    threshold = median_diff * (10 + 20 * amount)
+    threshold = median_diff * (15 + 25 * amount)
     pop_mask = np.concatenate(([False], diff > threshold))
     if not np.any(pop_mask):
         return y
 
     y_out = y.copy()
-    window = int(sr * 0.001)
+    window = int(sr * 0.002)
     indices = np.where(pop_mask)[0]
     for idx in indices:
         left = max(0, idx - window)
@@ -291,6 +157,34 @@ def _simple_depop(y, sr, amount):
         if right - left > 2:
             y_out[left:right] = np.linspace(y[left], y[right - 1], right - left)
     return y_out
+
+
+def _loudness_normalize(y, sr, target_lufs=-16.0):
+    """基于 RMS 的响度归一化"""
+    is_stereo = y.ndim > 1 and y.shape[0] == 2
+    if is_stereo:
+        y_mono = y.mean(axis=0)
+    else:
+        y_mono = y
+
+    rms_val = np.sqrt(np.mean(y_mono ** 2))
+    if rms_val < 1e-10:
+        return y
+
+    target_rms = 10 ** (target_lufs / 20.0)
+    gain = target_rms / rms_val
+
+    # 限制最大增益为 +12dB，避免过度放大噪声底
+    gain = min(gain, 4.0)
+
+    if is_stereo:
+        return y * gain
+    return y * gain
+
+
+def _peak_limit(y, threshold=0.95):
+    """硬限幅，防止削波"""
+    return np.clip(y, -threshold, threshold)
 
 
 def repair_audio(input_path: str, output_path: str, params: dict, progress_callback=None) -> dict:
@@ -314,38 +208,42 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
     if progress_callback:
         progress_callback(0.15, f"v2.2a {music_type} 处理中...")
 
-    # 时域修复
+    # 时域修复：削波修复
     if params.get("de_clipping", 0) > 0:
         y = _simple_declip(y, params["de_clipping"])
         issues_found.append("削波修复")
 
+    # 时域修复：爆音修复
     if params.get("de_pop", 0) > 0:
         y = _simple_depop(y, sr, params["de_pop"])
         issues_found.append("爆音修复")
 
     gc.collect()
 
-    # 单段压缩替代多段压缩
+    # 时域压缩：平滑包络检测，避免频域 artifacts
     if params.get("dynamic_range", 0) > 0:
         if progress_callback:
-            progress_callback(0.35, "v2.2a 动态压缩...")
-        y = _single_band_compress(y, sr, params["dynamic_range"])
-        issues_found.append("单段压缩")
+            progress_callback(0.40, "v2.2a 动态压缩...")
+        y = _smooth_compress(y, sr, params["dynamic_range"])
+        issues_found.append("动态压缩")
         gc.collect()
 
-    # 单次 STFT 频谱修复（降噪+去齿音）
-    if params.get("noise_reduction", 0) > 0 or params.get("de_essing", 0) > 0:
+    # v2.2a 移动端：不使用频谱减法降噪，避免音乐噪声/电流声
+    # 如果启用了降噪参数，仅做极轻微的时域高通滤波去除直流偏移
+    if params.get("noise_reduction", 0) > 0:
         if progress_callback:
-            progress_callback(0.55, "v2.2a 频谱修复...")
-        y = _spectral_repair(y, sr, params)
-        issues_found.append("频谱修复")
+            progress_callback(0.60, "v2.2a 噪声抑制...")
+        # 仅去除直流偏移和极低频噪声，不做频谱处理
+        for ch in range(y.shape[0]):
+            y[ch] = y[ch] - np.mean(y[ch])
+        issues_found.append("直流抑制")
         gc.collect()
 
     # 响度归一化
     if progress_callback:
         progress_callback(0.85, "v2.2a 响度归一化...")
     y = _loudness_normalize(y, sr, -16.0)
-    y = _peak_limit(y, 0.99)
+    y = _peak_limit(y, 0.95)
     issues_found.append("响度归一化")
 
     if was_mono:
@@ -362,7 +260,6 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
         subtype = subtype_map.get(bit_depth, "PCM_24")
         sf.write(output_path, y.T if y.ndim > 1 else y, sr, subtype=subtype)
     except Exception:
-        # fallback: 使用 scipy.io.wavfile
         from scipy.io import wavfile
         if y.ndim > 1:
             y_out = y.T
