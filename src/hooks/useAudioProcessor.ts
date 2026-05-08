@@ -973,18 +973,22 @@ export function useAudioProcessor() {
             }
 
             const previewUrl = getPreviewUrl(cachedTaskId || currentTaskId, 'repaired');
-            setBackendPreviewUrl(previewUrl);
-            startStreamingPlayback(previewUrl);
-            setPlayMode('backend');
-            setHasBeenProcessed(true);
+      setBackendPreviewUrl(previewUrl);
+      startStreamingPlayback(previewUrl);
+      setHasBeenProcessed(true);
 
-            if (audioFile && (cachedTaskId || currentTaskId)) {
-              loadAudioFromUrl(previewUrl, processingOptions.sampleRate).then(repairedBuffer => {
-                setBackendProcessedBuffer(repairedBuffer);
-              }).catch(err => {
-                console.warn('[applySettings] 后台下载缓存音频失败:', err);
-              });
-            }
+      // 先加载修复后的音频 buffer，加载完成后再切换模式
+      if (audioFile && (cachedTaskId || currentTaskId)) {
+        loadAudioFromUrl(previewUrl, processingOptions.sampleRate).then(repairedBuffer => {
+          setBackendProcessedBuffer(repairedBuffer);
+          setPlayMode('backend');
+        }).catch(err => {
+          console.warn('[applySettings] 后台下载缓存音频失败:', err);
+          setPlayMode('backend');
+        });
+      } else {
+        setPlayMode('backend');
+      }
 
             saveSession({
               file: audioFile,
@@ -1237,19 +1241,23 @@ export function useAudioProcessor() {
         });
       }
       anySuccess = true;
-      setPlayMode('backend');
 
       const previewUrl = effectiveBackendResult.value.previewUrl;
       if (previewUrl) {
         startStreamingPlayback(previewUrl);
       }
 
+      // 先加载修复后的音频 buffer，加载完成后再切换模式
       if (audioFile && taskIdRef.current) {
         loadAudioFromUrl(previewUrl, processingOptions.sampleRate).then(repairedBuffer => {
           setBackendProcessedBuffer(repairedBuffer);
+          setPlayMode('backend');
         }).catch(err => {
           console.warn('[applySettings] 后台下载修复后音频失败:', err);
+          setPlayMode('backend');
         });
+      } else {
+        setPlayMode('backend');
       }
     }
 
