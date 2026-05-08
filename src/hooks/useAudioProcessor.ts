@@ -1252,16 +1252,9 @@ export function useAudioProcessor() {
 
     if (currentTaskId && backendAvailable) {
       try {
-        setIsProcessing(true);
-        setProcessingStep('AI检测原始音频...');
-        setProcessingProgress(0);
-
-        const tryMapDetection = (result: unknown) => {
-          if (result && typeof result === 'object') {
-            return mapDetectionResult(result as import('../services/backendApi').BackendDetectionResult);
-          }
-          return null;
-        };
+        // ===== 检测缓存查询与二次确认 =====
+        setProcessingStep('查询检测缓存...');
+        writeLog(`[runAIDetection] 查询检测缓存: taskId=${currentTaskId}`);
 
         let statusData: Record<string, unknown> | null = null;
         try {
@@ -1271,22 +1264,95 @@ export function useAudioProcessor() {
           }
         } catch {}
 
-        if (statusData?.detection_result) {
-          const mapped = tryMapDetection(statusData.detection_result);
-          if (mapped) {
-            writeLog(`[runAIDetection] 从任务状态恢复原始检测结果`);
-            setOriginalAIDetection(mapped);
+        // 检查是否有缓存的检测结果
+        const hasCachedOriginal = statusData?.detection_result;
+        const hasCachedRepaired = statusData?.repaired_detection_result;
+        let skipDetectionCache = false;
+
+        if (hasCachedOriginal || hasCachedRepaired) {
+          const originalResult = hasCachedOriginal ? (statusData?.detection_result as Record<string, unknown>) : null;
+          const repairedResult = hasCachedRepaired ? (statusData?.repaired_detection_result as Record<string, unknown>) : null;
+
+          const originalAIProb = originalResult?.ai_probability as number;
+          const repairedAIProb = repairedResult?.ai_probability as number;
+
+          let confirmMessage = '检测到已有 AI 检测结果：\n\n';
+          if (originalResult) {
+            confirmMessage += `原始音频：AI 概率 ${Math.round((originalAIProb || 0) * 100)}%\n`;
           }
-        }
-        if (statusData?.repaired_detection_result) {
-          const mapped = tryMapDetection(statusData.repaired_detection_result);
-          if (mapped) {
-            writeLog(`[runAIDetection] 从任务状态恢复修复后检测结果`);
-            setBackendAIDetection(mapped);
+          if (repairedResult) {
+            confirmMessage += `修复后音频：AI 概率 ${Math.round((repairedAIProb || 0) * 100)}%\n`;
+          }
+          confirmMessage += '\n点击「确定」使用已有结果\n点击「取消」重新检测';
+
+          const useCache = window.confirm(confirmMessage);
+
+          if (useCache) {
+            writeLog(`[runAIDetection] 用户选择使用缓存的检测结果`);
+
+            // 直接使用缓存结果
+            const tryMapDetection = (result: unknown) => {
+              if (result && typeof result === 'object') {
+                return mapDetectionResult(result as import('../services/backendApi').BackendDetectionResult);
+              }
+              return null;
+            };
+
+            if (hasCachedOriginal) {
+              const mapped = tryMapDetection(statusData?.detection_result);
+              if (mapped) {
+                setOriginalAIDetection(mapped);
+                writeLog(`[runAIDetection] 使用缓存的原始检测结果`);
+              }
+            }
+            if (hasCachedRepaired) {
+              const mapped = tryMapDetection(statusData?.repaired_detection_result);
+              if (mapped) {
+                setBackendAIDetection(mapped);
+                writeLog(`[runAIDetection] 使用缓存的修复后检测结果`);
+              }
+            }
+
+            setIsProcessing(false);
+            setProcessingStep('');
+            setProcessingProgress(0);
+            return;
+          } else {
+            writeLog(`[runAIDetection] 用户选择重新检测，跳过所有缓存`);
+            skipDetectionCache = true;
           }
         }
 
-        const origRes = await detectAudio(currentTaskId, 'original', detectorVersion);
+        setIsProcessing(true);
+        setProcessingStep('AI检测原始音频...');
+        setProcessingProgress(0);
+
+        // 如果用户选择重新检测，跳过从 statusData 恢复缓存结果
+        if (!skipDetectionCache) {
+          const tryMapDetection = (result: unknown) => {
+            if (result && typeof result === 'object') {
+              return mapDetectionResult(result as import('../services/backendApi').BackendDetectionResult);
+            }
+            return null;
+          };
+
+          if (statusData?.detection_result) {
+            const mapped = tryMapDetection(statusData.detection_result);
+            if (mapped) {
+              writeLog(`[runAIDetection] 从任务状态恢复原始检测结果`);
+              setOriginalAIDetection(mapped);
+            }
+          }
+          if (statusData?.repaired_detection_result) {
+            const mapped = tryMapDetection(statusData.repaired_detection_result);
+            if (mapped) {
+              writeLog(`[runAIDetection] 从任务状态恢复修复后检测结果`);
+              setBackendAIDetection(mapped);
+            }
+          }
+        }
+
+        const origRes = await detectAudio(currentTaskId, 'original', detectorVersion, skipDetectionCache);
         if (origRes.detection_result) {
           writeLog(`[runAIDetection] 原始检测${origRes.cached ? '缓存命中' : '有结果'}，更新`);
           setOriginalAIDetection(mapDetectionResult(origRes.detection_result));
@@ -1327,7 +1393,7 @@ export function useAudioProcessor() {
 
         if (hasBeenProcessed && backendProcessedBuffer) {
           setProcessingStep('AI检测后端修复音频...');
-          const repairedRes = await detectAudio(currentTaskId, 'repaired', detectorVersion);
+          const repairedRes = await detectAudio(currentTaskId, 'repaired', detectorVersion, skipDetectionCache);
           if (repairedRes.detection_result) {
             writeLog(`[runAIDetection] 修复后检测${repairedRes.cached ? '缓存命中' : '有结果'}，更新`);
             setBackendAIDetection(mapDetectionResult(repairedRes.detection_result));

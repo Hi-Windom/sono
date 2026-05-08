@@ -10,6 +10,8 @@ from services.dsp_utils import (
     hpss,
     istft,
     mfcc,
+    mel_spectrogram,
+    power_to_db,
     note_to_hz,
     onset_detect,
     onset_strength,
@@ -44,4 +46,6 @@ __all__ = [
     "pyin",
     "note_to_hz",
     "frame",
+    "mel_spectrogram",
+    "power_to_db",
 ]

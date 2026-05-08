@@ -101,10 +101,11 @@ class DetectRequest(BaseModel):
     task_id: str
     type: str = "original"
     detector_version: str = "v1.1"
+    skip_cache: bool = False
 
 @router.post("/detect")
 async def detect_audio(request: DetectRequest):
-    logger.info(f"[/detect] 收到请求: task_id={request.task_id}, type={request.type}, detector_version={request.detector_version}")
+    logger.info(f"[/detect] 收到请求: task_id={request.task_id}, type={request.type}, detector_version={request.detector_version}, skip_cache={request.skip_cache}")
 
     task = get_task(request.task_id)
     if not task:
@@ -121,18 +122,22 @@ async def detect_audio(request: DetectRequest):
 
     label = "修复后" if request.type == "repaired" else "原始"
 
-    cached_result_key = "repaired_detection_result" if request.type == "repaired" else "detection_result"
-    cached_result = task.get(cached_result_key)
-    if cached_result and isinstance(cached_result, dict):
-        cached_version = cached_result.get("detector_version", "")
-        if cached_version == request.detector_version:
-            logger.info(f"[/detect] 缓存命中: task_id={request.task_id} type={request.type} version={request.detector_version}")
-            return {
-                "task_id": request.task_id,
-                "status": "detected",
-                "cached": True,
-                "detection_result": cached_result,
-            }
+    # 如果 skip_cache=True，跳过缓存检查，强制重新检测
+    if not request.skip_cache:
+        cached_result_key = "repaired_detection_result" if request.type == "repaired" else "detection_result"
+        cached_result = task.get(cached_result_key)
+        if cached_result and isinstance(cached_result, dict):
+            cached_version = cached_result.get("detector_version", "")
+            if cached_version == request.detector_version:
+                logger.info(f"[/detect] 缓存命中: task_id={request.task_id} type={request.type} version={request.detector_version}")
+                return {
+                    "task_id": request.task_id,
+                    "status": "detected",
+                    "cached": True,
+                    "detection_result": cached_result,
+                }
+    else:
+        logger.info(f"[/detect] 跳过缓存检查: task_id={request.task_id} type={request.type}")
 
     from database import update_task
     update_task(

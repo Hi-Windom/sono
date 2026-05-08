@@ -264,16 +264,16 @@ export interface DetectAudioResponse {
   detection_result?: BackendDetectionResult;
 }
 
-export async function detectAudio(taskId: string, type: 'original' | 'repaired' = 'original', detectorVersion?: string): Promise<DetectAudioResponse> {
+export async function detectAudio(taskId: string, type: 'original' | 'repaired' = 'original', detectorVersion?: string, skipCache: boolean = false): Promise<DetectAudioResponse> {
   const url = `${API_BASE}/detect`;
   const versionToSend = detectorVersion || 'v1.0';
-  log('detect', `POST ${url} task_id=${taskId} type=${type} detector_version=${versionToSend}`);
+  log('detect', `POST ${url} task_id=${taskId} type=${type} detector_version=${versionToSend} skipCache=${skipCache}`);
 
   try {
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ task_id: taskId, type, detector_version: versionToSend }),
+      body: JSON.stringify({ task_id: taskId, type, detector_version: versionToSend, skip_cache: skipCache }),
     });
 
     log('detect', `response status=${res.status} ok=${res.ok}`);

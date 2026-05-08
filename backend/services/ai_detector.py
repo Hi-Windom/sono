@@ -5,6 +5,7 @@ from typing import Any
 from services.detectors.ai_detector_v1_0 import detect_ai_audio as detect_ai_audio_v1_0
 from services.detectors.ai_detector_v1_1 import detect_ai_audio as detect_ai_audio_v1_1
 from services.detectors.ai_detector_v1_2 import detect_ai_audio as detect_ai_audio_v1_2
+from services.detectors.ai_detector_v1_3 import detect_ai_audio as detect_ai_audio_v1_3
 
 DETECTOR_VERSIONS = {
     "v1.0": {
@@ -25,9 +26,15 @@ DETECTOR_VERSIONS = {
         "description": "增强版特征分析，更精准的AI检测",
         "detect_fn": detect_ai_audio_v1_2,
     },
+    "v1.3": {
+        "name": "v1.3",
+        "label": "v1.3",
+        "description": "拼接痕迹+频谱指纹分析（无需训练）",
+        "detect_fn": detect_ai_audio_v1_3,
+    },
 }
 
-DEFAULT_VERSION = "v1.1"
+DEFAULT_VERSION = "v1.3"
 
 
 def get_detector_versions() -> list[dict[str, Any]]:

@@ -400,3 +400,89 @@ def note_to_hz(note):
 def frame(y, frame_length=2048, hop_length=512):
     frames = _stride_frames(y, frame_length, hop_length)
     return frames.T
+
+
+def mel_frequencies(n_mels=128, fmin=0.0, fmax=11025.0):
+    """计算 mel 频率刻度"""
+    def hz_to_mel(hz):
+        return 2595.0 * np.log10(1.0 + hz / 700.0)
+
+    def mel_to_hz(mel):
+        return 700.0 * (10.0 ** (mel / 2595.0) - 1.0)
+
+    mel_min = hz_to_mel(fmin)
+    mel_max = hz_to_mel(fmax)
+    mels = np.linspace(mel_min, mel_max, n_mels)
+    return mel_to_hz(mels)
+
+
+def mel_filterbank(sr, n_fft, n_mels=128, fmin=0.0, fmax=None):
+    """构建 mel 滤波器组"""
+    if fmax is None:
+        fmax = sr / 2.0
+
+    freqs = fft_frequencies(sr=sr, n_fft=n_fft)
+    mel_freqs = mel_frequencies(n_mels=n_mels, fmin=fmin, fmax=fmax)
+
+    # 构建三角滤波器
+    weights = np.zeros((n_mels, len(freqs)))
+
+    for i in range(n_mels):
+        # 三角滤波器的三个点
+        if i == 0:
+            left = mel_freqs[0]
+        else:
+            left = mel_freqs[i - 1]
+
+        center = mel_freqs[i]
+
+        if i == n_mels - 1:
+            right = mel_freqs[-1]
+        else:
+            right = mel_freqs[i + 1]
+
+        # 上升沿
+        for j, f in enumerate(freqs):
+            if left < f <= center:
+                weights[i, j] = (f - left) / (center - left)
+            elif center < f < right:
+                weights[i, j] = (right - f) / (right - center)
+
+    return weights
+
+
+def mel_spectrogram(y=None, sr=22050, S=None, n_fft=2048, hop_length=512, n_mels=128, fmin=0.0, fmax=None):
+    """计算 mel 频谱图"""
+    if S is None:
+        if y is None:
+            raise ValueError("Either y or S must be provided")
+        S = np.abs(stft(y, n_fft=n_fft, hop_length=hop_length))
+
+    # 功率谱
+    power = S ** 2
+
+    # 构建 mel 滤波器组
+    mel_basis = mel_filterbank(sr, n_fft, n_mels=n_mels, fmin=fmin, fmax=fmax)
+
+    # 应用 mel 滤波器
+    mel_spec = np.dot(mel_basis, power)
+
+    return mel_spec
+
+
+def power_to_db(S, ref=1.0, amin=1e-10, top_db=80.0):
+    """将功率谱转换为 dB 刻度"""
+    S = np.asarray(S)
+
+    # 确保最小值
+    S = np.maximum(S, amin)
+
+    # 计算 dB
+    db = 10.0 * np.log10(S / ref)
+
+    # 限制动态范围
+    if top_db is not None:
+        max_db = np.max(db)
+        db = np.maximum(db, max_db - top_db)
+
+    return db

@@ -1,0 +1,35 @@
+{
+  "000f2fbf_\u591c\u4e0d\u5f52\u5bbf.mp3": {
+    "ai_prob": 0.4693,
+    "human_prob": 0.5307,
+    "signature": "mixed",
+    "confidence": 0.72,
+    "reasons": [
+      "\u9891\u8c31\u7ed3\u6784\u7a81\u53d8\u660e\u663e",
+      "\u8282\u594f\u6df7\u4e71",
+      "\u65f6\u57df\u5305\u7edc\u7a81\u53d8"
+    ]
+  },
+  "1dd4ab3e_\u4f60\u4eec\u5531\u6211\u6765\u548c.mp3": {
+    "ai_prob": 0.4946,
+    "human_prob": 0.5054,
+    "signature": "mixed",
+    "confidence": 0.72,
+    "reasons": [
+      "\u9891\u8c31\u7ed3\u6784\u7a81\u53d8\u660e\u663e",
+      "\u8282\u594f\u6df7\u4e71",
+      "\u65f6\u57df\u5305\u7edc\u7a81\u53d8"
+    ]
+  },
+  "1e2f0426_\u4f60\u4e00\u53e5\u6211\u4e00\u53e5.mp3": {
+    "ai_prob": 0.4955,
+    "human_prob": 0.5045,
+    "signature": "mixed",
+    "confidence": 0.72,
+    "reasons": [
+      "\u9891\u8c31\u7ed3\u6784\u7a81\u53d8\u660e\u663e",
+      "\u8282\u594f\u6df7\u4e71",
+      "\u65f6\u57df\u5305\u7edc\u7a81\u53d8"
+    ]
+  }
+}
