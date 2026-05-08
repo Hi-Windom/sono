@@ -1829,14 +1829,23 @@ export function useAudioProcessor() {
   }, [stopPlaying, playMode, audioBuffer]);
 
   const switchPlayMode = useCallback(async (mode: PlayMode) => {
-    // 如果当前没有播放，直接切换模式
+    // 如果目标模式没有音频数据，只切换状态
+    const targetBuffer = mode === 'browser' ? browserProcessedBuffer
+      : mode === 'backend' ? backendProcessedBuffer
+      : audioBuffer;
+    if (!targetBuffer) {
+      setPlayMode(mode);
+      return;
+    }
+
+    // 如果没有在播放，直接切换模式
     if (!isPlayingRef.current) {
       setPlayMode(mode);
       return;
     }
 
     // 如果切换到当前已激活的模式，无需操作
-    if (activeModeRef.current === mode && modeNodesRef.current[mode]) {
+    if (activeModeRef.current === mode) {
       setPlayMode(mode);
       return;
     }
@@ -1847,33 +1856,25 @@ export function useAudioProcessor() {
       await context.resume();
     }
 
-    const newBuffer = mode === 'browser' ? browserProcessedBuffer
-      : mode === 'backend' ? backendProcessedBuffer
-      : audioBuffer;
-    if (!newBuffer) {
-      setPlayMode(mode);
-      return;
-    }
-
-    const fadeDuration = 0.025; // 25ms 淡入淡出
     const now = context.currentTime;
-    const startPosition = Math.min(currentPosition, newBuffer.duration - 0.01);
+    const fadeDuration = 0.02; // 20ms 淡出
+    const startPosition = Math.min(currentPosition, targetBuffer.duration - 0.01);
 
-    // 静音策略：目标模式是否已有节点？
-    const existing = modeNodesRef.current[mode];
-    if (existing) {
-      // 已有节点：同步到当前播放位置，然后淡入
+    // 1. 先停止当前播放的节点（带淡出）
+    const currentNode = modeNodesRef.current[activeModeRef.current];
+    if (currentNode) {
       try {
-        existing.source.stop();
-        existing.source.disconnect();
-        existing.gain.disconnect();
+        currentNode.source.onended = null;
+        currentNode.gain.gain.setValueAtTime(currentNode.gain.gain.value, now);
+        currentNode.gain.gain.linearRampToValueAtTime(0.0001, now + fadeDuration);
+        currentNode.source.stop(now + fadeDuration + 0.01);
       } catch {}
     }
 
-    // 创建新节点（或重建已有模式的节点到新位置）
+    // 2. 创建新节点
     const newSource = context.createBufferSource();
     const newGain = context.createGain();
-    newSource.buffer = newBuffer;
+    newSource.buffer = targetBuffer;
     newSource.connect(newGain);
     newGain.connect(analyserRef.current!);
     analyserRef.current!.connect(context.destination);
@@ -1889,6 +1890,11 @@ export function useAudioProcessor() {
       }
     };
 
+    // 3. 清理所有旧节点引用（不依赖setTimeout）
+    (Object.keys(modeNodesRef.current) as PlayMode[]).forEach((m) => {
+      modeNodesRef.current[m] = null;
+    });
+
     modeNodesRef.current[mode] = { source: newSource, gain: newGain };
     sourceNodeRef.current = newSource;
     gainNodeRef.current = newGain;
@@ -1896,24 +1902,6 @@ export function useAudioProcessor() {
 
     startTimeRef.current = now - startPosition;
     newSource.start(now, startPosition);
-
-    // 淡出并清理其他所有模式的节点，防止音频叠加和 onended 干扰
-    (Object.keys(modeNodesRef.current) as PlayMode[]).forEach((m) => {
-      if (m === mode) return;
-      const node = modeNodesRef.current[m];
-      if (!node) return;
-      try {
-        node.source.onended = null;
-        node.gain.gain.setValueAtTime(node.gain.gain.value, now);
-        node.gain.gain.linearRampToValueAtTime(0.0001, now + fadeDuration);
-        setTimeout(() => {
-          try { node.source.stop(); } catch {}
-          try { node.source.disconnect(); } catch {}
-          try { node.gain.disconnect(); } catch {}
-          modeNodesRef.current[m] = null;
-        }, fadeDuration * 1000 + 30);
-      } catch {}
-    });
 
     setPlayMode(mode);
 
@@ -1924,7 +1912,7 @@ export function useAudioProcessor() {
     const updateTime = () => {
       if (isPlayingRef.current) {
         const elapsed = context.currentTime - startTimeRef.current;
-        if (elapsed >= newBuffer.duration) {
+        if (elapsed >= targetBuffer.duration) {
           stopPlaying();
           setCurrentTime(0);
           pausedAtRef.current = 0;

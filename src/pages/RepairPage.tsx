@@ -110,9 +110,6 @@ export default function RepairPage() {
     : playMode === 'backend' ? backendProcessedBuffer
     : audioBuffer;
 
-  // eslint-disable-next-line no-console
-  console.log('[RepairPage] playMode:', playMode, 'backendBuffer:', !!backendProcessedBuffer, 'browserBuffer:', !!browserProcessedBuffer, 'activeBuffer:', !!activeBuffer);
-
   const browserBufferInfo = browserProcessedBuffer ? {
     sampleRate: browserProcessedBuffer.sampleRate,
     channels: browserProcessedBuffer.numberOfChannels,
@@ -293,6 +290,7 @@ export default function RepairPage() {
                 {activeBuffer && (
                   <div className="mt-6">
                     <WaveformVisualizer
+                      key={`waveform-${playMode}-${activeBuffer.duration}-${activeBuffer.numberOfChannels}`}
                       audioBuffer={activeBuffer}
                       label={playMode !== 'original' && ((playMode === 'backend' && backendProcessedBuffer) || (playMode === 'browser' && browserProcessedBuffer)) ? '修复后波形' : '原始波形'}
                       currentTime={currentTime}

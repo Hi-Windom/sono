@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 
 interface BuildInfoData {
   buildTime: string;
@@ -10,6 +10,8 @@ interface BuildInfoData {
 export function BuildInfo() {
   const [info, setInfo] = useState<BuildInfoData | null>(null);
   const [hmrTime, setHmrTime] = useState<string | null>(null);
+  const [clickCount, setClickCount] = useState(0);
+  const clickTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     try {
@@ -61,8 +63,26 @@ export function BuildInfo() {
     }
   };
 
+  const handleClick = () => {
+    const newCount = clickCount + 1;
+    setClickCount(newCount);
+    if (clickTimerRef.current) {
+      clearTimeout(clickTimerRef.current);
+    }
+    clickTimerRef.current = setTimeout(() => {
+      setClickCount(0);
+    }, 2000);
+    if (newCount >= 3) {
+      setClickCount(0);
+      const vc = (window as any).__vconsole__;
+      if (vc && vc.show) {
+        vc.show();
+      }
+    }
+  };
+
   return (
-    <div className="fixed bottom-2 left-2 z-50">
+    <div className="fixed bottom-2 left-2 z-50" onClick={handleClick} style={{ cursor: 'pointer' }} title="连续点击3次打开调试面板">
       <div className="bg-black/70 backdrop-blur-sm text-gray-400 text-[10px] px-2 py-1 rounded border border-gray-700/50">
         <div className="flex items-center gap-2">
           <span 
