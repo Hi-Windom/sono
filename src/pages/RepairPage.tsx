@@ -106,11 +106,12 @@ export default function RepairPage() {
   const hasBrowserResult = !!browserProcessedBuffer;
   const hasBackendResult = !!backendProcessedBuffer || !!repairResult;
 
-  // 计算当前播放模式对应的音频缓冲区
-  // 注意：只有当目标模式有数据时才切换，否则保持当前可见的缓冲区
-  const activeBuffer = playMode === 'browser' ? (browserProcessedBuffer || audioBuffer)
-    : playMode === 'backend' ? (backendProcessedBuffer || audioBuffer)
+  const activeBuffer = playMode === 'browser' ? browserProcessedBuffer
+    : playMode === 'backend' ? backendProcessedBuffer
     : audioBuffer;
+
+  // eslint-disable-next-line no-console
+  console.log('[RepairPage] playMode:', playMode, 'backendBuffer:', !!backendProcessedBuffer, 'browserBuffer:', !!browserProcessedBuffer, 'activeBuffer:', !!activeBuffer);
 
   const browserBufferInfo = browserProcessedBuffer ? {
     sampleRate: browserProcessedBuffer.sampleRate,
@@ -289,10 +290,9 @@ export default function RepairPage() {
                   </div>
                 )}
 
-                {audioBuffer && (
+                {activeBuffer && (
                   <div className="mt-6">
                     <WaveformVisualizer
-                      key={playMode}
                       audioBuffer={activeBuffer}
                       label={playMode !== 'original' && ((playMode === 'backend' && backendProcessedBuffer) || (playMode === 'browser' && browserProcessedBuffer)) ? '修复后波形' : '原始波形'}
                       currentTime={currentTime}
