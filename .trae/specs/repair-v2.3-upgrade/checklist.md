@@ -1,0 +1,20 @@
+- [ ] v2.3 算法包 `backend/services/repair/repair_v2_3/` 已创建，包含 `__init__.py` 和 `core.py`
+- [ ] v2.3 `_tanh_declip` 使用 tanh 软削波，无硬削波（铁律1合规）
+- [ ] v2.3 `_diff_clamp_depop` 每次最多修改 5 个连续采样，无大窗口替换（铁律3合规）
+- [ ] v2.3 `_global_loudness_normalize` 使用全局常量增益，无时变增益（铁律2合规）
+- [ ] v2.3 `_transparent_multiband_compress` 每子带使用全局常量增益，无 IIR 增益包络（铁律2合规）
+- [ ] v2.3 `_soft_peak_limit` 使用 tanh 软削波，无 IIR 增益包络（铁律1+2合规）
+- [ ] v2.3 处理链顺序与 v2.2 一致，保留所有 v2.2 的频谱/空间/音色步骤
+- [ ] v2.3a 算法包 `backend/services/repair/repair_v2_3a/` 已创建，包含 `__init__.py` 和 `core.py`
+- [ ] v2.3a `_spectral_denoise` 使用全局统计门限，无时变增益（铁律2合规）
+- [ ] v2.3a `_de_ess` 使用全局常量衰减因子，无时变增益（铁律2合规）
+- [ ] v2.3a 仅依赖 numpy + scipy + soundfile，无 librosa/pedalboard 依赖（移动端兼容）
+- [ ] v2.3a 处理链在 v2.2a 基础上增加了频谱降噪和齿音抑制步骤
+- [ ] `audio_repair.py` 已注册 v2.3（mobile_compatible: False, 6 模式）和 v2.3a（mobile_compatible: True, 4 模式）
+- [ ] `conftest.py` 的 ACTIVE_VERSIONS 包含 `"v2.3"` 和 `"v2.3a"`
+- [ ] `conftest.py` 的 `repair_fn` fixture 支持 v2.3/v2.3a 导入
+- [ ] `TestV23PerStepQuality` 类覆盖 v2.3 所有内联函数的 SNR 和铁律测试
+- [ ] `TestV23aPerStepQuality` 类覆盖 v2.3a 新增函数的 SNR 和铁律测试
+- [ ] 所有质量测试（baseline + per-step + iron-rule）通过
+- [ ] v2.3 的 scale-adjusted SNR 不低于 v2.2 的 80%
+- [ ] v2.3 的 HF 噪声增长不超过 v2.2 的 1.5 倍
