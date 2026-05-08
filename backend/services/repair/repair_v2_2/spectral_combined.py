@@ -12879,3 +12879,109 @@ def _fast_harmonic_richness(S, mag, freqs, sr, n_fft, intensity, music_type, n_f
         harmonics = [(2, 0.05), (3, 0.025)]
         max_harmonic_freq = 9000
     elif music_type == "classical":
+import numpy as np
+from services.librosa_compat import stft, istimport numpy as np
+from services.librosa_compat import stft, istft, fft_frequencies
+from scipy.signal import lfilter
+from .type_params import TYPE_PARAMS_MAP
+
+
+def apply_spectral_combined(y, sr, params, n_fft, hop_length, issues_found, music_type="generic"):
+    """
+    合并频谱处理 - 单次 STFT/ISTFT 完成所有频谱操作
+    Termux 兼容，纯 Python/SciPy 实现
+    """
+    result = y.copy()
+
+    de_crackle = params.get("de_crackle", 0)
+    de_essing = params.get("de_essing", 0)
+    noise_red = params.get("noise_reduction", 0)
+    harmonic_enhance = params.get("harmonic_enhance", 0)
+    harmonic_richness = params.get("harmonic_richness", 0)
+
+import numpy as np
+from services.librosa_compat import stft, istft, fft_frequencies
+from scipy.signal import lfilter
+from .type_params import TYPE_PARAMS_MAP
+
+
+def apply_spectral_combined(y, sr, params, n_fft, hop_length, issues_found, music_type="generic"):
+    """
+    合并频谱处理 - 单次 STFT/ISTFT 完成所有频谱操作
+    Termux 兼容，纯 Python/SciPy 实现
+    """
+    result = y.copy()
+
+    de_crackle = params.get("de_crackle", 0)
+    de_essing = params.get("de_essing", 0)
+    noise_red = params.get("noise_reduction", 0)
+    harmonic_enhance = params.get("harmonic_enhance", 0)
+    harmonic_richness = params.get("harmonic_richness", 0)
+
+    need_processing = (de_crackle > 0 or de_essing > 0 or noise_red > 0 or
+                       harmonic_enhance > 0 or harmonic_richness > 0)
+
+    if not need_processing:
+        return result
+
+    crackle_added = "毛刺修复v13" in issues_found
+    essing_added = "齿音抑制v13" in issues_found
+    noise_added = "智能降噪v13" in issues_found
+    enhance_added = "谐波增强v8" in issues_found
+    richness_added = "谐波丰富度v5" in issues_found
+
+    n_channels = y.shape[0]
+    freqs = fft_frequencies(sr=sr, n_fft=n_fft)
+
+    # 预计算滤波器系数
+    b_smooth = np.array([0.8])
+    a_smooth = np.array([1, -0.8])
+
+    for ch in range(n_channels):
+        data = result[ch]
+        S = stft(data, n_fft=n_fft, hop_length=hop_length)
+        mag = npimport numpy as np
+from services.librosa_compat import stft, istft, fft_frequencies
+from scipy.signal import lfilter
+from .type_params import TYPE_PARAMS_MAP
+
+
+def apply_spectral_combined(y, sr, params, n_fft, hop_length, issues_found, music_type="generic"):
+    """
+    合并频谱处理 - 单次 STFT/ISTFT 完成所有频谱操作
+    Termux 兼容，纯 Python/SciPy 实现
+    """
+    result = y.copy()
+
+    de_crackle = params.get("de_crackle", 0)
+    de_essing = params.get("de_essing", 0)
+    noise_red = params.get("noise_reduction", 0)
+    harmonic_enhance = params.get("harmonic_enhance", 0)
+    harmonic_richness = params.get("harmonic_richness", 0)
+
+    need_processing = (de_crackle > 0 or de_essing > 0 or noise_red > 0 or
+                       harmonic_enhance > 0 or harmonic_richness > 0)
+
+    if not need_processing:
+        return result
+
+    crackle_added = "毛刺修复v13" in issues_found
+    essing_added = "齿音抑制v13" in issues_found
+    noise_added = "智能降噪v13" in issues_found
+    enhance_added = "谐波增强v8" in issues_found
+    richness_added = "谐波丰富度v5" in issues_found
+
+    n_channels = y.shape[0]
+    freqs = fft_frequencies(sr=sr, n_fft=n_fft)
+
+    # 预计算滤波器系数
+    b_smooth = np.array([0.8])
+    a_smooth = np.array([1, -0.8])
+
+    for ch in range(n_channels):
+        data = result[ch]
+        S = stft(data, n_fft=n_fft, hop_length=hop_length)
+        mag = np.abs(S)
+        n_frames = mag.shape[1]
+
+        if n_frames
