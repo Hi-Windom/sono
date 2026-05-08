@@ -590,7 +590,7 @@ export function useAudioProcessor() {
     }
   }, []);
 
-  const startStreamingPlayback = useCallback((url: string) => {
+  const startStreamingPlayback = useCallback((url: string, mode: PlayMode = 'backend') => {
     stopPlaying();
 
     const context = getAudioContext();
@@ -615,6 +615,8 @@ export function useAudioProcessor() {
 
     isPlayingRef.current = true;
     setIsPlaying(true);
+    activeModeRef.current = mode;
+    setPlayMode(mode);
     startTimeRef.current = context.currentTime;
     pausedAtRef.current = 0;
     setCurrentTime(0);
@@ -973,22 +975,18 @@ export function useAudioProcessor() {
             }
 
             const previewUrl = getPreviewUrl(cachedTaskId || currentTaskId, 'repaired');
-      setBackendPreviewUrl(previewUrl);
-      startStreamingPlayback(previewUrl);
-      setHasBeenProcessed(true);
+            setBackendPreviewUrl(previewUrl);
+            startStreamingPlayback(previewUrl);
+            setHasBeenProcessed(true);
 
-      // 先加载修复后的音频 buffer，加载完成后再切换模式
-      if (audioFile && (cachedTaskId || currentTaskId)) {
-        loadAudioFromUrl(previewUrl, processingOptions.sampleRate).then(repairedBuffer => {
-          setBackendProcessedBuffer(repairedBuffer);
-          setPlayMode('backend');
-        }).catch(err => {
-          console.warn('[applySettings] 后台下载缓存音频失败:', err);
-          setPlayMode('backend');
-        });
-      } else {
-        setPlayMode('backend');
-      }
+            // 后台加载修复后的音频 buffer（startStreamingPlayback 已经设置了播放状态和模式）
+            if (audioFile && (cachedTaskId || currentTaskId)) {
+              loadAudioFromUrl(previewUrl, processingOptions.sampleRate).then(repairedBuffer => {
+                setBackendProcessedBuffer(repairedBuffer);
+              }).catch(err => {
+                console.warn('[applySettings] 后台下载缓存音频失败:', err);
+              });
+            }
 
             saveSession({
               file: audioFile,
@@ -1247,60 +1245,13 @@ export function useAudioProcessor() {
         startStreamingPlayback(previewUrl);
       }
 
-      // 先加载修复后的音频 buffer，加载完成后再切换模式
+      // 后台加载修复后的音频 buffer（startStreamingPlayback 已经设置了播放状态和模式）
       if (audioFile && taskIdRef.current) {
         loadAudioFromUrl(previewUrl, processingOptions.sampleRate).then(repairedBuffer => {
           setBackendProcessedBuffer(repairedBuffer);
-          // 如果当前正在播放后端模式，需要切换到新音频
-          if (isPlayingRef.current && activeModeRef.current === 'backend') {
-            // 停止当前播放的旧节点
-            stopAllModeNodes();
-            // 重新创建新节点播放新音频
-            const context = getAudioContext();
-            const newSource = context.createBufferSource();
-            const newGain = context.createGain();
-            newSource.buffer = repairedBuffer;
-            newSource.connect(newGain);
-            newGain.connect(analyserRef.current!);
-            analyserRef.current!.connect(context.destination);
-            newGain.gain.setValueAtTime(0, context.currentTime);
-            newGain.gain.linearRampToValueAtTime(1.0, context.currentTime + 0.015);
-            newSource.onended = () => {
-              if (isPlayingRef.current) {
-                stopPlaying();
-                setCurrentTime(0);
-                pausedAtRef.current = 0;
-              }
-            };
-            modeNodesRef.current['backend'] = { source: newSource, gain: newGain };
-            sourceNodeRef.current = newSource;
-            gainNodeRef.current = newGain;
-            newSource.start(0, pausedAtRef.current);
-            playStartTimeRef.current = performance.now();
-            startTimeRef.current = context.currentTime - pausedAtRef.current;
-            const updateTime = () => {
-              if (isPlayingRef.current) {
-                const elapsed = (performance.now() - playStartTimeRef.current) / 1000;
-                const current = pausedAtRef.current + elapsed;
-                if (current >= repairedBuffer.duration) {
-                  stopPlaying();
-                  setCurrentTime(0);
-                  pausedAtRef.current = 0;
-                } else {
-                  setCurrentTime(current);
-                  animationFrameRef.current = requestAnimationFrame(updateTime);
-                }
-              }
-            };
-            updateTime();
-          }
-          setPlayMode('backend');
         }).catch(err => {
           console.warn('[applySettings] 后台下载修复后音频失败:', err);
-          setPlayMode('backend');
         });
-      } else {
-        setPlayMode('backend');
       }
     }
 
