@@ -1830,6 +1830,9 @@ export function useAudioProcessor() {
 
     // 淡出旧音频（在启动新音频后）
     if (oldSource && oldGain) {
+      // 清除旧音频的 onended 回调，避免它调用 stopPlaying 影响新音频
+      oldSource.onended = null;
+      
       oldGain.gain.setValueAtTime(oldGain.gain.value, now);
       oldGain.gain.linearRampToValueAtTime(0.001, now + fadeOutDuration);
 
