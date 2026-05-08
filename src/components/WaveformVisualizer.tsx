@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useCallback, useState } from 'react';
+import React, { useEffect, useRef, useCallback } from 'react';
 
 interface WaveformVisualizerProps {
   audioBuffer: AudioBuffer | null;
@@ -20,9 +20,9 @@ export function WaveformVisualizer({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const waveformDataRef = useRef<{ min: number[]; max: number[] } | null>(null);
-  const [waveformKey, setWaveformKey] = useState(0);
 
-  const computeWaveformData = useCallback((buffer: AudioBuffer, width: number) => {
+  // 计算波形数据（同步）
+  function computeWaveformData(buffer: AudioBuffer, width: number): { min: number[]; max: number[] } {
     const channelData = buffer.getChannelData(0);
     const samplesPerPixel = Math.max(1, Math.floor(channelData.length / width));
 
@@ -52,61 +52,38 @@ export function WaveformVisualizer({
       maxData.push(max);
     }
 
-    waveformDataRef.current = { min: minData, max: maxData };
-  }, []);
+    return { min: minData, max: maxData };
+  }
 
-  // 当 audioBuffer 变化时，重新计算波形数据
-  useEffect(() => {
-    if (!audioBuffer) return;
+  // 绘制波形
+  function drawWaveform() {
+    if (!canvasRef.current || !audioBuffer) return;
 
     const container = containerRef.current;
-    const width = container ? container.clientWidth : 800;
-    computeWaveformData(audioBuffer, width);
-    setWaveformKey(k => k + 1);
-  }, [audioBuffer, computeWaveformData]);
-
-  // 监听窗口大小变化，重新计算波形数据
-  useEffect(() => {
-    const handleResize = () => {
-      if (!audioBuffer || !containerRef.current) return;
-      const width = containerRef.current.clientWidth;
-      computeWaveformData(audioBuffer, width);
-      setWaveformKey(k => k + 1);
-    };
-
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, [audioBuffer, computeWaveformData]);
-
-  // 绘制波形和进度
-  useEffect(() => {
-    if (!canvasRef.current || !waveformDataRef.current) return;
+    if (!container) return;
 
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const container = containerRef.current;
-    const actualWidth = container ? container.clientWidth : 800;
+    const actualWidth = container.clientWidth;
     const actualHeight = 140;
+
+    // 计算波形数据
+    const waveformData = computeWaveformData(audioBuffer, actualWidth);
+    waveformDataRef.current = waveformData;
 
     canvas.width = actualWidth * window.devicePixelRatio;
     canvas.height = actualHeight * window.devicePixelRatio;
     canvas.style.width = actualWidth + 'px';
     canvas.style.height = actualHeight + 'px';
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
 
     const width = actualWidth;
     const height = actualHeight;
-    const { min, max } = waveformDataRef.current;
+    const { min, max } = waveformData;
 
-    // 如果波形数据长度与画布宽度不匹配，需要重新计算
-    if (min.length !== width && audioBuffer) {
-      computeWaveformData(audioBuffer, width);
-      return;
-    }
-
-    // 计算进度位置
     const progressRatio = duration > 0 ? currentTime / duration : 0;
     const progressX = width * progressRatio;
 
@@ -114,24 +91,19 @@ export function WaveformVisualizer({
     ctx.fillStyle = '#0A1A2F';
     ctx.fillRect(0, 0, width, height);
 
-    // 绘制已播放区域背景
+    // 已播放区域背景
     if (progressX > 0) {
       ctx.fillStyle = 'rgba(0, 217, 255, 0.08)';
       ctx.fillRect(0, 0, progressX, height);
     }
 
-    // 绘制波形
-    const gradient = ctx.createLinearGradient(0, 0, 0, height);
-    gradient.addColorStop(0, color + 'cc');
-    gradient.addColorStop(0.5, color);
-    gradient.addColorStop(1, color + 'cc');
-
+    // 渐变
     const playedGradient = ctx.createLinearGradient(0, 0, 0, height);
     playedGradient.addColorStop(0, '#00D9FFcc');
     playedGradient.addColorStop(0.5, '#00D9FF');
     playedGradient.addColorStop(1, '#00D9FFcc');
 
-    // 绘制未播放部分（灰色）
+    // 未播放部分（灰色）
     ctx.fillStyle = 'rgba(100, 116, 139, 0.5)';
     for (let x = 0; x < width; x++) {
       if (x > progressX && x < min.length) {
@@ -141,7 +113,7 @@ export function WaveformVisualizer({
       }
     }
 
-    // 绘制已播放部分（高亮）
+    // 已播放部分（高亮）
     ctx.fillStyle = playedGradient;
     for (let x = 0; x < width; x++) {
       if (x <= progressX && x < min.length) {
@@ -151,7 +123,7 @@ export function WaveformVisualizer({
       }
     }
 
-    // 绘制中心线
+    // 中心线
     ctx.strokeStyle = color + '22';
     ctx.lineWidth = 1;
     ctx.beginPath();
@@ -159,15 +131,15 @@ export function WaveformVisualizer({
     ctx.lineTo(width, height / 2);
     ctx.stroke();
 
-    // 绘制进度条背景
+    // 进度条背景
     ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
     ctx.fillRect(0, height - 4, width, 4);
 
-    // 绘制进度条
+    // 进度条
     ctx.fillStyle = color;
     ctx.fillRect(0, height - 4, progressX, 4);
 
-    // 绘制进度指示器（圆形手柄）
+    // 进度指示器
     if (progressX > 0 && progressX < width) {
       ctx.beginPath();
       ctx.arc(progressX, height - 2, 6, 0, Math.PI * 2);
@@ -177,7 +149,7 @@ export function WaveformVisualizer({
       ctx.lineWidth = 2;
       ctx.stroke();
 
-      // 绘制垂直线
+      // 垂直线
       ctx.strokeStyle = color + '66';
       ctx.lineWidth = 1;
       ctx.beginPath();
@@ -185,9 +157,27 @@ export function WaveformVisualizer({
       ctx.lineTo(progressX, height - 8);
       ctx.stroke();
     }
-  }, [audioBuffer, color, currentTime, duration, waveformKey]);
+  }
 
-  // 点击跳转
+  // 关键：使用 key prop 强制重新挂载组件
+  // 当 audioBuffer 变化时，React 会卸载旧组件并挂载新组件
+  // 这确保画布总是使用最新的波形数据
+  useEffect(() => {
+    drawWaveform();
+  });
+
+  // 窗口大小变化时重绘
+  useEffect(() => {
+    const handleResize = () => {
+      if (audioBuffer) {
+        drawWaveform();
+      }
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [audioBuffer, currentTime, duration]);
+
   const handleClick = useCallback(
     (e: React.MouseEvent<HTMLCanvasElement>) => {
       if (!onSeek || !duration) return;
