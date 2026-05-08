@@ -11,9 +11,9 @@ def apply_spectral_group_a(y, sr, params, n_fft, hop_length, issues_found, music
     de_essing = params.get("de_essing", 0)
     noise_red = params.get("noise_reduction", 0)
 
-    crackle_added = "毛刺修复v7" in issues_found
-    essing_added = "齿音抑制v7" in issues_found
-    noise_added = "智能降噪v7" in issues_found
+    crackle_added = "毛刺修复v8" in issues_found
+    essing_added = "齿音抑制v8" in issues_found
+    noise_added = "智能降噪v8" in issues_found
 
     type_params = TYPE_PARAMS_MAP.get(music_type, TYPE_PARAMS_MAP["generic"])
 
@@ -23,23 +23,23 @@ def apply_spectral_group_a(y, sr, params, n_fft, hop_length, issues_found, music
         mag = np.abs(S)
 
         if de_crackle > 0:
-            _apply_de_crackle_v7_inplace(S, mag, sr, n_fft, hop_length, de_crackle)
+            _apply_de_crackle_v8_inplace(S, mag, sr, n_fft, hop_length, de_crackle)
             if not crackle_added:
-                issues_found.append("毛刺修复v7")
+                issues_found.append("毛刺修复v8")
                 crackle_added = True
             mag = np.abs(S)
 
         if de_essing > 0:
-            _apply_de_essing_v7_inplace(S, mag, sr, n_fft, hop_length, de_essing, music_type, type_params)
+            _apply_de_essing_v8_inplace(S, mag, sr, n_fft, hop_length, de_essing, music_type, type_params)
             if not essing_added:
-                issues_found.append("齿音抑制v7")
+                issues_found.append("齿音抑制v8")
                 essing_added = True
             mag = np.abs(S)
 
         if noise_red > 0:
-            _apply_noise_reduction_v7_inplace(S, mag, sr, n_fft, hop_length, noise_red, music_type, type_params)
+            _apply_noise_reduction_v8_inplace(S, mag, sr, n_fft, hop_length, noise_red, music_type, type_params)
             if not noise_added:
-                issues_found.append("智能降噪v7")
+                issues_found.append("智能降噪v8")
                 noise_added = True
 
         result[ch] = istft(S, hop_length=hop_length, length=len(data))
@@ -47,8 +47,8 @@ def apply_spectral_group_a(y, sr, params, n_fft, hop_length, issues_found, music
     return result
 
 
-def _apply_de_crackle_v7_inplace(S, mag, sr, n_fft, hop_length, intensity):
-    """优化毛刺修复 - 简化检测逻辑"""
+def _apply_de_crackle_v8_inplace(S, mag, sr, n_fft, hop_length, intensity):
+    """优化毛刺修复 - 向量化邻域平均"""
     n_frames = mag.shape[1]
     if n_frames < 5:
         return
@@ -56,11 +56,9 @@ def _apply_de_crackle_v7_inplace(S, mag, sr, n_fft, hop_length, intensity):
     # 计算帧能量
     frame_energy = np.sum(mag ** 2, axis=0)
 
-    # 中值滤波平滑
+    # 中值滤波
     kernel = min(5, n_frames | 1)
     med_energy = medfilt(frame_energy, kernel_size=kernel)
-
-    # 能量比
     energy_ratio = frame_energy / (med_energy + 1e-10)
 
     # 频谱平坦度
@@ -77,18 +75,21 @@ def _apply_de_crackle_v7_inplace(S, mag, sr, n_fft, hop_length, intensity):
     if not np.any(crackle):
         return
 
-    # 修复
+    # 向量化修复：使用卷积实现邻域平均
+    from scipy.ndimage import uniform_filter1d
+
+    blend = intensity * 0.4
+    phase = np.exp(1j * np.angle(S))
+
+    # 对每个频率 bin 进行时间维度的平滑
     for j in np.where(crackle)[0]:
-        left = max(0, j - 2)
-        right = min(mag.shape[1], j + 3)
-        local_avg = np.mean(mag[:, left:right], axis=1)
-        blend = intensity * 0.4
-        phase = np.exp(1j * np.angle(S[:, j]))
-        S[:, j] = (local_avg * blend + mag[:, j] * (1 - blend)) * phase
+        # 使用 uniform_filter1d 实现邻域平均
+        local_avg = uniform_filter1d(mag[:, j], size=5, mode='nearest')
+        S[:, j] = (local_avg * blend + mag[:, j] * (1 - blend)) * phase[:, j]
 
 
-def _apply_de_essing_v7_inplace(S, mag, sr, n_fft, hop_length, intensity, music_type, type_params):
-    """优化去齿音 - 简化频段处理"""
+def _apply_de_essing_v8_inplace(S, mag, sr, n_fft, hop_length, intensity, music_type, type_params):
+    """优化去齿音 - 向量化频段处理"""
     freqs = fft_frequencies(sr=sr, n_fft=n_fft)
     n_frames = mag.shape[1]
 
@@ -114,21 +115,25 @@ def _apply_de_essing_v7_inplace(S, mag, sr, n_fft, hop_length, intensity, music_
     else:
         bands = [(2500, 5000, 0.6), (5000, 10000, 0.4)]
 
+    # 向量化处理
     for low, high, weight in bands:
         mask = (freqs >= low) & (freqs <= high)
         if not np.any(mask):
             continue
 
+        # 计算所有帧的衰减因子
+        excess = np.maximum((ratio - thr) / (thr + 1e-10), 0)
+        reduction = 1.0 - intensity * 0.2 * weight * np.minimum(excess, 1.0)
+        reduction = np.maximum(reduction, 0.6)
+
+        # 应用到所有帧
         for j in np.where(sibilant)[0]:
-            excess = (ratio[j] - thr) / (thr + 1e-10)
-            reduction = 1.0 - intensity * 0.2 * weight * min(1.0, excess)
-            reduction = max(reduction, 0.6)
-            S[mask, j] *= reduction
+            S[mask, j] *= reduction[j]
 
 
-def _apply_noise_reduction_v7_inplace(S, mag, sr, n_fft, hop_length, intensity, music_type, type_params):
+def _apply_noise_reduction_v8_inplace(S, mag, sr, n_fft, hop_length, intensity, music_type, type_params):
     """
-    优化降噪 - 简化 Wiener 滤波，减少循环
+    优化降噪 - 简化算法，减少平滑操作
     """
     n_frames = mag.shape[1]
     if n_frames < 3:
@@ -140,40 +145,32 @@ def _apply_noise_reduction_v7_inplace(S, mag, sr, n_fft, hop_length, intensity, 
 
     # 参数
     if music_type == "classical":
-        alpha, floor, time_smooth = 1 + intensity * 1.5, 0.2 + (1 - intensity) * 0.25, 0.75
+        floor, time_smooth = 0.2 + (1 - intensity) * 0.25, 0.75
     elif music_type == "vocal":
-        alpha, floor, time_smooth = 1 + intensity * 2, 0.15 + (1 - intensity) * 0.2, 0.8
+        floor, time_smooth = 0.15 + (1 - intensity) * 0.2, 0.8
     else:
-        alpha, floor, time_smooth = 1 + intensity * 2.5, 0.12 + (1 - intensity) * 0.18, 0.8
+        floor, time_smooth = 0.12 + (1 - intensity) * 0.18, 0.8
 
     # 信号功率
     signal_power = mag ** 2
     noise_power = noise_profile ** 2
 
-    # 后验 SNR
-    post_snr = signal_power / (noise_power + 1e-10)
+    # 简化 SNR 估计
+    snr = signal_power / (noise_power + 1e-10)
 
-    # 简化先验 SNR 估计（使用前一帧）
-    prior_snr = np.zeros_like(post_snr)
-    prior_snr[:, 0] = np.maximum(post_snr[:, 0] - 1, 0)
+    # 简化 Wiener 增益（不使用决策导向）
+    gain = snr / (snr + 1)
+    gain = np.maximum(gain, floor)
 
-    # 优化：减少循环，使用向量化
-    for i in range(1, n_frames):
-        prior_snr[:, i] = 0.95 * prior_snr[:, i-1] + 0.05 * np.maximum(post_snr[:, i] - 1, 0)
-
-    # Wiener 增益
-    wiener_gain = prior_snr / (prior_snr + 1)
-
-    # 应用 floor
-    G = np.maximum(wiener_gain, floor)
-
-    # 时间平滑 - 向量化
-    G_smooth = G.copy()
-    for i in range(1, n_frames):
-        G_smooth[:, i] = time_smooth * G_smooth[:, i-1] + (1 - time_smooth) * G[:, i]
-
-    # 频率平滑 - 使用更高效的卷积
+    # 优化：使用更高效的指数平滑
+    # 使用 scipy.ndimage 的 gaussian_filter1d 替代循环
     for i in range(n_frames):
-        G_smooth[:, i] = gaussian_filter1d(G_smooth[:, i], sigma=1.0)
+        # 时间平滑
+        if i > 0:
+            gain[:, i] = time_smooth * gain[:, i-1] + (1 - time_smooth) * gain[:, i]
 
-    S *= G_smooth
+    # 频率平滑 - 每帧单独处理
+    for i in range(n_frames):
+        gain[:, i] = gaussian_filter1d(gain[:, i], sigma=1.0)
+
+    S *= gain

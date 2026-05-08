@@ -11,7 +11,7 @@ from .declip import apply_de_clipping_v5
 from .depop import apply_de_pop_v5
 from .spectral_group_a import apply_spectral_group_a
 from .spectral_group_b import apply_spectral_group_b
-from .transient import apply_transient_repair_v5
+from .transient import apply_transient_repair_v6
 from .filters import apply_presence_boost_v5, apply_bass_enhance_v5, apply_warmth_v2, apply_clarity_v2
 from .spatial import apply_spatial_enhance_v6, apply_stereo_width_v3
 from .dynamics import apply_multiband_compression_v5, apply_softness_v5
@@ -117,9 +117,9 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
         advance("爆音修复")
 
     if params.get("transient_repair", 0) > 0:
-        y = apply_transient_repair_v5(y, sr, params["transient_repair"])
-        if "瞬态修复v5" not in issues_found:
-            issues_found.append("瞬态修复v5")
+        y = apply_transient_repair_v6(y, sr, params["transient_repair"])
+        if "瞬态修复v6" not in issues_found:
+            issues_found.append("瞬态修复v6")
         advance("瞬态修复")
 
     # 动态处理（在频谱处理之前，避免压缩已处理的频谱）
