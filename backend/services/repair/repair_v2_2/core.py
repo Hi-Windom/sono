@@ -14,8 +14,8 @@ from .spectral_group_b import apply_spectral_group_b
 from .transient import apply_transient_repair_v5
 from .filters import apply_presence_boost_v5, apply_bass_enhance_v5, apply_warmth_v2, apply_clarity_v2
 from .spatial import apply_spatial_enhance_v6, apply_stereo_width_v3
-from .dynamics import apply_multiband_compression_v3, apply_softness_v3
-from .postprocess import apply_loudness_normalize_v4, apply_peak_limit_v4
+from .dynamics import apply_multiband_compression_v4, apply_softness_v4, apply_parallel_compression
+from .postprocess import apply_loudness_normalize_v5, apply_peak_limit_v5
 
 DESKTOP_WORKING_SR = 48000
 
@@ -33,6 +33,10 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
     original_sr = sr
     target_sr = params.get("sample_rate", sr)
     original_duration = round(y.shape[1] / sr, 2)
+
+    # 获取处理质量模式
+    quality_mode = params.get("quality", "standard")  # standard / hifi
+    is_hifi = quality_mode == "hifi"
 
     if MOBILE_MODE:
         working_sr = sr
@@ -74,12 +78,19 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
     else:
         params = apply_music_type_params(params, music_type, confidence)
 
-    active_steps = _count_active_steps(params, y.shape[0])
+    # HiFi 模式：进一步降低处理强度
+    if is_hifi:
+        for key in params:
+            if isinstance(params[key], (int, float)) and 0 < params[key] <= 1:
+                params[key] *= 0.6  # HiFi 模式降低 40% 处理强度
+
+    active_steps = _count_active_steps(params, y.shape[0], is_hifi)
     total_steps = active_steps + 2
     step_idx = 0
 
     if progress_callback:
-        progress_callback(0.05, f"v2.2 处理({active_steps}步)...")
+        mode_label = "HiFi" if is_hifi else "标准"
+        progress_callback(0.05, f"v2.2 {mode_label}模式处理({active_steps}步)...")
 
     def advance(label):
         nonlocal step_idx
@@ -88,24 +99,34 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
         if progress_callback:
             progress_callback(0.05 + 0.85 * step_idx / total_steps, f"v2.2 {label}...")
 
+    # 时域修复（优先处理，保护原始波形）
     if params.get("de_clipping", 0) > 0:
         y = apply_de_clipping_v5(y, sr, params["de_clipping"])
         if "削波修复v5" not in issues_found:
             issues_found.append("削波修复v5")
-        advance("削波修复v5")
+        advance("削波修复")
 
     if params.get("de_pop", 0) > 0:
         y = apply_de_pop_v5(y, sr, params["de_pop"])
         if "爆音修复v5" not in issues_found:
             issues_found.append("爆音修复v5")
-        advance("爆音修复v5")
+        advance("爆音修复")
 
     if params.get("transient_repair", 0) > 0:
         y = apply_transient_repair_v5(y, sr, params["transient_repair"])
         if "瞬态修复v5" not in issues_found:
             issues_found.append("瞬态修复v5")
-        advance("瞬态修复v5")
+        advance("瞬态修复")
 
+    # 动态处理（在频谱处理之前，避免压缩已处理的频谱）
+    if params.get("dynamic_range", 0) > 0:
+        # 使用改进的 v4 压缩
+        y = apply_multiband_compression_v4(y, sr, params["dynamic_range"], music_type)
+        if "多段压缩v4" not in issues_found:
+            issues_found.append("多段压缩v4")
+        advance("动态处理")
+
+    # 频谱修复
     need_group_a = (params.get("de_crackle", 0) > 0 or
                     params.get("de_essing", 0) > 0 or
                     params.get("noise_reduction", 0) > 0)
@@ -113,60 +134,62 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
         y = apply_spectral_group_a(y, sr, params, N_FFT, HOP_LENGTH, issues_found, music_type)
         advance("频谱修复")
 
-    need_group_b = (params.get("harmonic_enhance", 0) > 0 or
-                    params.get("harmonic_richness", 0) > 0)
-    if need_group_b:
-        y = apply_spectral_group_b(y, sr, params, N_FFT, HOP_LENGTH, issues_found, music_type)
-        advance("谐波增强")
+    # 谐波增强（HiFi 模式下可选跳过）
+    if not is_hifi:
+        need_group_b = (params.get("harmonic_enhance", 0) > 0 or
+                        params.get("harmonic_richness", 0) > 0)
+        if need_group_b:
+            y = apply_spectral_group_b(y, sr, params, N_FFT, HOP_LENGTH, issues_found, music_type)
+            advance("谐波增强")
 
+    # 空间处理
     if params.get("spatial_enhance", 0) > 0:
         y = apply_spatial_enhance_v6(y, sr, params["spatial_enhance"], music_type)
         if "空间感增强v6" not in issues_found:
             issues_found.append("空间感增强v6")
-        advance("空间感增强v6")
+        advance("空间感")
 
-    if params.get("presence_boost", 0) > 0:
-        y = apply_presence_boost_v5(y, sr, params["presence_boost"], music_type)
-        if "临场增强v5" not in issues_found:
-            issues_found.append("临场增强v5")
-        advance("临场增强v5")
+    # 音色调整（HiFi 模式下减少）
+    if not is_hifi:
+        if params.get("presence_boost", 0) > 0:
+            y = apply_presence_boost_v5(y, sr, params["presence_boost"], music_type)
+            if "临场增强v5" not in issues_found:
+                issues_found.append("临场增强v5")
+            advance("临场增强")
 
-    if params.get("bass_enhance", 0) > 0:
-        y = apply_bass_enhance_v5(y, sr, params["bass_enhance"], music_type)
-        if "低音增强v5" not in issues_found:
-            issues_found.append("低音增强v5")
-        advance("低音增强v5")
+        if params.get("bass_enhance", 0) > 0:
+            y = apply_bass_enhance_v5(y, sr, params["bass_enhance"], music_type)
+            if "低音增强v5" not in issues_found:
+                issues_found.append("低音增强v5")
+            advance("低音增强")
 
-    if params.get("warmth", 0) > 0:
-        y = apply_warmth_v2(y, sr, params["warmth"], music_type)
-        if "温暖度v2" not in issues_found:
-            issues_found.append("温暖度v2")
-        advance("温暖度v2")
+        if params.get("warmth", 0) > 0:
+            y = apply_warmth_v2(y, sr, params["warmth"], music_type)
+            if "温暖度v2" not in issues_found:
+                issues_found.append("温暖度v2")
+            advance("温暖度")
 
-    if params.get("clarity", 0) > 0:
-        y = apply_clarity_v2(y, sr, params["clarity"], music_type)
-        if "清晰度v2" not in issues_found:
-            issues_found.append("清晰度v2")
-        advance("清晰度v2")
+        if params.get("clarity", 0) > 0:
+            y = apply_clarity_v2(y, sr, params["clarity"], music_type)
+            if "清晰度v2" not in issues_found:
+                issues_found.append("清晰度v2")
+            advance("清晰度")
 
-    if params.get("dynamic_range", 0) > 0:
-        y = apply_multiband_compression_v3(y, sr, params["dynamic_range"], music_type)
-        if "多段压缩v3" not in issues_found:
-            issues_found.append("多段压缩v3")
-        advance("多段压缩v3")
-
+    # 立体声宽度
     if params.get("stereo_width", 0) > 0 and y.shape[0] == 2:
         y = apply_stereo_width_v3(y, sr, params["stereo_width"])
         if "立体声宽度v3" not in issues_found:
             issues_found.append("立体声宽度v3")
-        advance("立体声宽度v3")
+        advance("立体声宽度")
 
+    # 柔化处理（最后）
     if params.get("softness", 0) > 0:
-        y = apply_softness_v3(y, sr, params["softness"])
-        if "柔化处理v3" not in issues_found:
-            issues_found.append("柔化处理v3")
-        advance("柔化处理v3")
+        y = apply_softness_v4(y, sr, params["softness"])
+        if "柔化处理v4" not in issues_found:
+            issues_found.append("柔化处理v4")
+        advance("柔化处理")
 
+    # 重采样
     if target_sr != sr:
         if progress_callback:
             progress_callback(0.92, f"v2.2 重采样到 {target_sr//1000}kHz...")
@@ -184,11 +207,12 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
         sr = target_sr
         gc.collect()
 
+    # 后期处理
     if progress_callback:
         progress_callback(0.95, "v2.2 响度归一化...")
 
-    y = apply_loudness_normalize_v4(y, sr, -16.0)
-    y = apply_peak_limit_v4(y, sr)
+    y = apply_loudness_normalize_v5(y, sr, -16.0)
+    y = apply_peak_limit_v5(y, sr)
 
     if was_mono:
         y = y[0]
@@ -214,22 +238,26 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
         "channels": y.shape[0] if y.ndim > 1 else 1,
         "music_type": music_type,
         "confidence": confidence,
+        "quality_mode": quality_mode,
     }
 
 
-def _count_active_steps(params, num_channels):
+def _count_active_steps(params, num_channels, is_hifi=False):
     count = 0
     if params.get("de_clipping", 0) > 0: count += 1
     if params.get("de_pop", 0) > 0: count += 1
     if params.get("transient_repair", 0) > 0: count += 1
-    if params.get("de_crackle", 0) > 0 or params.get("de_essing", 0) > 0 or params.get("noise_reduction", 0) > 0: count += 1
-    if params.get("harmonic_enhance", 0) > 0 or params.get("harmonic_richness", 0) > 0: count += 1
-    if params.get("spatial_enhance", 0) > 0: count += 1
-    if params.get("presence_boost", 0) > 0: count += 1
-    if params.get("bass_enhance", 0) > 0: count += 1
-    if params.get("warmth", 0) > 0: count += 1
-    if params.get("clarity", 0) > 0: count += 1
     if params.get("dynamic_range", 0) > 0: count += 1
+    if params.get("de_crackle", 0) > 0 or params.get("de_essing", 0) > 0 or params.get("noise_reduction", 0) > 0: count += 1
+    
+    if not is_hifi:
+        if params.get("harmonic_enhance", 0) > 0 or params.get("harmonic_richness", 0) > 0: count += 1
+        if params.get("presence_boost", 0) > 0: count += 1
+        if params.get("bass_enhance", 0) > 0: count += 1
+        if params.get("warmth", 0) > 0: count += 1
+        if params.get("clarity", 0) > 0: count += 1
+    
+    if params.get("spatial_enhance", 0) > 0: count += 1
     if params.get("stereo_width", 0) > 0 and num_channels == 2: count += 1
     if params.get("softness", 0) > 0: count += 1
     return count
