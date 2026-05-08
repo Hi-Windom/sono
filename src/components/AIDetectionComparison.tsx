@@ -130,7 +130,7 @@ export function AIDetectionCard({ title, result, color, algorithmVersion }: AIDe
 
       {algorithmVersion && (
         <div className="mt-3 pt-2 border-t border-white/5 flex justify-end">
-          <span className="text-gray-500 text-[10px]">检测算法 {algorithmVersion}</span>
+          <span className="text-gray-500 text-[10px]">{algorithmVersion}</span>
         </div>
       )}
     </div>
@@ -256,6 +256,7 @@ export function AIDetectionComparison({ before, backendAfter, onDetect, isProces
             title="修复前"
             result={before}
             color="from-red-900/50 to-primary/50"
+            algorithmVersion={detectorVersion}
           />
         ) : (
           <div className="bg-gradient-to-br from-red-900/50 to-primary/50 rounded-xl p-5 border border-white/10 flex items-center justify-center h-64">
@@ -268,7 +269,7 @@ export function AIDetectionComparison({ before, backendAfter, onDetect, isProces
             title="修复后 · 后端处理"
             result={activeAfter}
             color="from-cyan-900/50 to-primary/50"
-            algorithmVersion={algorithmVersion}
+            algorithmVersion={detectorVersion}
           />
         ) : (
           <div className="bg-gradient-to-br from-green-900/50 to-primary/50 rounded-xl p-5 border border-white/10 flex items-center justify-center h-64">
