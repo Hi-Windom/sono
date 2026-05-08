@@ -321,6 +321,7 @@ export default function RepairPage() {
                 detectorVersion={detectorVersion}
                 onDetectorVersionChange={setDetectorVersion}
                 availableDetectors={availableDetectors}
+                algorithmVersion={algorithmVersion}
               />
             </div>
 

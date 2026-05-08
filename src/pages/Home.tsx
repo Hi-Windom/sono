@@ -58,6 +58,8 @@ export default function Home() {
     analyserRef,
     enableBrowserRepair,
     setEnableBrowserRepair,
+    backendError,
+    clearBackendError,
   } = useAudioProcessor();
 
   const [showDiag, setShowDiag] = useState(false);
@@ -206,6 +208,21 @@ export default function Home() {
                 )}
               </div>
 
+              {backendError && (
+                <div className="mt-4 p-4 bg-red-500/10 border border-red-500/30 rounded-lg">
+                  <div className="flex items-start gap-3">
+                    <svg className="w-5 h-5 text-red-400 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <div className="flex-1">
+                      <p className="text-red-400 text-sm font-medium">后端处理出错</p>
+                      <p className="text-gray-400 text-xs mt-1">{backendError}</p>
+                    </div>
+                    <button onClick={clearBackendError} className="text-gray-500 hover:text-white text-lg">×</button>
+                  </div>
+                </div>
+              )}
+
               <AIDetectionComparison
                 before={originalAIDetection}
                 backendAfter={backendAIDetection}
@@ -213,6 +230,7 @@ export default function Home() {
                 isProcessing={isProcessing}
                 detectorVersion={detectorVersion}
                 onDetectorVersionChange={setDetectorVersion}
+                algorithmVersion={algorithmVersion}
               />
             </div>
 

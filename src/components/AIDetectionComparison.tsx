@@ -5,9 +5,10 @@ interface AIDetectionCardProps {
   title: string;
   result: AISongDetectionResult;
   color: string;
+  algorithmVersion?: string;
 }
 
-export function AIDetectionCard({ title, result, color }: AIDetectionCardProps) {
+export function AIDetectionCard({ title, result, color, algorithmVersion }: AIDetectionCardProps) {
   const isAI = result.isAI;
   const getSignatureLabel = () => {
     switch (result.signature) {
@@ -126,6 +127,12 @@ export function AIDetectionCard({ title, result, color }: AIDetectionCardProps) 
           </ul>
         </div>
       )}
+
+      {algorithmVersion && (
+        <div className="mt-3 pt-2 border-t border-white/5 flex justify-end">
+          <span className="text-gray-500 text-[10px]">修复算法 {algorithmVersion}</span>
+        </div>
+      )}
     </div>
   );
 }
@@ -138,9 +145,10 @@ interface AIDetectionComparisonProps {
   detectorVersion?: string;
   onDetectorVersionChange?: (version: string) => void;
   availableDetectors?: { name: string; label: string; description: string }[];
+  algorithmVersion?: string;
 }
 
-export function AIDetectionComparison({ before, backendAfter, onDetect, isProcessing, detectorVersion, onDetectorVersionChange, availableDetectors }: AIDetectionComparisonProps) {
+export function AIDetectionComparison({ before, backendAfter, onDetect, isProcessing, detectorVersion, onDetectorVersionChange, availableDetectors, algorithmVersion }: AIDetectionComparisonProps) {
   const [lastDetectedVersion, setLastDetectedVersion] = React.useState<string | null>(null);
   const [showVersionWarning, setShowVersionWarning] = React.useState(false);
 
@@ -260,6 +268,7 @@ export function AIDetectionComparison({ before, backendAfter, onDetect, isProces
             title="修复后 · 后端处理"
             result={activeAfter}
             color="from-cyan-900/50 to-primary/50"
+            algorithmVersion={algorithmVersion}
           />
         ) : (
           <div className="bg-gradient-to-br from-green-900/50 to-primary/50 rounded-xl p-5 border border-white/10 flex items-center justify-center h-64">
