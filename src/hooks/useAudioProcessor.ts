@@ -509,13 +509,36 @@ export function useAudioProcessor() {
     })();
   }, [backendAvailable, getAudioContext, processingOptions.sampleRate]);
 
-  const stopPlaying = useCallback(() => {
-    if (sourceNodeRef.current) {
-      try { sourceNodeRef.current.stop(); } catch {}
-      sourceNodeRef.current.onended = null;
-      sourceNodeRef.current.disconnect();
-      sourceNodeRef.current = null;
+  const stopPlaying = useCallback((immediate = true) => {
+    // 如果不需要立即停止，先淡出
+    if (!immediate && gainNodeRef.current && sourceNodeRef.current) {
+      const context = audioContextRef.current;
+      if (context) {
+        const fadeOutDuration = 0.03; // 30ms 淡出
+        const now = context.currentTime;
+        gainNodeRef.current.gain.setValueAtTime(gainNodeRef.current.gain.value, now);
+        gainNodeRef.current.gain.linearRampToValueAtTime(0, now + fadeOutDuration);
+
+        // 延迟停止
+        setTimeout(() => {
+          if (sourceNodeRef.current) {
+            try { sourceNodeRef.current.stop(); } catch {}
+            sourceNodeRef.current.onended = null;
+            sourceNodeRef.current.disconnect();
+            sourceNodeRef.current = null;
+          }
+        }, fadeOutDuration * 1000 + 10); // 添加10ms缓冲
+      }
+    } else {
+      // 立即停止
+      if (sourceNodeRef.current) {
+        try { sourceNodeRef.current.stop(); } catch {}
+        sourceNodeRef.current.onended = null;
+        sourceNodeRef.current.disconnect();
+        sourceNodeRef.current = null;
+      }
     }
+
     if (mediaSourceRef.current) {
       try { mediaSourceRef.current.disconnect(); } catch {}
       mediaSourceRef.current = null;
@@ -1651,7 +1674,10 @@ export function useAudioProcessor() {
     gain.connect(analyserRef.current!);
     analyserRef.current!.connect(context.destination);
 
-    gain.gain.value = 1.0;
+    // 使用淡入避免爆音 - 使用线性渐变更平滑
+    const fadeInDuration = 0.015; // 15ms 淡入
+    gain.gain.setValueAtTime(0, context.currentTime);
+    gain.gain.linearRampToValueAtTime(1.0, context.currentTime + fadeInDuration);
 
     let playOffset = pausedAtRef.current;
     if (playOffset >= buffer.duration) {
@@ -1733,19 +1759,112 @@ export function useAudioProcessor() {
     }
   }, [stopPlaying, playMode, audioBuffer]);
 
-  const switchPlayMode = useCallback((mode: PlayMode) => {
+  const switchPlayMode = useCallback(async (mode: PlayMode) => {
+    // 如果当前没有播放，直接切换模式
+    if (!isPlayingRef.current) {
+      setPlayMode(mode);
+      return;
+    }
+
+    // 获取当前播放位置
+    const currentPosition = currentTime;
+    const context = getAudioContext();
+
+    // 确保音频上下文处于运行状态
+    if (context.state === 'suspended') {
+      await context.resume();
+    }
+
+    // 获取新旧模式的音频缓冲区
+    const newBuffer = mode === 'browser' ? browserProcessedBuffer
+      : mode === 'backend' ? backendProcessedBuffer
+      : audioBuffer;
+
+    if (!newBuffer) {
+      setPlayMode(mode);
+      return;
+    }
+
+    // 优化交叉淡入淡出时间 - 使用更短的淡入淡出实现更无缝的切换
+    const fadeOutDuration = 0.03; // 30ms 淡出
+    const fadeInDuration = 0.03;  // 30ms 淡入
+    const overlapTime = 0.01;     // 10ms 重叠时间，确保无缝
+
+    // 保存旧的音频源引用，用于后续停止
+    const oldSource = sourceNodeRef.current;
+    const oldGain = gainNodeRef.current;
+
+    // 创建新的音频源（先创建，确保准备好后再切换）
+    const newSource = context.createBufferSource();
+    const newGain = context.createGain();
+
+    newSource.buffer = newBuffer;
+    newSource.connect(newGain);
+    newGain.connect(analyserRef.current!);
+    analyserRef.current!.connect(context.destination);
+
+    // 从新位置开始播放，确保无缝衔接
+    const startPosition = Math.min(currentPosition, newBuffer.duration - 0.01);
+
+    // 设置淡入 - 使用线性渐变更平滑
+    const now = context.currentTime;
+    newGain.gain.setValueAtTime(0, now);
+    newGain.gain.linearRampToValueAtTime(1.0, now + fadeInDuration);
+
+    // 设置结束回调
+    newSource.onended = () => {
+      if (isPlayingRef.current) {
+        stopPlaying();
+        setCurrentTime(0);
+        pausedAtRef.current = 0;
+      }
+    };
+
+    // 更新引用
+    sourceNodeRef.current = newSource;
+    gainNodeRef.current = newGain;
+
+    // 开始播放新音频
+    startTimeRef.current = now - startPosition;
+    newSource.start(now, startPosition);
+
+    // 淡出旧音频（在启动新音频后）
+    if (oldSource && oldGain) {
+      oldGain.gain.setValueAtTime(oldGain.gain.value, now);
+      oldGain.gain.linearRampToValueAtTime(0.001, now + fadeOutDuration);
+
+      // 延迟停止旧音频
+      setTimeout(() => {
+        try {
+          oldSource.stop();
+          oldSource.disconnect();
+        } catch {}
+      }, fadeOutDuration * 1000 + overlapTime * 1000);
+    }
+
+    // 切换模式状态
     setPlayMode(mode);
 
-    if (isPlayingRef.current) {
-      const currentPosition = currentTime;
-      stopPlaying();
-      pausedAtRef.current = currentPosition;
-      setCurrentTime(currentPosition);
-      if (playRef.current) {
-        playRef.current();
-      }
+    // 更新时间跟踪 - 使用更精确的时间计算
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
     }
-  }, [currentTime, stopPlaying]);
+
+    const updateTime = () => {
+      if (isPlayingRef.current) {
+        const elapsed = context.currentTime - startTimeRef.current;
+        if (elapsed >= newBuffer.duration) {
+          stopPlaying();
+          setCurrentTime(0);
+          pausedAtRef.current = 0;
+        } else {
+          setCurrentTime(elapsed);
+          animationFrameRef.current = requestAnimationFrame(updateTime);
+        }
+      }
+    };
+    updateTime();
+  }, [currentTime, stopPlaying, getAudioContext, audioBuffer, browserProcessedBuffer, backendProcessedBuffer]);
 
   const downloadProcessedAudio = useCallback(async (source: 'browser' | 'backend') => {
     const baseName = audioFile
