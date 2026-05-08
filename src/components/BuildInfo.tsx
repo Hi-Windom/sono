@@ -20,9 +20,7 @@ export function BuildInfo() {
       // 获取构建时间（从 Vite 构建时注入的常量）
       let buildTime: string;
       try {
-        // 安全地访问 __BUILD_TIME__
-        const g = typeof globalThis !== 'undefined' ? globalThis : (typeof window !== 'undefined' ? window : {} as any);
-        buildTime = typeof g.__BUILD_TIME__ === 'string' ? g.__BUILD_TIME__ : new Date().toISOString();
+        buildTime = typeof __BUILD_TIME__ === 'string' ? __BUILD_TIME__ : new Date().toISOString();
       } catch {
         buildTime = new Date().toISOString();
       }

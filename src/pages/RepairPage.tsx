@@ -102,7 +102,7 @@ export default function RepairPage() {
   }, [isTaskStuck, stuckInfo]);
 
   const hasBrowserResult = !!browserProcessedBuffer;
-  const hasBackendResult = !!backendProcessedBuffer;
+  const hasBackendResult = !!backendProcessedBuffer || !!repairResult;
 
   const activeBuffer = playMode === 'browser' ? browserProcessedBuffer
     : playMode === 'backend' ? backendProcessedBuffer
@@ -117,6 +117,57 @@ export default function RepairPage() {
   return (
     <div className="min-h-screen bg-dark py-6">
       <Header />
+
+      {isProcessing && (
+        <div className="sticky top-0 z-40 bg-dark/95 backdrop-blur border-b border-white/5">
+          <div className="container mx-auto px-4 max-w-7xl py-2">
+            <div className="flex items-center gap-3">
+              <div className={`w-4 h-4 rounded-full animate-spin flex-shrink-0 ${isTaskStuck ? 'bg-yellow-500' : 'bg-gradient-to-r from-cyan-500 to-purple-500'}`} />
+              <span className={`text-sm truncate ${isTaskStuck ? 'text-yellow-400' : 'text-cyan-400'}`}>
+                {isTaskStuck ? '任务可能已卡住...' : (processingStep || '正在处理音频...')}
+              </span>
+              {queueStatus && queueStatus.detecting + queueStatus.repairing > 0 && (
+                <span className="text-xs text-gray-500 flex-shrink-0">
+                  队列: {queueStatus.detecting + queueStatus.repairing}
+                </span>
+              )}
+              <div className="flex-1 min-w-0">
+                <div className="w-full h-1.5 bg-gray-700 rounded-full overflow-hidden">
+                  <div
+                    className={`h-full transition-all duration-300 ${isTaskStuck ? 'bg-yellow-500' : 'bg-gradient-to-r from-cyan-500 via-purple-500 to-yellow-500'}`}
+                    style={{ width: `${processingProgress * 100}%` }}
+                  />
+                </div>
+              </div>
+              <span className="text-gray-400 text-xs flex-shrink-0 w-10 text-right">{Math.round(processingProgress * 100)}%</span>
+            </div>
+            {isTaskStuck && stuckInfo && (
+              <div className="mt-1.5 text-xs text-yellow-400">
+                已卡住 {Math.round(stuckDuration)} 秒 @ {stuckInfo.lastStep}
+              </div>
+            )}
+          </div>
+          {isTaskStuck && (
+            <div className="border-t border-yellow-500/20 bg-yellow-500/5 px-4 py-2">
+              <div className="container mx-auto max-w-7xl">
+                <div className="flex items-start gap-3">
+                  <svg className="w-4 h-4 text-yellow-400 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-yellow-400 text-xs">任务执行似乎卡住了 - "{stuckInfo?.lastStep}" 已超过 {Math.round(stuckInfo?.duration || 0)} 秒</p>
+                    <div className="flex gap-2 mt-1.5">
+                      <button onClick={cancelCurrentTask} className="px-2.5 py-1 bg-red-500/20 hover:bg-red-500/30 text-red-400 text-xs rounded transition-colors">取消任务</button>
+                      <button onClick={() => { resetStuckState(); if (processingStep.includes('检测')) runAIDetection(); else if (processingStep.includes('修复')) applySettings(); }} className="px-2.5 py-1 bg-yellow-500/20 hover:bg-yellow-500/30 text-yellow-400 text-xs rounded transition-colors">重试</button>
+                      <button onClick={resetStuckState} className="px-2.5 py-1 bg-white/5 hover:bg-white/10 text-gray-400 text-xs rounded transition-colors">继续等待</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* 返回首页按钮 */}
       <div className="container mx-auto px-4 max-w-7xl mt-4">
@@ -243,82 +294,6 @@ export default function RepairPage() {
                       duration={duration}
                       onSeek={seek}
                     />
-                  </div>
-                )}
-
-                {isProcessing && (
-                  <div className="mt-6">
-                    <div className="flex items-center gap-2 mb-2">
-                      <div className={`w-4 h-4 rounded-full animate-spin ${isTaskStuck ? 'bg-yellow-500' : 'bg-gradient-to-r from-cyan-500 to-purple-500'}`} />
-                      <span className={`text-sm ${isTaskStuck ? 'text-yellow-400' : 'text-cyan-400'}`}>
-                        {isTaskStuck ? '任务可能已卡住...' : (processingStep || '正在处理音频...')}
-                      </span>
-                      {queueStatus && queueStatus.detecting + queueStatus.repairing > 0 && (
-                        <span className="text-xs text-gray-500 ml-2">
-                          (队列: {queueStatus.detecting + queueStatus.repairing} 个任务运行中)
-                        </span>
-                      )}
-                    </div>
-                    <div className="w-full h-2 bg-gray-700 rounded-full overflow-hidden">
-                      <div
-                        className={`h-full transition-all duration-300 ${isTaskStuck ? 'bg-yellow-500' : 'bg-gradient-to-r from-cyan-500 via-purple-500 to-yellow-500'}`}
-                        style={{ width: `${processingProgress * 100}%` }}
-                      />
-                    </div>
-                    <div className="flex justify-between text-xs mt-1">
-                      <span className="text-gray-400">{Math.round(processingProgress * 100)}%</span>
-                      {isTaskStuck && stuckInfo && (
-                        <span className="text-yellow-400">
-                          已卡住 {Math.round(stuckDuration)} 秒 @ {stuckInfo.lastStep}
-                        </span>
-                      )}
-                    </div>
-
-                    {/* 卡住提示和重试选项 */}
-                    {isTaskStuck && (
-                      <div className="mt-4 p-4 bg-yellow-500/10 border border-yellow-500/30 rounded-lg">
-                        <div className="flex items-start gap-3">
-                          <svg className="w-5 h-5 text-yellow-400 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                          </svg>
-                          <div className="flex-1">
-                            <p className="text-yellow-400 text-sm font-medium">任务执行似乎卡住了</p>
-                            <p className="text-gray-400 text-xs mt-1">
-                              当前步骤 "{stuckInfo?.lastStep}" 已超过 {Math.round(stuckInfo?.duration || 0)} 秒没有进展。
-                              这可能是由于服务器繁忙或任务执行超时导致的。
-                            </p>
-                            <div className="flex gap-2 mt-3">
-                              <button
-                                onClick={cancelCurrentTask}
-                                className="px-3 py-1.5 bg-red-500/20 hover:bg-red-500/30 text-red-400 text-xs rounded transition-colors"
-                              >
-                                取消任务
-                              </button>
-                              <button
-                                onClick={() => {
-                                  resetStuckState();
-                                  // 重新尝试当前操作
-                                  if (processingStep.includes('检测')) {
-                                    runAIDetection();
-                                  } else if (processingStep.includes('修复')) {
-                                    applySettings();
-                                  }
-                                }}
-                                className="px-3 py-1.5 bg-yellow-500/20 hover:bg-yellow-500/30 text-yellow-400 text-xs rounded transition-colors"
-                              >
-                                重试
-                              </button>
-                              <button
-                                onClick={resetStuckState}
-                                className="px-3 py-1.5 bg-white/5 hover:bg-white/10 text-gray-400 text-xs rounded transition-colors"
-                              >
-                                忽略并继续等待
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    )}
                   </div>
                 )}
               </div>

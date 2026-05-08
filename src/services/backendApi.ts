@@ -214,6 +214,7 @@ export async function uploadAudio(file: File, onProgress?: ProgressCallback, fil
   return new Promise<UploadResponse>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open('POST', url);
+    xhr.timeout = 120000;
 
     const startTime = Date.now();
 
@@ -245,6 +246,11 @@ export async function uploadAudio(file: File, onProgress?: ProgressCallback, fil
     xhr.onerror = () => {
       log('upload', `XHR ERROR`);
       reject(new Error('上传网络错误'));
+    };
+
+    xhr.ontimeout = () => {
+      log('upload', 'TIMEOUT');
+      reject(new Error('上传超时(120s)，请检查网络或后端是否正常运行'));
     };
 
     xhr.send(formData);
@@ -369,6 +375,38 @@ export async function getQueueStatus(): Promise<QueueStatus | null> {
     return await res.json();
   } catch {
     return null;
+  }
+}
+
+export interface RepairCacheLookupResult {
+  found: boolean;
+  task_id?: string;
+  output_path?: string;
+  output_size?: number;
+  repair_result?: BackendRepairResult;
+  detection_result?: BackendDetectionResult;
+  repaired_detection_result?: BackendDetectionResult;
+}
+
+export async function lookupRepairCache(fileHash: string, params: Record<string, unknown>): Promise<RepairCacheLookupResult> {
+  const url = `${API_BASE}/cache/lookup`;
+  log('cache-lookup', `POST ${url} hash=${fileHash}`);
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ file_hash: fileHash, params }),
+    });
+    if (!res.ok) {
+      log('cache-lookup', `ERROR HTTP ${res.status}`);
+      return { found: false };
+    }
+    const data = await res.json();
+    log('cache-lookup', `result: found=${data.found} output_size=${data.output_size || 0}`);
+    return data;
+  } catch (e) {
+    log('cache-lookup', `FAILED: ${e instanceof Error ? e.message : String(e)}`);
+    return { found: false };
   }
 }
 

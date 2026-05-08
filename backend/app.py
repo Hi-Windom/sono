@@ -11,15 +11,29 @@ from config import MOBILE_MODE
 from pydantic import BaseModel
 
 BASE_DIR = Path(__file__).resolve().parent
+LOG_FILE = BASE_DIR / 'server.log'
+
+_BANNER = (
+    "\n"
+    "╔══════════════════════════════════════════════╗\n"
+    "║   Next-Gen AI Audio Repair Server v2.0      ║\n"
+    "║   http://0.0.0.0:8000                     ║\n"
+    "║                                              ║\n"
+    "║   API文档: http://0.0.0.0:8000/docs        ║\n"
+    "╚══════════════════════════════════════════════╝\n\n"
+)
 
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s [%(levelname)s] %(message)s',
     handlers=[
-        logging.FileHandler(str(BASE_DIR / 'server.log'), mode='w'),
+        logging.FileHandler(str(LOG_FILE), mode='w'),
         logging.StreamHandler(),
     ]
 )
+with open(LOG_FILE, 'a', encoding='utf-8') as _f:
+    _f.write(_BANNER)
+
 logger = logging.getLogger(__name__)
 
 class LogRequest(BaseModel):
@@ -80,6 +94,29 @@ def create_app() -> FastAPI:
     async def health():
         logger.info("Health check OK")
         return {"status": "ok", "version": "2.0.0", "mobile": MOBILE_MODE}
+
+    @app.get("/api/v1/logs")
+    async def download_logs(lines: int = 2000):
+        if not LOG_FILE.exists():
+            raise HTTPException(status_code=404, detail="日志文件不存在")
+        try:
+            with open(LOG_FILE, 'r', encoding='utf-8', errors='replace') as f:
+                all_lines = f.readlines()
+            total = len(all_lines)
+            tail = all_lines[-lines:] if total > lines else all_lines
+            content = ''.join(tail)
+            return Response(
+                content=content,
+                media_type='text/plain; charset=utf-8',
+                headers={
+                    'Content-Disposition': f'inline; filename="server.log"',
+                    'Cache-Control': 'no-cache, no-store',
+                    'X-Log-Total-Lines': str(total),
+                    'X-Log-Returned-Lines': str(len(tail)),
+                },
+            )
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"读取日志失败: {e}")
 
     dist_dir = BASE_DIR / "dist"
     serve_static = os.getenv("SERVE_STATIC", "").lower() in ("1", "true", "yes")

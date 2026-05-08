@@ -71,25 +71,26 @@ async def check_file_hash(request: CheckHashRequest):
     return {"exists": False}
 
 @router.post("/upload")
-async def upload_audio(file: UploadFile = File(...)):
+async def upload_audio(file: UploadFile = File(...), file_hash: str = Form("")):
     ext = os.path.splitext(file.filename or '')[1].lower()
     if ext not in ALLOWED_EXTENSIONS:
         raise HTTPException(status_code=400, detail=f"不支持的文件格式: {ext}")
-    
+
     task_id = generate_task_id()
     upload_path = os.path.join(UPLOAD_DIR, f"{task_id}{ext}")
-    
+
     os.makedirs(UPLOAD_DIR, exist_ok=True)
-    
+
     with open(upload_path, "wb") as f:
         content = await file.read()
         if len(content) > MAX_UPLOAD_SIZE:
             os.remove(upload_path)
             raise HTTPException(status_code=413, detail=f"文件过大，最大支持 {MAX_UPLOAD_SIZE // 1024 // 1024}MB")
         f.write(content)
-    
-    create_task(task_id, file.filename or "audio", upload_path, {})
-    
+
+    create_task(task_id, file.filename or "audio", upload_path, {}, file_hash, len(content))
+    logger.info(f"[/upload] task_id={task_id} file_hash={file_hash or 'none'}")
+
     return {
         "task_id": task_id,
         "filename": file.filename,
@@ -373,6 +374,28 @@ async def get_cache_info():
         "output_count": output_count,
         "task_count": len(tasks),
         "tasks": tasks,
+    }
+
+class RepairCacheLookupRequest(BaseModel):
+    file_hash: str
+    params: dict
+
+@router.post("/cache/lookup")
+async def lookup_repair_cache(req: RepairCacheLookupRequest):
+    from database import find_repair_cache
+
+    cached = find_repair_cache(req.file_hash, req.params)
+    if not cached:
+        return {"found": False}
+
+    return {
+        "found": True,
+        "task_id": cached["id"],
+        "output_path": cached.get("output_path", ""),
+        "output_size": cached.get("output_size", 0),
+        "repair_result": cached.get("repair_result"),
+        "detection_result": cached.get("detection_result"),
+        "repaired_detection_result": cached.get("repaired_detection_result"),
     }
 
 

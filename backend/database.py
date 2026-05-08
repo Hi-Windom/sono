@@ -98,6 +98,68 @@ def find_task_by_hash(file_hash: str) -> TaskDict | None:
     _parse_json_fields(result)
     return result
 
+def find_repair_cache(file_hash: str, params: dict) -> TaskDict | None:
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT * FROM tasks WHERE file_hash = ? ORDER BY updated_at DESC",
+        (file_hash,),
+    ).fetchall()
+    conn.close()
+    logger.info(f"[cache-lookup] hash={file_hash} found {len(rows)} total tasks")
+    
+    params_json = json.dumps(params, sort_keys=True, ensure_ascii=False)
+    logger.info(f"[cache-lookup] input_params={params_json}")
+    
+    for i, row in enumerate(rows):
+        result: TaskDict = dict(row)
+        output_path = result.get("output_path")
+        task_id = result.get("id", "?")
+        task_status = result.get("status", "?")
+        
+        if not output_path:
+            logger.info(f"[cache-lookup] task#{i} id={task_id} status={task_status} SKIP: no output_path")
+            continue
+        if not os.path.exists(output_path):
+            logger.info(f"[cache-lookup] task#{i} id={task_id} status={task_status} SKIP: file not exists path={output_path}")
+            continue
+        try:
+            size = os.path.getsize(output_path)
+        except OSError as e:
+            logger.info(f"[cache-lookup] task#{i} id={task_id} status={task_status} SKIP: getsize error {e}")
+            continue
+        if size < 10240:
+            logger.info(f"[cache-lookup] task#{i} id={task_id} status={task_status} SKIP: too small {size}B")
+            continue
+        
+        stored_params = result.get("params")
+        if stored_params and isinstance(stored_params, str):
+            try:
+                parsed = json.loads(stored_params)
+            except (json.JSONDecodeError, TypeError) as e:
+                logger.info(f"[cache-lookup] task#{i} id={task_id} status={task_status} SKIP: json parse error {e}")
+                continue
+        elif isinstance(stored_params, dict):
+            parsed = stored_params
+        else:
+            logger.info(f"[cache-lookup] task#{i} id={task_id} status={task_status} SKIP: params type={type(stored_params)} value={stored_params}")
+            continue
+        
+        stored_json = json.dumps(parsed, sort_keys=True, ensure_ascii=False)
+        
+        if stored_json == params_json:
+            logger.info(f"[cache-lookup] ✅ MATCH task#{i} id={task_id} status={task_status} size={size}")
+            result["output_size"] = size
+            _parse_json_fields(result)
+            return result
+        else:
+            logger.info(f"[cache-lookup] task#{i} id={task_id} status={task_status} MISMATCH stored={stored_json}")
+    
+    logger.info(f"[cache-lookup] ❌ NO MATCH for hash={file_hash}")
+    return None
+
 def get_all_tasks_ordered() -> list[TaskDict]:
     conn = get_db()
     rows = conn.execute("SELECT id, original_path, output_path, file_size, created_at FROM tasks ORDER BY created_at ASC").fetchall()
@@ -177,6 +239,15 @@ def _parse_json_fields(result: TaskDict) -> None:
                 result[field] = json.loads(raw)
             except (json.JSONDecodeError, TypeError):
                 pass
+
+    output_path = result.get("output_path")
+    if output_path and os.path.exists(output_path):
+        try:
+            result["output_size"] = os.path.getsize(output_path)
+        except OSError:
+            result["output_size"] = 0
+    else:
+        result["output_size"] = 0
 
 
 # 训练素材相关数据库操作

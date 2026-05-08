@@ -59,6 +59,8 @@ export default function LandingPage() {
   const [loading, setLoading] = useState(false);
   const [cleaning, setCleaning] = useState(false);
   const [cleaningStep, setCleaningStep] = useState('');
+  const [algorithmVersions, setAlgorithmVersions] = useState<{ name: string; description?: string }[]>([]);
+  const [detectorVersions, setDetectorVersions] = useState<{ name: string; description?: string }[]>([]);
 
   const fetchCacheInfo = async () => {
     setLoading(true);
@@ -75,8 +77,28 @@ export default function LandingPage() {
     }
   };
 
+  const fetchVersions = async () => {
+    try {
+      const [algRes, detRes] = await Promise.all([
+        fetch('/api/v1/algorithm-versions'),
+        fetch('/api/v1/detector-versions'),
+      ]);
+      if (algRes.ok) {
+        const algData = await algRes.json();
+        setAlgorithmVersions(algData.versions || []);
+      }
+      if (detRes.ok) {
+        const detData = await detRes.json();
+        setDetectorVersions(detData.versions || []);
+      }
+    } catch (err) {
+      console.error('获取版本信息失败:', err);
+    }
+  };
+
   useEffect(() => {
     fetchCacheInfo();
+    fetchVersions();
     const interval = setInterval(fetchCacheInfo, 30000);
     return () => clearInterval(interval);
   }, []);
@@ -463,20 +485,20 @@ export default function LandingPage() {
         {/* Stats Section */}
         <div className="mt-16 grid grid-cols-2 md:grid-cols-4 gap-6 max-w-4xl mx-auto">
           <div className="text-center p-4 bg-white/5 rounded-xl">
-            <div className="text-3xl font-bold text-cyan-400 mb-1">v2.0</div>
+            <div className="text-3xl font-bold text-cyan-400 mb-1">{algorithmVersions.length > 0 ? algorithmVersions[0].name : '-'}</div>
             <div className="text-sm text-gray-400">最新算法版本</div>
           </div>
           <div className="text-center p-4 bg-white/5 rounded-xl">
-            <div className="text-3xl font-bold text-purple-400 mb-1">4</div>
+            <div className="text-3xl font-bold text-purple-400 mb-1">{algorithmVersions.length || '-'}</div>
             <div className="text-sm text-gray-400">修复算法版本</div>
           </div>
           <div className="text-center p-4 bg-white/5 rounded-xl">
-            <div className="text-3xl font-bold text-pink-400 mb-1">2</div>
+            <div className="text-3xl font-bold text-pink-400 mb-1">{detectorVersions.length || '-'}</div>
             <div className="text-sm text-gray-400">检测算法版本</div>
           </div>
           <div className="text-center p-4 bg-white/5 rounded-xl">
-            <div className="text-3xl font-bold text-green-400 mb-1">实时</div>
-            <div className="text-sm text-gray-400">浏览器处理</div>
+            <div className="text-3xl font-bold text-green-400 mb-1">{cacheInfo?.task_count ?? '-'}</div>
+            <div className="text-sm text-gray-400">已处理任务</div>
           </div>
         </div>
       </div>

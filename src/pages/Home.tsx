@@ -63,7 +63,7 @@ export default function Home() {
   const [showDiag, setShowDiag] = useState(false);
 
   const hasBrowserResult = !!browserProcessedBuffer;
-  const hasBackendResult = !!backendProcessedBuffer;
+  const hasBackendResult = !!backendProcessedBuffer || !!repairResult;
 
   const activeBuffer = playMode === 'browser' ? browserProcessedBuffer
     : playMode === 'backend' ? backendProcessedBuffer
@@ -78,6 +78,26 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-dark py-6">
       <Header />
+
+      {isProcessing && (
+        <div className="sticky top-0 z-40 bg-dark/95 backdrop-blur border-b border-white/5">
+          <div className="container mx-auto px-4 max-w-7xl py-2">
+            <div className="flex items-center gap-3">
+              <div className="w-4 h-4 bg-gradient-to-r from-cyan-500 to-purple-500 rounded-full animate-spin flex-shrink-0" />
+              <span className="text-cyan-400 text-sm truncate">{processingStep || '正在处理音频...'}</span>
+              <div className="flex-1 min-w-0">
+                <div className="w-full h-1.5 bg-gray-700 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-gradient-to-r from-cyan-500 via-purple-500 to-yellow-500 transition-all duration-300"
+                    style={{ width: `${processingProgress * 100}%` }}
+                  />
+                </div>
+              </div>
+              <span className="text-gray-400 text-xs flex-shrink-0 w-10 text-right">{Math.round(processingProgress * 100)}%</span>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="container mx-auto px-4 py-8 max-w-7xl">
         {!audioFile ? (
@@ -182,24 +202,6 @@ export default function Home() {
                       duration={duration}
                       onSeek={seek}
                     />
-                  </div>
-                )}
-
-                {isProcessing && (
-                  <div className="mt-6">
-                    <div className="flex items-center gap-2 mb-2">
-                      <div className="w-4 h-4 bg-gradient-to-r from-cyan-500 to-purple-500 rounded-full animate-spin" />
-                      <span className="text-cyan-400 text-sm">{processingStep || '正在处理音频...'}</span>
-                    </div>
-                    <div className="w-full h-2 bg-gray-700 rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-gradient-to-r from-cyan-500 via-purple-500 to-yellow-500 transition-all duration-300"
-                        style={{ width: `${processingProgress * 100}%` }}
-                      />
-                    </div>
-                    <div className="text-right text-gray-400 text-xs mt-1">
-                      {Math.round(processingProgress * 100)}%
-                    </div>
                   </div>
                 )}
               </div>
