@@ -6,9 +6,10 @@ interface AIDetectionCardProps {
   result: AISongDetectionResult;
   color: string;
   algorithmVersion?: string;
+  detectTime?: string;
 }
 
-export function AIDetectionCard({ title, result, color, algorithmVersion }: AIDetectionCardProps) {
+export function AIDetectionCard({ title, result, color, algorithmVersion, detectTime }: AIDetectionCardProps) {
   const isAI = result.isAI;
   const getSignatureLabel = () => {
     switch (result.signature) {
@@ -128,9 +129,14 @@ export function AIDetectionCard({ title, result, color, algorithmVersion }: AIDe
         </div>
       )}
 
-      {algorithmVersion && (
-        <div className="mt-3 pt-2 border-t border-white/5 flex justify-end">
-          <span className="text-gray-500 text-[10px]">{algorithmVersion}</span>
+      {(algorithmVersion || detectTime) && (
+        <div className="mt-3 pt-2 border-t border-white/5 flex justify-end items-center gap-2">
+          {algorithmVersion && (
+            <span className="text-gray-400 text-xs font-medium">{algorithmVersion}</span>
+          )}
+          {detectTime && (
+            <span className="text-gray-500 text-xs">{detectTime}</span>
+          )}
         </div>
       )}
     </div>
@@ -146,9 +152,11 @@ interface AIDetectionComparisonProps {
   onDetectorVersionChange?: (version: string) => void;
   availableDetectors?: { name: string; label: string; description: string }[];
   algorithmVersion?: string;
+  originalDetectTime?: string;
+  repairedDetectTime?: string;
 }
 
-export function AIDetectionComparison({ before, backendAfter, onDetect, isProcessing, detectorVersion, onDetectorVersionChange, availableDetectors, algorithmVersion }: AIDetectionComparisonProps) {
+export function AIDetectionComparison({ before, backendAfter, onDetect, isProcessing, detectorVersion, onDetectorVersionChange, availableDetectors, algorithmVersion, originalDetectTime, repairedDetectTime }: AIDetectionComparisonProps) {
   const [lastDetectedVersion, setLastDetectedVersion] = React.useState<string | null>(null);
   const [showVersionWarning, setShowVersionWarning] = React.useState(false);
 
@@ -257,6 +265,7 @@ export function AIDetectionComparison({ before, backendAfter, onDetect, isProces
             result={before}
             color="from-red-900/50 to-primary/50"
             algorithmVersion={detectorVersion}
+            detectTime={originalDetectTime}
           />
         ) : (
           <div className="bg-gradient-to-br from-red-900/50 to-primary/50 rounded-xl p-5 border border-white/10 flex items-center justify-center h-64">
@@ -270,6 +279,7 @@ export function AIDetectionComparison({ before, backendAfter, onDetect, isProces
             result={activeAfter}
             color="from-cyan-900/50 to-primary/50"
             algorithmVersion={detectorVersion}
+            detectTime={repairedDetectTime}
           />
         ) : (
           <div className="bg-gradient-to-br from-green-900/50 to-primary/50 rounded-xl p-5 border border-white/10 flex items-center justify-center h-64">

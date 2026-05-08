@@ -30,6 +30,8 @@ export default function Home() {
     processingOptions,
     originalAIDetection,
     backendAIDetection,
+    originalDetectTime,
+    repairedDetectTime,
     hasBeenProcessed,
     originalSampleRate,
     currentSampleRate,
@@ -231,6 +233,8 @@ export default function Home() {
                 detectorVersion={detectorVersion}
                 onDetectorVersionChange={setDetectorVersion}
                 algorithmVersion={algorithmVersion}
+                originalDetectTime={originalDetectTime || undefined}
+                repairedDetectTime={repairedDetectTime || undefined}
               />
             </div>
 

@@ -36,6 +36,15 @@ function writeLog(message: string) {
   }).catch(() => {});
 }
 
+function formatDetectTime(date: Date = new Date()): string {
+  const now = date;
+  const month = (now.getMonth() + 1).toString().padStart(2, '0');
+  const day = now.getDate().toString().padStart(2, '0');
+  const hours = now.getHours().toString().padStart(2, '0');
+  const minutes = now.getMinutes().toString().padStart(2, '0');
+  return `${month}-${day} ${hours}:${minutes}`;
+}
+
 
 export interface AudioAnalysis {
   spectralFlatness: number;
@@ -123,6 +132,8 @@ export function useAudioProcessor() {
   const [processingOptions, setProcessingOptionsState] = useState<ProcessingOptions>(savedSettings.exportOptions);
   const [originalAIDetection, setOriginalAIDetection] = useState<AISongDetectionResult | null>(null);
   const [backendAIDetection, setBackendAIDetection] = useState<AISongDetectionResult | null>(null);
+  const [originalDetectTime, setOriginalDetectTime] = useState<string | null>(null);
+  const [repairedDetectTime, setRepairedDetectTime] = useState<string | null>(null);
   const [hasBeenProcessed, setHasBeenProcessed] = useState(false);
   const [backendAvailable, setBackendAvailable] = useState(false);
   const [backendDiag, setBackendDiag] = useState<string>('未检测');
@@ -1356,6 +1367,7 @@ export function useAudioProcessor() {
         if (origRes.detection_result) {
           writeLog(`[runAIDetection] 原始检测${origRes.cached ? '缓存命中' : '有结果'}，更新`);
           setOriginalAIDetection(mapDetectionResult(origRes.detection_result));
+          setOriginalDetectTime(formatDetectTime());
         } else {
           closeWS();
           const detectResult = await new Promise<import('../services/backendApi').ProgressEvent>((resolve, reject) => {
@@ -1367,6 +1379,7 @@ export function useAudioProcessor() {
                   setProcessingStep(event.step);
                   if (event.detection_result) {
                     setOriginalAIDetection(mapDetectionResult(event.detection_result));
+                    setOriginalDetectTime(formatDetectTime());
                   }
                 },
                 onError: reject,
@@ -1388,6 +1401,7 @@ export function useAudioProcessor() {
 
           if (detectResult.detection_result) {
             setOriginalAIDetection(mapDetectionResult(detectResult.detection_result));
+            setOriginalDetectTime(formatDetectTime());
           }
         }
 
@@ -1397,6 +1411,7 @@ export function useAudioProcessor() {
           if (repairedRes.detection_result) {
             writeLog(`[runAIDetection] 修复后检测${repairedRes.cached ? '缓存命中' : '有结果'}，更新`);
             setBackendAIDetection(mapDetectionResult(repairedRes.detection_result));
+            setRepairedDetectTime(formatDetectTime());
           } else {
             closeWS();
             await new Promise<import('../services/backendApi').ProgressEvent>((resolve, reject) => {
@@ -1408,6 +1423,7 @@ export function useAudioProcessor() {
                     setProcessingStep(evt.step);
                     if (evt.repaired_detection_result) {
                       setBackendAIDetection(mapDetectionResult(evt.repaired_detection_result));
+                      setRepairedDetectTime(formatDetectTime());
                     }
                   },
                   onError: reject,
@@ -1816,6 +1832,8 @@ export function useAudioProcessor() {
     processingOptions,
     originalAIDetection,
     backendAIDetection,
+    originalDetectTime,
+    repairedDetectTime,
     hasBeenProcessed,
     originalSampleRate,
     currentSampleRate,
