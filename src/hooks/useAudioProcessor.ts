@@ -174,6 +174,8 @@ export function useAudioProcessor() {
   const mediaSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
   const playRef = useRef<(() => void) | null>(null);
   const audioBufferRef = useRef<AudioBuffer | null>(null);
+  const browserProcessedBufferRef = useRef<AudioBuffer | null>(null);
+  const backendProcessedBufferRef = useRef<AudioBuffer | null>(null);
   const seekInProgressRef = useRef(false);
   // 静音策略：为每种播放模式维护独立的 source + gain，通过 gain 切换实现无缝 A/B 对比
   const modeNodesRef = useRef<Record<PlayMode, { source: AudioBufferSourceNode; gain: GainNode } | null>>({
@@ -487,6 +489,7 @@ export function useAudioProcessor() {
             const repairedBuffer = await downloadWithProgress(previewUrl);
             const tempContext = new OfflineAudioContext(1, 1, processingOptions.sampleRate);
             const decoded = await tempContext.decodeAudioData(repairedBuffer);
+            backendProcessedBufferRef.current = decoded;
             setBackendProcessedBuffer(decoded);
             setHasBeenProcessed(true);
             setPlayMode('backend');
@@ -652,8 +655,11 @@ export function useAudioProcessor() {
     const buffer = await context.decodeAudioData(arrayBuf);
 
     // 立即设置audioBuffer，让AIRepairPanel（含预估大小）显示
+    audioBufferRef.current = buffer;
     setAudioBuffer(buffer);
+    browserProcessedBufferRef.current = null;
     setBrowserProcessedBuffer(null);
+    backendProcessedBufferRef.current = null;
     setBackendProcessedBuffer(null);
     setDuration(buffer.duration);
     setCurrentTime(0);
@@ -974,6 +980,7 @@ export function useAudioProcessor() {
             // 后台加载修复后的音频 buffer（startStreamingPlayback 已经设置了播放状态和模式）
             if (audioFile && (cachedTaskId || currentTaskId)) {
               loadAudioFromUrl(previewUrl, processingOptions.sampleRate).then(repairedBuffer => {
+                backendProcessedBufferRef.current = repairedBuffer;
                 setBackendProcessedBuffer(repairedBuffer);
               }).catch(err => {
                 console.warn('[applySettings] 后台下载缓存音频失败:', err);
@@ -1241,6 +1248,7 @@ export function useAudioProcessor() {
       if (audioFile && taskIdRef.current) {
         loadAudioFromUrl(previewUrl, processingOptions.sampleRate).then(repairedBuffer => {
           writeLog(`[applySettings] buffer加载完成: duration=${repairedBuffer.duration.toFixed(3)}`);
+          backendProcessedBufferRef.current = repairedBuffer;
           setBackendProcessedBuffer(repairedBuffer);
 
           // 如果当前正在播放streaming，无缝切换到buffer播放
