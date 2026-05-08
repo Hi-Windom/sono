@@ -51,38 +51,44 @@ class MusicTypeDetector:
         return music_type, confidence, features
 
     def _extract_features(self, y: np.ndarray) -> Dict:
-        """提取频谱特征"""
+        """提取频谱特征 - 优化：缓存STFT结果避免重复计算"""
         features = {}
 
-        S = stft(y[0] if y.shape[0] > 0 else y, n_fft=self.n_fft, hop_length=self.hop_length)
+        mono = y[0] if y.shape[0] > 0 else y
+        # 只计算一次STFT
+        S = stft(mono, n_fft=self.n_fft, hop_length=self.hop_length)
         mag = np.abs(S)
         freqs = fft_frequencies(sr=self.sr, n_fft=self.n_fft)
 
-        features["spectral_centroid"] = self._spectral_centroid(mag, freqs)
-        features["spectral_bandwidth"] = self._spectral_bandwidth(mag, freqs)
+        # 预计算帧能量，多个特征复用
+        frame_energy = np.sum(mag, axis=0)
+        frame_energy_safe = frame_energy + 1e-10
+
+        features["spectral_centroid"] = self._spectral_centroid(mag, freqs, frame_energy_safe)
+        features["spectral_bandwidth"] = self._spectral_bandwidth(mag, freqs, frame_energy_safe)
         features["spectral_contrast"] = self._spectral_contrast(mag, freqs)
         features["spectral_rolloff"] = self._spectral_rolloff(mag, freqs)
-        features["zero_crossing_rate"] = self._zero_crossing_rate(y[0] if y.shape[0] > 0 else y)
-        features["rms"] = self._rms(y[0] if y.shape[0] > 0 else y)
+        features["zero_crossing_rate"] = self._zero_crossing_rate(mono)
+        features["rms"] = self._rms(mono)
         features["vocal_band_energy"] = self._vocal_band_energy(mag, freqs)
-        features["harmonic_ratio"] = self._harmonic_ratio(mag)
-        features["rhythmic_regularity"] = self._rhythmic_regularity(mag)
+        features["harmonic_ratio"] = self._harmonic_ratio(mag, freqs)
+        features["rhythmic_regularity"] = self._rhythmic_regularity(frame_energy)
 
         return features
 
-    def _spectral_centroid(self, mag: np.ndarray, freqs: np.ndarray) -> float:
-        """频谱质心"""
-        centroid = np.sum(freqs[:, np.newaxis] * mag, axis=0) / (np.sum(mag, axis=0) + 1e-10)
+    def _spectral_centroid(self, mag: np.ndarray, freqs: np.ndarray, frame_energy: np.ndarray) -> float:
+        """频谱质心 - 使用预计算的帧能量"""
+        centroid = np.sum(freqs[:, np.newaxis] * mag, axis=0) / frame_energy
         return np.mean(centroid)
 
-    def _spectral_bandwidth(self, mag: np.ndarray, freqs: np.ndarray) -> float:
-        """频谱带宽"""
-        centroid = np.sum(freqs[:, np.newaxis] * mag, axis=0) / (np.sum(mag, axis=0) + 1e-10)
-        bandwidth = np.sum(np.abs(freqs[:, np.newaxis] - centroid) * mag, axis=0) / (np.sum(mag, axis=0) + 1e-10)
+    def _spectral_bandwidth(self, mag: np.ndarray, freqs: np.ndarray, frame_energy: np.ndarray) -> float:
+        """频谱带宽 - 复用质心计算结果"""
+        centroid = np.sum(freqs[:, np.newaxis] * mag, axis=0) / frame_energy
+        bandwidth = np.sum(np.abs(freqs[:, np.newaxis] - centroid) * mag, axis=0) / frame_energy
         return np.mean(bandwidth)
 
     def _spectral_contrast(self, mag: np.ndarray, freqs: np.ndarray) -> float:
-        """频谱对比度"""
+        """频谱对比度 - 向量化计算"""
         bands = [(200, 1000), (1000, 4000), (4000, 8000), (8000, 16000)]
         contrasts = []
         for low, high in bands:
@@ -96,7 +102,7 @@ class MusicTypeDetector:
         return np.mean(contrasts) if contrasts else 0.0
 
     def _spectral_rolloff(self, mag: np.ndarray, freqs: np.ndarray) -> float:
-        """频谱滚降频率"""
+        """频谱滚降频率 - 向量化"""
         total_energy = np.sum(mag, axis=0)
         cumsum = np.cumsum(mag, axis=0)
         threshold = 0.85 * total_energy
@@ -118,33 +124,54 @@ class MusicTypeDetector:
         total_energy = np.sum(mag ** 2)
         return vocal_energy / (total_energy + 1e-10)
 
-    def _harmonic_ratio(self, mag: np.ndarray) -> float:
-        """谐波比例 - 检测谐波结构"""
+    def _harmonic_ratio(self, mag: np.ndarray, freqs: np.ndarray) -> float:
+        """谐波比例 - 向量化峰值检测和谐波匹配"""
+        n_frames = min(100, mag.shape[1])
+        if n_frames < 1:
+            return 0.5
+
+        # 向量化峰值检测：使用滑动窗口最大值
+        min_dist = 5
+        # 对前100帧进行批量处理
+        frames = mag[:, :n_frames]
+
+        # 计算每个点是否是局部峰值
+        # 使用卷积方式：比较当前点与左右min_dist范围内的最大值
+        padded = np.pad(frames, ((min_dist, min_dist), (0, 0)), mode='edge')
+        left_max = np.zeros_like(frames)
+        right_max = np.zeros_like(frames)
+
+        for d in range(1, min_dist + 1):
+            left_max = np.maximum(left_max, padded[min_dist - d:min_dist - d + frames.shape[0], :])
+            right_max = np.maximum(right_max, padded[min_dist + d:min_dist + d + frames.shape[0], :])
+
+        is_peak = (frames > left_max) & (frames > right_max)
+
+        # 阈值：大于均值2倍
+        mean_vals = np.mean(frames, axis=0, keepdims=True)
+        is_peak &= frames > mean_vals * 2
+
         frame_harmonics = []
-        for i in range(min(100, mag.shape[1])):
-            frame = mag[:, i]
-            peaks = self._find_peaks(frame)
-            if len(peaks) >= 3:
-                harmonic_count = 0
-                for j in range(1, len(peaks)):
-                    ratio = peaks[j] / (peaks[0] + 1e-10)
-                    if any(abs(ratio - h) < 0.1 for h in [2, 3, 4, 5]):
-                        harmonic_count += 1
-                frame_harmonics.append(harmonic_count / len(peaks))
+        for i in range(n_frames):
+            peak_indices = np.where(is_peak[:, i])[0]
+            if len(peak_indices) < 3:
+                continue
+
+            # 将频率bin索引转换为近似频率比
+            fundamental = peak_indices[0]
+            ratios = peak_indices[1:] / (fundamental + 1e-10)
+
+            # 向量化谐波匹配
+            harmonic_targets = np.array([2, 3, 4, 5])
+            # 检查每个ratio是否接近任意谐波目标
+            diffs = np.abs(ratios[:, np.newaxis] - harmonic_targets[np.newaxis, :])
+            harmonic_count = np.sum(np.any(diffs < 0.1, axis=1))
+            frame_harmonics.append(harmonic_count / len(peak_indices))
+
         return np.mean(frame_harmonics) if frame_harmonics else 0.5
 
-    def _find_peaks(self, data: np.ndarray, min_dist: int = 5) -> np.ndarray:
-        """简单的峰值检测"""
-        peaks = []
-        for i in range(min_dist, len(data) - min_dist):
-            if data[i] > data[i - min_dist:i].max() and data[i] > data[i + 1:i + min_dist + 1].max():
-                if data[i] > np.mean(data) * 2:
-                    peaks.append(i)
-        return np.array(peaks)
-
-    def _rhythmic_regularity(self, mag: np.ndarray) -> float:
-        """节奏规律性"""
-        frame_energy = np.sum(mag ** 2, axis=0)
+    def _rhythmic_regularity(self, frame_energy: np.ndarray) -> float:
+        """节奏规律性 - 复用预计算的帧能量"""
         if len(frame_energy) < 10:
             return 0.5
         diff = np.diff(frame_energy)

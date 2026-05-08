@@ -11,6 +11,7 @@ from .declip import apply_de_clipping_v5
 from .depop import apply_de_pop_v5
 from .spectral_group_a import apply_spectral_group_a
 from .spectral_group_b import apply_spectral_group_b
+from .subband_processing import apply_subband_repair
 from .transient import apply_transient_repair_v7
 from .filters import apply_presence_boost_v5, apply_bass_enhance_v5, apply_warmth_v2, apply_clarity_v2
 from .spatial import apply_spatial_enhance_v6, apply_stereo_width_v3
@@ -130,50 +131,63 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
             issues_found.append("多段压缩v5")
         advance("动态处理")
 
-    # 优化：频谱修复 - 合并多个处理步骤，减少 STFT/ISTFT 次数
-    need_group_a = (params.get("de_crackle", 0) > 0 or
-                    params.get("de_essing", 0) > 0 or
-                    params.get("noise_reduction", 0) > 0)
-    if need_group_a:
-        y = apply_spectral_group_a(y, sr, params, N_FFT, HOP_LENGTH, issues_found, music_type)
-        advance("频谱修复")
+    # 子带分离处理（Apollo-inspired）：低频保留 + 中高频修复
+    use_subband = params.get("subband_processing", True)
+    if use_subband and not is_hifi:
+        need_subband = (params.get("noise_reduction", 0) > 0 or
+                       params.get("de_essing", 0) > 0 or
+                       params.get("harmonic_enhance", 0) > 0)
+        if need_subband:
+            y = apply_subband_repair(y, sr, params, music_type, N_FFT, HOP_LENGTH)
+            if "子带修复" not in issues_found:
+                issues_found.append("子带修复")
+            advance("子带修复")
+    else:
+        # 传统频谱处理（HiFi 模式或关闭子带处理时）
+        need_group_a = (params.get("de_crackle", 0) > 0 or
+                        params.get("de_essing", 0) > 0 or
+                        params.get("noise_reduction", 0) > 0)
+        if need_group_a:
+            y = apply_spectral_group_a(y, sr, params, N_FFT, HOP_LENGTH, issues_found, music_type)
+            advance("频谱修复")
 
-    # 谐波增强（HiFi 模式下可选跳过）
-    if not is_hifi:
-        need_group_b = (params.get("harmonic_enhance", 0) > 0 or
-                        params.get("harmonic_richness", 0) > 0)
-        if need_group_b:
-            y = apply_spectral_group_b(y, sr, params, N_FFT, HOP_LENGTH, issues_found, music_type)
-            advance("谐波增强")
+        # 谐波增强（HiFi 模式下可选跳过）
+        if not is_hifi:
+            need_group_b = (params.get("harmonic_enhance", 0) > 0 or
+                            params.get("harmonic_richness", 0) > 0)
+            if need_group_b:
+                y = apply_spectral_group_b(y, sr, params, N_FFT, HOP_LENGTH, issues_found, music_type)
+                advance("谐波增强")
 
     # 空间处理
-    if params.get("spatial_enhance", 0) > 0:
+    # 空间处理（仅在非子带模式或显式启用时）
+    if not use_subband and params.get("spatial_enhance", 0) > 0:
         y = apply_spatial_enhance_v6(y, sr, params["spatial_enhance"], music_type)
         if "空间感增强v6" not in issues_found:
             issues_found.append("空间感增强v6")
         advance("空间感")
 
-    # 音色调整（HiFi 模式下减少）
+    # 音色调整（HiFi 模式下减少，子带模式下跳过部分）
     if not is_hifi:
-        if params.get("presence_boost", 0) > 0:
+        if params.get("presence_boost", 0) > 0 and not use_subband:
             y = apply_presence_boost_v5(y, sr, params["presence_boost"], music_type)
             if "临场增强v5" not in issues_found:
                 issues_found.append("临场增强v5")
             advance("临场增强")
 
-        if params.get("bass_enhance", 0) > 0:
+        if params.get("bass_enhance", 0) > 0 and not use_subband:
             y = apply_bass_enhance_v5(y, sr, params["bass_enhance"], music_type)
             if "低音增强v5" not in issues_found:
                 issues_found.append("低音增强v5")
             advance("低音增强")
 
-        if params.get("warmth", 0) > 0:
+        if params.get("warmth", 0) > 0 and not use_subband:
             y = apply_warmth_v2(y, sr, params["warmth"], music_type)
             if "温暖度v2" not in issues_found:
                 issues_found.append("温暖度v2")
             advance("温暖度")
 
-        if params.get("clarity", 0) > 0:
+        if params.get("clarity", 0) > 0 and not use_subband:
             y = apply_clarity_v2(y, sr, params["clarity"], music_type)
             if "清晰度v2" not in issues_found:
                 issues_found.append("清晰度v2")

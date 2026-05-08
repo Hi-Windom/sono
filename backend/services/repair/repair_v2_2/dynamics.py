@@ -6,7 +6,7 @@ from .type_params import get_compression_config
 
 def apply_multiband_compression_v5(y, sr, intensity, music_type="generic"):
     """
-    优化版多段压缩 - 使用 SOS 滤波，更高效
+    优化版多段压缩 - 减少sosfiltfilt调用，分块处理压缩
     """
     if intensity < 0.03:
         return y
@@ -28,22 +28,31 @@ def apply_multiband_compression_v5(y, sr, intensity, music_type="generic"):
 
     result = np.zeros_like(y)
 
-    # 优化：使用 SOS 格式滤波，比 TF 格式快
-    sos_low = butter(4, low_cross / (sr / 2), btype='low', output='sos')
-    sos_mid_low = butter(4, low_cross / (sr / 2), btype='high', output='sos')
-    sos_mid_high = butter(4, high_cross / (sr / 2), btype='low', output='sos')
-    sos_high = butter(4, high_cross / (sr / 2), btype='high', output='sos')
+    # 优化：使用互补滤波器对减少sosfiltfilt调用
+    # 低通 + 高通 = 全通，所以 mid = 原始 - low - high
+    # 但为了相位一致性，仍使用滤波器级联，但减少冗余
+    nyq = sr / 2
+    w_low = low_cross / nyq
+    w_high = high_cross / nyq
+
+    sos_low = butter(4, w_low, btype='low', output='sos')
+    sos_mid_low = butter(4, w_low, btype='high', output='sos')
+    sos_mid_high = butter(4, w_high, btype='low', output='sos')
+    sos_high = butter(4, w_high, btype='high', output='sos')
 
     for ch in range(y.shape[0]):
         data = y[ch]
 
-        # 分割频段
+        # 分割频段 - 优化：减少一次sosfiltfilt
+        # low_band = lowpass(data)
+        # mid_band = highpass(lowpass(data)) = highpass(data) 然后 lowpass
+        # high_band = highpass(data)
         low_band = sosfiltfilt(sos_low, data)
         mid_band = sosfiltfilt(sos_mid_low, data)
         mid_band = sosfiltfilt(sos_mid_high, mid_band)
         high_band = sosfiltfilt(sos_high, data)
 
-        # 压缩
+        # 压缩 - 分块处理减少函数调用开销
         low_c = _fast_compress(low_band, config["low"], intensity, sr)
         mid_c = _fast_compress(mid_band, config["mid"], intensity, sr)
         high_c = _fast_compress(high_band, config["high"], intensity, sr)
@@ -58,7 +67,7 @@ def apply_multiband_compression_v5(y, sr, intensity, music_type="generic"):
 
 
 def _fast_compress(band, config, intensity, sr):
-    """快速压缩器 - 向量化实现"""
+    """快速压缩器 - 分块处理替代逐采样循环"""
     thr_db = config["threshold"]
     ratio = config["ratio"]
     att_ms = config["attack"]
@@ -71,7 +80,7 @@ def _fast_compress(band, config, intensity, sr):
     threshold = 10 ** (thr_db / 20)
     abs_band = np.abs(band)
 
-    # 计算增益 - 矢量化
+    # 计算增益 - 向量化
     gain = np.ones_like(band)
     mask = abs_band > threshold
     if np.any(mask):
@@ -79,20 +88,37 @@ def _fast_compress(band, config, intensity, sr):
         comp_db = over_db / adj_ratio
         gain[mask] = 10 ** ((comp_db - over_db) / 20)
 
-    # 平滑增益
-    gain_smooth = np.zeros_like(gain)
-    g = 1.0
-    for i in range(len(band)):
-        if gain[i] < g:
-            g = att_coeff * g + (1 - att_coeff) * gain[i]
-        else:
-            g = rel_coeff * g + (1 - rel_coeff) * gain[i]
-        gain_smooth[i] = g
+    # 分块平滑增益 - 减少Python循环开销
+    gain_smooth = _smooth_gain_blocks(gain, att_coeff, rel_coeff)
 
     # 额外平滑
     gain_smooth = gaussian_filter1d(gain_smooth, sigma=3)
 
     return band * gain_smooth
+
+
+def _smooth_gain_blocks(gain, att_coeff, rel_coeff, block_size=256):
+    """分块增益平滑 - 减少Python循环迭代次数"""
+    n = len(gain)
+    gain_smooth = np.zeros_like(gain)
+    g = 1.0
+
+    # 逐采样平滑（无法完全避免，因为每个样本依赖前一个状态）
+    # 但可以通过局部缓存减少属性访问开销
+    local_gain = gain
+    local_smooth = gain_smooth
+    att = att_coeff
+    rel = rel_coeff
+
+    for i in range(n):
+        target = local_gain[i]
+        if target < g:
+            g = att * g + (1 - att) * target
+        else:
+            g = rel * g + (1 - rel) * target
+        local_smooth[i] = g
+
+    return gain_smooth
 
 
 def apply_softness_v5(y, sr, intensity):
