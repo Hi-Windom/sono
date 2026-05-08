@@ -132,6 +132,8 @@ export function useAudioProcessor() {
   const [processingOptions, setProcessingOptionsState] = useState<ProcessingOptions>(savedSettings.exportOptions);
   const [originalAIDetection, setOriginalAIDetection] = useState<AISongDetectionResult | null>(null);
   const [backendAIDetection, setBackendAIDetection] = useState<AISongDetectionResult | null>(null);
+  const [originalDetectTime, setOriginalDetectTime] = useState<string | null>(null);
+  const [repairedDetectTime, setRepairedDetectTime] = useState<string | null>(null);
   const [hasBeenProcessed, setHasBeenProcessed] = useState(false);
   const [backendAvailable, setBackendAvailable] = useState(false);
   const [backendDiag, setBackendDiag] = useState<string>('未检测');
@@ -1311,6 +1313,7 @@ export function useAudioProcessor() {
               const mapped = tryMapDetection(statusData?.detection_result);
               if (mapped) {
                 setOriginalAIDetection(mapped);
+                setOriginalDetectTime(formatDetectTime());
                 writeLog(`[runAIDetection] 使用缓存的原始检测结果`);
               }
             }
@@ -1318,6 +1321,7 @@ export function useAudioProcessor() {
               const mapped = tryMapDetection(statusData?.repaired_detection_result);
               if (mapped) {
                 setBackendAIDetection(mapped);
+                setRepairedDetectTime(formatDetectTime());
                 writeLog(`[runAIDetection] 使用缓存的修复后检测结果`);
               }
             }
