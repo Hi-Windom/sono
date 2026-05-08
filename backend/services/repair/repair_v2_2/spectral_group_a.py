@@ -1,39 +1,55 @@
 import numpy as np
 from services.librosa_compat import stft, istft, fft_frequencies
-from numba import jit, prange
 from .type_params import TYPE_PARAMS_MAP
 
-
-@jit(nopython=True, cache=True, fastmath=True)
-def _fast_smooth_gain(gain, alpha, n_frames, n_bins):
-    """Numba 加速的增益平滑 - 比 lfilter 快 5-10x"""
-    result = gain.copy()
-    for i in range(1, n_frames):
-        for j in range(n_bins):
-            result[j, i] = alpha * result[j, i-1] + (1 - alpha) * gain[j, i]
-    return result
+# 尝试导入 Numba，如果不可用则使用纯 Python 实现
+try:
+    from numba import jit, prange
+    NUMBA_AVAILABLE = True
+except ImportError:
+    NUMBA_AVAILABLE = False
 
 
-@jit(nopython=True, cache=True, fastmath=True)
-def _fast_smooth_1d(data, kernel):
-    """Numba 加速的 1D 平滑"""
-    n = len(data)
-    k = len(kernel)
-    half_k = k // 2
-    result = np.zeros_like(data)
-    for i in range(n):
-        acc = 0.0
-        for j in range(k):
-            idx = i - half_k + j
-            if 0 <= idx < n:
-                acc += data[idx] * kernel[j]
-        result[i] = acc
-    return result
+if NUMBA_AVAILABLE:
+    @jit(nopython=True, cache=True, fastmath=True)
+    def _fast_smooth_gain(gain, alpha, n_frames, n_bins):
+        """Numba 加速的增益平滑"""
+        result = gain.copy()
+        for i in range(1, n_frames):
+            for j in range(n_bins):
+                result[j, i] = alpha * result[j, i-1] + (1 - alpha) * gain[j, i]
+        return result
+
+    @jit(nopython=True, cache=True, fastmath=True)
+    def _fast_smooth_1d(data, kernel):
+        """Numba 加速的 1D 平滑"""
+        n = len(data)
+        k = len(kernel)
+        half_k = k // 2
+        result = np.zeros(n, dtype=np.float32)
+        for i in range(n):
+            acc = 0.0
+            for j in range(k):
+                idx = i - half_k + j
+                if 0 <= idx < n:
+                    acc += data[idx] * kernel[j]
+            result[i] = acc
+        return result
+else:
+    def _fast_smooth_gain(gain, alpha, n_frames, n_bins):
+        """纯 Python 版本的增益平滑"""
+        for i in range(1, n_frames):
+            gain[:, i] = alpha * gain[:, i-1] + (1 - alpha) * gain[:, i]
+        return gain
+
+    def _fast_smooth_1d(data, kernel):
+        """纯 Python 版本的 1D 平滑"""
+        return np.convolve(data, kernel, mode='same')
 
 
 def apply_spectral_group_a(y, sr, params, n_fft, hop_length, issues_found, music_type="generic"):
     """
-    极速版频谱修复 v12 - Numba 加速
+    频谱修复 - 支持 Numba 加速和纯 Python 降级
     """
     result = y.copy()
     de_crackle = params.get("de_crackle", 0)
@@ -70,19 +86,19 @@ def apply_spectral_group_a(y, sr, params, n_fft, hop_length, issues_found, music
             continue
 
         if noise_red > 0:
-            _numba_noise_reduction(mag, n_frames, noise_red, music_type)
+            _apply_noise_reduction(mag, n_frames, noise_red, music_type)
             if not noise_added:
                 issues_found.append("智能降噪v12")
                 noise_added = True
 
         if de_essing > 0 and freqs is not None:
-            _numba_de_essing(S, mag, freqs, frame_energies[ch], de_essing, music_type, n_frames)
+            _apply_de_essing(S, mag, freqs, frame_energies[ch], de_essing, music_type, n_frames)
             if not essing_added:
                 issues_found.append("齿音抑制v12")
                 essing_added = True
 
         if de_crackle > 0:
-            _numba_de_crackle(S, mag, frame_energies[ch], de_crackle, n_frames)
+            _apply_de_crackle(S, mag, frame_energies[ch], de_crackle, n_frames)
             if not crackle_added:
                 issues_found.append("毛刺修复v12")
                 crackle_added = True
@@ -92,8 +108,8 @@ def apply_spectral_group_a(y, sr, params, n_fft, hop_length, issues_found, music
     return result
 
 
-def _numba_noise_reduction(mag, n_frames, intensity, music_type):
-    """Numba 加速降噪"""
+def _apply_noise_reduction(mag, n_frames, intensity, music_type):
+    """降噪处理"""
     noise_frames = max(1, n_frames // 20)
     noise_profile = np.mean(mag[:, :noise_frames], axis=1, keepdims=True)
 
@@ -105,18 +121,24 @@ def _numba_noise_reduction(mag, n_frames, intensity, music_type):
     gain = snr / (snr + 1)
     gain = np.maximum(gain, floor)
 
-    # 使用 Numba 加速平滑
     alpha = 0.8
-    gain = _fast_smooth_gain(gain.astype(np.float32), alpha, n_frames, mag.shape[0])
+    if NUMBA_AVAILABLE:
+        gain = _fast_smooth_gain(gain.astype(np.float32), alpha, n_frames, mag.shape[0])
+    else:
+        _fast_smooth_gain(gain, alpha, n_frames, mag.shape[0])
+
     mag *= gain
 
 
-def _numba_de_essing(S, mag, freqs, frame_energy, intensity, music_type, n_frames):
-    """Numba 加速去齿音"""
+def _apply_de_essing(S, mag, freqs, frame_energy, intensity, music_type, n_frames):
+    """去齿音处理"""
     centroid = np.sum(freqs[:, np.newaxis] * mag, axis=0) / (np.sum(mag, axis=0) + 1e-10)
 
     if n_frames >= 3:
-        centroid = _fast_smooth_1d(centroid.astype(np.float32), np.array([0.25, 0.5, 0.25], dtype=np.float32))
+        if NUMBA_AVAILABLE:
+            centroid = _fast_smooth_1d(centroid.astype(np.float32), np.array([0.25, 0.5, 0.25], dtype=np.float32))
+        else:
+            centroid = _fast_smooth_1d(centroid, [0.25, 0.5, 0.25])
 
     mean_centroid = np.mean(centroid)
     thr = mean_centroid * (1.2 + intensity * 0.3)
@@ -137,12 +159,15 @@ def _numba_de_essing(S, mag, freqs, frame_energy, intensity, music_type, n_frame
     S[mask, :] *= attenuation[np.newaxis, :]
 
 
-def _numba_de_crackle(S, mag, frame_energy, intensity, n_frames):
-    """Numba 加速毛刺修复"""
+def _apply_de_crackle(S, mag, frame_energy, intensity, n_frames):
+    """毛刺修复"""
     if n_frames < 5:
         return
 
-    smooth_energy = _fast_smooth_1d(frame_energy.astype(np.float32), np.array([0.2, 0.6, 0.2], dtype=np.float32))
+    if NUMBA_AVAILABLE:
+        smooth_energy = _fast_smooth_1d(frame_energy.astype(np.float32), np.array([0.2, 0.6, 0.2], dtype=np.float32))
+    else:
+        smooth_energy = _fast_smooth_1d(frame_energy, [0.2, 0.6, 0.2])
     ratio = frame_energy / (smooth_energy + 1e-10)
 
     thr = np.mean(ratio) + np.std(ratio) * 1.5
