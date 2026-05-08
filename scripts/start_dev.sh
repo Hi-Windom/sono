@@ -88,4 +88,4 @@ echo ""
 echo "按 Ctrl+C 关闭所有服务"
 echo ""
 
-npm run dev
+npm run dev -- --host
