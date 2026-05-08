@@ -64,53 +64,22 @@ def _transparent_compress(y, sr, amount, threshold_db=-18.0, ratio=2.0):
     if n < 1024:
         return y
 
-    frame_len = int(sr * 0.04)
-    hop_len = int(sr * 0.01)
-    n_frames = max(1, (n - frame_len) // hop_len + 1)
-
     y_64 = y.astype(np.float64)
-
-    frame_rms = np.zeros(n_frames, dtype=np.float64)
-    for i in range(n_frames):
-        start = i * hop_len
-        end = min(start + frame_len, n)
-        frame_rms[i] = np.sqrt(np.mean(y_64[start:end] ** 2))
-
-    frame_rms = np.maximum(frame_rms, 1e-10)
+    input_rms = np.sqrt(np.mean(y_64 ** 2))
+    if input_rms < 1e-10:
+        return y
 
     threshold_lin = 10 ** (threshold_db / 20.0)
     effective_ratio = 1.0 + (ratio - 1.0) * min(amount, 1.0)
 
-    frame_gain = np.ones(n_frames, dtype=np.float64)
-    over_mask = frame_rms > threshold_lin
-    target_output = threshold_lin + (frame_rms[over_mask] - threshold_lin) / effective_ratio
-    frame_gain[over_mask] = target_output / frame_rms[over_mask]
+    global_rms = np.sqrt(np.mean(y_64 ** 2))
+    if global_rms <= threshold_lin:
+        return y
 
-    frame_gain = np.minimum(frame_gain, 1.0)
+    target_rms = threshold_lin + (global_rms - threshold_lin) / effective_ratio
+    global_gain = target_rms / global_rms
 
-    smooth_kernel_size = min(31, max(5, n_frames // 10))
-    if smooth_kernel_size % 2 == 0:
-        smooth_kernel_size += 1
-    kernel = np.hanning(smooth_kernel_size)
-    kernel = kernel / kernel.sum()
-    frame_gain = np.convolve(frame_gain, kernel, mode='same')
-
-    for _ in range(3):
-        frame_gain = np.convolve(frame_gain, kernel, mode='same')
-
-    frame_positions = np.arange(n_frames, dtype=np.float64) * hop_len
-    sample_positions = np.arange(n, dtype=np.float64)
-    gain = np.interp(sample_positions, frame_positions, frame_gain)
-    gain[0] = frame_gain[0]
-    gain[-1] = frame_gain[-1]
-
-    out = y_64 * gain
-
-    compressed_rms = np.sqrt(np.mean(out ** 2))
-    input_rms = np.sqrt(np.mean(y_64 ** 2))
-    if compressed_rms > 1e-10 and input_rms > 1e-10:
-        makeup_gain = min(input_rms / compressed_rms, 1.2)
-        out = out * makeup_gain
+    out = y_64 * global_gain
 
     return out.astype(y.dtype)
 
@@ -146,24 +115,26 @@ def _simple_depop(y, sr, amount):
 
 
 def _simple_depop_1d(data, sr, amount):
-    diff = np.abs(np.diff(data))
-    median_diff = np.median(diff)
+    diff = np.diff(data)
+    abs_diff = np.abs(diff)
+    median_diff = np.median(abs_diff)
     if median_diff < 1e-10:
         return data
-    threshold = median_diff * (30 + 40 * amount)
-    pop_mask = np.concatenate(([False], diff > threshold))
+    threshold = median_diff * (80 + 120 * amount)
+    pop_mask = np.concatenate(([False], abs_diff > threshold))
     if not np.any(pop_mask):
         return data
 
     y_out = data.copy()
-    window = int(sr * 0.003)
     indices = np.where(pop_mask)[0]
     for idx in indices:
-        left = max(0, idx - window)
-        right = min(len(data), idx + window + 1)
-        if right - left > 2:
-            t = np.linspace(0, 1, right - left)
-            y_out[left:right] = data[left] + (data[right - 1] - data[left]) * 0.5 * (1 - np.cos(t * np.pi))
+        if idx > 0 and idx < len(y_out) - 1:
+            prev = y_out[idx - 1]
+            next_val = y_out[idx + 1]
+            actual_diff = y_out[idx] - prev
+            if abs(actual_diff) > threshold:
+                clamped = prev + np.sign(actual_diff) * threshold
+                y_out[idx] = 0.5 * (clamped + next_val)
     return y_out
 
 
