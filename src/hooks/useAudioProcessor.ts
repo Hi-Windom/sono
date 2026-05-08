@@ -132,8 +132,6 @@ export function useAudioProcessor() {
   const [processingOptions, setProcessingOptionsState] = useState<ProcessingOptions>(savedSettings.exportOptions);
   const [originalAIDetection, setOriginalAIDetection] = useState<AISongDetectionResult | null>(null);
   const [backendAIDetection, setBackendAIDetection] = useState<AISongDetectionResult | null>(null);
-  const [originalDetectTime, setOriginalDetectTime] = useState<string | null>(null);
-  const [repairedDetectTime, setRepairedDetectTime] = useState<string | null>(null);
   const [hasBeenProcessed, setHasBeenProcessed] = useState(false);
   const [backendAvailable, setBackendAvailable] = useState(false);
   const [backendDiag, setBackendDiag] = useState<string>('未检测');
@@ -1367,7 +1365,6 @@ export function useAudioProcessor() {
         if (origRes.detection_result) {
           writeLog(`[runAIDetection] 原始检测${origRes.cached ? '缓存命中' : '有结果'}，更新`);
           setOriginalAIDetection(mapDetectionResult(origRes.detection_result));
-          setOriginalDetectTime(formatDetectTime());
         } else {
           closeWS();
           const detectResult = await new Promise<import('../services/backendApi').ProgressEvent>((resolve, reject) => {
@@ -1379,7 +1376,6 @@ export function useAudioProcessor() {
                   setProcessingStep(event.step);
                   if (event.detection_result) {
                     setOriginalAIDetection(mapDetectionResult(event.detection_result));
-                    setOriginalDetectTime(formatDetectTime());
                   }
                 },
                 onError: reject,
