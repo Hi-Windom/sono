@@ -18,7 +18,7 @@ export function BuildInfo() {
       // 检测当前模式
       const isDev = typeof import.meta !== 'undefined' && import.meta.env?.DEV === true;
       const isDevServer = typeof import.meta !== 'undefined' && import.meta.env?.MODE === 'development';
-      
+
       // 获取构建时间（从 Vite 构建时注入的常量）
       let buildTime: string;
       try {
@@ -26,7 +26,7 @@ export function BuildInfo() {
       } catch {
         buildTime = new Date().toISOString();
       }
-      
+
       setInfo({
         buildTime,
         mode: isDev ? 'development' : 'production',
@@ -44,6 +44,11 @@ export function BuildInfo() {
       // 如果出错，就不显示这个组件，避免影响整个页面
       console.error('BuildInfo error:', e);
     }
+    return () => {
+      if (clickTimerRef.current) {
+        clearTimeout(clickTimerRef.current);
+      }
+    };
   }, []);
 
   if (!info) return null;

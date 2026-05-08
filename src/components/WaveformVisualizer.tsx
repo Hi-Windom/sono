@@ -19,11 +19,16 @@ export function WaveformVisualizer({
 }: WaveformVisualizerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const audioBufferRef = useRef<AudioBuffer | null>(null);
+  const peakRef = useRef<number>(0);
 
-  const draw = useCallback(() => {
-    if (!canvasRef.current || !audioBuffer) return;
+  // 当 audioBuffer 变化时，重新计算峰值并绘制
+  useEffect(() => {
+    if (!canvasRef.current || !audioBuffer || !containerRef.current) return;
+
+    audioBufferRef.current = audioBuffer;
+
     const container = containerRef.current;
-    if (!container) return;
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
@@ -41,22 +46,17 @@ export function WaveformVisualizer({
     const step = Math.max(1, Math.floor(data.length / width));
     let peak = 0;
     for (let i = 0; i < data.length; i++) peak = Math.max(peak, Math.abs(data[i]));
-    const norm = peak > 0.05 ? 1 / peak : 20;
+    peakRef.current = peak > 0.05 ? 1 / peak : 20;
 
+    // 绘制背景
     ctx.fillStyle = '#0A1A2F';
     ctx.fillRect(0, 0, width, height);
 
+    // 绘制波形（未播放区域用灰色，已播放区域用传入的 color）
+    const norm = peakRef.current;
     const progressX = duration > 0 ? (currentTime / duration) * width : 0;
-    if (progressX > 0) {
-      ctx.fillStyle = 'rgba(0, 217, 255, 0.08)';
-      ctx.fillRect(0, 0, progressX, height);
-    }
 
-    const playedGrad = ctx.createLinearGradient(0, 0, 0, height);
-    playedGrad.addColorStop(0, '#00D9FFcc');
-    playedGrad.addColorStop(0.5, '#00D9FF');
-    playedGrad.addColorStop(1, '#00D9FFcc');
-
+    // 未播放区域
     ctx.fillStyle = 'rgba(100, 116, 139, 0.5)';
     for (let x = 0; x < width; x++) {
       if (x > progressX) {
@@ -74,6 +74,12 @@ export function WaveformVisualizer({
         ctx.fillRect(x, y1, 1, Math.max(1, y2 - y1));
       }
     }
+
+    // 已播放区域 - 使用传入的 color
+    const playedGrad = ctx.createLinearGradient(0, 0, 0, height);
+    playedGrad.addColorStop(0, color + 'cc');
+    playedGrad.addColorStop(0.5, color);
+    playedGrad.addColorStop(1, color + 'cc');
 
     ctx.fillStyle = playedGrad;
     for (let x = 0; x < width; x++) {
@@ -93,6 +99,7 @@ export function WaveformVisualizer({
       }
     }
 
+    // 绘制中心线
     ctx.strokeStyle = color + '22';
     ctx.lineWidth = 1;
     ctx.beginPath();
@@ -100,11 +107,13 @@ export function WaveformVisualizer({
     ctx.lineTo(width, height / 2);
     ctx.stroke();
 
+    // 进度条背景
     ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
     ctx.fillRect(0, height - 4, width, 4);
     ctx.fillStyle = color;
     ctx.fillRect(0, height - 4, progressX, 4);
 
+    // 进度指示器
     if (progressX > 0 && progressX < width) {
       ctx.beginPath();
       ctx.arc(progressX, height - 2, 6, 0, Math.PI * 2);
@@ -120,17 +129,127 @@ export function WaveformVisualizer({
       ctx.lineTo(progressX, height - 8);
       ctx.stroke();
     }
-  }, [audioBuffer, color, currentTime, duration]);
 
-  useEffect(() => {
-    draw();
-  }, [draw]);
+    // 绘制已播放区域背景高亮
+    if (progressX > 0) {
+      ctx.fillStyle = color + '08';
+      ctx.fillRect(0, 0, progressX, height);
+    }
+  }, [audioBuffer, color]);
 
+  // 当 currentTime 变化时，只更新进度指示器（不重绘整个波形）
   useEffect(() => {
-    const handleResize = () => draw();
+    if (!canvasRef.current || !audioBufferRef.current || !containerRef.current) return;
+
+    const container = containerRef.current;
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const width = container.clientWidth;
+    const height = 140;
+    const data = audioBufferRef.current.getChannelData(0);
+    const step = Math.max(1, Math.floor(data.length / width));
+    const norm = peakRef.current;
+    const progressX = duration > 0 ? (currentTime / duration) * width : 0;
+
+    // 重绘整个 canvas（因为需要更新已播放/未播放区域的颜色）
+    ctx.fillStyle = '#0A1A2F';
+    ctx.fillRect(0, 0, width, height);
+
+    // 已播放区域背景高亮
+    if (progressX > 0) {
+      ctx.fillStyle = color + '08';
+      ctx.fillRect(0, 0, progressX, height);
+    }
+
+    // 未播放区域
+    ctx.fillStyle = 'rgba(100, 116, 139, 0.5)';
+    for (let x = 0; x < width; x++) {
+      if (x > progressX) {
+        let mn = 1, mx = -1;
+        for (let j = 0; j < step; j++) {
+          const idx = x * step + j;
+          if (idx < data.length) {
+            const v = data[idx] * norm;
+            if (v < mn) mn = v;
+            if (v > mx) mx = v;
+          }
+        }
+        const y1 = (0.5 + mn * 0.4) * height;
+        const y2 = (0.5 + mx * 0.4) * height;
+        ctx.fillRect(x, y1, 1, Math.max(1, y2 - y1));
+      }
+    }
+
+    // 已播放区域
+    const playedGrad = ctx.createLinearGradient(0, 0, 0, height);
+    playedGrad.addColorStop(0, color + 'cc');
+    playedGrad.addColorStop(0.5, color);
+    playedGrad.addColorStop(1, color + 'cc');
+
+    ctx.fillStyle = playedGrad;
+    for (let x = 0; x < width; x++) {
+      if (x <= progressX) {
+        let mn = 1, mx = -1;
+        for (let j = 0; j < step; j++) {
+          const idx = x * step + j;
+          if (idx < data.length) {
+            const v = data[idx] * norm;
+            if (v < mn) mn = v;
+            if (v > mx) mx = v;
+          }
+        }
+        const y1 = (0.5 + mn * 0.4) * height;
+        const y2 = (0.5 + mx * 0.4) * height;
+        ctx.fillRect(x, y1, 1, Math.max(1, y2 - y1));
+      }
+    }
+
+    // 中心线
+    ctx.strokeStyle = color + '22';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, height / 2);
+    ctx.lineTo(width, height / 2);
+    ctx.stroke();
+
+    // 进度条
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+    ctx.fillRect(0, height - 4, width, 4);
+    ctx.fillStyle = color;
+    ctx.fillRect(0, height - 4, progressX, 4);
+
+    // 进度指示器
+    if (progressX > 0 && progressX < width) {
+      ctx.beginPath();
+      ctx.arc(progressX, height - 2, 6, 0, Math.PI * 2);
+      ctx.fillStyle = '#fff';
+      ctx.fill();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.strokeStyle = color + '66';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(progressX, 0);
+      ctx.lineTo(progressX, height - 8);
+      ctx.stroke();
+    }
+  }, [currentTime, duration, color]);
+
+  // 窗口大小变化时重绘
+  useEffect(() => {
+    const handleResize = () => {
+      if (audioBufferRef.current) {
+        // 触发 audioBuffer effect 重绘
+        const event = new Event('buffer-redraw');
+        window.dispatchEvent(event);
+      }
+    };
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
-  }, [draw]);
+  }, []);
 
   const handleClick = useCallback(
     (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -147,7 +266,7 @@ export function WaveformVisualizer({
   return (
     <div ref={containerRef} className="relative w-full group">
       {label && (
-        <div className="absolute top-2 left-2 text-xs text-gray-400 font-medium z-10 bg-black/50 px-2 py-1 rounded">
+        <div className="absolute top-2 left-2 text-xs font-medium z-10 bg-black/50 px-2 py-1 rounded" style={{ color }}>
           {label}
         </div>
       )}

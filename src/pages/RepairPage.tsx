@@ -290,9 +290,10 @@ export default function RepairPage() {
                 {activeBuffer && (
                   <div className="mt-6">
                     <WaveformVisualizer
-                      key={`waveform-${playMode}-${activeBuffer.duration}-${activeBuffer.numberOfChannels}`}
+                      key={`waveform-${playMode}`}
                       audioBuffer={activeBuffer}
-                      label={playMode !== 'original' && ((playMode === 'backend' && backendProcessedBuffer) || (playMode === 'browser' && browserProcessedBuffer)) ? '修复后波形' : '原始波形'}
+                      color={playMode === 'original' ? '#6B7280' : playMode === 'browser' ? '#A855F7' : '#00D9FF'}
+                      label={playMode === 'original' ? '原始波形' : playMode === 'browser' ? '浏览器修复波形' : '后端修复波形'}
                       currentTime={currentTime}
                       duration={duration}
                       onSeek={seek}
