@@ -11,8 +11,7 @@ from .declip import apply_de_clipping_v5
 from .depop import apply_de_pop_v5
 from .spectral_group_a import apply_spectral_group_a
 from .spectral_group_b import apply_spectral_group_b
-from .spectral_combined import apply_spectral_combined
-from .transient import apply_transient_repair_v8
+from .transient import apply_transient_repair_v7
 from .filters import apply_presence_boost_v5, apply_bass_enhance_v5, apply_warmth_v2, apply_clarity_v2
 from .spatial import apply_spatial_enhance_v6, apply_stereo_width_v3
 from .dynamics import apply_multiband_compression_v5, apply_softness_v5
@@ -118,9 +117,9 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
         advance("爆音修复")
 
     if params.get("transient_repair", 0) > 0:
-        y = apply_transient_repair_v8(y, sr, params["transient_repair"])
-        if "瞬态修复v8" not in issues_found:
-            issues_found.append("瞬态修复v8")
+        y = apply_transient_repair_v7(y, sr, params["transient_repair"])
+        if "瞬态修复v7" not in issues_found:
+            issues_found.append("瞬态修复v7")
         advance("瞬态修复")
 
     # 动态处理（在频谱处理之前，避免压缩已处理的频谱）
@@ -131,26 +130,19 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
             issues_found.append("多段压缩v5")
         advance("动态处理")
 
-    # 优化：频谱修复 - 使用合并处理减少 STFT/ISTFT 次数
-    # 如果同时需要 group_a 和 group_b，使用合并版本
+    # 优化：频谱修复 - 合并多个处理步骤，减少 STFT/ISTFT 次数
     need_group_a = (params.get("de_crackle", 0) > 0 or
                     params.get("de_essing", 0) > 0 or
                     params.get("noise_reduction", 0) > 0)
-    need_group_b = (params.get("harmonic_enhance", 0) > 0 or
-                    params.get("harmonic_richness", 0) > 0)
+    if need_group_a:
+        y = apply_spectral_group_a(y, sr, params, N_FFT, HOP_LENGTH, issues_found, music_type)
+        advance("频谱修复")
 
-    if need_group_a and need_group_b and not is_hifi:
-        # 使用合并版本，单次 STFT/ISTFT
-        y = apply_spectral_combined(y, sr, params, N_FFT, HOP_LENGTH, issues_found, music_type)
-        advance("频谱处理")
-    else:
-        # 分开处理
-        if need_group_a:
-            y = apply_spectral_group_a(y, sr, params, N_FFT, HOP_LENGTH, issues_found, music_type)
-            advance("频谱修复")
-
-        # 谐波增强（HiFi 模式下可选跳过）
-        if not is_hifi and need_group_b:
+    # 谐波增强（HiFi 模式下可选跳过）
+    if not is_hifi:
+        need_group_b = (params.get("harmonic_enhance", 0) > 0 or
+                        params.get("harmonic_richness", 0) > 0)
+        if need_group_b:
             y = apply_spectral_group_b(y, sr, params, N_FFT, HOP_LENGTH, issues_found, music_type)
             advance("谐波增强")
 
