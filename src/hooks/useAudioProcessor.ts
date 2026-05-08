@@ -395,6 +395,8 @@ export function useAudioProcessor() {
     hasBeenProcessed: boolean;
     wavInfo?: string;
     repairResult?: string;
+    originalDetectTime?: string;
+    repairedDetectTime?: string;
   } | null>(null);
 
   useEffect(() => {
@@ -418,6 +420,8 @@ export function useAudioProcessor() {
         hasBeenProcessed: session.hasBeenProcessed,
         wavInfo: session.wavInfo,
         repairResult: session.repairResult,
+        originalDetectTime: session.originalDetectTime,
+        repairedDetectTime: session.repairedDetectTime,
       };
     })();
   }, []);
@@ -496,6 +500,12 @@ export function useAudioProcessor() {
         }
         if (taskStatus.repaired_detection_result) {
           try { setBackendAIDetection(mapDetectionResult(taskStatus.repaired_detection_result as import('../services/backendApi').BackendDetectionResult)); } catch {}
+        }
+        if (session.originalDetectTime) {
+          setOriginalDetectTime(session.originalDetectTime);
+        }
+        if (session.repairedDetectTime) {
+          setRepairedDetectTime(session.repairedDetectTime);
         }
 
         sessionRestoredRef.current = true;
@@ -686,6 +696,8 @@ export function useAudioProcessor() {
         hasBeenProcessed: false,
         wavInfo: wavHeaderInfo ? JSON.stringify(wavHeaderInfo) : '',
         repairResult: '',
+        originalDetectTime: originalDetectTime || '',
+        repairedDetectTime: repairedDetectTime || '',
       });
 
       // 阻止旧会话恢复逻辑覆盖新上传的任务
@@ -968,6 +980,8 @@ export function useAudioProcessor() {
               repairResult: cacheResult.repair_result
                 ? JSON.stringify(cacheResult.repair_result)
                 : '',
+              originalDetectTime: originalDetectTime || '',
+              repairedDetectTime: repairedDetectTime || '',
             });
 
             setIsProcessing(false);
@@ -1262,6 +1276,8 @@ export function useAudioProcessor() {
           repairResult: _backendValue?.repairResult
             ? JSON.stringify(_backendValue.repairResult)
             : '',
+          originalDetectTime: originalDetectTime || '',
+          repairedDetectTime: repairedDetectTime || '',
         });
       }
     }
