@@ -102,32 +102,28 @@ function RingChart({ passed, failed, skipped, total }: { passed: number; failed:
 }
 
 function VersionMatrix({ tests }: { tests: TestResult[] }) {
-  const safeTests = Array.isArray(tests) ? tests : [];
-  const metrics = useMemo(() => {
-    const seen = new Set<string>();
-    return safeTests.filter(t => {
-      const m = t.metric || '';
-      if (!m || seen.has(m)) return false;
-      seen.add(m);
-      return true;
-    }).map(t => t.metric || '');
-  }, [safeTests]);
+  if (!Array.isArray(tests) || tests.length === 0) {
+    return <div className="text-gray-600 text-xs font-mono py-4 text-center">暂无数据</div>;
+  }
 
-  const versions = useMemo(() => {
-    const seen = new Set<string>();
-    return safeTests.filter(t => {
-      const v = t.version || '';
-      if (!v || seen.has(v)) return false;
-      seen.add(v);
-      return true;
-    }).map(t => t.version!);
-  }, [safeTests]);
-
-  const getTest = (metric: string, version: string) =>
-    safeTests.find(t => t.metric === metric && t.version === version);
+  const metricSet = new Set<string>();
+  const versionSet = new Set<string>();
+  for (const t of tests) {
+    if (t.metric) metricSet.add(t.metric);
+    if (t.version) versionSet.add(t.version);
+  }
+  const metrics = Array.from(metricSet);
+  const versions = Array.from(versionSet);
 
   if (metrics.length === 0 || versions.length === 0) {
     return <div className="text-gray-600 text-xs font-mono py-4 text-center">暂无数据</div>;
+  }
+
+  const grid: Record<string, Record<string, TestResult | undefined>> = {};
+  for (const t of tests) {
+    if (!t.metric || !t.version) continue;
+    if (!grid[t.metric]) grid[t.metric] = {};
+    grid[t.metric][t.version] = t;
   }
 
   return (
@@ -151,7 +147,7 @@ function VersionMatrix({ tests }: { tests: TestResult[] }) {
                 {m}
               </td>
               {versions.map(v => {
-                const t = getTest(m, v);
+                const t = grid[m]?.[v];
                 if (!t) return <td key={v} className="text-center py-2.5 px-2 text-gray-600">—</td>;
                 return (
                   <td key={v} className="text-center py-2.5 px-2">
