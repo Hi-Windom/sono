@@ -107,17 +107,21 @@ def _single_band_compress(y, sr, amount, threshold_db=-20.0, ratio=4.0, attack_m
 
         gain_array[start:end] = gain
 
-    # 简单平滑增益
-    if len(gain_array) > 5:
+    # 增益平滑：使用更大的卷积核减少增益突变导致的高频噪声
+    if len(gain_array) > 11:
+        kernel = np.hanning(11)
+        kernel = kernel / kernel.sum()
+        gain_array = np.convolve(gain_array, kernel, mode='same')
+    elif len(gain_array) > 5:
         kernel = np.ones(5) / 5
         gain_array = np.convolve(gain_array, kernel, mode='same')
 
     out = y * gain_array
-    # 严格限制 makeup gain 最大 +1dB，避免过度增益产生噪声
-    makeup_gain = 1.0 + min((1.0 - 1.0 / ratio) * amount * 0.08, 0.12)
+    # 严格限制 makeup gain 最大 +0.5dB，避免过度增益放大噪声底
+    makeup_gain = 1.0 + min((1.0 - 1.0 / ratio) * amount * 0.04, 0.06)
     out = out * makeup_gain
 
-    # 软限幅：防止压缩后削波，使用平滑曲线避免失真
+    # 软限幅：防止压缩后削波
     peak = np.max(np.abs(out))
     if peak > 0.92:
         out = out * (0.92 / peak)
@@ -126,7 +130,8 @@ def _single_band_compress(y, sr, amount, threshold_db=-20.0, ratio=4.0, attack_m
 
 
 def _spectral_repair(y, sr, params):
-    """单次 STFT/ISTFT 完成降噪+去齿音，避免多次变换"""
+    """单次 STFT/ISTFT 完成降噪+去齿音，避免多次变换
+    重点消除音乐噪声（musical noise）导致的呲呲电流声"""
     is_stereo = y.ndim > 1 and y.shape[0] == 2
     if is_stereo:
         ch_out = np.zeros_like(y)
@@ -141,42 +146,58 @@ def _spectral_repair(y, sr, params):
     freqs = fft_frequencies(sr=sr, n_fft=N_FFT)
     n_freqs, n_frames = mag.shape
 
-    # 噪声门限：基于低能量帧估计噪声底
     nr_amount = params.get("noise_reduction", 0)
     deess_amount = params.get("de_essing", 0)
 
     if nr_amount > 0:
-        # 简化的频谱减法：估计噪声底并应用平滑增益
-        noise_frames = max(1, n_frames // 20)
-        noise_profile = np.mean(mag[:, :noise_frames], axis=1, keepdims=True)
+        # 噪声估计：使用中位数而非均值，更鲁棒
+        noise_frames = max(3, n_frames // 15)
+        noise_profile = np.median(mag[:, :noise_frames], axis=1, keepdims=True)
 
-        # 计算 SNR 并应用增益
+        # 计算 SNR
         signal_power = mag ** 2
         noise_power = noise_profile ** 2 + 1e-10
         snr = signal_power / noise_power
 
-        # 软阈值增益 - 更保守的降噪
+        # 软阈值增益 - 极保守的降噪，重点消除音乐噪声
         gain = snr / (snr + 1.0)
-        # 大幅提高最小增益 floor 到 0.5-0.65，彻底消除音乐噪声/电流声
-        floor = 0.5 + 0.15 * (1 - nr_amount)
+        # floor 提高到 0.65-0.75：即使是最强降噪也保留大部分信号
+        # 这是消除音乐噪声的关键：不能过度衰减任何频点
+        floor = 0.65 + 0.10 * (1 - nr_amount)
         gain = np.maximum(gain, floor)
 
-        # 降低时间平滑系数，减少拖尾噪声
-        alpha = 0.75 + 0.12 * nr_amount
+        # 频谱时间平滑：使用前后帧平均，消除帧间增益突变
+        # 这是消除音乐噪声的第二关键步骤
+        gain_smooth = gain.copy()
+        for i in range(1, n_frames - 1):
+            gain_smooth[:, i] = 0.25 * gain[:, i-1] + 0.5 * gain[:, i] + 0.25 * gain[:, i+1]
+        gain = gain_smooth
+
+        # 额外的时间维度递归平滑
+        alpha = 0.70 + 0.15 * nr_amount
         for i in range(1, n_frames):
             gain[:, i] = alpha * gain[:, i-1] + (1 - alpha) * gain[:, i]
 
         mag *= gain
 
-    # 去齿音：更保守地衰减 5kHz-9kHz 区域，避免引入高频 artifacts
+    # 去齿音：极保守地衰减 6kHz-10kHz 区域
     if deess_amount > 0:
-        sibilance_mask = (freqs >= 5000) & (freqs <= 9000)
+        sibilance_mask = (freqs >= 6000) & (freqs <= 10000)
         if np.any(sibilance_mask):
-            attenuation = 1.0 - 0.3 * deess_amount
+            attenuation = 1.0 - 0.2 * deess_amount
             mag[sibilance_mask, :] *= attenuation
 
     S_repaired = mag * np.exp(1j * phase)
     out = istft(S_repaired, hop_length=HOP_LENGTH, length=len(y))
+
+    # 时域轻微低通滤波：消除频谱处理引入的高频 artifacts
+    # 使用 6 阶 Butterworth，截止频率 18kHz（对 44.1k/48k 采样率都安全）
+    nyquist = sr / 2
+    if nyquist > 18000:
+        cutoff = 18000 / nyquist
+        b, a = butter(6, cutoff, btype='low')
+        out = filtfilt(b, a, out)
+
     return out
 
 
