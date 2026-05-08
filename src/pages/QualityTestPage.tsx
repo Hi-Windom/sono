@@ -170,16 +170,40 @@ export default function QualityTestPage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch('/api/v1/quality-tests');
-      if (res.ok) {
-        const json = await res.json();
-        setData(json);
-      } else {
-        setError(`请求失败: ${res.status} ${res.statusText}`);
+      const startRes = await fetch('/api/v1/quality-tests/start', { method: 'POST' });
+      if (!startRes.ok) {
+        setError(`启动测试失败: ${startRes.status}`);
+        setLoading(false);
+        return;
       }
+      const { task_id } = await startRes.json();
+
+      const poll = async () => {
+        try {
+          const res = await fetch(`/api/v1/quality-tests/result/${task_id}`);
+          if (!res.ok) {
+            setError(`查询结果失败: ${res.status}`);
+            setLoading(false);
+            return;
+          }
+          const json = await res.json();
+          if (json.status === 'running') {
+            setTimeout(poll, 2000);
+          } else if (json.status === 'completed') {
+            setData(json);
+            setLoading(false);
+          } else {
+            setError(json.error || `未知状态: ${json.status}`);
+            setLoading(false);
+          }
+        } catch (err) {
+          setError(`轮询错误: ${err instanceof Error ? err.message : String(err)}`);
+          setLoading(false);
+        }
+      };
+      setTimeout(poll, 1000);
     } catch (err) {
-      setError(`网络错误: ${err instanceof Error ? err.message : String(err)}`);
-    } finally {
+      setError(`启动失败: ${err instanceof Error ? err.message : String(err)}`);
       setLoading(false);
     }
   };
