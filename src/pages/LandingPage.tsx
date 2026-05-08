@@ -228,7 +228,7 @@ export default function LandingPage() {
         </div>
 
         {/* Feature Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-4xl mx-auto">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-5xl mx-auto">
           {/* AI 音乐修复 */}
           <div
             onClick={() => navigate('/repair')}
@@ -273,6 +273,31 @@ export default function LandingPage() {
             </p>
             <div className="flex items-center text-purple-400 group-hover:text-purple-300">
               <span className="text-sm font-medium">上传素材</span>
+              <svg className="w-5 h-5 ml-2 group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
+              </svg>
+            </div>
+          </div>
+
+          {/* 质量测试 */}
+          <div
+            onClick={() => navigate('/quality-tests')}
+            className="group bg-primary/50 border border-white/10 rounded-2xl p-8 cursor-pointer
+                       hover:border-emerald-400/50 hover:bg-primary/70 transition-all duration-300"
+          >
+            <div className="w-16 h-16 bg-gradient-to-br from-emerald-500/20 to-cyan-500/20 rounded-xl
+                            flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
+              <svg className="w-8 h-8 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                      d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </div>
+            <h2 className="text-2xl font-bold text-white mb-3">质量测试</h2>
+            <p className="text-gray-400 mb-4">
+              自动化测试套件，确保修复算法不引入可闻失真和 AM 伪影
+            </p>
+            <div className="flex items-center text-emerald-400 group-hover:text-emerald-300">
+              <span className="text-sm font-medium">运行测试</span>
               <svg className="w-5 h-5 ml-2 group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
               </svg>

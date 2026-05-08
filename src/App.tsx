@@ -2,6 +2,7 @@ import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
 import LandingPage from "@/pages/LandingPage";
 import RepairPage from "@/pages/RepairPage";
 import TrainingUploadPage from "@/pages/TrainingUploadPage";
+import QualityTestPage from "@/pages/QualityTestPage";
 import { BuildInfo } from "@/components/BuildInfo";
 import { useEffect } from "react";
 
@@ -35,6 +36,7 @@ export default function App() {
         <Route path="/" element={<LandingPage />} />
         <Route path="/repair" element={<RepairPage />} />
         <Route path="/training-upload" element={<TrainingUploadPage />} />
+        <Route path="/quality-tests" element={<QualityTestPage />} />
       </Routes>
       <BuildInfo />
     </Router>

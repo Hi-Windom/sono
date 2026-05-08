@@ -598,3 +598,174 @@ async def delete_task_cache(task_id: str):
 async def list_training_data():
     from services.training_manager import list_training_files
     return list_training_files()
+
+
+@router.get("/quality-tests")
+async def run_quality_tests():
+    import subprocess
+    import re
+
+    try:
+        result = subprocess.run(
+            ["python", "-m", "pytest", "backend/tests/test_repair_quality.py", "-v", "--tb=short"],
+            capture_output=True,
+            text=True,
+            timeout=180,
+            cwd=os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        )
+
+        output = result.stdout + result.stderr
+        lines = output.strip().split("\n")
+
+        tests = []
+        summary_line = ""
+        for line in lines:
+            stripped = line.strip()
+            if " PASSED" in stripped:
+                test_name = stripped.split(" PASSED")[0].strip()
+                if "::" in test_name:
+                    test_name = test_name.split("::")[-1]
+                tests.append({"name": test_name, "status": "passed"})
+            elif " FAILED" in stripped:
+                test_name = stripped.split(" FAILED")[0].strip()
+                if "::" in test_name:
+                    test_name = test_name.split("::")[-1]
+                error_msg = ""
+                tests.append({"name": test_name, "status": "failed", "error": error_msg})
+            elif " SKIPPED" in stripped:
+                test_name = stripped.split(" SKIPPED")[0].strip()
+                if "::" in test_name:
+                    test_name = test_name.split("::")[-1]
+                tests.append({"name": test_name, "status": "skipped"})
+            elif "passed" in stripped and ("failed" in stripped or "skipped" in stripped or stripped.endswith("passed")):
+                summary_line = stripped
+
+        for t in tests:
+            name = t["name"]
+            if "[" in name:
+                t["version"] = re.search(r'\[(v[\d.]+[\w]*)\]', name).group(1) if re.search(r'\[(v[\d.]+[\w]*)\]', name) else ""
+            elif "V22a" in name or "v22a" in name.lower():
+                t["version"] = "v2.2a"
+            else:
+                t["version"] = ""
+
+            if "test_pure_sine" in name:
+                t["category"] = "baseline"
+                t["metric"] = "THD"
+                t["description"] = "纯正弦波输入，输出总谐波失真 < -20 dB"
+            elif "test_no_hard_clipping" in name:
+                t["category"] = "baseline"
+                t["metric"] = "Flat-top"
+                t["description"] = "输出无 flat-top 样本（硬削波指标）"
+            elif "test_no_high_frequency_noise" in name:
+                t["category"] = "baseline"
+                t["metric"] = "HF Noise"
+                t["description"] = "5-16kHz 频段噪声增长 < 10x"
+            elif "test_scale_adjusted_snr" in name:
+                t["category"] = "baseline"
+                t["metric"] = "SNR"
+                t["description"] = "全流程 scale-adjusted SNR > 5 dB"
+            elif "test_output_finite" in name:
+                t["category"] = "baseline"
+                t["metric"] = "Finite"
+                t["description"] = "输出无 NaN/Inf 值"
+            elif "test_peak_level_valid" in name:
+                t["category"] = "baseline"
+                t["metric"] = "Peak"
+                t["description"] = "输出峰值 ≤ 1.0"
+            elif "test_dc_offset_small" in name:
+                t["category"] = "baseline"
+                t["metric"] = "DC"
+                t["description"] = "DC 偏移 < 0.01"
+            elif "test_output_length_preserved" in name:
+                t["category"] = "baseline"
+                t["metric"] = "Length"
+                t["description"] = "输出长度与输入一致（±5%）"
+            elif "test_declip_snr" in name:
+                t["category"] = "per_step"
+                t["metric"] = "SNR"
+                t["description"] = "Declip 步骤 SNR > 20 dB"
+            elif "test_depop_snr" in name:
+                t["category"] = "per_step"
+                t["metric"] = "SNR"
+                t["description"] = "Depop 步骤 SNR > 10 dB"
+            elif "test_compress_snr" in name:
+                t["category"] = "per_step"
+                t["metric"] = "SNR"
+                t["description"] = "Compress 步骤 SNR > 40 dB（全局常量增益）"
+            elif "test_peak_limit_snr" in name:
+                t["category"] = "per_step"
+                t["metric"] = "SNR"
+                t["description"] = "Peak Limit 步骤 SNR > 30 dB"
+            elif "test_loudness_norm_snr" in name:
+                t["category"] = "per_step"
+                t["metric"] = "SNR"
+                t["description"] = "Loudness Norm 步骤 SNR > 60 dB（纯增益）"
+            elif "test_dc_remove_snr" in name:
+                t["category"] = "per_step"
+                t["metric"] = "SNR"
+                t["description"] = "DC Remove 步骤 SNR > 60 dB"
+            elif "test_depop_no_large" in name:
+                t["category"] = "iron_rule"
+                t["metric"] = "Window"
+                t["description"] = "Depop 不替换超过 5 个连续样本"
+            elif "test_compress_is_global" in name:
+                t["category"] = "iron_rule"
+                t["metric"] = "Gain CV"
+                t["description"] = "Compress 增益变异系数 < 1%（无 AM 伪影）"
+            elif "test_declip_uses_soft" in name:
+                t["category"] = "iron_rule"
+                t["metric"] = "Flat-top"
+                t["description"] = "Declip 不增加 flat-top 样本（使用软削波）"
+            elif "test_peak_limit_uses_soft" in name:
+                t["category"] = "iron_rule"
+                t["metric"] = "Flat-top"
+                t["description"] = "Peak Limit 不增加 flat-top 样本（使用软削波）"
+            elif "test_loudness_norm_is_constant" in name:
+                t["category"] = "iron_rule"
+                t["metric"] = "Gain CV"
+                t["description"] = "Loudness Norm 是纯常量增益（CV < 0.1%）"
+            elif "test_dc_remove_reduces" in name:
+                t["category"] = "per_step"
+                t["metric"] = "DC"
+                t["description"] = "DC Remove 有效降低直流偏移"
+            else:
+                t["category"] = "other"
+                t["metric"] = ""
+                t["description"] = ""
+
+        passed = sum(1 for t in tests if t["status"] == "passed")
+        failed = sum(1 for t in tests if t["status"] == "failed")
+        skipped = sum(1 for t in tests if t["status"] == "skipped")
+
+        baseline = [t for t in tests if t.get("category") == "baseline"]
+        per_step = [t for t in tests if t.get("category") == "per_step"]
+        iron_rule = [t for t in tests if t.get("category") == "iron_rule"]
+
+        return {
+            "total": len(tests),
+            "passed": passed,
+            "failed": failed,
+            "skipped": skipped,
+            "summary": summary_line,
+            "tests": tests,
+            "baseline": baseline,
+            "per_step": per_step,
+            "iron_rule": iron_rule,
+            "raw_output": output[-4000:] if len(output) > 4000 else output,
+            "exit_code": result.returncode,
+        }
+    except subprocess.TimeoutExpired:
+        return {
+            "total": 0, "passed": 0, "failed": 0, "skipped": 0,
+            "summary": "测试超时（180秒）",
+            "tests": [], "baseline": [], "per_step": [], "iron_rule": [],
+            "raw_output": "", "exit_code": -1,
+        }
+    except Exception as e:
+        return {
+            "total": 0, "passed": 0, "failed": 0, "skipped": 0,
+            "summary": f"运行失败: {str(e)}",
+            "tests": [], "baseline": [], "per_step": [], "iron_rule": [],
+            "raw_output": "", "exit_code": -1,
+        }

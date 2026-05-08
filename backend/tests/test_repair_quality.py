@@ -18,150 +18,100 @@ from backend.tests.conftest import (
 )
 
 
+def _run_repair_and_read(repair_fn, input_signal, default_params, tmp_wav_dir):
+    input_path = write_temp_wav(input_signal, SR, tmp_wav_dir)
+    output_path = str(tmp_wav_dir / "output.wav")
+
+    try:
+        import soundfile as sf
+    except ImportError:
+        from scipy.io import wavfile
+
+    repair_fn(input_path, output_path, default_params)
+
+    try:
+        y_out, sr_out = sf.read(output_path)
+    except (ImportError, NameError):
+        from scipy.io import wavfile as _wv
+        sr_out, y_out = _wv.read(output_path)
+        y_out = y_out.astype(np.float64) / 32768.0
+
+    if y_out.ndim > 1:
+        y_out = y_out[:, 0]
+
+    return y_out, sr_out
+
+
 class TestRepairQualityBaseline:
 
     def test_pure_sine_no_artifacts(self, repair_fn, default_params, tmp_wav_dir, repair_version):
         y = generate_pure_sine(sr=SR, freq=440.0, duration=2.0, amplitude=0.5)
-        input_path = write_temp_wav(y, SR, tmp_wav_dir)
-        output_path = str(tmp_wav_dir / "output.wav")
-
-        try:
-            import soundfile as sf
-        except ImportError:
-            from scipy.io import wavfile
-
-        repair_fn(input_path, output_path, default_params)
-
-        try:
-            y_out, sr_out = sf.read(output_path)
-        except (ImportError, NameError):
-            sr_out, y_out = wavfile.read(output_path)
-            y_out = y_out.astype(np.float64) / 32768.0
-
-        if y_out.ndim > 1:
-            y_out = y_out[:, 0]
-
+        y_out, sr_out = _run_repair_and_read(repair_fn, y, default_params, tmp_wav_dir)
         thd = compute_thd(y_out, sr_out, 440.0)
         assert thd < -20.0, (
-            f"[{repair_version}] THD too high after repair: {thd:.1f} dB (threshold: -20 dB). "
-            f"Repair should not introduce severe harmonic distortion."
+            f"[{repair_version}] THD too high: {thd:.1f} dB (threshold: -20 dB)"
         )
 
     def test_no_hard_clipping(self, repair_fn, default_params, tmp_wav_dir, repair_version):
         y = generate_multi_tone(sr=SR, duration=2.0)
-        input_path = write_temp_wav(y, SR, tmp_wav_dir)
-        output_path = str(tmp_wav_dir / "output.wav")
-
-        try:
-            import soundfile as sf
-        except ImportError:
-            from scipy.io import wavfile
-
-        repair_fn(input_path, output_path, default_params)
-
-        try:
-            y_out, sr_out = sf.read(output_path)
-        except (ImportError, NameError):
-            sr_out, y_out = wavfile.read(output_path)
-            y_out = y_out.astype(np.float64) / 32768.0
-
-        if y_out.ndim > 1:
-            y_out = y_out[:, 0]
-
+        y_out, sr_out = _run_repair_and_read(repair_fn, y, default_params, tmp_wav_dir)
         flat_count = count_flat_top_samples(y_out, threshold=1e-6)
-        total_samples = len(y_out)
-        flat_ratio = flat_count / total_samples
-
+        flat_ratio = flat_count / len(y_out)
         assert flat_ratio < 0.01, (
-            f"[{repair_version}] Too many flat-top samples: {flat_ratio:.4f} "
-            f"({flat_count}/{total_samples}). Hard clipping detected."
+            f"[{repair_version}] Flat-top ratio: {flat_ratio:.4f} ({flat_count}/{len(y_out)})"
         )
 
     def test_no_high_frequency_noise(self, repair_fn, default_params, tmp_wav_dir, repair_version):
         y = generate_speech_like(sr=SR, duration=2.0)
-        input_path = write_temp_wav(y, SR, tmp_wav_dir)
-        output_path = str(tmp_wav_dir / "output.wav")
-
-        try:
-            import soundfile as sf
-        except ImportError:
-            from scipy.io import wavfile
-
         input_hf = compute_hf_noise(y, SR, 5000, 16000)
-
-        repair_fn(input_path, output_path, default_params)
-
-        try:
-            y_out, sr_out = sf.read(output_path)
-        except (ImportError, NameError):
-            sr_out, y_out = wavfile.read(output_path)
-            y_out = y_out.astype(np.float64) / 32768.0
-
-        if y_out.ndim > 1:
-            y_out = y_out[:, 0]
-
+        y_out, sr_out = _run_repair_and_read(repair_fn, y, default_params, tmp_wav_dir)
         output_hf = compute_hf_noise(y_out, sr_out, 5000, 16000)
-
         if input_hf > 1e-10:
             hf_ratio = output_hf / input_hf
         else:
             hf_ratio = output_hf / 1e-10
-
         assert hf_ratio < 10.0, (
-            f"[{repair_version}] HF noise increased too much: {hf_ratio:.1f}x "
-            f"(input: {input_hf:.2e}, output: {output_hf:.2e}). "
-            f"Repair should not add significant high-frequency noise."
+            f"[{repair_version}] HF noise ratio: {hf_ratio:.1f}x (in: {input_hf:.2e}, out: {output_hf:.2e})"
         )
 
     def test_scale_adjusted_snr(self, repair_fn, default_params, tmp_wav_dir, repair_version):
         y = generate_speech_like(sr=SR, duration=2.0)
-        input_path = write_temp_wav(y, SR, tmp_wav_dir)
-        output_path = str(tmp_wav_dir / "output.wav")
-
-        try:
-            import soundfile as sf
-        except ImportError:
-            from scipy.io import wavfile
-
-        repair_fn(input_path, output_path, default_params)
-
-        try:
-            y_out, sr_out = sf.read(output_path)
-        except (ImportError, NameError):
-            sr_out, y_out = wavfile.read(output_path)
-            y_out = y_out.astype(np.float64) / 32768.0
-
-        if y_out.ndim > 1:
-            y_out = y_out[:, 0]
-
+        y_out, sr_out = _run_repair_and_read(repair_fn, y, default_params, tmp_wav_dir)
         min_len = min(len(y), len(y_out))
         snr = compute_scale_adjusted_snr(y[:min_len], y_out[:min_len])
-
         assert snr > 5.0, (
-            f"[{repair_version}] Scale-adjusted SNR too low: {snr:.1f} dB. "
-            f"Repair is destroying the signal."
+            f"[{repair_version}] SNR too low: {snr:.1f} dB"
         )
 
     def test_output_finite(self, repair_fn, default_params, tmp_wav_dir, repair_version):
         y = generate_multi_tone(sr=SR, duration=2.0)
-        input_path = write_temp_wav(y, SR, tmp_wav_dir)
-        output_path = str(tmp_wav_dir / "output.wav")
-
-        try:
-            import soundfile as sf
-        except ImportError:
-            from scipy.io import wavfile
-
-        repair_fn(input_path, output_path, default_params)
-
-        try:
-            y_out, sr_out = sf.read(output_path)
-        except (ImportError, NameError):
-            sr_out, y_out = wavfile.read(output_path)
-            y_out = y_out.astype(np.float64) / 32768.0
-
+        y_out, sr_out = _run_repair_and_read(repair_fn, y, default_params, tmp_wav_dir)
         assert np.all(np.isfinite(y_out)), (
-            f"[{repair_version}] Output contains NaN or Inf values."
+            f"[{repair_version}] Output contains NaN or Inf"
+        )
+
+    def test_peak_level_valid(self, repair_fn, default_params, tmp_wav_dir, repair_version):
+        y = generate_speech_like(sr=SR, duration=2.0) * 0.9
+        y_out, sr_out = _run_repair_and_read(repair_fn, y, default_params, tmp_wav_dir)
+        peak = np.max(np.abs(y_out))
+        assert peak <= 1.0, (
+            f"[{repair_version}] Peak exceeds 1.0: {peak:.4f}"
+        )
+
+    def test_dc_offset_small(self, repair_fn, default_params, tmp_wav_dir, repair_version):
+        y = generate_speech_like(sr=SR, duration=2.0)
+        y_out, sr_out = _run_repair_and_read(repair_fn, y, default_params, tmp_wav_dir)
+        dc = np.abs(np.mean(y_out))
+        assert dc < 0.01, (
+            f"[{repair_version}] DC offset too large: {dc:.4f}"
+        )
+
+    def test_output_length_preserved(self, repair_fn, default_params, tmp_wav_dir, repair_version):
+        y = generate_speech_like(sr=SR, duration=2.0)
+        y_out, sr_out = _run_repair_and_read(repair_fn, y, default_params, tmp_wav_dir)
+        ratio = len(y_out) / len(y)
+        assert 0.95 < ratio < 1.05, (
+            f"[{repair_version}] Length ratio: {ratio:.3f} (in: {len(y)}, out: {len(y_out)})"
         )
 
 
@@ -201,8 +151,7 @@ class TestV22aPerStepQuality:
         snr = compute_per_step_snr(y, self._transparent_compress, SR, 0.5)
         assert snr > 40.0, (
             f"compress SNR too low: {snr:.1f} dB. "
-            f"Global constant gain should be near-lossless (SNR > 60 dB). "
-            f"If SNR drops, time-varying gain (AM modulation) may have been reintroduced."
+            f"Global constant gain should be near-lossless."
         )
 
     def test_peak_limit_snr(self):
@@ -215,8 +164,13 @@ class TestV22aPerStepQuality:
         snr = compute_per_step_snr(y, self._loudness_normalize, SR, -16.0)
         assert snr > 60.0, (
             f"loudness_normalize SNR too low: {snr:.1f} dB. "
-            f"Loudness normalization is a pure gain operation and should have SNR > 80 dB."
+            f"Pure gain operation should have SNR > 80 dB."
         )
+
+    def test_dc_remove_snr(self):
+        y = generate_speech_like(sr=SR, duration=2.0)
+        snr = compute_per_step_snr(y, self._remove_dc, SR)
+        assert snr > 60.0, f"dc_remove SNR too low: {snr:.1f} dB"
 
     def test_depop_no_large_window_replacement(self):
         y = generate_with_pops(sr=SR, duration=2.0)
@@ -227,7 +181,7 @@ class TestV22aPerStepQuality:
         diff = np.abs(y_out[:min_len] - y_in[:min_len])
         changed = diff > 1e-8
         if not np.any(changed):
-            pytest.skip("No pops detected in test signal, depop made no changes")
+            pytest.skip("No pops detected in test signal")
 
         changed_indices = np.where(changed)[0]
         if len(changed_indices) == 0:
@@ -245,8 +199,7 @@ class TestV22aPerStepQuality:
 
         assert max_run <= 5, (
             f"depop replaced {max_run} consecutive samples. "
-            f"Large-window replacement (>5 samples) indicates cosine/linear interpolation "
-            f"which causes audible artifacts. Use single-sample diff clamping instead."
+            f"Large-window replacement indicates cosine/linear interpolation."
         )
 
     def test_compress_is_global_gain(self):
@@ -268,8 +221,61 @@ class TestV22aPerStepQuality:
         ratio_mean = np.mean(ratios)
 
         assert ratio_std / (abs(ratio_mean) + 1e-10) < 0.01, (
-            f"compress gain varies across samples: mean={ratio_mean:.6f}, std={ratio_std:.6f}, "
-            f"cv={ratio_std / (abs(ratio_mean) + 1e-10):.4f}. "
-            f"Time-varying gain = AM modulation = audible '呲呲' noise. "
-            f"Use global constant gain instead."
+            f"compress gain varies: mean={ratio_mean:.6f}, std={ratio_std:.6f}. "
+            f"Time-varying gain = AM modulation = audible noise."
+        )
+
+    def test_declip_uses_soft_clipping(self):
+        y = generate_with_clipping(sr=SR, duration=2.0)
+        y_out = self._simple_declip(y, 0.5).astype(np.float64).flatten()
+        y_in = y.astype(np.float64).flatten()
+        flat_before = count_flat_top_samples(y_in, threshold=1e-6) / len(y_in)
+        flat_after = count_flat_top_samples(y_out, threshold=1e-6) / len(y_out)
+        assert flat_after <= flat_before, (
+            f"declip increased flat-top ratio: before={flat_before:.4f}, after={flat_after:.4f}. "
+            f"Declip should reduce flat-top samples, not increase them."
+        )
+
+    def test_peak_limit_uses_soft_clipping(self):
+        y = generate_speech_like(sr=SR, duration=2.0) * 1.2
+        y_out = self._soft_peak_limit(y, 0.9).astype(np.float64).flatten()
+        y_in = y.astype(np.float64).flatten()
+        flat_before = count_flat_top_samples(y_in, threshold=1e-6) / len(y_in)
+        flat_after = count_flat_top_samples(y_out, threshold=1e-6) / len(y_out)
+        assert flat_after <= flat_before + 0.001, (
+            f"peak_limit increased flat-top ratio: before={flat_before:.4f}, after={flat_after:.4f}. "
+            f"Soft peak limit should not introduce new flat-top samples."
+        )
+
+    def test_loudness_norm_is_constant_gain(self):
+        y = generate_speech_like(sr=SR, duration=2.0)
+        y_out = self._loudness_normalize(y, SR, -16.0)
+
+        y_64 = y.astype(np.float64).flatten()
+        y_out_64 = y_out.astype(np.float64).flatten()
+        min_len = min(len(y_64), len(y_out_64))
+        y_64 = y_64[:min_len]
+        y_out_64 = y_out_64[:min_len]
+
+        nonzero = np.abs(y_64) > 1e-10
+        if not np.any(nonzero):
+            pytest.skip("Signal too quiet")
+
+        ratios = y_out_64[nonzero] / y_64[nonzero]
+        ratio_std = np.std(ratios)
+        ratio_mean = np.mean(ratios)
+        cv = ratio_std / (abs(ratio_mean) + 1e-10)
+
+        assert cv < 0.001, (
+            f"loudness_norm gain varies: cv={cv:.6f}. "
+            f"Should be pure constant gain."
+        )
+
+    def test_dc_remove_reduces_dc(self):
+        y = generate_speech_like(sr=SR, duration=2.0) + 0.05
+        y_out = self._remove_dc(y, SR)
+        dc_before = np.abs(np.mean(y.astype(np.float64).flatten()))
+        dc_after = np.abs(np.mean(y_out.astype(np.float64).flatten()))
+        assert dc_after < dc_before, (
+            f"dc_remove did not reduce DC: before={dc_before:.6f}, after={dc_after:.6f}"
         )
