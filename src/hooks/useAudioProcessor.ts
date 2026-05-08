@@ -537,7 +537,6 @@ export function useAudioProcessor() {
 
   const stopAllModeNodes = useCallback((immediate = true) => {
     const context = audioContextRef.current;
-    const fadeOutDuration = immediate ? 0 : 0.03;
     (Object.keys(modeNodesRef.current) as PlayMode[]).forEach((mode) => {
       const node = modeNodesRef.current[mode];
       if (!node) return;
@@ -545,13 +544,11 @@ export function useAudioProcessor() {
         // 清除 onended 回调，防止它调用 stopPlaying 影响新音频
         node.source.onended = null;
         if (!immediate && context) {
-          node.gain.gain.setValueAtTime(node.gain.gain.value, context.currentTime);
-          node.gain.gain.linearRampToValueAtTime(0, context.currentTime + fadeOutDuration);
-          setTimeout(() => {
-            try { node.source.stop(); } catch {}
-            try { node.source.disconnect(); } catch {}
-            try { node.gain.disconnect(); } catch {}
-          }, fadeOutDuration * 1000 + 20);
+          // 使用 Web Audio API 调度淡出，不依赖 setTimeout
+          const now = context.currentTime;
+          node.gain.gain.setValueAtTime(node.gain.gain.value, now);
+          node.gain.gain.linearRampToValueAtTime(0.0001, now + 0.03);
+          node.source.stop(now + 0.03);
         } else {
           try { node.source.stop(); } catch {}
           try { node.source.disconnect(); } catch {}
@@ -1248,7 +1245,67 @@ export function useAudioProcessor() {
       // 后台加载修复后的音频 buffer（startStreamingPlayback 已经设置了播放状态和模式）
       if (audioFile && taskIdRef.current) {
         loadAudioFromUrl(previewUrl, processingOptions.sampleRate).then(repairedBuffer => {
+          writeLog(`[applySettings] buffer加载完成: duration=${repairedBuffer.duration.toFixed(3)}`);
           setBackendProcessedBuffer(repairedBuffer);
+
+          // 如果当前正在播放streaming，无缝切换到buffer播放
+          if (isPlayingRef.current && streamingAudioRef.current) {
+            writeLog(`[applySettings] 正在播放streaming，切换到buffer播放`);
+            const currentPos = streamingAudioRef.current.currentTime;
+
+            // 停止streaming
+            streamingAudioRef.current.pause();
+            streamingAudioRef.current = null;
+            if (mediaSourceRef.current) {
+              try { mediaSourceRef.current.disconnect(); } catch {}
+              mediaSourceRef.current = null;
+            }
+
+            // 用新buffer创建节点继续播放
+            const context = getAudioContext();
+            const newSource = context.createBufferSource();
+            const newGain = context.createGain();
+            newSource.buffer = repairedBuffer;
+            newSource.connect(newGain);
+            newGain.connect(analyserRef.current!);
+            analyserRef.current!.connect(context.destination);
+            newGain.gain.setValueAtTime(0, context.currentTime);
+            newGain.gain.linearRampToValueAtTime(1.0, context.currentTime + 0.015);
+
+            newSource.onended = () => {
+              if (isPlayingRef.current) {
+                stopPlaying();
+                setCurrentTime(0);
+                pausedAtRef.current = 0;
+              }
+            };
+
+            modeNodesRef.current['backend'] = { source: newSource, gain: newGain };
+            sourceNodeRef.current = newSource;
+            gainNodeRef.current = newGain;
+            activeModeRef.current = 'backend';
+
+            startTimeRef.current = context.currentTime - currentPos;
+            newSource.start(0, currentPos);
+            playStartTimeRef.current = performance.now();
+            pausedAtRef.current = currentPos;
+
+            const updateTime = () => {
+              if (isPlayingRef.current) {
+                const elapsed = (performance.now() - playStartTimeRef.current) / 1000;
+                const current = currentPos + elapsed;
+                if (current >= repairedBuffer.duration) {
+                  stopPlaying();
+                  setCurrentTime(0);
+                  pausedAtRef.current = 0;
+                } else {
+                  setCurrentTime(current);
+                  animationFrameRef.current = requestAnimationFrame(updateTime);
+                }
+              }
+            };
+            updateTime();
+          }
         }).catch(err => {
           console.warn('[applySettings] 后台下载修复后音频失败:', err);
         });
@@ -1648,10 +1705,14 @@ export function useAudioProcessor() {
   }, [playMode, audioBuffer, browserProcessedBuffer, backendProcessedBuffer]);
 
   const play = useCallback(async () => {
+    writeLog(`[play] 开始播放: playMode=${playMode}, isPlaying=${isPlayingRef.current}, activeMode=${activeModeRef.current}`);
+
     if (playMode === 'backend' && streamingAudioRef.current && !backendProcessedBuffer) {
+      writeLog(`[play] 使用streaming播放`);
       streamingAudioRef.current.play().catch(() => {});
       isPlayingRef.current = true;
       setIsPlaying(true);
+      activeModeRef.current = 'backend';
       const updateTime = () => {
         if (isPlayingRef.current && streamingAudioRef.current) {
           const current = streamingAudioRef.current.currentTime;
@@ -1670,6 +1731,7 @@ export function useAudioProcessor() {
     }
 
     if (streamingAudioRef.current) {
+      writeLog(`[play] 停止streaming，切换到buffer播放`);
       const resumeTime = streamingAudioRef.current.currentTime;
       streamingAudioRef.current.pause();
       streamingAudioRef.current = null;
@@ -1684,6 +1746,7 @@ export function useAudioProcessor() {
 
     const buffer = getCurrentBuffer() ?? audioBufferRef.current;
     if (!buffer) {
+      writeLog(`[play] 没有可用buffer，返回`);
       return;
     }
 
@@ -1695,11 +1758,26 @@ export function useAudioProcessor() {
 
     // seek 时停止所有模式节点，重新创建
     if (seekInProgressRef.current) {
+      writeLog(`[play] seek模式，停止所有节点`);
       stopAllModeNodes();
+      seekInProgressRef.current = false;
     }
-    seekInProgressRef.current = false;
+
+    // 检查是否已有节点在运行（保护逻辑）
+    if (modeNodesRef.current[playMode]) {
+      writeLog(`[play] 警告: 当前模式已有节点，先停止`);
+      try {
+        const node = modeNodesRef.current[playMode]!;
+        node.source.onended = null;
+        node.source.stop();
+        node.source.disconnect();
+        node.gain.disconnect();
+      } catch {}
+      modeNodesRef.current[playMode] = null;
+    }
 
     // 创建当前模式的音频节点
+    writeLog(`[play] 创建新节点: mode=${playMode}, bufferDuration=${buffer.duration.toFixed(3)}`);
     const source = context.createBufferSource();
     const gain = context.createGain();
 
@@ -1720,6 +1798,7 @@ export function useAudioProcessor() {
     }
 
     source.onended = () => {
+      writeLog(`[play] 节点播放结束`);
       if (isPlayingRef.current) {
         stopPlaying();
         setCurrentTime(0);
@@ -1735,6 +1814,7 @@ export function useAudioProcessor() {
     playStartTimeRef.current = performance.now();
     startTimeRef.current = context.currentTime - playOffset;
     source.start(0, playOffset);
+    writeLog(`[play] 节点已启动: offset=${playOffset.toFixed(3)}`);
 
     isPlayingRef.current = true;
     setIsPlaying(true);
@@ -1796,23 +1876,28 @@ export function useAudioProcessor() {
   }, [stopPlaying, playMode, audioBuffer]);
 
   const switchPlayMode = useCallback(async (mode: PlayMode) => {
+    writeLog(`[switchPlayMode] 开始切换: target=${mode}, current=${activeModeRef.current}, isPlaying=${isPlayingRef.current}`);
+
     // 如果目标模式没有音频数据，只切换状态
     const targetBuffer = mode === 'browser' ? browserProcessedBuffer
       : mode === 'backend' ? backendProcessedBuffer
       : audioBuffer;
     if (!targetBuffer) {
+      writeLog(`[switchPlayMode] 目标buffer为空，只切换状态`);
       setPlayMode(mode);
       return;
     }
 
     // 如果没有在播放，直接切换模式
     if (!isPlayingRef.current) {
+      writeLog(`[switchPlayMode] 未在播放，直接切换状态`);
       setPlayMode(mode);
       return;
     }
 
     // 如果切换到当前已激活的模式，无需操作
     if (activeModeRef.current === mode) {
+      writeLog(`[switchPlayMode] 已是目标模式，无需操作`);
       setPlayMode(mode);
       return;
     }
@@ -1824,21 +1909,31 @@ export function useAudioProcessor() {
     }
 
     const now = context.currentTime;
-    const fadeDuration = 0.02; // 20ms 淡出
     const startPosition = Math.min(currentPosition, targetBuffer.duration - 0.01);
 
-    // 1. 先停止当前播放的节点（带淡出）
+    writeLog(`[switchPlayMode] 停止当前节点: mode=${activeModeRef.current}, position=${currentPosition.toFixed(3)}`);
+
+    // 1. 立即停止当前播放（不淡出，避免与新节点重叠）
     const currentNode = modeNodesRef.current[activeModeRef.current];
     if (currentNode) {
       try {
         currentNode.source.onended = null;
-        currentNode.gain.gain.setValueAtTime(currentNode.gain.gain.value, now);
-        currentNode.gain.gain.linearRampToValueAtTime(0.0001, now + fadeDuration);
-        currentNode.source.stop(now + fadeDuration + 0.01);
-      } catch {}
+        currentNode.source.stop(now);
+        currentNode.source.disconnect();
+        currentNode.gain.disconnect();
+        writeLog(`[switchPlayMode] 旧节点已停止并断开`);
+      } catch (e) {
+        writeLog(`[switchPlayMode] 停止旧节点出错: ${e}`);
+      }
     }
 
-    // 2. 创建新节点
+    // 2. 清理所有旧节点引用
+    (Object.keys(modeNodesRef.current) as PlayMode[]).forEach((m) => {
+      modeNodesRef.current[m] = null;
+    });
+
+    // 3. 创建新节点
+    writeLog(`[switchPlayMode] 创建新节点: mode=${mode}, bufferDuration=${targetBuffer.duration.toFixed(3)}`);
     const newSource = context.createBufferSource();
     const newGain = context.createGain();
     newSource.buffer = targetBuffer;
@@ -1846,21 +1941,18 @@ export function useAudioProcessor() {
     newGain.connect(analyserRef.current!);
     analyserRef.current!.connect(context.destination);
 
+    // 使用极短淡入避免click
     newGain.gain.setValueAtTime(0, now);
-    newGain.gain.linearRampToValueAtTime(1.0, now + fadeDuration);
+    newGain.gain.linearRampToValueAtTime(1.0, now + 0.01);
 
     newSource.onended = () => {
+      writeLog(`[switchPlayMode] 新节点播放结束`);
       if (isPlayingRef.current) {
         stopPlaying();
         setCurrentTime(0);
         pausedAtRef.current = 0;
       }
     };
-
-    // 3. 清理所有旧节点引用（不依赖setTimeout）
-    (Object.keys(modeNodesRef.current) as PlayMode[]).forEach((m) => {
-      modeNodesRef.current[m] = null;
-    });
 
     modeNodesRef.current[mode] = { source: newSource, gain: newGain };
     sourceNodeRef.current = newSource;
@@ -1869,6 +1961,7 @@ export function useAudioProcessor() {
 
     startTimeRef.current = now - startPosition;
     newSource.start(now, startPosition);
+    writeLog(`[switchPlayMode] 新节点已启动: startTime=${startTimeRef.current.toFixed(3)}, offset=${startPosition.toFixed(3)}`);
 
     setPlayMode(mode);
 

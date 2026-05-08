@@ -91,9 +91,12 @@ def _smooth_compress(y, sr, amount, threshold_db=-22.0, ratio=3.0, attack_ms=15,
 
     out = y * gain
 
-    # 极保守的 makeup gain
-    makeup_gain = 1.0 + min((1.0 - 1.0 / ratio) * amount * 0.03, 0.04)
-    out = out * makeup_gain
+    # 根据实际压缩量计算 makeup gain，更合理
+    compressed_rms = np.sqrt(np.mean(out ** 2))
+    input_rms = np.sqrt(np.mean(y ** 2))
+    if compressed_rms > 1e-10 and input_rms > 1e-10:
+        makeup_gain = min(input_rms / compressed_rms, 1.5)  # 最大 +3.5dB
+        out = out * makeup_gain
 
     # 硬限幅到 0.95，避免任何削波
     out = np.clip(out, -0.95, 0.95)
@@ -150,7 +153,9 @@ def _simple_depop(y, sr, amount):
         left = max(0, idx - window)
         right = min(len(y), idx + window + 1)
         if right - left > 2:
-            y_out[left:right] = np.linspace(y[left], y[right - 1], right - left)
+            # 使用余弦插值代替线性插值，更平滑
+    t = np.linspace(0, 1, right - left)
+    y_out[left:right] = y[left] + (y[right - 1] - y[left]) * 0.5 * (1 - np.cos(t * np.pi))
     return y_out
 
 
@@ -193,8 +198,8 @@ def _loudness_normalize(y, sr, target_lufs=-16.0):
     target_rms = 10 ** (target_lufs / 20.0)
     gain = target_rms / rms_val
 
-    # 限制最大增益为 +12dB，避免过度放大噪声底
-    gain = min(gain, 4.0)
+    # 限制最大增益为 +6dB，避免过度放大噪声底
+    gain = min(gain, 2.0)
 
     if is_stereo:
         return y * gain
@@ -259,7 +264,7 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
     # 这是彻底消除电流声的关键步骤
     if progress_callback:
         progress_callback(0.75, "v2.2a 平滑处理...")
-    y = _lowpass_final(y, sr, cutoff_hz=17000)
+    y = _lowpass_final(y, sr, cutoff_hz=16000)
     issues_found.append("高频平滑")
     gc.collect()
 
