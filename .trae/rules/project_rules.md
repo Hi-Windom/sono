@@ -14,11 +14,28 @@ bash scripts/build_android.sh
 ```
 此脚本自动完成：清理旧产物 → npm run build → 部署前端到 backend/dist → 验证 → 重启后端
 
-### 桌面预览启动
+### 桌面开发预览（热重载，推荐开发时使用）
 ```bash
-cd /workspace/backend && SERVE_STATIC=1 python main.py
+# 一键启动前后端（推荐）
+bash scripts/start_dev.sh
+# 访问地址: http://localhost:5173
+
+# 或手动分别启动：
+# 终端1：启动 Vite 前端开发服务器（热重载）
+npm run dev
+# 终端2：启动后端 API 服务（仅 API，不 serve 静态文件）
+cd /workspace/backend && python main.py
 ```
-访问地址: http://localhost:8000
+
+### 桌面生产预览（使用打包后的 dist，非开发环境）
+```bash
+# 先构建前端，再启动后端（SERVE_STATIC=1 会 serve backend/dist）
+npm run build
+cp -r dist backend/dist
+cd /workspace/backend && SERVE_STATIC=1 python main.py
+# 访问地址: http://localhost:8000
+```
+**注意**：`SERVE_STATIC=1` 仅用于生产/打包验证，开发时请勿使用，应使用 `npm run dev` 获得热重载体验。
 
 ## Architecture
 
