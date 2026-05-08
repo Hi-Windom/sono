@@ -162,19 +162,23 @@ function VersionMatrix({ tests }: { tests: TestResult[] }) {
 export default function QualityTestPage() {
   const navigate = useNavigate();
   const [data, setData] = useState<QualityTestResponse | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [showRaw, setShowRaw] = useState(false);
 
   const runTests = async () => {
     setLoading(true);
+    setError(null);
     try {
       const res = await fetch('/api/v1/quality-tests');
       if (res.ok) {
         const json = await res.json();
         setData(json);
+      } else {
+        setError(`请求失败: ${res.status} ${res.statusText}`);
       }
     } catch (err) {
-      console.error('获取测试结果失败:', err);
+      setError(`网络错误: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setLoading(false);
     }
@@ -220,6 +224,22 @@ export default function QualityTestPage() {
             </div>
             <p className="text-gray-400 text-sm font-mono">Running quality tests...</p>
             <p className="text-gray-600 text-xs font-mono mt-1">4 versions × 8 baselines + 12 per-step + 4 iron rules</p>
+          </div>
+        )}
+
+        {/* Error */}
+        {!loading && error && !data && (
+          <div className="flex flex-col items-center justify-center py-28">
+            <div className="w-16 h-16 bg-red-500/10 rounded-full flex items-center justify-center mb-6">
+              <svg className="w-8 h-8 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+            </div>
+            <p className="text-red-400 text-sm font-mono mb-2">测试运行失败</p>
+            <p className="text-gray-500 text-xs font-mono mb-6">{error}</p>
+            <button onClick={runTests} className="px-4 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-gray-300 text-xs font-mono transition">
+              重试
+            </button>
           </div>
         )}
 
