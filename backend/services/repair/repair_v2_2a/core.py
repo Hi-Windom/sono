@@ -68,9 +68,9 @@ def _smooth_compress(y, sr, amount, threshold_db=-22.0, ratio=3.0, attack_ms=15,
     # 包络检测：使用 scipy 的单向低通滤波，避免 Python 循环
     rectified = np.abs(y).astype(np.float64)
 
-    # 设计包络检测低通滤波器
+    # 设计包络检测低通滤波器（更低截止频率减少高频调制/电流声）
     nyquist = sr / 2
-    envelope_cutoff = min(100.0, nyquist * 0.5)
+    envelope_cutoff = min(30.0, nyquist * 0.3)  # 从100Hz降到30Hz
     envelope_cutoff_norm = envelope_cutoff / nyquist
     b, a = butter(2, envelope_cutoff_norm, btype='low')
     envelope = lfilter(b, a, rectified)
@@ -84,8 +84,8 @@ def _smooth_compress(y, sr, amount, threshold_db=-22.0, ratio=3.0, attack_ms=15,
     gain[over_mask] = (threshold_lin + (envelope[over_mask] - threshold_lin) / ratio) / (envelope[over_mask] + 1e-10)
 
     # 对增益曲线做重度平滑，消除任何高频调制
-    if len(gain) > 101:
-        kernel = np.hanning(101)
+    if len(gain) > 201:
+        kernel = np.hanning(201)  # 从101增加到201，更平滑
         kernel = kernel / kernel.sum()
         gain = np.convolve(gain, kernel, mode='same')
 
@@ -154,8 +154,8 @@ def _simple_depop(y, sr, amount):
         right = min(len(y), idx + window + 1)
         if right - left > 2:
             # 使用余弦插值代替线性插值，更平滑
-    t = np.linspace(0, 1, right - left)
-    y_out[left:right] = y[left] + (y[right - 1] - y[left]) * 0.5 * (1 - np.cos(t * np.pi))
+            t = np.linspace(0, 1, right - left)
+            y_out[left:right] = y[left] + (y[right - 1] - y[left]) * 0.5 * (1 - np.cos(t * np.pi))
     return y_out
 
 
@@ -264,7 +264,7 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
     # 这是彻底消除电流声的关键步骤
     if progress_callback:
         progress_callback(0.75, "v2.2a 平滑处理...")
-    y = _lowpass_final(y, sr, cutoff_hz=16000)
+    y = _lowpass_final(y, sr, cutoff_hz=15000)  # 进一步降低截止频率消除高频artifacts
     issues_found.append("高频平滑")
     gc.collect()
 
