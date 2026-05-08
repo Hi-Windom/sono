@@ -279,3 +279,202 @@ class TestV22aPerStepQuality:
         assert dc_after < dc_before, (
             f"dc_remove did not reduce DC: before={dc_before:.6f}, after={dc_after:.6f}"
         )
+
+
+class TestV23PerStepQuality:
+
+    @pytest.fixture(autouse=True)
+    def import_v23_functions(self):
+        from services.repair.repair_v2_3.core import (
+            _tanh_declip,
+            _diff_clamp_depop,
+            _global_loudness_normalize,
+            _transparent_multiband_compress,
+            _soft_peak_limit,
+            _soft_transient_limit,
+        )
+        self._tanh_declip = _tanh_declip
+        self._diff_clamp_depop = _diff_clamp_depop
+        self._global_loudness_normalize = _global_loudness_normalize
+        self._transparent_multiband_compress = _transparent_multiband_compress
+        self._soft_peak_limit = _soft_peak_limit
+        self._soft_transient_limit = _soft_transient_limit
+
+    def test_declip_snr(self):
+        y = generate_with_clipping(sr=SR, duration=2.0)
+        snr = compute_per_step_snr(y, self._tanh_declip, 0.5)
+        assert snr > 20.0, f"declip SNR too low: {snr:.1f} dB"
+
+    def test_depop_snr(self):
+        y = generate_with_pops(sr=SR, duration=2.0)
+        snr = compute_per_step_snr(y, self._diff_clamp_depop, SR, 0.5)
+        assert snr > 10.0, f"depop SNR too low: {snr:.1f} dB"
+
+    def test_transient_snr(self):
+        y = generate_speech_like(sr=SR, duration=2.0).reshape(1, -1)
+        snr = compute_per_step_snr(y, self._soft_transient_limit, SR, 0.5)
+        assert snr > 15.0, f"transient SNR too low: {snr:.1f} dB"
+
+    def test_loudness_norm_snr(self):
+        y = generate_speech_like(sr=SR, duration=2.0).reshape(1, -1)
+        snr = compute_per_step_snr(y, self._global_loudness_normalize, SR, -16.0)
+        assert snr > 60.0, (
+            f"loudness_normalize SNR too low: {snr:.1f} dB. "
+            f"Pure gain operation should have SNR > 80 dB."
+        )
+
+    def test_compress_snr(self):
+        y = generate_speech_like(sr=SR, duration=2.0).reshape(1, -1)
+        snr = compute_per_step_snr(y, self._transparent_multiband_compress, SR, 0.5, "generic")
+        assert snr > 30.0, f"compress SNR too low: {snr:.1f} dB"
+
+    def test_peak_limit_snr(self):
+        y = generate_speech_like(sr=SR, duration=2.0) * 0.8
+        snr = compute_per_step_snr(y, self._soft_peak_limit, 0.9)
+        assert snr > 30.0, f"peak_limit SNR too low: {snr:.1f} dB"
+
+    def test_declip_uses_soft_clipping(self):
+        y = generate_with_clipping(sr=SR, duration=2.0)
+        y_out = self._tanh_declip(y, 0.5).astype(np.float64).flatten()
+        y_in = y.astype(np.float64).flatten()
+        flat_before = count_flat_top_samples(y_in, threshold=1e-6) / len(y_in)
+        flat_after = count_flat_top_samples(y_out, threshold=1e-6) / len(y_out)
+        assert flat_after <= flat_before, (
+            f"declip increased flat-top ratio: before={flat_before:.4f}, after={flat_after:.4f}"
+        )
+
+    def test_depop_no_large_window_replacement(self):
+        y = generate_with_pops(sr=SR, duration=2.0)
+        y_out = self._diff_clamp_depop(y, SR, 0.5)
+        y_out = y_out.astype(np.float64).flatten()
+        y_in = y.astype(np.float64).flatten()
+        min_len = min(len(y_in), len(y_out))
+        diff = np.abs(y_out[:min_len] - y_in[:min_len])
+        changed = diff > 1e-8
+        if not np.any(changed):
+            pytest.skip("No pops detected in test signal")
+        changed_indices = np.where(changed)[0]
+        if len(changed_indices) == 0:
+            return
+        gaps = np.diff(changed_indices)
+        max_run = 1
+        current_run = 1
+        for g in gaps:
+            if g == 1:
+                current_run += 1
+                max_run = max(max_run, current_run)
+            else:
+                current_run = 1
+        assert max_run <= 2, (
+            f"depop replaced {max_run} consecutive samples. "
+            f"Iron law 3: max 2 consecutive samples allowed."
+        )
+
+    def test_transient_uses_constant_gain(self):
+        y = generate_speech_like(sr=SR, duration=2.0).reshape(1, -1)
+        y_out = self._soft_transient_limit(y, SR, 0.5)
+        y_64 = y.astype(np.float64).flatten()
+        y_out_64 = y_out.astype(np.float64).flatten()
+        min_len = min(len(y_64), len(y_out_64))
+        y_64 = y_64[:min_len]
+        y_out_64 = y_out_64[:min_len]
+        nonzero = np.abs(y_64) > 1e-10
+        if not np.any(nonzero):
+            pytest.skip("Signal too quiet for gain ratio test")
+        ratios = y_out_64[nonzero] / y_64[nonzero]
+        ratio_std = np.std(ratios)
+        ratio_mean = np.mean(ratios)
+        assert ratio_std / (abs(ratio_mean) + 1e-10) < 0.05, (
+            f"transient gain varies: mean={ratio_mean:.6f}, std={ratio_std:.6f}. "
+            f"Time-varying gain = AM modulation."
+        )
+
+    def test_loudness_norm_is_constant_gain(self):
+        y = generate_speech_like(sr=SR, duration=2.0).reshape(1, -1)
+        y_out = self._global_loudness_normalize(y, SR, -16.0)
+        y_64 = y.astype(np.float64).flatten()
+        y_out_64 = y_out.astype(np.float64).flatten()
+        min_len = min(len(y_64), len(y_out_64))
+        y_64 = y_64[:min_len]
+        y_out_64 = y_out_64[:min_len]
+        nonzero = np.abs(y_64) > 1e-10
+        if not np.any(nonzero):
+            pytest.skip("Signal too quiet")
+        ratios = y_out_64[nonzero] / y_64[nonzero]
+        ratio_std = np.std(ratios)
+        ratio_mean = np.mean(ratios)
+        cv = ratio_std / (abs(ratio_mean) + 1e-10)
+        assert cv < 0.001, (
+            f"loudness_norm gain varies: cv={cv:.6f}. "
+            f"Should be pure constant gain."
+        )
+
+    def test_compress_is_global_gain(self):
+        y = generate_speech_like(sr=SR, duration=2.0).reshape(1, -1)
+        y_out = self._transparent_multiband_compress(y, SR, 0.5, "generic")
+        y_64 = y.astype(np.float64).flatten()
+        y_out_64 = y_out.astype(np.float64).flatten()
+        min_len = min(len(y_64), len(y_out_64))
+        y_64 = y_64[:min_len]
+        y_out_64 = y_out_64[:min_len]
+        nonzero = np.abs(y_64) > 1e-10
+        if not np.any(nonzero):
+            pytest.skip("Signal too quiet for gain ratio test")
+        ratios = y_out_64[nonzero] / y_64[nonzero]
+        ratio_std = np.std(ratios)
+        ratio_mean = np.mean(ratios)
+        assert ratio_std / (abs(ratio_mean) + 1e-10) < 0.05, (
+            f"compress gain varies: mean={ratio_mean:.6f}, std={ratio_std:.6f}. "
+            f"Multiband compress CV should be < 5%."
+        )
+
+    def test_peak_limit_uses_soft_clipping(self):
+        y = generate_speech_like(sr=SR, duration=2.0) * 1.2
+        y_out = self._soft_peak_limit(y, 0.9).astype(np.float64).flatten()
+        y_in = y.astype(np.float64).flatten()
+        flat_before = count_flat_top_samples(y_in, threshold=1e-6) / len(y_in)
+        flat_after = count_flat_top_samples(y_out, threshold=1e-6) / len(y_out)
+        assert flat_after <= flat_before + 0.001, (
+            f"peak_limit increased flat-top ratio: before={flat_before:.4f}, after={flat_after:.4f}"
+        )
+
+
+class TestV23aPerStepQuality:
+
+    @pytest.fixture(autouse=True)
+    def import_v23a_functions(self):
+        from services.repair.repair_v2_3a.core import (
+            _spectral_denoise,
+            _de_ess,
+        )
+        self._spectral_denoise = _spectral_denoise
+        self._de_ess = _de_ess
+
+    def test_spectral_denoise_snr(self):
+        y = generate_speech_like(sr=SR, duration=2.0)
+        snr = compute_per_step_snr(y, self._spectral_denoise, SR, 0.3)
+        assert snr > 10.0, f"spectral_denoise SNR too low: {snr:.1f} dB"
+
+    def test_de_ess_snr(self):
+        y = generate_speech_like(sr=SR, duration=2.0)
+        snr = compute_per_step_snr(y, self._de_ess, SR, 0.3)
+        assert snr > 15.0, f"de_ess SNR too low: {snr:.1f} dB"
+
+    def test_de_ess_is_constant_gain(self):
+        y = generate_speech_like(sr=SR, duration=2.0)
+        y_out = self._de_ess(y, SR, 0.3)
+        y_64 = y.astype(np.float64).flatten()
+        y_out_64 = y_out.astype(np.float64).flatten()
+        min_len = min(len(y_64), len(y_out_64))
+        y_64 = y_64[:min_len]
+        y_out_64 = y_out_64[:min_len]
+        nonzero = np.abs(y_64) > 1e-10
+        if not np.any(nonzero):
+            pytest.skip("Signal too quiet")
+        ratios = y_out_64[nonzero] / y_64[nonzero]
+        ratio_std = np.std(ratios)
+        ratio_mean = np.mean(ratios)
+        assert ratio_std / (abs(ratio_mean) + 1e-10) < 0.05, (
+            f"de_ess gain varies: mean={ratio_mean:.6f}, std={ratio_std:.6f}. "
+            f"Should use global constant attenuation."
+        )

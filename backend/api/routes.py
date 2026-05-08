@@ -648,28 +648,36 @@ def _parse_pytest_output(output: str) -> dict:
         stripped = line.strip()
         if " PASSED" in stripped:
             test_name = stripped.split(" PASSED")[0].strip()
+            full_name = test_name
             if "::" in test_name:
                 test_name = test_name.split("::")[-1]
-            tests.append({"name": test_name, "status": "passed"})
+            tests.append({"name": test_name, "full_name": full_name, "status": "passed"})
         elif " FAILED" in stripped:
             test_name = stripped.split(" FAILED")[0].strip()
+            full_name = test_name
             if "::" in test_name:
                 test_name = test_name.split("::")[-1]
-            tests.append({"name": test_name, "status": "failed", "error": ""})
+            tests.append({"name": test_name, "full_name": full_name, "status": "failed", "error": ""})
         elif " SKIPPED" in stripped:
             test_name = stripped.split(" SKIPPED")[0].strip()
+            full_name = test_name
             if "::" in test_name:
                 test_name = test_name.split("::")[-1]
-            tests.append({"name": test_name, "status": "skipped"})
+            tests.append({"name": test_name, "full_name": full_name, "status": "skipped"})
         elif "passed" in stripped and ("failed" in stripped or "skipped" in stripped or stripped.endswith("passed")):
             summary_line = stripped
 
     for t in tests:
         name = t["name"]
+        full_name = t.get("full_name", name)
         if "[" in name:
             m = re.search(r'\[(v[\d.]+[\w]*)\]', name)
             t["version"] = m.group(1) if m else ""
-        elif "V22a" in name or "v22a" in name.lower():
+        elif "V23a" in full_name or "v23a" in full_name.lower():
+            t["version"] = "v2.3a"
+        elif "V23" in full_name or "v23" in full_name.lower():
+            t["version"] = "v2.3"
+        elif "V22a" in full_name or "v22a" in full_name.lower():
             t["version"] = "v2.2a"
         else:
             t["version"] = ""
@@ -695,6 +703,11 @@ def _parse_pytest_output(output: str) -> dict:
             "test_peak_limit_uses_soft": ("iron_rule", "Flat-top", "Peak Limit 不增加 flat-top 样本（使用软削波）"),
             "test_loudness_norm_is_constant": ("iron_rule", "Gain CV", "Loudness Norm 是纯常量增益（CV < 0.1%）"),
             "test_dc_remove_reduces": ("per_step", "DC", "DC Remove 有效降低直流偏移"),
+            "test_transient_snr": ("per_step", "SNR", "瞬态修复 SNR > 15 dB"),
+            "test_transient_uses_constant": ("iron_rule", "Gain CV", "瞬态修复使用全局常量增益（CV < 5%）"),
+            "test_spectral_denoise_snr": ("per_step", "SNR", "频谱降噪 SNR > 10 dB"),
+            "test_de_ess_snr": ("per_step", "SNR", "齿音抑制 SNR > 15 dB"),
+            "test_de_ess_is_constant": ("iron_rule", "Gain CV", "齿音抑制使用全局常量衰减"),
         }
         matched = False
         for key, val in category_map.items():
@@ -706,6 +719,7 @@ def _parse_pytest_output(output: str) -> dict:
             t["category"] = "other"
             t["metric"] = ""
             t["description"] = ""
+        t.pop("full_name", None)
 
     passed = sum(1 for t in tests if t["status"] == "passed")
     failed = sum(1 for t in tests if t["status"] == "failed")
