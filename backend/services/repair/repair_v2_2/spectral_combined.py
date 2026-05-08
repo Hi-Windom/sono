@@ -12984,4 +12984,21 @@ def apply_spectral_combined(y, sr, params, n_fft, hop_length, issues_found, musi
         mag = np.abs(S)
         n_frames = mag.shape[1]
 
-        if n_frames
+        if n_framesimport numpy as np
+from services.librosa_compat import stft,import numpy as np
+from services.librosa_compat import stft, istft, fft_frequencies
+from scipy.signal import lfilter
+from .type_params import TYPE_PARAMS_MAP
+
+
+def apply_spectral_combined(y, sr, params, n_fft, hop_length, issues_found, music_type="generic"):
+    """
+import numpy as np
+from services.librosa_compat import stft, istft, fft_frequencies
+from scipy.signal import lfilter
+from .type_params import TYPE_PARAMS_MAP
+
+
+def apply_spectral_combined(y, sr, params, n_fft, hop_length, issues_found, music_type="generic"):
+    """
+    合并频谱处理 - 单次 STFT/ISTFT 完成所有频谱操作
