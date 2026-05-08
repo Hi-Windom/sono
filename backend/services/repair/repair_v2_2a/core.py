@@ -113,14 +113,14 @@ def _single_band_compress(y, sr, amount, threshold_db=-20.0, ratio=4.0, attack_m
         gain_array = np.convolve(gain_array, kernel, mode='same')
 
     out = y * gain_array
-    # 限制 makeup gain 最大 +2dB，避免过度增益
-    makeup_gain = 1.0 + min((1.0 - 1.0 / ratio) * amount * 0.15, 0.25)
+    # 严格限制 makeup gain 最大 +1dB，避免过度增益产生噪声
+    makeup_gain = 1.0 + min((1.0 - 1.0 / ratio) * amount * 0.08, 0.12)
     out = out * makeup_gain
 
-    # 安全限幅：防止压缩后削波
+    # 软限幅：防止压缩后削波，使用平滑曲线避免失真
     peak = np.max(np.abs(out))
-    if peak > 0.95:
-        out *= 0.95 / peak
+    if peak > 0.92:
+        out = out * (0.92 / peak)
 
     return out
 
@@ -149,30 +149,30 @@ def _spectral_repair(y, sr, params):
         # 简化的频谱减法：估计噪声底并应用平滑增益
         noise_frames = max(1, n_frames // 20)
         noise_profile = np.mean(mag[:, :noise_frames], axis=1, keepdims=True)
-        
+
         # 计算 SNR 并应用增益
         signal_power = mag ** 2
         noise_power = noise_profile ** 2 + 1e-10
         snr = signal_power / noise_power
-        
+
         # 软阈值增益 - 更保守的降噪
         gain = snr / (snr + 1.0)
-        # 提高最小增益 floor，避免过度衰减产生音乐噪声
-        floor = 0.3 + 0.3 * (1 - nr_amount)
+        # 大幅提高最小增益 floor 到 0.5-0.65，彻底消除音乐噪声/电流声
+        floor = 0.5 + 0.15 * (1 - nr_amount)
         gain = np.maximum(gain, floor)
-        
-        # 时间维度平滑 - 更强的平滑避免增益突变
-        alpha = 0.85 + 0.1 * nr_amount
+
+        # 降低时间平滑系数，减少拖尾噪声
+        alpha = 0.75 + 0.12 * nr_amount
         for i in range(1, n_frames):
             gain[:, i] = alpha * gain[:, i-1] + (1 - alpha) * gain[:, i]
-        
+
         mag *= gain
 
-    # 去齿音：衰减 4kHz-8kHz 区域
+    # 去齿音：更保守地衰减 5kHz-9kHz 区域，避免引入高频 artifacts
     if deess_amount > 0:
-        sibilance_mask = (freqs >= 4000) & (freqs <= 8000)
+        sibilance_mask = (freqs >= 5000) & (freqs <= 9000)
         if np.any(sibilance_mask):
-            attenuation = 1.0 - 0.5 * deess_amount
+            attenuation = 1.0 - 0.3 * deess_amount
             mag[sibilance_mask, :] *= attenuation
 
     S_repaired = mag * np.exp(1j * phase)
@@ -224,15 +224,20 @@ def _peak_limit(y, threshold=0.99):
 
 
 def _simple_declip(y, amount):
-    """简单削波检测与修复"""
+    """简单削波检测与修复 - 使用平滑曲线避免高频失真"""
     if amount <= 0:
         return y
-    threshold = 0.95
+    threshold = 0.92
     mask = np.abs(y) > threshold
     if not np.any(mask):
         return y
     y_out = y.copy()
-    y_out[mask] = np.sign(y_out[mask]) * (threshold + (np.abs(y_out[mask]) - threshold) * (1 - amount * 0.5))
+    # 使用平方根曲线平滑过渡，避免硬拐点产生高频谐波
+    over = np.abs(y_out[mask]) - threshold
+    max_over = np.max(over) if len(over) > 0 else 1e-10
+    scale = 1.0 - amount * 0.4
+    smoothed = threshold + np.sqrt(over / (max_over + 1e-10)) * over * scale
+    y_out[mask] = np.sign(y_out[mask]) * np.minimum(smoothed, 0.99)
     return y_out
 
 

@@ -185,6 +185,13 @@ export function useAudioProcessor() {
   const playRef = useRef<(() => void) | null>(null);
   const audioBufferRef = useRef<AudioBuffer | null>(null);
   const seekInProgressRef = useRef(false);
+  // 静音策略：为每种播放模式维护独立的 source + gain，通过 gain 切换实现无缝 A/B 对比
+  const modeNodesRef = useRef<Record<PlayMode, { source: AudioBufferSourceNode; gain: GainNode } | null>>({
+    original: null,
+    browser: null,
+    backend: null,
+  });
+  const activeModeRef = useRef<PlayMode>('original');
 
   // 同步 audioBufferRef 与 audioBuffer state
   useEffect(() => {
@@ -519,35 +526,35 @@ export function useAudioProcessor() {
     })();
   }, [backendAvailable, getAudioContext, processingOptions.sampleRate]);
 
-  const stopPlaying = useCallback((immediate = true) => {
-    // 如果不需要立即停止，先淡出
-    if (!immediate && gainNodeRef.current && sourceNodeRef.current) {
-      const context = audioContextRef.current;
-      if (context) {
-        const fadeOutDuration = 0.03; // 30ms 淡出
-        const now = context.currentTime;
-        gainNodeRef.current.gain.setValueAtTime(gainNodeRef.current.gain.value, now);
-        gainNodeRef.current.gain.linearRampToValueAtTime(0, now + fadeOutDuration);
+  const stopAllModeNodes = useCallback((immediate = true) => {
+    const context = audioContextRef.current;
+    const fadeOutDuration = immediate ? 0 : 0.03;
+    (Object.keys(modeNodesRef.current) as PlayMode[]).forEach((mode) => {
+      const node = modeNodesRef.current[mode];
+      if (!node) return;
+      try {
+        if (!immediate && context) {
+          node.gain.gain.setValueAtTime(node.gain.gain.value, context.currentTime);
+          node.gain.gain.linearRampToValueAtTime(0, context.currentTime + fadeOutDuration);
+          setTimeout(() => {
+            try { node.source.stop(); } catch {}
+            node.source.disconnect();
+            node.gain.disconnect();
+          }, fadeOutDuration * 1000 + 10);
+        } else {
+          node.source.stop();
+          node.source.disconnect();
+          node.gain.disconnect();
+        }
+      } catch {}
+      modeNodesRef.current[mode] = null;
+    });
+    sourceNodeRef.current = null;
+    gainNodeRef.current = null;
+  }, []);
 
-        // 延迟停止
-        setTimeout(() => {
-          if (sourceNodeRef.current) {
-            try { sourceNodeRef.current.stop(); } catch {}
-            sourceNodeRef.current.onended = null;
-            sourceNodeRef.current.disconnect();
-            sourceNodeRef.current = null;
-          }
-        }, fadeOutDuration * 1000 + 10); // 添加10ms缓冲
-      }
-    } else {
-      // 立即停止
-      if (sourceNodeRef.current) {
-        try { sourceNodeRef.current.stop(); } catch {}
-        sourceNodeRef.current.onended = null;
-        sourceNodeRef.current.disconnect();
-        sourceNodeRef.current = null;
-      }
-    }
+  const stopPlaying = useCallback((immediate = true) => {
+    stopAllModeNodes(immediate);
 
     if (mediaSourceRef.current) {
       try { mediaSourceRef.current.disconnect(); } catch {}
@@ -563,7 +570,7 @@ export function useAudioProcessor() {
     }
     isPlayingRef.current = false;
     setIsPlaying(false);
-  }, []);
+  }, [stopAllModeNodes]);
 
   const closeWS = useCallback(() => {
     if (wsControlRef.current) {
@@ -1673,15 +1680,40 @@ export function useAudioProcessor() {
       await new Promise(resolve => setTimeout(resolve, 50));
     }
 
-    if (sourceNodeRef.current && !seekInProgressRef.current) {
-      stopPlaying();
-    } else if (sourceNodeRef.current && seekInProgressRef.current) {
-      try { sourceNodeRef.current.stop(); } catch {}
-      sourceNodeRef.current.disconnect();
-      sourceNodeRef.current = null;
+    // 静音策略：seek 时停止所有模式节点，重新创建；普通播放时复用已有节点
+    if (seekInProgressRef.current) {
+      stopAllModeNodes();
+    } else if (!seekInProgressRef.current && modeNodesRef.current[playMode]) {
+      // 当前模式已有节点在运行，直接恢复播放（从暂停恢复）
+      const node = modeNodesRef.current[playMode]!;
+      sourceNodeRef.current = node.source;
+      gainNodeRef.current = node.gain;
+      isPlayingRef.current = true;
+      setIsPlaying(true);
+      playStartTimeRef.current = performance.now();
+      const playOffset = pausedAtRef.current;
+      startTimeRef.current = context.currentTime - playOffset;
+      activeModeRef.current = playMode;
+      const updateTime = () => {
+        if (isPlayingRef.current) {
+          const elapsed = (performance.now() - playStartTimeRef.current) / 1000;
+          const current = playOffset + elapsed;
+          if (current >= buffer.duration) {
+            stopPlaying();
+            setCurrentTime(0);
+            pausedAtRef.current = 0;
+          } else {
+            setCurrentTime(current);
+            animationFrameRef.current = requestAnimationFrame(updateTime);
+          }
+        }
+      };
+      updateTime();
+      return;
     }
     seekInProgressRef.current = false;
 
+    // 创建当前模式的音频节点
     const source = context.createBufferSource();
     const gain = context.createGain();
 
@@ -1690,7 +1722,7 @@ export function useAudioProcessor() {
     gain.connect(analyserRef.current!);
     analyserRef.current!.connect(context.destination);
 
-    // 使用淡入避免爆音 - 使用线性渐变更平滑
+    // 使用淡入避免爆音
     const fadeInDuration = 0.015; // 15ms 淡入
     gain.gain.setValueAtTime(0, context.currentTime);
     gain.gain.linearRampToValueAtTime(1.0, context.currentTime + fadeInDuration);
@@ -1709,8 +1741,10 @@ export function useAudioProcessor() {
       }
     };
 
+    modeNodesRef.current[playMode] = { source, gain };
     sourceNodeRef.current = source;
     gainNodeRef.current = gain;
+    activeModeRef.current = playMode;
 
     playStartTimeRef.current = performance.now();
     startTimeRef.current = context.currentTime - playOffset;
@@ -1734,7 +1768,7 @@ export function useAudioProcessor() {
       }
     };
     updateTime();
-  }, [playMode, backendProcessedBuffer, getCurrentBuffer, getAudioContext, stopPlaying]);
+  }, [playMode, backendProcessedBuffer, getCurrentBuffer, getAudioContext, stopPlaying, stopAllModeNodes]);
 
   // 更新 playRef
   useEffect(() => {
@@ -1782,52 +1816,52 @@ export function useAudioProcessor() {
       return;
     }
 
-    // 获取当前播放位置
+    // 如果切换到当前已激活的模式，无需操作
+    if (activeModeRef.current === mode && modeNodesRef.current[mode]) {
+      setPlayMode(mode);
+      return;
+    }
+
     const currentPosition = currentTime;
     const context = getAudioContext();
-
-    // 确保音频上下文处于运行状态
     if (context.state === 'suspended') {
       await context.resume();
     }
 
-    // 获取新旧模式的音频缓冲区
     const newBuffer = mode === 'browser' ? browserProcessedBuffer
       : mode === 'backend' ? backendProcessedBuffer
       : audioBuffer;
-
     if (!newBuffer) {
       setPlayMode(mode);
       return;
     }
 
-    // 优化交叉淡入淡出时间 - 使用更短的淡入淡出实现更无缝的切换
-    const fadeOutDuration = 0.03; // 30ms 淡出
-    const fadeInDuration = 0.03;  // 30ms 淡入
-    const overlapTime = 0.01;     // 10ms 重叠时间，确保无缝
+    const fadeDuration = 0.025; // 25ms 淡入淡出
+    const now = context.currentTime;
+    const startPosition = Math.min(currentPosition, newBuffer.duration - 0.01);
 
-    // 保存旧的音频源引用，用于后续停止
-    const oldSource = sourceNodeRef.current;
-    const oldGain = gainNodeRef.current;
+    // 静音策略：目标模式是否已有节点？
+    const existing = modeNodesRef.current[mode];
+    if (existing) {
+      // 已有节点：同步到当前播放位置，然后淡入
+      try {
+        existing.source.stop();
+        existing.source.disconnect();
+        existing.gain.disconnect();
+      } catch {}
+    }
 
-    // 创建新的音频源（先创建，确保准备好后再切换）
+    // 创建新节点（或重建已有模式的节点到新位置）
     const newSource = context.createBufferSource();
     const newGain = context.createGain();
-
     newSource.buffer = newBuffer;
     newSource.connect(newGain);
     newGain.connect(analyserRef.current!);
     analyserRef.current!.connect(context.destination);
 
-    // 从新位置开始播放，确保无缝衔接
-    const startPosition = Math.min(currentPosition, newBuffer.duration - 0.01);
-
-    // 设置淡入 - 使用线性渐变更平滑
-    const now = context.currentTime;
     newGain.gain.setValueAtTime(0, now);
-    newGain.gain.linearRampToValueAtTime(1.0, now + fadeInDuration);
+    newGain.gain.linearRampToValueAtTime(1.0, now + fadeDuration);
 
-    // 设置结束回调
     newSource.onended = () => {
       if (isPlayingRef.current) {
         stopPlaying();
@@ -1836,35 +1870,27 @@ export function useAudioProcessor() {
       }
     };
 
-    // 更新引用
+    modeNodesRef.current[mode] = { source: newSource, gain: newGain };
     sourceNodeRef.current = newSource;
     gainNodeRef.current = newGain;
+    activeModeRef.current = mode;
 
-    // 开始播放新音频
     startTimeRef.current = now - startPosition;
     newSource.start(now, startPosition);
 
-    // 淡出旧音频（在启动新音频后）
-    if (oldSource && oldGain) {
-      // 清除旧音频的 onended 回调，避免它调用 stopPlaying 影响新音频
-      oldSource.onended = null;
-      
-      oldGain.gain.setValueAtTime(oldGain.gain.value, now);
-      oldGain.gain.linearRampToValueAtTime(0.001, now + fadeOutDuration);
+    // 淡出其他所有模式的节点（保持存活但静音）
+    (Object.keys(modeNodesRef.current) as PlayMode[]).forEach((m) => {
+      if (m === mode) return;
+      const node = modeNodesRef.current[m];
+      if (!node) return;
+      try {
+        node.gain.gain.setValueAtTime(node.gain.gain.value, now);
+        node.gain.gain.linearRampToValueAtTime(0.0001, now + fadeDuration);
+      } catch {}
+    });
 
-      // 延迟停止旧音频
-      setTimeout(() => {
-        try {
-          oldSource.stop();
-          oldSource.disconnect();
-        } catch {}
-      }, fadeOutDuration * 1000 + overlapTime * 1000);
-    }
-
-    // 切换模式状态
     setPlayMode(mode);
 
-    // 更新时间跟踪 - 使用更精确的时间计算
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current);
     }

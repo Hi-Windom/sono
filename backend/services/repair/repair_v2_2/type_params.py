@@ -6,112 +6,112 @@
 from typing import Dict, Any
 
 
-# 基础参数模板 - 降低处理强度
+# 基础参数模板 - 桌面端：更强的处理力度，确保显著优于修复前
 BASE_PARAMS = {
-    "de_clipping": 0.35,      # 降低 0.45 -> 0.35
-    "noise_reduction": 0.25,  # 降低 0.35 -> 0.25
-    "de_essing": 0.25,        # 降低 0.35 -> 0.25
-    "de_crackle": 0.25,       # 降低 0.35 -> 0.25
-    "de_pop": 0.20,           # 降低 0.28 -> 0.20
-    "harmonic_enhance": 0.12, # 降低 0.20 -> 0.12
-    "dynamic_range": 0.12,    # 降低 0.20 -> 0.12
-    "softness": 0.03,         # 降低 0.05 -> 0.03
-    "presence_boost": 0.08,   # 降低 0.12 -> 0.08
-    "bass_enhance": 0.12,     # 降低 0.18 -> 0.12
-    "spatial_enhance": 0.12,  # 降低 0.20 -> 0.12
-    "transient_repair": 0.12, # 降低 0.20 -> 0.12
-    "warmth": 0.25,           # 降低 0.35 -> 0.25
-    "clarity": 0.25,          # 降低 0.35 -> 0.25
-}
-
-# 人声主导音乐优化参数 - 更温和
-VOCAL_PARAMS = {
-    "de_clipping": 0.30,
-    "noise_reduction": 0.18,  # 更轻度降噪
-    "de_essing": 0.35,        # 适度去齿音
-    "de_crackle": 0.28,
-    "de_pop": 0.22,
-    "harmonic_enhance": 0.15, # 轻度谐波增强
-    "dynamic_range": 0.08,    # 更轻度压缩
-    "softness": 0.02,
-    "presence_boost": 0.12,
-    "bass_enhance": 0.08,
-    "spatial_enhance": 0.10,
-    "transient_repair": 0.15,
-    "warmth": 0.30,
+    "de_clipping": 0.45,
+    "noise_reduction": 0.40,
+    "de_essing": 0.35,
+    "de_crackle": 0.35,
+    "de_pop": 0.28,
+    "harmonic_enhance": 0.22,
+    "dynamic_range": 0.22,
+    "softness": 0.05,
+    "presence_boost": 0.15,
+    "bass_enhance": 0.18,
+    "spatial_enhance": 0.18,
+    "transient_repair": 0.20,
+    "warmth": 0.32,
     "clarity": 0.32,
 }
 
-# 纯器乐优化参数 - 保护动态和细节
-INSTRUMENTAL_PARAMS = {
-    "de_clipping": 0.25,
-    "noise_reduction": 0.20,
-    "de_essing": 0.12,        # 器乐齿音少
-    "de_crackle": 0.20,
-    "de_pop": 0.12,
-    "harmonic_enhance": 0.20, # 适度谐波增强
-    "dynamic_range": 0.10,    # 轻度压缩
-    "softness": 0.01,
-    "presence_boost": 0.10,
-    "bass_enhance": 0.10,
-    "spatial_enhance": 0.18,  # 适度空间感
-    "transient_repair": 0.10,
-    "warmth": 0.22,
-    "clarity": 0.22,
+# 人声主导音乐优化参数 - 桌面端：清晰自然的人声
+VOCAL_PARAMS = {
+    "de_clipping": 0.40,
+    "noise_reduction": 0.32,
+    "de_essing": 0.42,
+    "de_crackle": 0.32,
+    "de_pop": 0.28,
+    "harmonic_enhance": 0.22,
+    "dynamic_range": 0.15,
+    "softness": 0.03,
+    "presence_boost": 0.18,
+    "bass_enhance": 0.12,
+    "spatial_enhance": 0.14,
+    "transient_repair": 0.22,
+    "warmth": 0.35,
+    "clarity": 0.38,
 }
 
-# 电子音乐优化参数 - 保持冲击力但不过度
-ELECTRONIC_PARAMS = {
-    "de_clipping": 0.40,
+# 纯器乐优化参数 - 桌面端：丰富谐波与空间感
+INSTRUMENTAL_PARAMS = {
+    "de_clipping": 0.35,
     "noise_reduction": 0.28,
-    "de_essing": 0.18,
-    "de_crackle": 0.22,
+    "de_essing": 0.15,
+    "de_crackle": 0.28,
     "de_pop": 0.18,
-    "harmonic_enhance": 0.10,
-    "dynamic_range": 0.20,    # 适度压缩
-    "softness": 0.01,
-    "presence_boost": 0.12,
-    "bass_enhance": 0.18,     # 适度低音
-    "spatial_enhance": 0.15,
-    "transient_repair": 0.18,
-    "warmth": 0.18,
+    "harmonic_enhance": 0.28,
+    "dynamic_range": 0.15,
+    "softness": 0.02,
+    "presence_boost": 0.14,
+    "bass_enhance": 0.14,
+    "spatial_enhance": 0.22,
+    "transient_repair": 0.15,
+    "warmth": 0.28,
     "clarity": 0.28,
 }
 
-# 古典音乐优化参数 - 最小处理
-CLASSICAL_PARAMS = {
-    "de_clipping": 0.18,
-    "noise_reduction": 0.08,  # 最小降噪
-    "de_essing": 0.08,
-    "de_crackle": 0.12,
-    "de_pop": 0.08,
-    "harmonic_enhance": 0.05, # 最小谐波增强
-    "dynamic_range": 0.04,    # 极轻度压缩
-    "softness": 0.005,
-    "presence_boost": 0.04,
-    "bass_enhance": 0.05,
-    "spatial_enhance": 0.05,  # 最小空间处理
-    "transient_repair": 0.05,
-    "warmth": 0.12,
-    "clarity": 0.12,
+# 电子音乐优化参数 - 桌面端：强劲低音与清晰高频
+ELECTRONIC_PARAMS = {
+    "de_clipping": 0.50,
+    "noise_reduction": 0.38,
+    "de_essing": 0.22,
+    "de_crackle": 0.30,
+    "de_pop": 0.25,
+    "harmonic_enhance": 0.18,
+    "dynamic_range": 0.28,
+    "softness": 0.02,
+    "presence_boost": 0.16,
+    "bass_enhance": 0.25,
+    "spatial_enhance": 0.18,
+    "transient_repair": 0.25,
+    "warmth": 0.22,
+    "clarity": 0.35,
 }
 
-# 流行音乐优化参数
-POP_PARAMS = {
-    "de_clipping": 0.32,
-    "noise_reduction": 0.22,
-    "de_essing": 0.25,
-    "de_crackle": 0.22,
-    "de_pop": 0.18,
-    "harmonic_enhance": 0.15,
-    "dynamic_range": 0.15,
-    "softness": 0.025,
-    "presence_boost": 0.10,
-    "bass_enhance": 0.12,
+# 古典音乐优化参数 - 桌面端：保留动态的同时提升细节
+CLASSICAL_PARAMS = {
+    "de_clipping": 0.28,
+    "noise_reduction": 0.15,
+    "de_essing": 0.12,
+    "de_crackle": 0.18,
+    "de_pop": 0.12,
+    "harmonic_enhance": 0.12,
+    "dynamic_range": 0.08,
+    "softness": 0.01,
+    "presence_boost": 0.08,
+    "bass_enhance": 0.08,
     "spatial_enhance": 0.12,
-    "transient_repair": 0.12,
-    "warmth": 0.25,
-    "clarity": 0.25,
+    "transient_repair": 0.10,
+    "warmth": 0.18,
+    "clarity": 0.18,
+}
+
+# 流行音乐优化参数 - 桌面端：均衡全面的处理
+POP_PARAMS = {
+    "de_clipping": 0.42,
+    "noise_reduction": 0.32,
+    "de_essing": 0.32,
+    "de_crackle": 0.30,
+    "de_pop": 0.25,
+    "harmonic_enhance": 0.22,
+    "dynamic_range": 0.20,
+    "softness": 0.04,
+    "presence_boost": 0.14,
+    "bass_enhance": 0.16,
+    "spatial_enhance": 0.16,
+    "transient_repair": 0.18,
+    "warmth": 0.30,
+    "clarity": 0.30,
 }
 
 # 通用参数（置信度低时使用）
@@ -214,7 +214,7 @@ def apply_music_type_params(params: Dict[str, Any], music_type: str, confidence:
     type_params = TYPE_PARAMS_MAP.get(music_type, GENERIC_PARAMS)
 
     result = params.copy()
-    blend = min(confidence, 0.6)  # 降低最大混合比例 0.8 -> 0.6
+    blend = min(confidence, 0.85)  # 桌面端：更高的类型参数混合比例，效果更明显
 
     for key in type_params:
         if key in result:
@@ -254,20 +254,20 @@ REPAIR_MODES = {
         "description": "最强修复力度，适合严重损坏的AI音频",
         "icon": "🔧",
         "params": {
-            "de_clipping": 0.50,
-            "noise_reduction": 0.40,
-            "de_essing": 0.38,
-            "de_crackle": 0.40,
-            "de_pop": 0.32,
-            "harmonic_enhance": 0.20,
-            "dynamic_range": 0.22,
-            "softness": 0.06,
-            "presence_boost": 0.14,
-            "bass_enhance": 0.18,
-            "spatial_enhance": 0.18,
-            "transient_repair": 0.22,
-            "warmth": 0.35,
-            "clarity": 0.35,
+            "de_clipping": 0.60,
+            "noise_reduction": 0.55,
+            "de_essing": 0.50,
+            "de_crackle": 0.50,
+            "de_pop": 0.42,
+            "harmonic_enhance": 0.30,
+            "dynamic_range": 0.32,
+            "softness": 0.08,
+            "presence_boost": 0.20,
+            "bass_enhance": 0.25,
+            "spatial_enhance": 0.22,
+            "transient_repair": 0.30,
+            "warmth": 0.42,
+            "clarity": 0.45,
         },
     },
     "gentle": {
@@ -275,20 +275,20 @@ REPAIR_MODES = {
         "description": "轻微处理，保留原始音质",
         "icon": "🌿",
         "params": {
-            "de_clipping": 0.15,
-            "noise_reduction": 0.10,
-            "de_essing": 0.12,
-            "de_crackle": 0.10,
-            "de_pop": 0.08,
-            "harmonic_enhance": 0.06,
-            "dynamic_range": 0.06,
-            "softness": 0.015,
-            "presence_boost": 0.04,
-            "bass_enhance": 0.06,
-            "spatial_enhance": 0.06,
-            "transient_repair": 0.06,
-            "warmth": 0.15,
-            "clarity": 0.18,
+            "de_clipping": 0.25,
+            "noise_reduction": 0.18,
+            "de_essing": 0.20,
+            "de_crackle": 0.18,
+            "de_pop": 0.15,
+            "harmonic_enhance": 0.12,
+            "dynamic_range": 0.12,
+            "softness": 0.03,
+            "presence_boost": 0.08,
+            "bass_enhance": 0.10,
+            "spatial_enhance": 0.10,
+            "transient_repair": 0.10,
+            "warmth": 0.20,
+            "clarity": 0.22,
         },
     },
     "hifi": {
@@ -296,20 +296,20 @@ REPAIR_MODES = {
         "description": "最小处理，追求最高音质保真度",
         "icon": "✨",
         "params": {
-            "de_clipping": 0.12,
-            "noise_reduction": 0.05,
-            "de_essing": 0.08,
-            "de_crackle": 0.06,
-            "de_pop": 0.05,
-            "harmonic_enhance": 0.03,
-            "dynamic_range": 0.03,
-            "softness": 0.01,
-            "presence_boost": 0.03,
-            "bass_enhance": 0.04,
-            "spatial_enhance": 0.04,
-            "transient_repair": 0.04,
-            "warmth": 0.10,
-            "clarity": 0.12,
+            "de_clipping": 0.18,
+            "noise_reduction": 0.10,
+            "de_essing": 0.12,
+            "de_crackle": 0.10,
+            "de_pop": 0.08,
+            "harmonic_enhance": 0.08,
+            "dynamic_range": 0.06,
+            "softness": 0.015,
+            "presence_boost": 0.05,
+            "bass_enhance": 0.06,
+            "spatial_enhance": 0.06,
+            "transient_repair": 0.06,
+            "warmth": 0.12,
+            "clarity": 0.15,
         },
     },
 }

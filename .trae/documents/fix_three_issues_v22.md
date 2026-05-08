@@ -24,24 +24,47 @@
 
 ## 修复方案
 
-### 问题 1：修复播放切换
+### 问题 1：修复播放切换（采用静音策略）
 
 **文件**: `src/components/AudioPlayer.tsx`
 
+**用户反馈**: 频繁切换对比播放体验，应该使用**静音处理**而不是停止释放。
+
+**原因**:
+- 停止+释放会导致音频从头加载，切换时有延迟
+- 静音可以保持音频缓冲，切换瞬间响应
+- 两个 Audio 对象同时存在，通过控制 `muted` 属性实现 A/B 对比
+
 **改动**:
-1. `playPreview()` 中切换 source 前先 `stop()` 当前播放
-2. `useEffect` 清理时确保所有 Audio 对象被释放
-3. 添加 `audioRef` 追踪当前活跃的 Audio 对象
+1. 同时创建两个 `Audio` 对象（原始和修复），但初始都 `muted`
+2. 切换时只需改变 `muted` 属性，无需重新加载
+3. 播放/暂停时同步控制两个 Audio 的 `paused` 状态
+4. 组件卸载时才释放 Audio 对象
 
 ```typescript
-// 在切换前确保停止当前播放
+// 同时维护两个 Audio 对象
+const originalAudioRef = useRef<HTMLAudioElement | null>(null);
+const repairedAudioRef = useRef<HTMLAudioElement | null>(null);
+
 const playPreview = useCallback((source: 'original' | 'repaired') => {
-  if (audioRef.current) {
-    audioRef.current.pause();
-    audioRef.current.currentTime = 0;
-    audioRef.current = null;
+  // 确保两个音频都已加载
+  if (!originalAudioRef.current) {
+    originalAudioRef.current = new Audio(audioUrl);
+    originalAudioRef.current.muted = true;
   }
-  // ... 创建新 Audio
+  if (!repairedAudioRef.current) {
+    repairedAudioRef.current = new Audio(repairedUrl);
+    repairedAudioRef.current.muted = true;
+  }
+  
+  // 同步播放进度
+  const targetTime = source === 'original' 
+    ? originalAudioRef.current.currentTime 
+    : repairedAudioRef.current.currentTime;
+  
+  // 切换静音状态
+  originalAudioRef.current.muted = (source === 'repaired');
+  repairedAudioRef.current.muted = (source === 'original');
 }, []);
 ```
 
