@@ -8,6 +8,7 @@ from services.repair.audio_repair_v1_2 import repair_audio as repair_audio_v1_2
 from services.repair.repair_v2_0 import repair_audio as repair_audio_v2_0
 from services.repair.repair_v2_1 import repair_audio as repair_audio_v2_1
 from services.repair.repair_v2_2 import repair_audio as repair_audio_v2_2
+from services.repair.repair_v2_2a import repair_audio as repair_audio_v2_2a
 
 PARAM_DEFINITIONS = {
     "music_type": {"key": "musicType", "label": "音乐类型", "min": 0, "max": 5, "step": 1},
@@ -345,9 +346,9 @@ ALGORITHM_VERSIONS = {
     },
     "v2.2": {
         "name": "v2.2",
-        "label": "v2.2",
-        "description": "音质优化版：Wiener降噪、动态保护、HiFi模式",
-        "mobile_compatible": True,
+        "label": "v2.2 桌面版",
+        "description": "最佳音质，完整处理（仅桌面端）",
+        "mobile_compatible": False,
         "repair_fn": repair_audio_v2_2,
         "default_params": {
             "de_clipping": 0.35, "noise_reduction": 0.25, "de_essing": 0.25,
@@ -434,6 +435,60 @@ ALGORITHM_VERSIONS = {
                     "bass_enhance": 0.04, "spatial_enhance": 0.04, "transient_repair": 0.04,
                     "warmth": 0.1, "clarity": 0.12, "music_type": "auto", "repair_mode": "smart",
                     "quality": "hifi",
+                },
+            },
+        ],
+    },
+    "v2.2a": {
+        "name": "v2.2a",
+        "label": "v2.2a 移动版",
+        "description": "速度优先，精简处理（移动端专用）",
+        "mobile_compatible": True,
+        "repair_fn": repair_audio_v2_2a,
+        "default_params": {
+            "de_clipping": 0.3, "noise_reduction": 0.2, "de_essing": 0.2,
+            "de_pop": 0.15, "dynamic_range": 0.1,
+            "music_type": "auto", "repair_mode": "smart",
+        },
+        "modes": [
+            {
+                "name": "智能修复",
+                "description": "自动检测类型，快速处理",
+                "icon": "🧠",
+                "params": {
+                    "de_clipping": 0.3, "noise_reduction": 0.2, "de_essing": 0.2,
+                    "de_pop": 0.15, "dynamic_range": 0.1,
+                    "music_type": "auto", "repair_mode": "smart",
+                },
+            },
+            {
+                "name": "快速修复",
+                "description": "极速处理，适合大文件",
+                "icon": "⚡",
+                "params": {
+                    "de_clipping": 0.2, "noise_reduction": 0.15, "de_essing": 0.15,
+                    "de_pop": 0.1, "dynamic_range": 0.05,
+                    "music_type": "auto", "repair_mode": "fast",
+                },
+            },
+            {
+                "name": "深度修复",
+                "description": "较强修复力度",
+                "icon": "🔧",
+                "params": {
+                    "de_clipping": 0.45, "noise_reduction": 0.35, "de_essing": 0.35,
+                    "de_pop": 0.3, "dynamic_range": 0.2,
+                    "music_type": "auto", "repair_mode": "deep",
+                },
+            },
+            {
+                "name": "温和优化",
+                "description": "轻微处理，保留音质",
+                "icon": "🌿",
+                "params": {
+                    "de_clipping": 0.1, "noise_reduction": 0.08, "de_essing": 0.08,
+                    "de_pop": 0.05, "dynamic_range": 0.03,
+                    "music_type": "auto", "repair_mode": "gentle",
                 },
             },
         ],
