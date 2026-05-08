@@ -51,8 +51,6 @@ def _detect_music_type_fast(y, sr):
 
 
 def _transparent_compress(y, sr, amount, threshold_db=-18.0, ratio=2.0):
-    """透明压缩：使用长窗口帧级增益，避免逐样本增益调制产生AM伪影
-    核心思路：在帧级别计算增益，帧间做极重度平滑，确保增益变化极缓慢"""
     if amount <= 0:
         return y
 
@@ -101,13 +99,11 @@ def _transparent_compress(y, sr, amount, threshold_db=-18.0, ratio=2.0):
     for _ in range(3):
         frame_gain = np.convolve(frame_gain, kernel, mode='same')
 
-    gain = np.ones(n, dtype=np.float64)
-    for i in range(n_frames):
-        start = i * hop_len
-        end = min(start + hop_len, n)
-        gain[start:end] = frame_gain[i]
-
-    gain[n_frames * hop_len:] = frame_gain[-1]
+    frame_positions = np.arange(n_frames, dtype=np.float64) * hop_len
+    sample_positions = np.arange(n, dtype=np.float64)
+    gain = np.interp(sample_positions, frame_positions, frame_gain)
+    gain[0] = frame_gain[0]
+    gain[-1] = frame_gain[-1]
 
     out = y_64 * gain
 
@@ -117,7 +113,6 @@ def _transparent_compress(y, sr, amount, threshold_db=-18.0, ratio=2.0):
         makeup_gain = min(input_rms / compressed_rms, 1.2)
         out = out * makeup_gain
 
-    out = np.clip(out, -0.95, 0.95)
     return out.astype(y.dtype)
 
 
@@ -178,47 +173,63 @@ def _remove_dc(y, sr):
     return y - np.mean(y)
 
 
-def _gentle_lowpass(y, sr, cutoff_hz=16000):
-    """温和低通滤波：使用 sosfiltfilt 零相位滤波，避免 lfilter 的相位失真
-    使用1阶滤波器确保最平滑的过渡带，不产生振铃"""
-    nyquist = sr / 2
-    if nyquist <= cutoff_hz:
-        return y
+def _smooth_gain_envelope(gain, attack_coeff, release_coeff):
+    n = len(gain)
+    smoothed = np.ones(n, dtype=np.float64)
+    g = 1.0
+    for i in range(n):
+        target = gain[i]
+        if target < g:
+            g = attack_coeff * g + (1 - attack_coeff) * target
+        else:
+            g = release_coeff * g + (1 - release_coeff) * target
+        smoothed[i] = g
+    return smoothed
+
+
+def _peak_limit_smooth(y, sr, threshold_db=-1.0):
+    threshold = 10 ** (threshold_db / 20.0)
 
     is_stereo = y.ndim > 1 and y.shape[0] == 2
     if is_stereo:
-        ch_out = np.zeros_like(y)
+        result = y.copy().astype(np.float64)
         for ch in range(y.shape[0]):
-            ch_out[ch] = _gentle_lowpass(y[ch], sr, cutoff_hz)
-        return ch_out
+            result[ch] = _peak_limit_smooth_channel(result[ch], sr, threshold)
+        return result.astype(y.dtype)
 
-    cutoff_norm = cutoff_hz / nyquist
-    sos = butter(1, cutoff_norm, btype='low', output='sos')
-    padlen = min(len(y) - 1, 3 * max(3, int(3 / cutoff_norm)))
-    y_filtered = sosfiltfilt(sos, y, padlen=padlen)
-    return y_filtered
+    data_1d = y.flatten() if y.ndim > 1 else y
+    return _peak_limit_smooth_channel(data_1d.astype(np.float64), sr, threshold).astype(y.dtype)
 
 
-def _apply_fade(y, sr, fade_ms=5):
-    """首尾淡入淡出，消除边界伪影"""
-    fade_samples = int(sr * fade_ms / 1000)
-    if fade_samples < 2:
-        return y
+def _peak_limit_smooth_channel(data, sr, threshold):
+    data = data.astype(np.float64)
+    abs_data = np.abs(data)
+    max_val = np.max(abs_data)
 
-    is_stereo = y.ndim > 1 and y.shape[0] == 2
-    if is_stereo:
-        fade_in = np.linspace(0, 1, fade_samples, dtype=np.float64)
-        fade_out = np.linspace(1, 0, fade_samples, dtype=np.float64)
-        for ch in range(y.shape[0]):
-            y[ch, :fade_samples] *= fade_in
-            y[ch, -fade_samples:] *= fade_out
-        return y
+    if max_val <= threshold:
+        return data
 
-    fade_in = np.linspace(0, 1, fade_samples, dtype=y.dtype)
-    fade_out = np.linspace(1, 0, fade_samples, dtype=y.dtype)
-    y[:fade_samples] *= fade_in
-    y[-fade_samples:] *= fade_out
-    return y
+    gain = np.ones(len(data), dtype=np.float64)
+    over = abs_data > threshold
+    gain[over] = threshold / abs_data[over]
+
+    lookahead_samples = min(int(sr * 0.005), len(data) // 2)
+    if lookahead_samples > 0:
+        gain_shifted = np.ones_like(gain)
+        gain_shifted[lookahead_samples:] = gain[:-lookahead_samples]
+        gain_shifted[:lookahead_samples] = gain[0]
+        gain = np.minimum(gain, gain_shifted)
+
+    attack_coeff = np.exp(-1 / (0.0005 * sr))
+    release_coeff = np.exp(-1 / (0.05 * sr))
+
+    smoothed_gain = _smooth_gain_envelope(gain, attack_coeff, release_coeff)
+
+    result = data * smoothed_gain
+
+    result = np.clip(result, -1.0, 1.0)
+
+    return result
 
 
 def _loudness_normalize(y, sr, target_lufs=-16.0):
@@ -232,17 +243,13 @@ def _loudness_normalize(y, sr, target_lufs=-16.0):
     if rms_val < 1e-10:
         return y
 
-    target_rms = 10 ** (target_lufs / 20.0)
-    gain = target_rms / rms_val
-    gain = min(gain, 2.0)
+    current_lufs = -0.691 + 20 * np.log10(rms_val)
+    gain_db = np.clip(target_lufs - current_lufs, -12, 6)
+    gain = 10 ** (gain_db / 20.0)
 
     if is_stereo:
         return y * gain
     return y * gain
-
-
-def _peak_limit(y, threshold=0.95):
-    return np.clip(y, -threshold, threshold)
 
 
 def repair_audio(input_path: str, output_path: str, params: dict, progress_callback=None) -> dict:
@@ -276,6 +283,9 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
 
     gc.collect()
 
+    y = _loudness_normalize(y, sr, -16.0)
+    issues_found.append("响度归一化")
+
     if params.get("dynamic_range", 0) > 0:
         if progress_callback:
             progress_callback(0.40, "v2.2a 动态压缩...")
@@ -291,17 +301,9 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
         gc.collect()
 
     if progress_callback:
-        progress_callback(0.75, "v2.2a 平滑处理...")
-    y = _gentle_lowpass(y, sr, cutoff_hz=16000)
-    issues_found.append("高频平滑")
-    gc.collect()
-
-    if progress_callback:
-        progress_callback(0.85, "v2.2a 响度归一化...")
-    y = _loudness_normalize(y, sr, -16.0)
-    y = _peak_limit(y, 0.95)
-    y = _apply_fade(y, sr, fade_ms=5)
-    issues_found.append("响度归一化")
+        progress_callback(0.85, "v2.2a 峰值限制...")
+    y = _peak_limit_smooth(y, sr, threshold_db=-1.0)
+    issues_found.append("峰值限制")
 
     if was_mono:
         y = y[0]
