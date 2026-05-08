@@ -43,8 +43,22 @@ function _compareRepairParams(current: Record<string, unknown>, cached: Record<s
     'transient_repair', 'warmth', 'clarity', 'sample_rate', 'bit_depth',
   ];
   for (const key of keysToCompare) {
-    if (current[key] !== cached[key]) {
-      writeLog(`[cache] 参数不匹配: ${key} current=${current[key]} cached=${cached[key]}`);
+    const cur = current[key];
+    const cch = cached[key];
+    if (cur == null || cch == null) {
+      if (cur !== cch) {
+        writeLog(`[cache] 参数不匹配(空值): ${key} current=${cur} cached=${cch}`);
+        return false;
+      }
+      continue;
+    }
+    if (typeof cur === 'number' && typeof cch === 'number') {
+      if (cur !== cch && Math.abs(cur - cch) > 1e-9) {
+        writeLog(`[cache] 参数不匹配(数值): ${key} current=${cur} cached=${cch}`);
+        return false;
+      }
+    } else if (cur !== cch) {
+      writeLog(`[cache] 参数不匹配: ${key} current=${cur} (${typeof cur}) cached=${cch} (${typeof cch})`);
       return false;
     }
   }
@@ -136,7 +150,6 @@ export function useAudioProcessor() {
   const [playMode, setPlayMode] = useState<PlayMode>('original');
   const [processingOptions, setProcessingOptionsState] = useState<ProcessingOptions>(savedSettings.exportOptions);
   const [originalAIDetection, setOriginalAIDetection] = useState<AISongDetectionResult | null>(null);
-  const [browserAIDetection, setBrowserAIDetection] = useState<AISongDetectionResult | null>(null);
   const [backendAIDetection, setBackendAIDetection] = useState<AISongDetectionResult | null>(null);
   const [hasBeenProcessed, setHasBeenProcessed] = useState(false);
   const [backendAvailable, setBackendAvailable] = useState(false);
@@ -495,6 +508,12 @@ export function useAudioProcessor() {
         if (session.repairResult) {
           try { setRepairResult(JSON.parse(session.repairResult)); } catch {}
         }
+        if (taskStatus.detection_result) {
+          try { setOriginalAIDetection(mapDetectionResult(taskStatus.detection_result as import('../services/backendApi').BackendDetectionResult)); } catch {}
+        }
+        if (taskStatus.repaired_detection_result) {
+          try { setBackendAIDetection(mapDetectionResult(taskStatus.repaired_detection_result as import('../services/backendApi').BackendDetectionResult)); } catch {}
+        }
 
         sessionRestoredRef.current = true;
         pendingSessionRef.current = null;
@@ -619,7 +638,6 @@ export function useAudioProcessor() {
     setCurrentTime(0);
     pausedAtRef.current = 0;
     setOriginalAIDetection(null);
-    setBrowserAIDetection(null);
     setBackendAIDetection(null);
     setHasBeenProcessed(false);
     setPlayMode('original');
@@ -851,6 +869,7 @@ export function useAudioProcessor() {
 
     setIsProcessing(true);
     setProcessingProgress(0);
+    let taskStatus: Record<string, unknown> | null = null;
     setProcessingStep('准备修复...');
 
     const REPAIR_TERMINALS = new Set(['completed', 'error']);
@@ -878,9 +897,9 @@ export function useAudioProcessor() {
       try {
         const statusRes = await fetch(`/api/v1/status/${currentTaskId}`);
         if (statusRes.ok) {
-          const status = await statusRes.json();
-          writeLog(`[applySettings] 已有任务状态: status=${status.status}, progress=${status.progress}`);
-          if (status.status !== 'completed' && status.status !== 'error') {
+          taskStatus = await statusRes.json();
+          writeLog(`[applySettings] 已有任务状态: status=${taskStatus.status}, progress=${taskStatus.progress}`);
+          if (taskStatus.status !== 'completed' && taskStatus.status !== 'error') {
             writeLog(`[applySettings] 复用已有任务`);
           } else {
             writeLog(`[applySettings] 任务已完成/失败，需要创建新任务`);
@@ -917,8 +936,8 @@ export function useAudioProcessor() {
       try {
         const statusRes = await fetch(`/api/v1/status/${currentTaskId}`);
         if (statusRes.ok) {
-          const taskStatus = await statusRes.json();
-          const cachedParams = taskStatus.params || {};
+        taskStatus = await statusRes.json();
+          const cachedParams = (taskStatus.params && typeof taskStatus.params === 'object' ? taskStatus.params : {}) as Record<string, unknown>;
           const paramsMatch = _compareRepairParams(currentParamsForCache, cachedParams);
           const outputValid = !!taskStatus.output_path && taskStatus.status === 'completed';
 
@@ -1162,6 +1181,26 @@ export function useAudioProcessor() {
         setPlayMode('browser');
       }
 
+      if (effectiveBackendResult.status === 'fulfilled' && effectiveBackendResult.value && taskIdRef.current) {
+        const trySetBackendDetection = (result: unknown) => {
+          if (result && typeof result === 'object') {
+            writeLog('[applySettings] 设置修复后检测结果');
+            setBackendAIDetection(mapDetectionResult(result as import('../services/backendApi').BackendDetectionResult));
+          }
+        };
+
+        if (taskStatus?.repaired_detection_result) {
+          trySetBackendDetection(taskStatus.repaired_detection_result);
+        }
+
+        detectAudio(taskIdRef.current, 'repaired', detectorVersion).then(res => {
+          if (res.detection_result) {
+            writeLog(`[applySettings] 修复后检测${res.cached ? '缓存命中' : '新结果'}，刷新`);
+            trySetBackendDetection(res.detection_result);
+          }
+        }).catch(() => {});
+      }
+
       if (audioFile && taskIdRef.current) {
         const _backendValue = effectiveBackendResult.status === 'fulfilled' ? effectiveBackendResult.value : null;
         saveSession({
@@ -1190,7 +1229,7 @@ export function useAudioProcessor() {
       setProcessingStep('');
       setProcessingProgress(0);
     }, 2000);
-  }, [audioBuffer, audioFile, params, processingOptions, originalAIDetection, loadAudioFromUrl, repairWithWorker, wavInfo, startStreamingPlayback]);
+  }, [audioBuffer, audioFile, params, processingOptions, originalAIDetection, loadAudioFromUrl, repairWithWorker, wavInfo, startStreamingPlayback, detectorVersion]);
 
   const runAIDetection = useCallback(async () => {
     if (!audioBuffer) return;
@@ -1203,55 +1242,52 @@ export function useAudioProcessor() {
         setIsProcessing(true);
         setProcessingStep('AI检测原始音频...');
         setProcessingProgress(0);
-        await detectAudio(currentTaskId, 'original', detectorVersion);
 
-        closeWS();
-        const detectResult = await new Promise<import('../services/backendApi').ProgressEvent>((resolve, reject) => {
-          wsControlRef.current = connectProgressWS(
-            currentTaskId,
-            {
-              onProgress: (event) => {
-                setProcessingProgress(event.progress);
-                setProcessingStep(event.step);
-                if (event.detection_result) {
-                  setOriginalAIDetection(mapDetectionResult(event.detection_result));
-                }
-              },
-              onError: reject,
-              onComplete: resolve,
-              onStuck: (info) => {
-                setIsTaskStuck(true);
-                setStuckInfo(info);
-              },
-              onUnstuck: () => {
-                setIsTaskStuck(false);
-              },
-              onQueueUpdate: (queue) => {
-                setQueueStatus(queue);
-              },
-            },
-            DETECT_TERMINALS,
-          );
-        });
+        const tryMapDetection = (result: unknown) => {
+          if (result && typeof result === 'object') {
+            return mapDetectionResult(result as import('../services/backendApi').BackendDetectionResult);
+          }
+          return null;
+        };
 
-        if (detectResult.detection_result) {
-          setOriginalAIDetection(mapDetectionResult(detectResult.detection_result));
+        let statusData: Record<string, unknown> | null = null;
+        try {
+          const statusRes = await fetch(`/api/v1/status/${currentTaskId}`);
+          if (statusRes.ok) {
+            statusData = await statusRes.json();
+          }
+        } catch {}
+
+        if (statusData?.detection_result) {
+          const mapped = tryMapDetection(statusData.detection_result);
+          if (mapped) {
+            writeLog(`[runAIDetection] 从任务状态恢复原始检测结果`);
+            setOriginalAIDetection(mapped);
+          }
+        }
+        if (statusData?.repaired_detection_result) {
+          const mapped = tryMapDetection(statusData.repaired_detection_result);
+          if (mapped) {
+            writeLog(`[runAIDetection] 从任务状态恢复修复后检测结果`);
+            setBackendAIDetection(mapped);
+          }
         }
 
-        if (hasBeenProcessed && backendProcessedBuffer) {
-          setProcessingStep('AI检测后端修复音频...');
-          await detectAudio(currentTaskId, 'repaired', detectorVersion);
-
+        const origRes = await detectAudio(currentTaskId, 'original', detectorVersion);
+        if (origRes.detection_result) {
+          writeLog(`[runAIDetection] 原始检测${origRes.cached ? '缓存命中' : '有结果'}，更新`);
+          setOriginalAIDetection(mapDetectionResult(origRes.detection_result));
+        } else {
           closeWS();
-          await new Promise<import('../services/backendApi').ProgressEvent>((resolve, reject) => {
+          const detectResult = await new Promise<import('../services/backendApi').ProgressEvent>((resolve, reject) => {
             wsControlRef.current = connectProgressWS(
               currentTaskId,
               {
-                onProgress: (evt) => {
-                  setProcessingProgress(evt.progress);
-                  setProcessingStep(evt.step);
-                  if (evt.repaired_detection_result) {
-                    setBackendAIDetection(mapDetectionResult(evt.repaired_detection_result));
+                onProgress: (event) => {
+                  setProcessingProgress(event.progress);
+                  setProcessingStep(event.step);
+                  if (event.detection_result) {
+                    setOriginalAIDetection(mapDetectionResult(event.detection_result));
                   }
                 },
                 onError: reject,
@@ -1263,10 +1299,52 @@ export function useAudioProcessor() {
                 onUnstuck: () => {
                   setIsTaskStuck(false);
                 },
+                onQueueUpdate: (queue) => {
+                  setQueueStatus(queue);
+                },
               },
               DETECT_TERMINALS,
             );
           });
+
+          if (detectResult.detection_result) {
+            setOriginalAIDetection(mapDetectionResult(detectResult.detection_result));
+          }
+        }
+
+        if (hasBeenProcessed && backendProcessedBuffer) {
+          setProcessingStep('AI检测后端修复音频...');
+          const repairedRes = await detectAudio(currentTaskId, 'repaired', detectorVersion);
+          if (repairedRes.detection_result) {
+            writeLog(`[runAIDetection] 修复后检测${repairedRes.cached ? '缓存命中' : '有结果'}，更新`);
+            setBackendAIDetection(mapDetectionResult(repairedRes.detection_result));
+          } else {
+            closeWS();
+            await new Promise<import('../services/backendApi').ProgressEvent>((resolve, reject) => {
+              wsControlRef.current = connectProgressWS(
+                currentTaskId,
+                {
+                  onProgress: (evt) => {
+                    setProcessingProgress(evt.progress);
+                    setProcessingStep(evt.step);
+                    if (evt.repaired_detection_result) {
+                      setBackendAIDetection(mapDetectionResult(evt.repaired_detection_result));
+                    }
+                  },
+                  onError: reject,
+                  onComplete: resolve,
+                  onStuck: (info) => {
+                    setIsTaskStuck(true);
+                    setStuckInfo(info);
+                  },
+                  onUnstuck: () => {
+                    setIsTaskStuck(false);
+                  },
+                },
+                DETECT_TERMINALS,
+              );
+            });
+          }
         }
       } catch (err) {
         console.warn('[runAIDetection] 后端检测失败, 降级本地:', err);
@@ -1276,9 +1354,6 @@ export function useAudioProcessor() {
         if (hasBeenProcessed && backendProcessedBuffer) {
           setBackendAIDetection(checkAISong(backendProcessedBuffer));
         }
-        if (hasBeenProcessed && browserProcessedBuffer) {
-          setBrowserAIDetection(checkAISong(browserProcessedBuffer));
-        }
       }
     } else {
       const { checkAISong } = await import('../utils/aiSongChecker');
@@ -1286,15 +1361,12 @@ export function useAudioProcessor() {
       if (hasBeenProcessed && backendProcessedBuffer) {
         setBackendAIDetection(checkAISong(backendProcessedBuffer));
       }
-      if (hasBeenProcessed && browserProcessedBuffer) {
-        setBrowserAIDetection(checkAISong(browserProcessedBuffer));
-      }
     }
 
     setIsProcessing(false);
     setProcessingStep('');
     setProcessingProgress(0);
-  }, [audioBuffer, browserProcessedBuffer, backendProcessedBuffer, backendAvailable, hasBeenProcessed, detectorVersion]);
+  }, [audioBuffer, backendProcessedBuffer, backendAvailable, hasBeenProcessed, detectorVersion]);
 
   const resetParams = useCallback(() => {
     setParams(defaultAIRepairParams);
@@ -1664,7 +1736,6 @@ export function useAudioProcessor() {
     repairModes,
     processingOptions,
     originalAIDetection,
-    browserAIDetection,
     backendAIDetection,
     hasBeenProcessed,
     originalSampleRate,

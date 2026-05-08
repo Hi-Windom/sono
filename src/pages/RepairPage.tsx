@@ -30,7 +30,6 @@ export default function RepairPage() {
     repairModes,
     processingOptions,
     originalAIDetection,
-    browserAIDetection,
     backendAIDetection,
     hasBeenProcessed,
     originalSampleRate,
@@ -341,7 +340,6 @@ export default function RepairPage() {
 
               <AIDetectionComparison
                 before={originalAIDetection}
-                browserAfter={browserAIDetection}
                 backendAfter={backendAIDetection}
                 onDetect={runAIDetection}
                 isProcessing={isProcessing}

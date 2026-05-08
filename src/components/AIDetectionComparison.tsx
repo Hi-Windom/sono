@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { AISongDetectionResult } from '../utils/aiSongChecker';
 
 interface AIDetectionCardProps {
@@ -130,74 +130,8 @@ export function AIDetectionCard({ title, result, color }: AIDetectionCardProps) 
   );
 }
 
-interface FlipCardProps {
-  browserResult: AISongDetectionResult | null;
-  backendResult: AISongDetectionResult | null;
-}
-
-function FlipCard({ browserResult, backendResult }: FlipCardProps) {
-  const [flipped, setFlipped] = useState(false);
-  const hasBoth = !!browserResult && !!backendResult;
-
-  const currentResult = flipped ? backendResult : browserResult;
-  const currentLabel = flipped ? '后端修复' : '浏览器修复';
-  const currentColor = flipped
-    ? 'from-cyan-900/50 to-primary/50'
-    : 'from-purple-900/50 to-primary/50';
-  const otherLabel = flipped ? '浏览器修复' : '后端修复';
-
-  if (!currentResult) {
-    return (
-      <div className="bg-gradient-to-br from-green-900/50 to-primary/50 rounded-xl p-5 border border-white/10 flex items-center justify-center h-64">
-        <p className="text-gray-400">处理中...</p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="relative">
-      <div
-        onClick={() => hasBoth && setFlipped(!flipped)}
-        className={`transition-all duration-500 ${hasBoth ? 'cursor-pointer' : ''}`}
-        style={{ perspective: '1000px' }}
-      >
-        <div
-          style={{
-            transition: 'transform 0.6s',
-            transformStyle: 'preserve-3d',
-          }}
-        >
-          <AIDetectionCard
-            title={`修复后 · ${currentLabel}`}
-            result={currentResult}
-            color={currentColor}
-          />
-        </div>
-      </div>
-      {hasBoth && (
-        <button
-          onClick={() => setFlipped(!flipped)}
-          className="absolute top-3 right-3 flex items-center gap-1 px-2 py-1 bg-white/10 hover:bg-white/20 rounded-md text-xs text-gray-300 hover:text-white transition z-10"
-        >
-          <svg
-            className="w-3 h-3 transition-transform duration-300"
-            style={{ transform: flipped ? 'scaleX(-1)' : 'none' }}
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
-          </svg>
-          {otherLabel}
-        </button>
-      )}
-    </div>
-  );
-}
-
 interface AIDetectionComparisonProps {
   before: AISongDetectionResult | null;
-  browserAfter: AISongDetectionResult | null;
   backendAfter: AISongDetectionResult | null;
   onDetect?: () => void;
   isProcessing?: boolean;
@@ -206,11 +140,11 @@ interface AIDetectionComparisonProps {
   availableDetectors?: { name: string; label: string; description: string }[];
 }
 
-export function AIDetectionComparison({ before, browserAfter, backendAfter, onDetect, isProcessing, detectorVersion, onDetectorVersionChange, availableDetectors }: AIDetectionComparisonProps) {
+export function AIDetectionComparison({ before, backendAfter, onDetect, isProcessing, detectorVersion, onDetectorVersionChange, availableDetectors }: AIDetectionComparisonProps) {
   const [lastDetectedVersion, setLastDetectedVersion] = React.useState<string | null>(null);
   const [showVersionWarning, setShowVersionWarning] = React.useState(false);
 
-  const activeAfter = backendAfter || browserAfter;
+  const activeAfter = backendAfter;
   const improvement = before && activeAfter
     ? (activeAfter.humanProbability - before.humanProbability) * 100
     : 0;
@@ -321,13 +255,22 @@ export function AIDetectionComparison({ before, browserAfter, backendAfter, onDe
           </div>
         )}
 
-        <FlipCard browserResult={browserAfter} backendResult={backendAfter} />
+        {activeAfter ? (
+          <AIDetectionCard
+            title="修复后 · 后端处理"
+            result={activeAfter}
+            color="from-cyan-900/50 to-primary/50"
+          />
+        ) : (
+          <div className="bg-gradient-to-br from-green-900/50 to-primary/50 rounded-xl p-5 border border-white/10 flex items-center justify-center h-64">
+            <p className="text-gray-400">处理中...</p>
+          </div>
+        )}
       </div>
 
       <div className="mt-4 p-3 bg-black/30 rounded-lg">
         <p className="text-gray-400 text-xs text-center">
           💡 基于音频特征的启发式分析，仅供参考，不作为可靠判断依据
-          {browserAfter && backendAfter && ' · 点击修复后卡片切换浏览器/后端结果'}
         </p>
       </div>
     </div>

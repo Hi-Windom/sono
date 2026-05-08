@@ -155,6 +155,7 @@ def _run_detect(task_id: str, audio_path: str, detect_type: str, detector_versio
 
         result = detect_ai_audio(audio_path, progress_callback, version=detector_version)
         result["detect_type"] = detect_type
+        result["detector_version"] = detector_version
 
         elapsed = time.time() - start_time
         final_status = "completed" if prev_status == "completed" else "detected"

@@ -251,7 +251,14 @@ export async function uploadAudio(file: File, onProgress?: ProgressCallback, fil
   });
 }
 
-export async function detectAudio(taskId: string, type: 'original' | 'repaired' = 'original', detectorVersion?: string): Promise<{ task_id: string; message: string }> {
+export interface DetectAudioResponse {
+  task_id: string;
+  status: string;
+  cached?: boolean;
+  detection_result?: BackendDetectionResult;
+}
+
+export async function detectAudio(taskId: string, type: 'original' | 'repaired' = 'original', detectorVersion?: string): Promise<DetectAudioResponse> {
   const url = `${API_BASE}/detect`;
   const versionToSend = detectorVersion || 'v1.0';
   log('detect', `POST ${url} task_id=${taskId} type=${type} detector_version=${versionToSend}`);
@@ -271,8 +278,8 @@ export async function detectAudio(taskId: string, type: 'original' | 'repaired' 
       throw new Error(err.detail || '检测请求失败');
     }
 
-    const data = await res.json();
-    log('detect', `success: ${data.message}`);
+    const data: DetectAudioResponse = await res.json();
+    log('detect', `success: status=${data.status} cached=${!!data.cached}`);
     return data;
   } catch (e) {
     log('detect', `FETCH ERROR: ${e instanceof Error ? e.message : String(e)}`);
