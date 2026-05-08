@@ -168,12 +168,17 @@ export default function QualityTestPage() {
   const [liveLines, setLiveLines] = useState<string[]>([]);
 
   const wsRef = useRef<WebSocket | null>(null);
+  const pollingRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const runTests = useCallback(async () => {
     setLoading(true);
     setError(null);
     setData(null);
     setLiveLines([]);
+
+    if (wsRef.current) { wsRef.current.close(); wsRef.current = null; }
+    if (pollingRef.current) { clearTimeout(pollingRef.current); pollingRef.current = null; }
+
     try {
       const startRes = await fetch('/api/v1/quality-tests/start', { method: 'POST' });
       if (!startRes.ok) {
@@ -183,52 +188,74 @@ export default function QualityTestPage() {
       }
       const { task_id } = await startRes.json();
 
-      if (wsRef.current) { wsRef.current.close(); wsRef.current = null; }
-
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = `${protocol}//${window.location.host}/api/v1/ws/${task_id}`;
-      const ws = new WebSocket(wsUrl);
-      wsRef.current = ws;
-
-      ws.onmessage = (event) => {
-        try {
-          const msg = JSON.parse(event.data);
-          if (msg.error && !msg.task_id) {
-            setError(msg.error);
+      const startPolling = () => {
+        const poll = async () => {
+          try {
+            const res = await fetch(`/api/v1/quality-tests/result/${task_id}`);
+            if (!res.ok) { setError(`查询失败: ${res.status}`); setLoading(false); return; }
+            const json = await res.json();
+            if (json.status === 'completed') {
+              setData(json);
+              setLoading(false);
+            } else if (json.status === 'running') {
+              pollingRef.current = setTimeout(poll, 2000);
+            } else {
+              setError(json.error || `未知状态: ${json.status}`);
+              setLoading(false);
+            }
+          } catch (err) {
+            setError(`轮询错误: ${err instanceof Error ? err.message : String(err)}`);
             setLoading(false);
-            return;
           }
-          if (msg.quality_test_line) {
-            setLiveLines(prev => [...prev.slice(-25), msg.quality_test_line]);
-          }
-          if (msg.status === 'completed' && msg.total !== undefined) {
-            setData({
-              total: msg.total || 0,
-              passed: msg.passed || 0,
-              failed: msg.failed || 0,
-              skipped: msg.skipped || 0,
-              summary: msg.summary || '',
-              tests: msg.tests || [],
-              baseline: msg.baseline || [],
-              per_step: msg.per_step || [],
-              iron_rule: msg.iron_rule || [],
-              raw_output: msg.raw_output || '',
-              exit_code: msg.exit_code ?? -1,
-            });
-            setLoading(false);
-            ws.close();
-          }
-        } catch { /* ignore parse errors */ }
+        };
+        pollingRef.current = setTimeout(poll, 2000);
       };
 
-      ws.onerror = () => {
-        setError('WebSocket 连接失败');
-        setLoading(false);
-      };
+      try {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${protocol}//${window.location.host}/api/v1/ws/${task_id}`;
+        const ws = new WebSocket(wsUrl);
+        wsRef.current = ws;
+        let wsOk = false;
 
-      ws.onclose = () => {
-        if (wsRef.current === ws) wsRef.current = null;
-      };
+        ws.onopen = () => { wsOk = true; };
+
+        ws.onmessage = (event) => {
+          try {
+            const msg = JSON.parse(event.data);
+            if (msg.error && !msg.task_id) {
+              setError(msg.error);
+              setLoading(false);
+              return;
+            }
+            if (msg.quality_test_line) {
+              setLiveLines(prev => [...prev.slice(-25), msg.quality_test_line]);
+            }
+            if (msg.status === 'completed' && msg.total !== undefined) {
+              setData({
+                total: msg.total || 0, passed: msg.passed || 0, failed: msg.failed || 0, skipped: msg.skipped || 0,
+                summary: msg.summary || '', tests: msg.tests || [], baseline: msg.baseline || [],
+                per_step: msg.per_step || [], iron_rule: msg.iron_rule || [],
+                raw_output: msg.raw_output || '', exit_code: msg.exit_code ?? -1,
+              });
+              setLoading(false);
+              ws.close();
+            }
+          } catch { /* ignore */ }
+        };
+
+        ws.onerror = () => {
+          ws.close();
+          wsRef.current = null;
+          if (!wsOk) startPolling();
+        };
+
+        ws.onclose = () => {
+          if (wsRef.current === ws) wsRef.current = null;
+        };
+      } catch {
+        startPolling();
+      }
     } catch (err) {
       setError(`启动失败: ${err instanceof Error ? err.message : String(err)}`);
       setLoading(false);

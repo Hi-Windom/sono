@@ -809,3 +809,11 @@ async def start_quality_tests():
     thread = threading.Thread(target=_run_quality_tests_background, args=(task_id, loop), daemon=True)
     thread.start()
     return {"task_id": task_id, "status": "running"}
+
+
+@router.get("/quality-tests/result/{task_id}")
+async def get_quality_test_result(task_id: str):
+    global _quality_test_cache
+    if task_id not in _quality_test_cache:
+        return {"status": "not_found", "error": f"Task {task_id} not found"}
+    return _quality_test_cache[task_id]

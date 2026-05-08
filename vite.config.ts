@@ -134,6 +134,7 @@ export default defineConfig(({ mode }) => {
         '/api': {
           target: apiUrl,
           changeOrigin: true,
+          ws: true,
           bypass: (req) => {
             if (req.url?.startsWith('/api/log')) {
               return false;
