@@ -1,4 +1,4 @@
-import { defineConfig, Plugin } from 'vite'
+import { defineConfig, Plugin, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import tsconfigPaths from "vite-tsconfig-paths";
 import fs from 'fs';
@@ -18,7 +18,7 @@ function requestLogPlugin(): Plugin {
     name: 'request-log',
     configureServer(server) {
       ensureLogDir();
-      
+
       server.middlewares.use('/api/log', (req, res) => {
         if (req.method === 'POST') {
           let body = '';
@@ -48,7 +48,7 @@ function requestLogPlugin(): Plugin {
           res.end();
         }
       });
-      
+
       server.middlewares.use((req, res, next) => {
         const start = Date.now();
         const originalEnd = res.end;
@@ -63,7 +63,7 @@ function requestLogPlugin(): Plugin {
     },
     configurePreviewServer(server) {
       ensureLogDir();
-      
+
       server.middlewares.use('/api/log', (req, res) => {
         if (req.method === 'POST') {
           let body = '';
@@ -93,7 +93,7 @@ function requestLogPlugin(): Plugin {
           res.end();
         }
       });
-      
+
       server.middlewares.use((req, res, next) => {
         const start = Date.now();
         const originalEnd = res.end;
@@ -109,70 +109,76 @@ function requestLogPlugin(): Plugin {
   };
 }
 
-export default defineConfig({
-  define: {
-    '__BUILD_TIME__': JSON.stringify(new Date().toISOString()),
-  },
-  build: {
-    sourcemap: 'hidden',
-    // 每次 build 都生成唯一文件名，强制浏览器刷新
-    rollupOptions: {
-      output: {
-        entryFileNames: `assets/[name].[hash].js`,
-        chunkFileNames: `assets/[name].[hash].js`,
-        assetFileNames: `assets/[name].[hash].[ext]`,
-      },
+export default defineConfig(({ mode }) => {
+  // 加载环境变量
+  const env = loadEnv(mode, process.cwd(), '');
+  const apiUrl = env.VITE_API_URL || 'http://localhost:8000';
+
+  return {
+    define: {
+      '__BUILD_TIME__': JSON.stringify(new Date().toISOString()),
     },
-  },
-  server: {
-    allowedHosts: true,
-    proxy: {
-      '/api': {
-        target: 'http://localhost:8000',
-        changeOrigin: true,
-        bypass: (req) => {
-          if (req.url?.startsWith('/api/log')) {
-            return false;
-          }
-        },
-        configure: (proxy) => {
-          proxy.on('proxyReq', (proxyReq, req) => {
-            console.log(`[Proxy] → ${req.method} ${req.url} => http://localhost:8000${req.url}`);
-          });
-          proxy.on('proxyRes', (proxyRes, req) => {
-            console.log(`[Proxy] ← ${req.method} ${req.url} status=${proxyRes.statusCode}`);
-          });
-          proxy.on('error', (err, req) => {
-            console.error(`[Proxy] ERROR ${req.method} ${req.url}: ${err.message}`);
-          });
-        },
-      },
-      '/health': {
-        target: 'http://localhost:8000',
-        changeOrigin: true,
-        configure: (proxy) => {
-          proxy.on('proxyReq', (proxyReq, req) => {
-            console.log(`[Proxy] → ${req.method} ${req.url} => http://localhost:8000${req.url}`);
-          });
-          proxy.on('proxyRes', (proxyRes, req) => {
-            console.log(`[Proxy] ← ${req.method} ${req.url} status=${proxyRes.statusCode}`);
-          });
-          proxy.on('error', (err, req) => {
-            console.error(`[Proxy] ERROR ${req.method} ${req.url}: ${err.message}`);
-          });
+    build: {
+      sourcemap: 'hidden',
+      rollupOptions: {
+        output: {
+          entryFileNames: `assets/[name].[hash].js`,
+          chunkFileNames: `assets/[name].[hash].js`,
+          assetFileNames: `assets/[name].[hash].[ext]`,
         },
       },
     },
-  },
-  plugins: [
-    requestLogPlugin(),
-    react({
-      babel: {
-        plugins: [
-          'react-dev-locator',
-        ],
+    server: {
+      allowedHosts: true,
+      proxy: {
+        '/api': {
+          target: apiUrl,
+          changeOrigin: true,
+          ws: true,
+          bypass: (req) => {
+            if (req.url?.startsWith('/api/log')) {
+              return false;
+            }
+          },
+          configure: (proxy) => {
+            proxy.on('proxyReq', (proxyReq, req) => {
+              console.log(`[Proxy] → ${req.method} ${req.url} => ${apiUrl}${req.url}`);
+            });
+            proxy.on('proxyRes', (proxyRes, req) => {
+              console.log(`[Proxy] ← ${req.method} ${req.url} status=${proxyRes.statusCode}`);
+            });
+            proxy.on('error', (err, req) => {
+              console.error(`[Proxy] ERROR ${req.method} ${req.url}: ${err.message}`);
+            });
+          },
+        },
+        '/health': {
+          target: apiUrl,
+          changeOrigin: true,
+          configure: (proxy) => {
+            proxy.on('proxyReq', (proxyReq, req) => {
+              console.log(`[Proxy] → ${req.method} ${req.url} => ${apiUrl}${req.url}`);
+            });
+            proxy.on('proxyRes', (proxyRes, req) => {
+              console.log(`[Proxy] ← ${req.method} ${req.url} status=${proxyRes.statusCode}`);
+            });
+            proxy.on('error', (err, req) => {
+              console.error(`[Proxy] ERROR ${req.method} ${req.url}: ${err.message}`);
+            });
+          },
+        },
       },
-    }),
-    tsconfigPaths()
-  ],
-})
+    },
+    plugins: [
+      requestLogPlugin(),
+      react({
+        babel: {
+          plugins: [
+            'react-dev-locator',
+          ],
+        },
+      }),
+      tsconfigPaths()
+    ],
+  };
+});

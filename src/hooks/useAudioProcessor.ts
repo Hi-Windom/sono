@@ -4,6 +4,7 @@ import { AISongDetectionResult } from '../utils/aiSongChecker';
 import { loadSettings, saveSettings, resetSettings as resetStoredSettings } from '../utils/settingsStorage';
 import { parseWavHeader, WavInfo } from '../utils/wavParser';
 import { saveSession, loadSession, clearSession } from '../utils/sessionDB';
+import { computeFileHash } from '../utils/fileHash';
 import {
   uploadAudio,
   detectAudio,
@@ -28,12 +29,8 @@ import {
 } from '../services/backendApi';
 
 function writeLog(message: string) {
+  // eslint-disable-next-line no-console
   console.log(message);
-  fetch('/api/log', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message })
-  }).catch(() => {});
 }
 
 function formatDetectTime(date: Date = new Date()): string {
@@ -103,13 +100,6 @@ function downloadUrl(url: string, fileName: string) {
   setTimeout(() => {
     document.body.removeChild(a);
   }, 5000);
-}
-
-async function computeFileHash(file: File): Promise<string> {
-  const buffer = await file.arrayBuffer();
-  const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
 export function useAudioProcessor() {
@@ -184,12 +174,29 @@ export function useAudioProcessor() {
   const mediaSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
   const playRef = useRef<(() => void) | null>(null);
   const audioBufferRef = useRef<AudioBuffer | null>(null);
+  const browserProcessedBufferRef = useRef<AudioBuffer | null>(null);
+  const backendProcessedBufferRef = useRef<AudioBuffer | null>(null);
   const seekInProgressRef = useRef(false);
+  // 静音策略：为每种播放模式维护独立的 source + gain，通过 gain 切换实现无缝 A/B 对比
+  const modeNodesRef = useRef<Record<PlayMode, { source: AudioBufferSourceNode; gain: GainNode } | null>>({
+    original: null,
+    browser: null,
+    backend: null,
+  });
+  const activeModeRef = useRef<PlayMode>('original');
 
   // 同步 audioBufferRef 与 audioBuffer state
   useEffect(() => {
     audioBufferRef.current = audioBuffer;
   }, [audioBuffer]);
+
+  useEffect(() => {
+    browserProcessedBufferRef.current = browserProcessedBuffer;
+  }, [browserProcessedBuffer]);
+
+  useEffect(() => {
+    backendProcessedBufferRef.current = backendProcessedBuffer;
+  }, [backendProcessedBuffer]);
 
   const applyAlgorithmVersion = useCallback((version: string) => {
     setAlgorithmVersionState(version);
@@ -382,6 +389,7 @@ export function useAudioProcessor() {
       audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
       analyserRef.current = audioContextRef.current.createAnalyser();
       analyserRef.current.fftSize = 256;
+      analyserRef.current.connect(audioContextRef.current.destination);
     }
     return audioContextRef.current;
   }, []);
@@ -434,6 +442,15 @@ export function useAudioProcessor() {
 
     (async () => {
       try {
+        // 保护：如果用户已经加载了新文件（在会话恢复前），放弃恢复旧会话
+        if (audioFile) {
+          writeLog(`[useAudioProcessor] 用户已加载文件 ${audioFile.name}，跳过旧会话恢复`);
+          await clearSession();
+          pendingSessionRef.current = null;
+          sessionRestoredRef.current = true;
+          return;
+        }
+
         const statusRes = await fetch(`/api/v1/status/${session.taskId}`);
         if (!statusRes.ok) {
           writeLog(`[useAudioProcessor] 任务不存在 taskId=${session.taskId}，清除会话`);
@@ -481,6 +498,7 @@ export function useAudioProcessor() {
             const repairedBuffer = await downloadWithProgress(previewUrl);
             const tempContext = new OfflineAudioContext(1, 1, processingOptions.sampleRate);
             const decoded = await tempContext.decodeAudioData(repairedBuffer);
+            backendProcessedBufferRef.current = decoded;
             setBackendProcessedBuffer(decoded);
             setHasBeenProcessed(true);
             setPlayMode('backend');
@@ -519,35 +537,34 @@ export function useAudioProcessor() {
     })();
   }, [backendAvailable, getAudioContext, processingOptions.sampleRate]);
 
-  const stopPlaying = useCallback((immediate = true) => {
-    // 如果不需要立即停止，先淡出
-    if (!immediate && gainNodeRef.current && sourceNodeRef.current) {
-      const context = audioContextRef.current;
-      if (context) {
-        const fadeOutDuration = 0.03; // 30ms 淡出
-        const now = context.currentTime;
-        gainNodeRef.current.gain.setValueAtTime(gainNodeRef.current.gain.value, now);
-        gainNodeRef.current.gain.linearRampToValueAtTime(0, now + fadeOutDuration);
+  const stopAllModeNodes = useCallback((immediate = true) => {
+    const context = audioContextRef.current;
+    (Object.keys(modeNodesRef.current) as PlayMode[]).forEach((mode) => {
+      const node = modeNodesRef.current[mode];
+      if (!node) return;
+      try {
+        // 清除 onended 回调，防止它调用 stopPlaying 影响新音频
+        node.source.onended = null;
+        if (!immediate && context) {
+          // 使用 Web Audio API 调度淡出，不依赖 setTimeout
+          const now = context.currentTime;
+          node.gain.gain.setValueAtTime(node.gain.gain.value, now);
+          node.gain.gain.linearRampToValueAtTime(0.0001, now + 0.03);
+          node.source.stop(now + 0.03);
+        } else {
+          try { node.source.stop(); } catch {}
+          try { node.source.disconnect(); } catch {}
+          try { node.gain.disconnect(); } catch {}
+        }
+      } catch {}
+      modeNodesRef.current[mode] = null;
+    });
+    sourceNodeRef.current = null;
+    gainNodeRef.current = null;
+  }, []);
 
-        // 延迟停止
-        setTimeout(() => {
-          if (sourceNodeRef.current) {
-            try { sourceNodeRef.current.stop(); } catch {}
-            sourceNodeRef.current.onended = null;
-            sourceNodeRef.current.disconnect();
-            sourceNodeRef.current = null;
-          }
-        }, fadeOutDuration * 1000 + 10); // 添加10ms缓冲
-      }
-    } else {
-      // 立即停止
-      if (sourceNodeRef.current) {
-        try { sourceNodeRef.current.stop(); } catch {}
-        sourceNodeRef.current.onended = null;
-        sourceNodeRef.current.disconnect();
-        sourceNodeRef.current = null;
-      }
-    }
+  const stopPlaying = useCallback((immediate = true) => {
+    stopAllModeNodes(immediate);
 
     if (mediaSourceRef.current) {
       try { mediaSourceRef.current.disconnect(); } catch {}
@@ -563,7 +580,7 @@ export function useAudioProcessor() {
     }
     isPlayingRef.current = false;
     setIsPlaying(false);
-  }, []);
+  }, [stopAllModeNodes]);
 
   const closeWS = useCallback(() => {
     if (wsControlRef.current) {
@@ -572,7 +589,7 @@ export function useAudioProcessor() {
     }
   }, []);
 
-  const startStreamingPlayback = useCallback((url: string) => {
+  const startStreamingPlayback = useCallback((url: string, mode: PlayMode = 'backend') => {
     stopPlaying();
 
     const context = getAudioContext();
@@ -586,7 +603,6 @@ export function useAudioProcessor() {
 
     const source = context.createMediaElementSource(audio);
     source.connect(analyserRef.current!);
-    analyserRef.current!.connect(context.destination);
 
     streamingAudioRef.current = audio;
     mediaSourceRef.current = source;
@@ -597,6 +613,8 @@ export function useAudioProcessor() {
 
     isPlayingRef.current = true;
     setIsPlaying(true);
+    activeModeRef.current = mode;
+    setPlayMode(mode);
     startTimeRef.current = context.currentTime;
     pausedAtRef.current = 0;
     setCurrentTime(0);
@@ -633,13 +651,10 @@ export function useAudioProcessor() {
     setBackendError(null);
     setAudioFile(file);
 
-    setProcessingStep('计算文件哈希...');
+    // 阶段1: 立即解码音频，让UI尽快显示波形和预估大小
+    setProcessingStep('加载音频...');
     setIsProcessing(true);
     setProcessingProgress(0);
-
-    const fileHash = await computeFileHash(file);
-    fileHashRef.current = fileHash;
-    writeLog(`[loadAudioFile] fileHash=${fileHash}`);
 
     const context = getAudioContext();
     const arrayBuf = await file.arrayBuffer();
@@ -647,8 +662,12 @@ export function useAudioProcessor() {
     setWavInfo(wavHeaderInfo);
     const buffer = await context.decodeAudioData(arrayBuf);
 
+    // 立即设置audioBuffer，让AIRepairPanel（含预估大小）显示
+    audioBufferRef.current = buffer;
     setAudioBuffer(buffer);
+    browserProcessedBufferRef.current = null;
     setBrowserProcessedBuffer(null);
+    backendProcessedBufferRef.current = null;
     setBackendProcessedBuffer(null);
     setDuration(buffer.duration);
     setCurrentTime(0);
@@ -666,6 +685,13 @@ export function useAudioProcessor() {
     const analysis = detectAudioIssues(buffer);
     setAudioAnalysis(analysis);
 
+    // 阶段2: 后台计算哈希（不阻塞UI）
+    setProcessingStep('计算文件哈希...');
+    const fileHash = await computeFileHash(file);
+    fileHashRef.current = fileHash;
+    writeLog(`[loadAudioFile] fileHash=${fileHash}`);
+
+    // 阶段3: 上传文件
     try {
       setProcessingStep('上传到后端...');
       setProcessingProgress(0);
@@ -957,11 +983,12 @@ export function useAudioProcessor() {
             const previewUrl = getPreviewUrl(cachedTaskId || currentTaskId, 'repaired');
             setBackendPreviewUrl(previewUrl);
             startStreamingPlayback(previewUrl);
-            setPlayMode('backend');
             setHasBeenProcessed(true);
 
+            // 后台加载修复后的音频 buffer（startStreamingPlayback 已经设置了播放状态和模式）
             if (audioFile && (cachedTaskId || currentTaskId)) {
               loadAudioFromUrl(previewUrl, processingOptions.sampleRate).then(repairedBuffer => {
+                backendProcessedBufferRef.current = repairedBuffer;
                 setBackendProcessedBuffer(repairedBuffer);
               }).catch(err => {
                 console.warn('[applySettings] 后台下载缓存音频失败:', err);
@@ -1219,16 +1246,76 @@ export function useAudioProcessor() {
         });
       }
       anySuccess = true;
-      setPlayMode('backend');
 
       const previewUrl = effectiveBackendResult.value.previewUrl;
       if (previewUrl) {
         startStreamingPlayback(previewUrl);
       }
 
+      // 后台加载修复后的音频 buffer（startStreamingPlayback 已经设置了播放状态和模式）
       if (audioFile && taskIdRef.current) {
         loadAudioFromUrl(previewUrl, processingOptions.sampleRate).then(repairedBuffer => {
+          writeLog(`[applySettings] buffer加载完成: duration=${repairedBuffer.duration.toFixed(3)}`);
+          backendProcessedBufferRef.current = repairedBuffer;
           setBackendProcessedBuffer(repairedBuffer);
+
+          // 如果当前正在播放streaming，无缝切换到buffer播放
+          if (isPlayingRef.current && streamingAudioRef.current) {
+            writeLog(`[applySettings] 正在播放streaming，切换到buffer播放`);
+            const currentPos = streamingAudioRef.current.currentTime;
+
+            // 停止streaming
+            streamingAudioRef.current.pause();
+            streamingAudioRef.current = null;
+            if (mediaSourceRef.current) {
+              try { mediaSourceRef.current.disconnect(); } catch {}
+              mediaSourceRef.current = null;
+            }
+
+            // 用新buffer创建节点继续播放
+            const context = getAudioContext();
+            const newSource = context.createBufferSource();
+            const newGain = context.createGain();
+            newSource.buffer = repairedBuffer;
+            newSource.connect(newGain);
+            newGain.connect(analyserRef.current!);
+            newGain.gain.setValueAtTime(0, context.currentTime);
+            newGain.gain.linearRampToValueAtTime(1.0, context.currentTime + 0.015);
+
+            newSource.onended = () => {
+              if (isPlayingRef.current) {
+                stopPlaying();
+                setCurrentTime(0);
+                pausedAtRef.current = 0;
+              }
+            };
+
+            modeNodesRef.current['backend'] = { source: newSource, gain: newGain };
+            sourceNodeRef.current = newSource;
+            gainNodeRef.current = newGain;
+            activeModeRef.current = 'backend';
+
+            startTimeRef.current = context.currentTime - currentPos;
+            newSource.start(0, currentPos);
+            playStartTimeRef.current = performance.now();
+            pausedAtRef.current = currentPos;
+
+            const updateTime = () => {
+              if (isPlayingRef.current) {
+                const elapsed = (performance.now() - playStartTimeRef.current) / 1000;
+                const current = currentPos + elapsed;
+                if (current >= repairedBuffer.duration) {
+                  stopPlaying();
+                  setCurrentTime(0);
+                  pausedAtRef.current = 0;
+                } else {
+                  setCurrentTime(current);
+                  animationFrameRef.current = requestAnimationFrame(updateTime);
+                }
+              }
+            };
+            updateTime();
+          }
         }).catch(err => {
           console.warn('[applySettings] 后台下载修复后音频失败:', err);
         });
@@ -1236,6 +1323,7 @@ export function useAudioProcessor() {
     }
 
     if (browserResult.status === 'fulfilled' && browserResult.value) {
+      browserProcessedBufferRef.current = browserResult.value;
       setBrowserProcessedBuffer(browserResult.value);
       anySuccess = true;
     }
@@ -1621,17 +1709,21 @@ export function useAudioProcessor() {
   }, []);
 
   const getCurrentBuffer = useCallback(() => {
-    if (playMode === 'original') return audioBuffer;
-    if (playMode === 'browser') return browserProcessedBuffer;
-    if (playMode === 'backend') return backendProcessedBuffer;
-    return audioBuffer;
-  }, [playMode, audioBuffer, browserProcessedBuffer, backendProcessedBuffer]);
+    if (playMode === 'original') return audioBufferRef.current;
+    if (playMode === 'browser') return browserProcessedBufferRef.current;
+    if (playMode === 'backend') return backendProcessedBufferRef.current;
+    return audioBufferRef.current;
+  }, [playMode]);
 
   const play = useCallback(async () => {
-    if (playMode === 'backend' && streamingAudioRef.current && !backendProcessedBuffer) {
+    writeLog(`[play] 开始播放: playMode=${playMode}, isPlaying=${isPlayingRef.current}, activeMode=${activeModeRef.current}`);
+
+    if (playMode === 'backend' && streamingAudioRef.current && !backendProcessedBufferRef.current) {
+      writeLog(`[play] 使用streaming播放`);
       streamingAudioRef.current.play().catch(() => {});
       isPlayingRef.current = true;
       setIsPlaying(true);
+      activeModeRef.current = 'backend';
       const updateTime = () => {
         if (isPlayingRef.current && streamingAudioRef.current) {
           const current = streamingAudioRef.current.currentTime;
@@ -1650,6 +1742,7 @@ export function useAudioProcessor() {
     }
 
     if (streamingAudioRef.current) {
+      writeLog(`[play] 停止streaming，切换到buffer播放`);
       const resumeTime = streamingAudioRef.current.currentTime;
       streamingAudioRef.current.pause();
       streamingAudioRef.current = null;
@@ -1664,6 +1757,7 @@ export function useAudioProcessor() {
 
     const buffer = getCurrentBuffer() ?? audioBufferRef.current;
     if (!buffer) {
+      writeLog(`[play] 没有可用buffer，返回`);
       return;
     }
 
@@ -1673,24 +1767,36 @@ export function useAudioProcessor() {
       await new Promise(resolve => setTimeout(resolve, 50));
     }
 
-    if (sourceNodeRef.current && !seekInProgressRef.current) {
-      stopPlaying();
-    } else if (sourceNodeRef.current && seekInProgressRef.current) {
-      try { sourceNodeRef.current.stop(); } catch {}
-      sourceNodeRef.current.disconnect();
-      sourceNodeRef.current = null;
+    // seek 时停止所有模式节点，重新创建
+    if (seekInProgressRef.current) {
+      writeLog(`[play] seek模式，停止所有节点`);
+      stopAllModeNodes();
+      seekInProgressRef.current = false;
     }
-    seekInProgressRef.current = false;
 
+    // 检查是否已有节点在运行（保护逻辑）
+    if (modeNodesRef.current[playMode]) {
+      writeLog(`[play] 警告: 当前模式已有节点，先停止`);
+      try {
+        const node = modeNodesRef.current[playMode]!;
+        node.source.onended = null;
+        node.source.stop();
+        node.source.disconnect();
+        node.gain.disconnect();
+      } catch {}
+      modeNodesRef.current[playMode] = null;
+    }
+
+    // 创建当前模式的音频节点
+    writeLog(`[play] 创建新节点: mode=${playMode}, bufferDuration=${buffer.duration.toFixed(3)}`);
     const source = context.createBufferSource();
     const gain = context.createGain();
 
     source.buffer = buffer;
     source.connect(gain);
     gain.connect(analyserRef.current!);
-    analyserRef.current!.connect(context.destination);
 
-    // 使用淡入避免爆音 - 使用线性渐变更平滑
+    // 使用淡入避免爆音
     const fadeInDuration = 0.015; // 15ms 淡入
     gain.gain.setValueAtTime(0, context.currentTime);
     gain.gain.linearRampToValueAtTime(1.0, context.currentTime + fadeInDuration);
@@ -1702,6 +1808,7 @@ export function useAudioProcessor() {
     }
 
     source.onended = () => {
+      writeLog(`[play] 节点播放结束`);
       if (isPlayingRef.current) {
         stopPlaying();
         setCurrentTime(0);
@@ -1709,12 +1816,15 @@ export function useAudioProcessor() {
       }
     };
 
+    modeNodesRef.current[playMode] = { source, gain };
     sourceNodeRef.current = source;
     gainNodeRef.current = gain;
+    activeModeRef.current = playMode;
 
     playStartTimeRef.current = performance.now();
     startTimeRef.current = context.currentTime - playOffset;
     source.start(0, playOffset);
+    writeLog(`[play] 节点已启动: offset=${playOffset.toFixed(3)}`);
 
     isPlayingRef.current = true;
     setIsPlaying(true);
@@ -1734,7 +1844,7 @@ export function useAudioProcessor() {
       }
     };
     updateTime();
-  }, [playMode, backendProcessedBuffer, getCurrentBuffer, getAudioContext, stopPlaying]);
+  }, [playMode, getCurrentBuffer, getAudioContext, stopPlaying, stopAllModeNodes]);
 
   // 更新 playRef
   useEffect(() => {
@@ -1776,59 +1886,82 @@ export function useAudioProcessor() {
   }, [stopPlaying, playMode, audioBuffer]);
 
   const switchPlayMode = useCallback(async (mode: PlayMode) => {
-    // 如果当前没有播放，直接切换模式
-    if (!isPlayingRef.current) {
+    writeLog(`[switchPlayMode] 开始切换: target=${mode}, current=${activeModeRef.current}, isPlaying=${isPlayingRef.current}`);
+
+    const targetBuffer = mode === 'browser' ? browserProcessedBufferRef.current
+      : mode === 'backend' ? backendProcessedBufferRef.current
+      : audioBufferRef.current;
+    if (!targetBuffer) {
+      writeLog(`[switchPlayMode] 目标buffer为空，只切换状态`);
       setPlayMode(mode);
       return;
     }
 
-    // 获取当前播放位置
-    const currentPosition = currentTime;
-    const context = getAudioContext();
+    if (!isPlayingRef.current) {
+      writeLog(`[switchPlayMode] 未在播放，直接切换状态`);
+      setPlayMode(mode);
+      return;
+    }
 
-    // 确保音频上下文处于运行状态
+    if (activeModeRef.current === mode) {
+      writeLog(`[switchPlayMode] 已是目标模式，无需操作`);
+      setPlayMode(mode);
+      return;
+    }
+
+    const context = getAudioContext();
     if (context.state === 'suspended') {
       await context.resume();
     }
 
-    // 获取新旧模式的音频缓冲区
-    const newBuffer = mode === 'browser' ? browserProcessedBuffer
-      : mode === 'backend' ? backendProcessedBuffer
-      : audioBuffer;
+    const now = context.currentTime;
+    const currentElapsed = now - startTimeRef.current;
+    const startPosition = Math.min(currentElapsed, targetBuffer.duration - 0.01);
 
-    if (!newBuffer) {
-      setPlayMode(mode);
-      return;
+    writeLog(`[switchPlayMode] 停止当前节点: mode=${activeModeRef.current}, position=${startPosition.toFixed(3)}`);
+
+    if (streamingAudioRef.current) {
+      writeLog(`[switchPlayMode] 停止streaming音频`);
+      try {
+        streamingAudioRef.current.pause();
+        streamingAudioRef.current.src = '';
+      } catch {}
+      streamingAudioRef.current = null;
+      if (mediaSourceRef.current) {
+        try { mediaSourceRef.current.disconnect(); } catch {}
+        mediaSourceRef.current = null;
+      }
     }
 
-    // 优化交叉淡入淡出时间 - 使用更短的淡入淡出实现更无缝的切换
-    const fadeOutDuration = 0.03; // 30ms 淡出
-    const fadeInDuration = 0.03;  // 30ms 淡入
-    const overlapTime = 0.01;     // 10ms 重叠时间，确保无缝
+    const currentNode = modeNodesRef.current[activeModeRef.current];
+    if (currentNode) {
+      try {
+        currentNode.source.onended = null;
+        currentNode.source.stop(now);
+        currentNode.source.disconnect();
+        currentNode.gain.disconnect();
+        writeLog(`[switchPlayMode] 旧节点已停止并断开`);
+      } catch (e) {
+        writeLog(`[switchPlayMode] 停止旧节点出错: ${e}`);
+      }
+    }
 
-    // 保存旧的音频源引用，用于后续停止
-    const oldSource = sourceNodeRef.current;
-    const oldGain = gainNodeRef.current;
+    (Object.keys(modeNodesRef.current) as PlayMode[]).forEach((m) => {
+      modeNodesRef.current[m] = null;
+    });
 
-    // 创建新的音频源（先创建，确保准备好后再切换）
+    writeLog(`[switchPlayMode] 创建新节点: mode=${mode}, bufferDuration=${targetBuffer.duration.toFixed(3)}`);
     const newSource = context.createBufferSource();
     const newGain = context.createGain();
-
-    newSource.buffer = newBuffer;
+    newSource.buffer = targetBuffer;
     newSource.connect(newGain);
     newGain.connect(analyserRef.current!);
-    analyserRef.current!.connect(context.destination);
 
-    // 从新位置开始播放，确保无缝衔接
-    const startPosition = Math.min(currentPosition, newBuffer.duration - 0.01);
-
-    // 设置淡入 - 使用线性渐变更平滑
-    const now = context.currentTime;
     newGain.gain.setValueAtTime(0, now);
-    newGain.gain.linearRampToValueAtTime(1.0, now + fadeInDuration);
+    newGain.gain.linearRampToValueAtTime(1.0, now + 0.01);
 
-    // 设置结束回调
     newSource.onended = () => {
+      writeLog(`[switchPlayMode] 新节点播放结束`);
       if (isPlayingRef.current) {
         stopPlaying();
         setCurrentTime(0);
@@ -1836,35 +1969,17 @@ export function useAudioProcessor() {
       }
     };
 
-    // 更新引用
+    modeNodesRef.current[mode] = { source: newSource, gain: newGain };
     sourceNodeRef.current = newSource;
     gainNodeRef.current = newGain;
+    activeModeRef.current = mode;
 
-    // 开始播放新音频
     startTimeRef.current = now - startPosition;
     newSource.start(now, startPosition);
+    writeLog(`[switchPlayMode] 新节点已启动: startTime=${startTimeRef.current.toFixed(3)}, offset=${startPosition.toFixed(3)}`);
 
-    // 淡出旧音频（在启动新音频后）
-    if (oldSource && oldGain) {
-      // 清除旧音频的 onended 回调，避免它调用 stopPlaying 影响新音频
-      oldSource.onended = null;
-      
-      oldGain.gain.setValueAtTime(oldGain.gain.value, now);
-      oldGain.gain.linearRampToValueAtTime(0.001, now + fadeOutDuration);
-
-      // 延迟停止旧音频
-      setTimeout(() => {
-        try {
-          oldSource.stop();
-          oldSource.disconnect();
-        } catch {}
-      }, fadeOutDuration * 1000 + overlapTime * 1000);
-    }
-
-    // 切换模式状态
     setPlayMode(mode);
 
-    // 更新时间跟踪 - 使用更精确的时间计算
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current);
     }
@@ -1872,7 +1987,7 @@ export function useAudioProcessor() {
     const updateTime = () => {
       if (isPlayingRef.current) {
         const elapsed = context.currentTime - startTimeRef.current;
-        if (elapsed >= newBuffer.duration) {
+        if (elapsed >= targetBuffer.duration) {
           stopPlaying();
           setCurrentTime(0);
           pausedAtRef.current = 0;
@@ -1883,7 +1998,7 @@ export function useAudioProcessor() {
       }
     };
     updateTime();
-  }, [currentTime, stopPlaying, getAudioContext, audioBuffer, browserProcessedBuffer, backendProcessedBuffer]);
+  }, [stopPlaying, getAudioContext]);
 
   const downloadProcessedAudio = useCallback(async (source: 'browser' | 'backend') => {
     const baseName = audioFile

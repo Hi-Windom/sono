@@ -7,8 +7,13 @@ from services.repair.audio_repair_v1_1 import repair_audio as repair_audio_v1_1
 from services.repair.audio_repair_v1_2 import repair_audio as repair_audio_v1_2
 from services.repair.repair_v2_0 import repair_audio as repair_audio_v2_0
 from services.repair.repair_v2_1 import repair_audio as repair_audio_v2_1
+from services.repair.repair_v2_2 import repair_audio as repair_audio_v2_2
+from services.repair.repair_v2_2a import repair_audio as repair_audio_v2_2a
 
 PARAM_DEFINITIONS = {
+    "music_type": {"key": "musicType", "label": "音乐类型", "min": 0, "max": 5, "step": 1},
+    "repair_mode": {"key": "repairMode", "label": "修复模式", "min": 0, "max": 5, "step": 1},
+    "quality": {"key": "quality", "label": "处理质量", "min": 0, "max": 1, "step": 1},
     "de_clipping": {"key": "deClipping", "label": "去削波", "min": 0, "max": 1, "step": 0.01},
     "noise_reduction": {"key": "noiseReduction", "label": "降噪", "min": 0, "max": 1, "step": 0.01},
     "de_essing": {"key": "deEssing", "label": "去齿音", "min": 0, "max": 1, "step": 0.01},
@@ -335,6 +340,155 @@ ALGORITHM_VERSIONS = {
                     "dynamic_range": 0.35, "softness": 0.03, "presence_boost": 0.15,
                     "bass_enhance": 0.2, "spatial_enhance": 0.28, "transient_repair": 0.15,
                     "warmth": 0.45, "clarity": 0.35,
+                },
+            },
+        ],
+    },
+    "v2.2": {
+        "name": "v2.2",
+        "label": "v2.2 桌面版",
+        "description": "最佳音质，完整处理（仅桌面端）",
+        "mobile_compatible": False,
+        "repair_fn": repair_audio_v2_2,
+        "default_params": {
+            "de_clipping": 0.35, "noise_reduction": 0.25, "de_essing": 0.25,
+            "de_crackle": 0.25, "de_pop": 0.2, "harmonic_enhance": 0.12,
+            "dynamic_range": 0.12, "softness": 0.03, "presence_boost": 0.08,
+            "bass_enhance": 0.12, "spatial_enhance": 0.12, "transient_repair": 0.12,
+            "warmth": 0.25, "clarity": 0.25, "music_type": "auto", "repair_mode": "smart",
+            "quality": "standard",
+        },
+        "modes": [
+            {
+                "name": "智能修复",
+                "description": "自动检测音乐类型，应用类型优化的处理参数",
+                "icon": "🧠",
+                "params": {
+                    "de_clipping": 0.35, "noise_reduction": 0.25, "de_essing": 0.25,
+                    "de_crackle": 0.25, "de_pop": 0.2, "harmonic_enhance": 0.12,
+                    "dynamic_range": 0.12, "softness": 0.03, "presence_boost": 0.08,
+                    "bass_enhance": 0.12, "spatial_enhance": 0.12, "transient_repair": 0.12,
+                    "warmth": 0.25, "clarity": 0.25, "music_type": "auto", "repair_mode": "smart",
+                    "quality": "standard",
+                },
+            },
+            {
+                "name": "人声修复",
+                "description": "针对人声优化，去齿音+气息自然度+清晰度",
+                "icon": "🎤",
+                "params": {
+                    "de_clipping": 0.3, "noise_reduction": 0.18, "de_essing": 0.35,
+                    "de_crackle": 0.28, "de_pop": 0.22, "harmonic_enhance": 0.15,
+                    "dynamic_range": 0.08, "softness": 0.02, "presence_boost": 0.12,
+                    "bass_enhance": 0.08, "spatial_enhance": 0.1, "transient_repair": 0.15,
+                    "warmth": 0.3, "clarity": 0.32, "music_type": "vocal", "repair_mode": "vocal",
+                    "quality": "standard",
+                },
+            },
+            {
+                "name": "器乐修复",
+                "description": "针对器乐优化，谐波丰富度+空间感+细节保留",
+                "icon": "🎻",
+                "params": {
+                    "de_clipping": 0.25, "noise_reduction": 0.2, "de_essing": 0.12,
+                    "de_crackle": 0.2, "de_pop": 0.12, "harmonic_enhance": 0.2,
+                    "dynamic_range": 0.1, "softness": 0.01, "presence_boost": 0.1,
+                    "bass_enhance": 0.1, "spatial_enhance": 0.18, "transient_repair": 0.1,
+                    "warmth": 0.22, "clarity": 0.22, "music_type": "instrumental", "repair_mode": "instrumental",
+                    "quality": "standard",
+                },
+            },
+            {
+                "name": "深度修复",
+                "description": "最强修复力度，适合严重损坏的AI音频",
+                "icon": "🔧",
+                "params": {
+                    "de_clipping": 0.5, "noise_reduction": 0.4, "de_essing": 0.38,
+                    "de_crackle": 0.4, "de_pop": 0.32, "harmonic_enhance": 0.2,
+                    "dynamic_range": 0.22, "softness": 0.06, "presence_boost": 0.14,
+                    "bass_enhance": 0.18, "spatial_enhance": 0.18, "transient_repair": 0.22,
+                    "warmth": 0.35, "clarity": 0.35, "music_type": "auto", "repair_mode": "deep",
+                    "quality": "standard",
+                },
+            },
+            {
+                "name": "温和优化",
+                "description": "轻微处理，保留原始音质",
+                "icon": "🌿",
+                "params": {
+                    "de_clipping": 0.15, "noise_reduction": 0.1, "de_essing": 0.12,
+                    "de_crackle": 0.1, "de_pop": 0.08, "harmonic_enhance": 0.06,
+                    "dynamic_range": 0.06, "softness": 0.015, "presence_boost": 0.04,
+                    "bass_enhance": 0.06, "spatial_enhance": 0.06, "transient_repair": 0.06,
+                    "warmth": 0.15, "clarity": 0.18, "music_type": "auto", "repair_mode": "gentle",
+                    "quality": "standard",
+                },
+            },
+            {
+                "name": "HiFi 模式",
+                "description": "最小处理，追求最高音质保真度",
+                "icon": "✨",
+                "params": {
+                    "de_clipping": 0.12, "noise_reduction": 0.05, "de_essing": 0.08,
+                    "de_crackle": 0.06, "de_pop": 0.05, "harmonic_enhance": 0.03,
+                    "dynamic_range": 0.03, "softness": 0.01, "presence_boost": 0.03,
+                    "bass_enhance": 0.04, "spatial_enhance": 0.04, "transient_repair": 0.04,
+                    "warmth": 0.1, "clarity": 0.12, "music_type": "auto", "repair_mode": "smart",
+                    "quality": "hifi",
+                },
+            },
+        ],
+    },
+    "v2.2a": {
+        "name": "v2.2a",
+        "label": "v2.2a 移动版",
+        "description": "速度优先，精简处理（移动端专用）",
+        "mobile_compatible": True,
+        "repair_fn": repair_audio_v2_2a,
+        "default_params": {
+            "de_clipping": 0.3, "noise_reduction": 0.2, "de_essing": 0.2,
+            "de_pop": 0.15, "dynamic_range": 0.1,
+            "music_type": "auto", "repair_mode": "smart",
+        },
+        "modes": [
+            {
+                "name": "智能修复",
+                "description": "自动检测类型，快速处理",
+                "icon": "🧠",
+                "params": {
+                    "de_clipping": 0.3, "noise_reduction": 0.2, "de_essing": 0.2,
+                    "de_pop": 0.15, "dynamic_range": 0.1,
+                    "music_type": "auto", "repair_mode": "smart",
+                },
+            },
+            {
+                "name": "快速修复",
+                "description": "极速处理，适合大文件",
+                "icon": "⚡",
+                "params": {
+                    "de_clipping": 0.2, "noise_reduction": 0.15, "de_essing": 0.15,
+                    "de_pop": 0.1, "dynamic_range": 0.05,
+                    "music_type": "auto", "repair_mode": "fast",
+                },
+            },
+            {
+                "name": "深度修复",
+                "description": "较强修复力度",
+                "icon": "🔧",
+                "params": {
+                    "de_clipping": 0.45, "noise_reduction": 0.35, "de_essing": 0.35,
+                    "de_pop": 0.3, "dynamic_range": 0.2,
+                    "music_type": "auto", "repair_mode": "deep",
+                },
+            },
+            {
+                "name": "温和优化",
+                "description": "轻微处理，保留音质",
+                "icon": "🌿",
+                "params": {
+                    "de_clipping": 0.1, "noise_reduction": 0.08, "de_essing": 0.08,
+                    "de_pop": 0.05, "dynamic_range": 0.03,
+                    "music_type": "auto", "repair_mode": "gentle",
                 },
             },
         ],

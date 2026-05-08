@@ -185,6 +185,42 @@ async def get_queue():
 async def websocket_task_status(websocket: WebSocket, task_id: str):
     await websocket.accept()
     
+    if task_id.startswith("qt-"):
+        qt_task = _quality_test_cache.get(task_id)
+        if not qt_task:
+            await websocket.send_json({"error": "测试任务不存在"})
+            await websocket.close()
+            return
+        from services.ws_manager import ws_manager
+        await ws_manager.connect(task_id, websocket)
+        try:
+            await websocket.send_json({
+                "task_id": task_id,
+                "status": qt_task.get("status", "running"),
+                "progress": 0 if qt_task.get("status") == "running" else 100,
+                "step": "quality_test",
+            })
+            if qt_task.get("status") == "completed":
+                await websocket.send_json({"task_id": task_id, "status": "completed", "progress": 100, "step": "done", **qt_task})
+                await websocket.close()
+                return
+            import asyncio
+            while True:
+                try:
+                    await asyncio.wait_for(websocket.receive_text(), timeout=10.0)
+                except asyncio.TimeoutError:
+                    current = _quality_test_cache.get(task_id, {})
+                    if current.get("status") == "completed":
+                        await websocket.send_json({"task_id": task_id, "status": "completed", "progress": 100, "step": "done", **current})
+                        await websocket.close()
+                        return
+                    await websocket.send_json({"task_id": task_id, "status": "running", "progress": 50, "step": "quality_test", "heartbeat": True})
+        except WebSocketDisconnect:
+            pass
+        finally:
+            ws_manager.disconnect(task_id, websocket)
+        return
+
     task = get_task(task_id)
     if not task:
         await websocket.send_json({"error": "任务不存在"})
@@ -598,3 +634,186 @@ async def delete_task_cache(task_id: str):
 async def list_training_data():
     from services.training_manager import list_training_files
     return list_training_files()
+
+
+_quality_test_cache: dict = {}
+
+
+def _parse_pytest_output(output: str) -> dict:
+    import re
+    lines = output.strip().split("\n")
+    tests = []
+    summary_line = ""
+    for line in lines:
+        stripped = line.strip()
+        if " PASSED" in stripped:
+            test_name = stripped.split(" PASSED")[0].strip()
+            if "::" in test_name:
+                test_name = test_name.split("::")[-1]
+            tests.append({"name": test_name, "status": "passed"})
+        elif " FAILED" in stripped:
+            test_name = stripped.split(" FAILED")[0].strip()
+            if "::" in test_name:
+                test_name = test_name.split("::")[-1]
+            tests.append({"name": test_name, "status": "failed", "error": ""})
+        elif " SKIPPED" in stripped:
+            test_name = stripped.split(" SKIPPED")[0].strip()
+            if "::" in test_name:
+                test_name = test_name.split("::")[-1]
+            tests.append({"name": test_name, "status": "skipped"})
+        elif "passed" in stripped and ("failed" in stripped or "skipped" in stripped or stripped.endswith("passed")):
+            summary_line = stripped
+
+    for t in tests:
+        name = t["name"]
+        if "[" in name:
+            m = re.search(r'\[(v[\d.]+[\w]*)\]', name)
+            t["version"] = m.group(1) if m else ""
+        elif "V22a" in name or "v22a" in name.lower():
+            t["version"] = "v2.2a"
+        else:
+            t["version"] = ""
+
+        category_map = {
+            "test_pure_sine": ("baseline", "THD", "纯正弦波输入，输出总谐波失真 < -20 dB"),
+            "test_no_hard_clipping": ("baseline", "Flat-top", "输出无 flat-top 样本（硬削波指标）"),
+            "test_no_high_frequency_noise": ("baseline", "HF Noise", "5-16kHz 频段噪声增长 < 10x"),
+            "test_scale_adjusted_snr": ("baseline", "SNR", "全流程 scale-adjusted SNR > 5 dB"),
+            "test_output_finite": ("baseline", "Finite", "输出无 NaN/Inf 值"),
+            "test_peak_level_valid": ("baseline", "Peak", "输出峰值 ≤ 1.0"),
+            "test_dc_offset_small": ("baseline", "DC", "DC 偏移 < 0.01"),
+            "test_output_length_preserved": ("baseline", "Length", "输出长度与输入一致（±5%）"),
+            "test_declip_snr": ("per_step", "SNR", "Declip 步骤 SNR > 20 dB"),
+            "test_depop_snr": ("per_step", "SNR", "Depop 步骤 SNR > 10 dB"),
+            "test_compress_snr": ("per_step", "SNR", "Compress 步骤 SNR > 40 dB（全局常量增益）"),
+            "test_peak_limit_snr": ("per_step", "SNR", "Peak Limit 步骤 SNR > 30 dB"),
+            "test_loudness_norm_snr": ("per_step", "SNR", "Loudness Norm 步骤 SNR > 60 dB（纯增益）"),
+            "test_dc_remove_snr": ("per_step", "SNR", "DC Remove 步骤 SNR > 60 dB"),
+            "test_depop_no_large": ("iron_rule", "Window", "Depop 不替换超过 5 个连续样本"),
+            "test_compress_is_global": ("iron_rule", "Gain CV", "Compress 增益变异系数 < 1%（无 AM 伪影）"),
+            "test_declip_uses_soft": ("iron_rule", "Flat-top", "Declip 不增加 flat-top 样本（使用软削波）"),
+            "test_peak_limit_uses_soft": ("iron_rule", "Flat-top", "Peak Limit 不增加 flat-top 样本（使用软削波）"),
+            "test_loudness_norm_is_constant": ("iron_rule", "Gain CV", "Loudness Norm 是纯常量增益（CV < 0.1%）"),
+            "test_dc_remove_reduces": ("per_step", "DC", "DC Remove 有效降低直流偏移"),
+        }
+        matched = False
+        for key, val in category_map.items():
+            if key in name:
+                t["category"], t["metric"], t["description"] = val
+                matched = True
+                break
+        if not matched:
+            t["category"] = "other"
+            t["metric"] = ""
+            t["description"] = ""
+
+    passed = sum(1 for t in tests if t["status"] == "passed")
+    failed = sum(1 for t in tests if t["status"] == "failed")
+    skipped = sum(1 for t in tests if t["status"] == "skipped")
+    baseline = [t for t in tests if t.get("category") == "baseline"]
+    per_step = [t for t in tests if t.get("category") == "per_step"]
+    iron_rule = [t for t in tests if t.get("category") == "iron_rule"]
+
+    return {
+        "total": len(tests), "passed": passed, "failed": failed, "skipped": skipped,
+        "summary": summary_line, "tests": tests,
+        "baseline": baseline, "per_step": per_step, "iron_rule": iron_rule,
+        "raw_output": output[-4000:] if len(output) > 4000 else output,
+    }
+
+
+def _run_quality_tests_background(task_id: str, loop):
+    import subprocess
+    import asyncio
+    from services.ws_manager import ws_manager
+    global _quality_test_cache
+    try:
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        result = subprocess.run(
+            ["python", "-m", "pytest", "backend/tests/test_repair_quality.py", "-v", "--tb=short"],
+            capture_output=True, text=True, timeout=180, cwd=project_root,
+        )
+        output = result.stdout + result.stderr
+
+        for line in output.strip().split("\n"):
+            if " PASSED" in line or " FAILED" in line or " SKIPPED" in line:
+                try:
+                    asyncio.run_coroutine_threadsafe(
+                        ws_manager.send_progress(task_id, {
+                            "task_id": task_id, "status": "running",
+                            "progress": 50, "step": "quality_test",
+                            "quality_test_line": line.strip(),
+                        }),
+                        loop,
+                    )
+                except Exception:
+                    pass
+
+        parsed = _parse_pytest_output(output)
+        parsed["exit_code"] = result.returncode
+        parsed["status"] = "completed"
+        _quality_test_cache[task_id] = parsed
+
+        try:
+            asyncio.run_coroutine_threadsafe(
+                ws_manager.send_final(task_id, {
+                    "task_id": task_id, "status": "completed",
+                    "progress": 100, "step": "done",
+                    **parsed,
+                }),
+                loop,
+            )
+        except Exception:
+            pass
+    except subprocess.TimeoutExpired:
+        err_data = {
+            "total": 0, "passed": 0, "failed": 0, "skipped": 0,
+            "summary": "测试超时（180秒）", "tests": [], "baseline": [], "per_step": [], "iron_rule": [],
+            "raw_output": "", "exit_code": -1, "status": "completed",
+        }
+        _quality_test_cache[task_id] = err_data
+        try:
+            asyncio.run_coroutine_threadsafe(
+                ws_manager.send_final(task_id, {"task_id": task_id, "status": "completed", "progress": 100, "step": "timeout", **err_data}),
+                loop,
+            )
+        except Exception:
+            pass
+    except Exception as e:
+        err_data = {
+            "total": 0, "passed": 0, "failed": 0, "skipped": 0,
+            "summary": f"运行失败: {str(e)}", "tests": [], "baseline": [], "per_step": [], "iron_rule": [],
+            "raw_output": "", "exit_code": -1, "status": "completed",
+        }
+        _quality_test_cache[task_id] = err_data
+        try:
+            asyncio.run_coroutine_threadsafe(
+                ws_manager.send_final(task_id, {"task_id": task_id, "status": "completed", "progress": 100, "step": "error", **err_data}),
+                loop,
+            )
+        except Exception:
+            pass
+
+
+@router.post("/quality-tests/start")
+async def start_quality_tests():
+    import threading
+    import uuid
+    import asyncio
+    global _quality_test_cache
+    task_id = f"qt-{uuid.uuid4().hex[:8]}"
+    _quality_test_cache[task_id] = {"status": "running", "total": 0, "passed": 0, "failed": 0, "skipped": 0,
+                                     "tests": [], "baseline": [], "per_step": [], "iron_rule": [],
+                                     "summary": "", "raw_output": "", "exit_code": -1}
+    loop = asyncio.get_event_loop()
+    thread = threading.Thread(target=_run_quality_tests_background, args=(task_id, loop), daemon=True)
+    thread.start()
+    return {"task_id": task_id, "status": "running"}
+
+
+@router.get("/quality-tests/result/{task_id}")
+async def get_quality_test_result(task_id: str):
+    global _quality_test_cache
+    if task_id not in _quality_test_cache:
+        return {"status": "not_found", "error": f"Task {task_id} not found"}
+    return _quality_test_cache[task_id]

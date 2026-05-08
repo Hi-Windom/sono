@@ -118,6 +118,11 @@ def create_app() -> FastAPI:
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"读取日志失败: {e}")
 
+    # 桌面开发预览/生产环境静态文件服务
+    # 注意：此功能仅在 SERVE_STATIC=1 时启用，用于桌面端打包后的预览或生产部署
+    # 开发环境（热重载）应使用 `npm run dev` 启动 Vite 开发服务器（端口 5173）
+    # 后端仅提供 API 服务（端口 8000），前端通过代理访问 API
+    # Android 打包时，dist 会被复制到 backend/dist，此时 SERVE_STATIC=1 提供完整服务
     dist_dir = BASE_DIR / "dist"
     serve_static = os.getenv("SERVE_STATIC", "").lower() in ("1", "true", "yes")
     if serve_static and dist_dir.is_dir():

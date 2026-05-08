@@ -15,6 +15,8 @@ echo -e "${GREEN}  Sono Android Release 打包脚本${NC}"
 echo -e "${GREEN}============================================${NC}"
 
 echo -e "${YELLOW}[1/4] 清理旧的前端构建产物...${NC}"
+# 注意：此脚本构建的 dist 仅用于 Android 打包和桌面生产部署
+# 桌面开发预览应使用 `npm run dev` 启动 Vite 热重载服务器，不依赖此 dist
 if [ -d "dist" ]; then
     echo "  清理旧的 dist/ 目录..."
     rm -rf dist
