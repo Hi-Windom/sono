@@ -102,6 +102,14 @@ def _smooth_compress(y, sr, amount, threshold_db=-22.0, ratio=3.0, attack_ms=15,
     makeup_gain = 1.0 + min((1.0 - 1.0 / ratio) * amount * 0.03, 0.04)
     out = out * makeup_gain
 
+    # 轻微低通滤波：消除压缩可能引入的高频 artifacts
+    # 18kHz 截止，6阶 Butterworth
+    nyquist = sr / 2
+    if nyquist > 18000:
+        cutoff = 18000 / nyquist
+        b, a = butter(6, cutoff, btype='low')
+        out = filtfilt(b, a, out)
+
     # 硬限幅到 0.95，避免任何削波
     out = np.clip(out, -0.95, 0.95)
 
@@ -109,22 +117,20 @@ def _smooth_compress(y, sr, amount, threshold_db=-22.0, ratio=3.0, attack_ms=15,
 
 
 def _simple_declip(y, amount):
-    """削波修复：使用线性插值而非硬拐点"""
+    """削波修复：使用软拐点避免高频谐波"""
     if amount <= 0:
         return y
-    threshold = 0.90
+    threshold = 0.88
     mask = np.abs(y) > threshold
     if not np.any(mask):
         return y
 
     y_out = y.copy()
-    # 找到所有削波区域并做线性插值修复
-    indices = np.where(mask)[0]
-    if len(indices) == 0:
-        return y_out
-
-    # 将削波样本限制在阈值内，不做复杂非线性处理
-    y_out[mask] = np.sign(y_out[mask]) * threshold
+    # 软拐点：超过阈值的部分使用平方根压缩，避免硬削波
+    over = np.abs(y_out[mask]) - threshold
+    # 压缩曲线：越远离阈值，压缩越强
+    compressed = threshold + np.tanh(over * 2.0) * 0.03
+    y_out[mask] = np.sign(y_out[mask]) * compressed
     return y_out
 
 

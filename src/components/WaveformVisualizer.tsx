@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useCallback } from 'react';
+import React, { useEffect, useRef, useCallback, useState } from 'react';
 
 interface WaveformVisualizerProps {
   audioBuffer: AudioBuffer | null;
@@ -20,7 +20,7 @@ export function WaveformVisualizer({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const waveformDataRef = useRef<{ min: number[]; max: number[] } | null>(null);
-  const waveformKeyRef = useRef(0);
+  const [waveformKey, setWaveformKey] = useState(0);
 
   const computeWaveformData = useCallback((buffer: AudioBuffer, width: number) => {
     const channelData = buffer.getChannelData(0);
@@ -55,13 +55,14 @@ export function WaveformVisualizer({
     waveformDataRef.current = { min: minData, max: maxData };
   }, []);
 
+  // 当 audioBuffer 变化时，重新计算波形数据
   useEffect(() => {
     if (!audioBuffer) return;
 
     const container = containerRef.current;
     const width = container ? container.clientWidth : 800;
     computeWaveformData(audioBuffer, width);
-    waveformKeyRef.current++;
+    setWaveformKey(k => k + 1);
   }, [audioBuffer, computeWaveformData]);
 
   // 监听窗口大小变化，重新计算波形数据
@@ -70,7 +71,7 @@ export function WaveformVisualizer({
       if (!audioBuffer || !containerRef.current) return;
       const width = containerRef.current.clientWidth;
       computeWaveformData(audioBuffer, width);
-      waveformKeyRef.current++;
+      setWaveformKey(k => k + 1);
     };
 
     window.addEventListener('resize', handleResize);
@@ -184,7 +185,7 @@ export function WaveformVisualizer({
       ctx.lineTo(progressX, height - 8);
       ctx.stroke();
     }
-  }, [audioBuffer, color, currentTime, duration, waveformKeyRef.current]);
+  }, [audioBuffer, color, currentTime, duration, waveformKey]);
 
   // 点击跳转
   const handleClick = useCallback(
