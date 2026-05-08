@@ -70,9 +70,9 @@ def apply_loudness_normalize_v5(y, sr, target_lufs):
                 rms = np.sqrt(np.mean(data ** 2))
                 current_lufs = -0.691 + 20 * np.log10(rms + 1e-10) if rms > 1e-10 else -70
 
-            # 3. 计算增益
+            # 3. 计算增益 - 限制最大 +6dB，避免过度增益导致削波
             if current_lufs > -80:  # 避免对静音过度增益
-                gain_db = np.clip(target_lufs - current_lufs, -12, 12)
+                gain_db = np.clip(target_lufs - current_lufs, -12, 6)
                 result[ch] *= 10 ** (gain_db / 20)
 
     except Exception:
@@ -81,7 +81,7 @@ def apply_loudness_normalize_v5(y, sr, target_lufs):
             rms = np.sqrt(np.mean(result[ch] ** 2))
             if rms > 1e-10:
                 current_lufs = -0.691 + 20 * np.log10(rms)
-                gain_db = np.clip(target_lufs - current_lufs, -12, 12)
+                gain_db = np.clip(target_lufs - current_lufs, -12, 6)
                 result[ch] *= 10 ** (gain_db / 20)
 
     return result

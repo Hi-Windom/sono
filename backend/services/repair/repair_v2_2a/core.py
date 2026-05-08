@@ -113,8 +113,16 @@ def _single_band_compress(y, sr, amount, threshold_db=-20.0, ratio=4.0, attack_m
         gain_array = np.convolve(gain_array, kernel, mode='same')
 
     out = y * gain_array
-    makeup_gain = 1.0 + (1.0 - 1.0 / ratio) * amount * 0.3
-    return out * makeup_gain
+    # 限制 makeup gain 最大 +2dB，避免过度增益
+    makeup_gain = 1.0 + min((1.0 - 1.0 / ratio) * amount * 0.15, 0.25)
+    out = out * makeup_gain
+
+    # 安全限幅：防止压缩后削波
+    peak = np.max(np.abs(out))
+    if peak > 0.95:
+        out *= 0.95 / peak
+
+    return out
 
 
 def _spectral_repair(y, sr, params):
@@ -147,13 +155,14 @@ def _spectral_repair(y, sr, params):
         noise_power = noise_profile ** 2 + 1e-10
         snr = signal_power / noise_power
         
-        # 软阈值增益
+        # 软阈值增益 - 更保守的降噪
         gain = snr / (snr + 1.0)
-        floor = 0.15 + 0.2 * (1 - nr_amount)  # 根据强度调整底噪保留
+        # 提高最小增益 floor，避免过度衰减产生音乐噪声
+        floor = 0.3 + 0.3 * (1 - nr_amount)
         gain = np.maximum(gain, floor)
         
-        # 时间维度平滑（避免音乐噪声）
-        alpha = 0.7 + 0.2 * nr_amount
+        # 时间维度平滑 - 更强的平滑避免增益突变
+        alpha = 0.85 + 0.1 * nr_amount
         for i in range(1, n_frames):
             gain[:, i] = alpha * gain[:, i-1] + (1 - alpha) * gain[:, i]
         
@@ -192,11 +201,26 @@ def _loudness_normalize(y, sr, target_lufs=-16.0):
 
 
 def _peak_limit(y, threshold=0.99):
-    """硬限幅，防止削波"""
+    """软限幅，防止削波 - 使用平滑增益避免硬削波失真"""
     peak = np.max(np.abs(y))
-    if peak > threshold:
-        return y * (threshold / peak)
-    return y
+    if peak <= threshold:
+        return y
+
+    # 软限幅：超过阈值的样本使用平滑过渡
+    abs_y = np.abs(y)
+    gain = np.ones_like(y)
+
+    # 对超过阈值的样本计算增益
+    over_mask = abs_y > threshold
+    if np.any(over_mask):
+        # 软限幅曲线：越接近阈值，压缩越轻
+        over_amount = abs_y[over_mask] - threshold
+        max_over = np.max(over_amount) if len(over_amount) > 0 else 1e-10
+        # 使用平方根曲线实现平滑过渡
+        compressed = threshold + np.sqrt(over_amount / (max_over + 1e-10)) * 0.01
+        gain[over_mask] = compressed / abs_y[over_mask]
+
+    return y * gain
 
 
 def _simple_declip(y, amount):

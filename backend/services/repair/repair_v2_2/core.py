@@ -123,7 +123,13 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
             issues_found.append("瞬态修复v7")
         advance("瞬态修复")
 
-    # 动态处理（在频谱处理之前，避免压缩已处理的频谱）
+    # 响度归一化（在处理链早期，避免后续处理导致削波）
+    y = apply_loudness_normalize_v5(y, sr, -16.0)
+    if "响度归一化" not in issues_found:
+        issues_found.append("响度归一化")
+    advance("响度归一化")
+
+    # 动态处理（在响度归一化之后，避免压缩已削波的音频）
     if params.get("dynamic_range", 0) > 0:
         # 使用优化的 v5 压缩
         y = apply_multiband_compression_v5(y, sr, params["dynamic_range"], music_type)
@@ -131,8 +137,9 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
             issues_found.append("多段压缩v5")
         advance("动态处理")
 
-    # 子带分离处理（Apollo-inspired）：低频保留 + 中高频修复
-    use_subband = params.get("subband_processing", True)
+    # 频谱处理：使用传统 spectral_group_a + spectral_group_b
+    # 子带处理默认关闭（实验性功能，可能导致频谱失真）
+    use_subband = params.get("subband_processing", False)
     if use_subband and not is_hifi:
         need_subband = (params.get("noise_reduction", 0) > 0 or
                        params.get("de_essing", 0) > 0 or
@@ -143,7 +150,7 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
                 issues_found.append("子带修复")
             advance("子带修复")
     else:
-        # 传统频谱处理（HiFi 模式或关闭子带处理时）
+        # 传统频谱处理（默认）
         need_group_a = (params.get("de_crackle", 0) > 0 or
                         params.get("de_essing", 0) > 0 or
                         params.get("noise_reduction", 0) > 0)
@@ -225,11 +232,10 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
         sr = target_sr
         gc.collect()
 
-    # 后期处理
+    # 最终峰值限制（防止任何削波）
     if progress_callback:
-        progress_callback(0.95, "v2.2 响度归一化...")
+        progress_callback(0.95, "v2.2 峰值限制...")
 
-    y = apply_loudness_normalize_v5(y, sr, -16.0)
     y = apply_peak_limit_v5(y, sr)
 
     if was_mono:

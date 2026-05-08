@@ -59,9 +59,15 @@ def apply_multiband_compression_v5(y, sr, intensity, music_type="generic"):
 
         result[ch] = low_c + mid_c + high_c
 
-    # Makeup gain
+    # Makeup gain - 限制最大 +3dB，避免过度增益导致削波
     makeup = config["makeup_gain"] * intensity
+    makeup = min(makeup, 3.0)  # 限制最大 makeup gain 为 +3dB
     result *= 10 ** (makeup / 20)
+
+    # 安全限幅：防止压缩后削波
+    peak = np.max(np.abs(result))
+    if peak > 0.95:
+        result *= 0.95 / peak
 
     return result
 
