@@ -185,6 +185,42 @@ async def get_queue():
 async def websocket_task_status(websocket: WebSocket, task_id: str):
     await websocket.accept()
     
+    if task_id.startswith("qt-"):
+        qt_task = _quality_test_cache.get(task_id)
+        if not qt_task:
+            await websocket.send_json({"error": "测试任务不存在"})
+            await websocket.close()
+            return
+        from services.ws_manager import ws_manager
+        await ws_manager.connect(task_id, websocket)
+        try:
+            await websocket.send_json({
+                "task_id": task_id,
+                "status": qt_task.get("status", "running"),
+                "progress": 0 if qt_task.get("status") == "running" else 100,
+                "step": "quality_test",
+            })
+            if qt_task.get("status") == "completed":
+                await websocket.send_json({"task_id": task_id, "status": "completed", "progress": 100, "step": "done", **qt_task})
+                await websocket.close()
+                return
+            import asyncio
+            while True:
+                try:
+                    await asyncio.wait_for(websocket.receive_text(), timeout=10.0)
+                except asyncio.TimeoutError:
+                    current = _quality_test_cache.get(task_id, {})
+                    if current.get("status") == "completed":
+                        await websocket.send_json({"task_id": task_id, "status": "completed", "progress": 100, "step": "done", **current})
+                        await websocket.close()
+                        return
+                    await websocket.send_json({"task_id": task_id, "status": "running", "progress": 50, "step": "quality_test", "heartbeat": True})
+        except WebSocketDisconnect:
+            pass
+        finally:
+            ws_manager.disconnect(task_id, websocket)
+        return
+
     task = get_task(task_id)
     if not task:
         await websocket.send_json({"error": "任务不存在"})
@@ -686,51 +722,100 @@ def _parse_pytest_output(output: str) -> dict:
     }
 
 
-def _run_quality_tests_background(task_id: str):
+def _run_quality_tests_background(task_id: str, loop):
     import subprocess
+    import asyncio
+    from services.ws_manager import ws_manager
     global _quality_test_cache
     try:
         project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        result = subprocess.run(
+        process = subprocess.Popen(
             ["python", "-m", "pytest", "backend/tests/test_repair_quality.py", "-v", "--tb=short"],
-            capture_output=True, text=True, timeout=180, cwd=project_root,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, cwd=project_root,
         )
-        output = result.stdout + result.stderr
+
+        last_line_count = 0
+        while True:
+            line = process.stdout.readline()
+            if not line and process.poll() is not None:
+                break
+            if line:
+                last_line_count += 1
+                if " PASSED" in line or " FAILED" in line or " SKIPPED" in line:
+                    try:
+                        asyncio.run_coroutine_threadsafe(
+                            ws_manager.send_progress(task_id, {
+                                "task_id": task_id, "status": "running",
+                                "progress": min(95, last_line_count * 2),
+                                "step": line.strip().split()[0] if line.strip() else "running",
+                                "quality_test_line": line.strip(),
+                            }),
+                            loop,
+                        )
+                    except Exception:
+                        pass
+
+        process.wait(timeout=10)
+        output = process.stdout.read() if process.stdout else ""
+        exit_code = process.returncode
+
         parsed = _parse_pytest_output(output)
-        parsed["exit_code"] = result.returncode
+        parsed["exit_code"] = exit_code
         parsed["status"] = "completed"
         _quality_test_cache[task_id] = parsed
+
+        try:
+            asyncio.run_coroutine_threadsafe(
+                ws_manager.send_final(task_id, {
+                    "task_id": task_id, "status": "completed",
+                    "progress": 100, "step": "done",
+                    **parsed,
+                }),
+                loop,
+            )
+        except Exception:
+            pass
     except subprocess.TimeoutExpired:
-        _quality_test_cache[task_id] = {
+        err_data = {
             "total": 0, "passed": 0, "failed": 0, "skipped": 0,
             "summary": "测试超时（180秒）", "tests": [], "baseline": [], "per_step": [], "iron_rule": [],
             "raw_output": "", "exit_code": -1, "status": "completed",
         }
+        _quality_test_cache[task_id] = err_data
+        try:
+            asyncio.run_coroutine_threadsafe(
+                ws_manager.send_final(task_id, {"task_id": task_id, "status": "completed", "progress": 100, "step": "timeout", **err_data}),
+                loop,
+            )
+        except Exception:
+            pass
     except Exception as e:
-        _quality_test_cache[task_id] = {
+        err_data = {
             "total": 0, "passed": 0, "failed": 0, "skipped": 0,
             "summary": f"运行失败: {str(e)}", "tests": [], "baseline": [], "per_step": [], "iron_rule": [],
             "raw_output": "", "exit_code": -1, "status": "completed",
         }
+        _quality_test_cache[task_id] = err_data
+        try:
+            asyncio.run_coroutine_threadsafe(
+                ws_manager.send_final(task_id, {"task_id": task_id, "status": "completed", "progress": 100, "step": "error", **err_data}),
+                loop,
+            )
+        except Exception:
+            pass
 
 
 @router.post("/quality-tests/start")
 async def start_quality_tests():
     import threading
     import uuid
+    import asyncio
     global _quality_test_cache
-    task_id = str(uuid.uuid4())[:8]
+    task_id = f"qt-{uuid.uuid4().hex[:8]}"
     _quality_test_cache[task_id] = {"status": "running", "total": 0, "passed": 0, "failed": 0, "skipped": 0,
                                      "tests": [], "baseline": [], "per_step": [], "iron_rule": [],
                                      "summary": "", "raw_output": "", "exit_code": -1}
-    thread = threading.Thread(target=_run_quality_tests_background, args=(task_id,), daemon=True)
+    loop = asyncio.get_event_loop()
+    thread = threading.Thread(target=_run_quality_tests_background, args=(task_id, loop), daemon=True)
     thread.start()
     return {"task_id": task_id, "status": "running"}
-
-
-@router.get("/quality-tests/result/{task_id}")
-async def get_quality_test_result(task_id: str):
-    global _quality_test_cache
-    if task_id not in _quality_test_cache:
-        return {"status": "not_found", "error": f"Task {task_id} not found"}
-    return _quality_test_cache[task_id]

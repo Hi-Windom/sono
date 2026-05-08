@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Header } from '../components/Header';
+import { connectProgressWS } from '../services/backendApi';
 
 interface TestResult {
   name: string;
@@ -165,10 +166,14 @@ export default function QualityTestPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showRaw, setShowRaw] = useState(false);
+  const [liveLines, setLiveLines] = useState<string[]>([]);
+
+  const wsRef = useRef<ReturnType<typeof connectProgressWS> | null>(null);
 
   const runTests = async () => {
     setLoading(true);
     setError(null);
+    setData(null);
     try {
       const startRes = await fetch('/api/v1/quality-tests/start', { method: 'POST' });
       if (!startRes.ok) {
@@ -178,30 +183,39 @@ export default function QualityTestPage() {
       }
       const { task_id } = await startRes.json();
 
-      const poll = async () => {
-        try {
-          const res = await fetch(`/api/v1/quality-tests/result/${task_id}`);
-          if (!res.ok) {
-            setError(`查询结果失败: ${res.status}`);
+      if (wsRef.current) wsRef.current.close();
+      wsRef.current = connectProgressWS(
+        task_id,
+        {
+          onProgress: (event) => {
+            if (event.quality_test_line) {
+              setLiveLines(prev => [...prev.slice(-20), event.quality_test_line!]);
+            }
+          },
+          onComplete: (event) => {
+            const result = {
+              total: event.total || 0,
+              passed: event.passed || 0,
+              failed: event.failed || 0,
+              skipped: event.skipped || 0,
+              summary: event.summary || '',
+              tests: event.tests || [],
+              baseline: event.baseline || [],
+              per_step: event.per_step || [],
+              iron_rule: event.iron_rule || [],
+              raw_output: event.raw_output || '',
+              exit_code: event.exit_code ?? -1,
+            };
+            setData(result);
             setLoading(false);
-            return;
-          }
-          const json = await res.json();
-          if (json.status === 'running') {
-            setTimeout(poll, 2000);
-          } else if (json.status === 'completed') {
-            setData(json);
+          },
+          onError: (err) => {
+            setError(err.message);
             setLoading(false);
-          } else {
-            setError(json.error || `未知状态: ${json.status}`);
-            setLoading(false);
-          }
-        } catch (err) {
-          setError(`轮询错误: ${err instanceof Error ? err.message : String(err)}`);
-          setLoading(false);
-        }
-      };
-      setTimeout(poll, 1000);
+          },
+        },
+        new Set(['completed']),
+      );
     } catch (err) {
       setError(`启动失败: ${err instanceof Error ? err.message : String(err)}`);
       setLoading(false);
@@ -239,8 +253,8 @@ export default function QualityTestPage() {
         </div>
 
         {/* Loading */}
-        {loading && !data && (
-          <div className="flex flex-col items-center justify-center py-28">
+        {loading && (
+          <div className="flex flex-col items-center justify-center py-20">
             <div className="relative w-20 h-20 mb-8">
               <div className="absolute inset-0 border-2 border-white/5 rounded-full" />
               <div className="absolute inset-0 border-2 border-cyan-500/80 border-t-transparent rounded-full animate-spin" />
@@ -248,6 +262,17 @@ export default function QualityTestPage() {
             </div>
             <p className="text-gray-400 text-sm font-mono">Running quality tests...</p>
             <p className="text-gray-600 text-xs font-mono mt-1">4 versions × 8 baselines + 12 per-step + 4 iron rules</p>
+            {liveLines.length > 0 && (
+              <div className="mt-6 w-full max-w-2xl bg-black/30 border border-white/[0.04] rounded-xl p-4 max-h-40 overflow-y-auto">
+                {liveLines.map((line, i) => (
+                  <div key={i} className={`text-[10px] font-mono leading-relaxed ${
+                    line.includes('PASSED') ? 'text-emerald-500/60' :
+                    line.includes('FAILED') ? 'text-red-400/60' :
+                    'text-gray-600'
+                  }`}>{line}</div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
