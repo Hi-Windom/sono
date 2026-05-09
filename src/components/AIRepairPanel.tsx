@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { AIRepairParams, RepairMode } from '../utils/advancedAudioProcessing';
-import { ProcessingOptions, AlgorithmVersion, fetchMemoryInfo, MemoryInfoResult } from '../services/backendApi';
+import { ProcessingOptions, AlgorithmVersion, fetchMemoryInfo, MemoryInfoResult, fetchStorageEstimate, StorageEstimateResult } from '../services/backendApi';
 
 interface AIRepairPanelProps {
   params: AIRepairParams;
@@ -105,7 +105,9 @@ export function AIRepairPanel({
 }: AIRepairPanelProps) {
   const [showParams, setShowParams] = useState(false);
   const [memoryInfo, setMemoryInfo] = useState<MemoryInfoResult | null>(null);
+  const [storageEstimate, setStorageEstimate] = useState<StorageEstimateResult | null>(null);
   const memoryFetchRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const storageFetchRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (duration <= 0) {
@@ -118,6 +120,18 @@ export function AIRepairPanel({
     }, 300);
     return () => { if (memoryFetchRef.current) clearTimeout(memoryFetchRef.current); };
   }, [duration, channels, processingOptions.sampleRate, algorithmVersion]);
+
+  useEffect(() => {
+    if (duration <= 0) {
+      setStorageEstimate(null);
+      return;
+    }
+    if (storageFetchRef.current) clearTimeout(storageFetchRef.current);
+    storageFetchRef.current = setTimeout(() => {
+      fetchStorageEstimate(duration, channels, processingOptions.sampleRate, processingOptions.bitDepth).then(setStorageEstimate);
+    }, 300);
+    return () => { if (storageFetchRef.current) clearTimeout(storageFetchRef.current); };
+  }, [duration, channels, processingOptions.sampleRate, processingOptions.bitDepth]);
 
   const paramLabels: Record<keyof AIRepairParams, string> = {
     deClipping: '去削波',
@@ -292,7 +306,7 @@ export function AIRepairPanel({
       </div>
 
       <div className="mb-4 p-3 bg-black/20 rounded-lg">
-        <h4 className="text-secondary text-sm font-medium mb-3">处理选项</h4>
+        <h4 className="text-secondary text-sm font-medium mb-3">交付规格</h4>
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="text-gray-400 text-xs mb-2 block flex items-center gap-1">
@@ -375,61 +389,24 @@ export function AIRepairPanel({
           </div>
         </div>
 
-        {/* 预估大小显示 */}
-        {duration > 0 && currentEstimate && (
-          <div className={`mt-3 p-2.5 rounded-lg border ${
-            isCurrentWarning
-              ? 'bg-red-500/10 border-red-500/30'
-              : currentCombo?.isRecommended
-                ? 'bg-emerald-500/10 border-emerald-500/30'
-                : 'bg-gray-800/50 border-gray-700'
-          }`}>
+        {/* 预估输出大小 */}
+        {duration > 0 && storageEstimate && (
+          <div className="mt-3 p-2.5 rounded-lg border bg-gray-800/50 border-gray-700">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                {isCurrentWarning ? (
-                  <svg className="w-4 h-4 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                  </svg>
-                ) : currentCombo?.isRecommended ? (
-                  <svg className="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                  </svg>
-                ) : (
-                  <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                )}
-                <span className={`text-sm font-medium ${
-                  isCurrentWarning ? 'text-red-400' : currentCombo?.isRecommended ? 'text-emerald-400' : 'text-gray-300'
-                }`}>
-                  预估文件大小
+                <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <span className="text-sm font-medium text-gray-300">
+                  预估输出大小
                 </span>
               </div>
-              <span className={`text-sm font-bold ${
-                isCurrentWarning ? 'text-red-400' : currentCombo?.isRecommended ? 'text-emerald-400' : 'text-white'
-              }`}>
-                {formatSize(currentEstimate.size, currentEstimate.sizeMiB, currentEstimate.sizeMB)}
+              <span className="text-sm font-bold text-white">
+                {storageEstimate.estimated_output_mb} MB
               </span>
             </div>
 
-            {/* 警告信息 */}
-            {isCurrentWarning && (
-              <div className="mt-2 text-xs text-red-400/80">
-                <span className="font-medium">⚠️ 超过平台限制：</span>
-                音乐平台通常限制上传最大200MB，当前设置可能无法上传。
-                建议使用 48k/24bit 或 44.1k/24bit 组合。
-              </div>
-            )}
-
-            {/* 推荐信息 */}
-            {!isCurrentWarning && currentCombo?.isRecommended && (
-              <div className="mt-2 text-xs text-emerald-400/80">
-                <span className="font-medium">✓ 推荐设置：</span>
-                音质与文件大小的最佳平衡，兼容大多数音乐平台。
-              </div>
-            )}
-
-            {/* 所有组合大小参考 */}
+            {/* 各组合大小参考 */}
             <div className="mt-3 pt-2 border-t border-gray-700/50">
               <div className="text-[10px] text-gray-500 mb-1.5">各组合预估大小参考：</div>
               <div className="grid grid-cols-3 gap-1 text-[10px]">
@@ -554,7 +531,7 @@ export function AIRepairPanel({
           </div>
         )}
 
-        <p className="text-gray-500 text-xs mt-2">采样率和位深在修复时应用，修改后需重新修复</p>
+        <p className="text-gray-500 text-xs mt-2">交付规格在导出时应用，修改后即时渲染无需重新修复</p>
       </div>
 
       <div className="mb-4">

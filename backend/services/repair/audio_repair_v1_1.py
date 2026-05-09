@@ -20,7 +20,6 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
         was_mono = True
 
     original_sr = sr
-    target_sr = params.get("sample_rate", sr)
     original_duration = round(y.shape[1] / sr, 2)
     n_fft = 4096
     hop_length = 1024
@@ -101,23 +100,6 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
             progress_callback(0.88, "v1.1 柔化处理...")
         y = _apply_softness(y, sr, params["softness"])
         issues_found.append("柔化处理v2")
-
-    if target_sr != sr:
-        if progress_callback:
-            progress_callback(0.92, f"v1.1 重采样到 {target_sr//1000} kHz...")
-        if target_sr < sr:
-            nyquist = target_sr / 2
-            cutoff = nyquist * 0.95
-            b, a = butter(8, cutoff / (sr / 2), btype='low')
-            for ch in range(y.shape[0]):
-                y[ch] = filtfilt(b, a, y[ch])
-
-        y_resampled = np.zeros((y.shape[0], int(y.shape[1] * target_sr / sr)))
-        for ch in range(y.shape[0]):
-            resampled = resample_poly(y[ch], target_sr, sr)
-            y_resampled[ch, :len(resampled)] = resampled[:y_resampled.shape[1]]
-        y = y_resampled
-        sr = target_sr
 
     if progress_callback:
         progress_callback(0.95, "v1.1 响度归一化+峰值限制...")

@@ -500,18 +500,18 @@ class TestV23aResample:
         y_out, sr_out = sf.read(output_path)
         assert sr_out == 48000, f"v2.3a output sr should be 48000, got {sr_out}"
 
-    def test_v23a_output_resample(self, tmp_wav_dir):
+    def test_v23a_output_ignores_sample_rate(self, tmp_wav_dir):
         from services.repair.repair_v2_3a import repair_audio
         from services.audio_repair import ALGORITHM_VERSIONS
         y = generate_speech_like(sr=44100, duration=1.0)
         input_path = write_temp_wav(y, 44100, tmp_wav_dir)
-        output_path = str(tmp_wav_dir / "output_v23a_22k.wav")
+        output_path = str(tmp_wav_dir / "output_v23a_48k.wav")
         params = dict(ALGORITHM_VERSIONS["v2.3a"]["default_params"])
         params["sample_rate"] = 22050
         repair_audio(input_path, output_path, params)
         import soundfile as sf
         y_out, sr_out = sf.read(output_path)
-        assert sr_out == 22050, f"v2.3a output sr should be 22050, got {sr_out}"
+        assert sr_out == 48000, f"v2.3a output sr should be working_sr=48000, got {sr_out}"
 
     def test_v23a_no_resample_when_same(self, tmp_wav_dir):
         from services.repair.repair_v2_3a import repair_audio

@@ -124,6 +124,22 @@ async def deploy_info():
         pass
     return {"deploy_time": deploy_time, "deploy_days": deploy_days}
 
+class StorageEstimateRequest(BaseModel):
+    duration: float
+    channels: int = 2
+    sample_rate: int = 44100
+    bit_depth: int = 24
+
+@router.post("/storage/estimate")
+async def storage_estimate(request: StorageEstimateRequest):
+    bytes_per_sample = request.bit_depth // 8
+    data_bytes = int(request.duration * request.sample_rate * request.channels * bytes_per_sample)
+    total_bytes = data_bytes + 44
+    return {
+        "estimated_output_bytes": total_bytes,
+        "estimated_output_mb": round(total_bytes / (1024 * 1024), 1),
+    }
+
 class CheckHashRequest(BaseModel):
     file_hash: str
 
@@ -239,6 +255,34 @@ async def repair_audio_endpoint(request: RepairRequest):
     submit_repair_task(request.task_id, audio_path, request.params)
     
     return {"task_id": request.task_id, "status": "pending"}
+
+class RenderRequest(BaseModel):
+    task_id: str
+    sample_rate: int = 44100
+    bit_depth: int = 24
+
+@router.post("/render")
+async def render_audio_endpoint(request: RenderRequest):
+    task = get_task(request.task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    output_path = task.get("output_path")
+    if not output_path or not os.path.exists(output_path):
+        raise HTTPException(status_code=400, detail="修复结果不存在，请先完成修复")
+
+    from services.render import render_output
+    render_filename = f"{request.task_id}_rendered_{request.sample_rate}_{request.bit_depth}.wav"
+    render_path = os.path.join(OUTPUT_DIR, render_filename)
+
+    result = render_output(output_path, render_path, request.sample_rate, request.bit_depth)
+
+    return {
+        "task_id": request.task_id,
+        "render_path": render_path,
+        "render_filename": render_filename,
+        "render_result": result,
+    }
 
 @router.get("/status/{task_id}")
 async def get_task_status(task_id: str):
@@ -370,6 +414,17 @@ async def download_audio(task_id: str):
         output_path,
         media_type="audio/wav",
         filename=download_name,
+    )
+
+@router.get("/download-file/{filename}")
+async def download_file(filename: str):
+    file_path = os.path.join(OUTPUT_DIR, filename)
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="文件不存在")
+    return FileResponse(
+        file_path,
+        media_type="audio/wav",
+        filename=filename,
     )
 
 @router.post("/cancel/{task_id}")

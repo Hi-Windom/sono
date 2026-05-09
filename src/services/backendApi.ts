@@ -90,7 +90,7 @@ export interface DetectorVersion {
   description: string;
 }
 
-export function mapParamsToBackend(params: AIRepairParams, options: ProcessingOptions, algorithmVersion?: string): Record<string, unknown> {
+export function mapParamsToBackend(params: AIRepairParams, _options?: ProcessingOptions, algorithmVersion?: string): Record<string, unknown> {
   return {
     de_clipping: params.deClipping,
     noise_reduction: params.noiseReduction,
@@ -106,8 +106,6 @@ export function mapParamsToBackend(params: AIRepairParams, options: ProcessingOp
     transient_repair: params.transientRepair,
     warmth: params.warmth,
     clarity: params.clarity,
-    sample_rate: options.sampleRate,
-    bit_depth: options.bitDepth,
     algorithm_version: algorithmVersion || 'v2.0',
   };
 }
@@ -1010,6 +1008,72 @@ export async function fetchMemoryInfo(
   } catch {
     return null;
   }
+}
+
+export interface StorageEstimateResult {
+  estimated_output_bytes: number;
+  estimated_output_mb: number;
+}
+
+export async function fetchStorageEstimate(
+  duration: number,
+  channels: number,
+  sampleRate: number,
+  bitDepth: number,
+): Promise<StorageEstimateResult | null> {
+  try {
+    const res = await fetch(`${API_BASE}/storage/estimate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        duration,
+        channels,
+        sample_rate: sampleRate,
+        bit_depth: bitDepth,
+      }),
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+export interface RenderResult {
+  task_id: string;
+  render_path: string;
+  render_filename: string;
+  render_result: {
+    original_sample_rate: number;
+    output_sample_rate: number;
+    output_bit_depth: number;
+    duration: number;
+    channels: number;
+  };
+}
+
+export async function renderAudio(
+  taskId: string,
+  sampleRate: number,
+  bitDepth: number,
+): Promise<RenderResult> {
+  const url = `${API_BASE}/render`;
+  log('render', `POST ${url} task_id=${taskId} sr=${sampleRate} bd=${bitDepth}`);
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      task_id: taskId,
+      sample_rate: sampleRate,
+      bit_depth: bitDepth,
+    }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.detail || `渲染失败 (${res.status})`);
+  }
+  return await res.json();
 }
 
 export { mapDetectionResult, type BackendDetectionResult, type BackendRepairResult, type ProgressEvent, type TaskStatus };

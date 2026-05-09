@@ -26,6 +26,7 @@ import {
   AlgorithmVersion,
   DetectorVersion,
   QueueStatus,
+  renderAudio,
 } from '../services/backendApi';
 
 function writeLog(message: string) {
@@ -2026,9 +2027,28 @@ export function useAudioProcessor() {
       : `${baseName}_browser_repaired.wav`;
 
     if (source === 'backend' && taskIdRef.current) {
-      const url = getDownloadUrl(taskIdRef.current);
-      downloadUrl(url, fileName);
-      return;
+      try {
+        setProcessingStep('渲染交付规格...');
+        setProcessingProgress(0);
+        const renderRes = await renderAudio(
+          taskIdRef.current,
+          processingOptions.sampleRate,
+          processingOptions.bitDepth,
+        );
+        writeLog(`[downloadProcessedAudio] 渲染完成: sr=${renderRes.render_result.output_sample_rate} bd=${renderRes.render_result.output_bit_depth}`);
+        const url = `/api/v1/download-file/${renderRes.render_filename}`;
+        downloadUrl(url, fileName);
+        setProcessingStep('');
+        setProcessingProgress(0);
+        return;
+      } catch (renderErr) {
+        writeLog(`[downloadProcessedAudio] 渲染失败，回退到原始下载: ${renderErr}`);
+        const url = getDownloadUrl(taskIdRef.current);
+        downloadUrl(url, fileName);
+        setProcessingStep('');
+        setProcessingProgress(0);
+        return;
+      }
     }
 
     const targetBuffer = source === 'backend' ? backendProcessedBuffer : browserProcessedBuffer;
