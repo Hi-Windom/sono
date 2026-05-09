@@ -37,7 +37,19 @@ export function WaveformVisualizer({
     const data = audioBufferRef.current ? audioBufferRef.current.getChannelData(0) : null;
     const peaks = peaksRef.current;
 
-    if (!data && !peaks) return false;
+    if (!data && !peaks) {
+      ctx.fillStyle = '#0A1A2F';
+      ctx.fillRect(0, 0, width, height);
+      ctx.strokeStyle = color + '22';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(0, height / 2);
+      ctx.lineTo(width, height / 2);
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+      ctx.fillRect(0, height - 4, width, 4);
+      return true;
+    }
 
     ctx.fillStyle = '#0A1A2F';
     ctx.fillRect(0, 0, width, height);
@@ -48,9 +60,12 @@ export function WaveformVisualizer({
     }
 
     if (data) {
-      const step = Math.max(1, Math.floor(data.length / width));
+      const isLongAudio = data.length > 48000 * 60 * 5;
+      const step = isLongAudio
+        ? Math.max(1, Math.floor(data.length / (width * 2)))
+        : Math.max(1, Math.floor(data.length / width));
       let peak = 0;
-      for (let i = 0; i < data.length; i++) peak = Math.max(peak, Math.abs(data[i]));
+      for (let i = 0; i < data.length; i += (isLongAudio ? 8 : 1)) peak = Math.max(peak, Math.abs(data[i]));
       peakRef.current = peak > 0.05 ? 1 / peak : 20;
       const norm = peakRef.current;
 

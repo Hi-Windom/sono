@@ -671,37 +671,10 @@ export function useAudioProcessor() {
       setDuration(wavHeaderInfo.duration);
     }
 
-    setProcessingStep('读取音频数据...');
-    setProcessingProgress(0.05);
-
-    const [arrayBuf, fileHash] = await Promise.all([
-      file.arrayBuffer(),
-      computeFileHash(file),
-    ]);
-    fileHashRef.current = fileHash;
-    writeLog(`[loadAudioFile] fileHash=${fileHash}`);
-
-    setProcessingStep('解析音频数据...');
-    setProcessingProgress(0.08);
-    const context = getAudioContext();
-    let buffer: AudioBuffer;
-    const fastDecoded = decodeWavPcm(context, arrayBuf);
-    if (fastDecoded) {
-      buffer = fastDecoded;
-      writeLog(`[loadAudioFile] WAV PCM快速解码完成`);
-    } else {
-      buffer = await context.decodeAudioData(arrayBuf);
-      writeLog(`[loadAudioFile] 浏览器解码完成`);
-    }
-    setProcessingProgress(0.1);
-
-    audioBufferRef.current = buffer;
-    setAudioBuffer(buffer);
     browserProcessedBufferRef.current = null;
     setBrowserProcessedBuffer(null);
     backendProcessedBufferRef.current = null;
     setBackendProcessedBuffer(null);
-    setDuration(buffer.duration);
     setCurrentTime(0);
     pausedAtRef.current = 0;
     setOriginalAIDetection(null);
@@ -715,12 +688,34 @@ export function useAudioProcessor() {
     setBackendAvailable(false);
     setBackendPreviewUrl(null);
 
-    const analysis = detectAudioIssues(buffer);
-    setAudioAnalysis(analysis);
-
     setIsProcessing(false);
     setProcessingStep('');
     setProcessingProgress(0);
+
+    const [arrayBuf, fileHash] = await Promise.all([
+      file.arrayBuffer(),
+      computeFileHash(file),
+    ]);
+    fileHashRef.current = fileHash;
+    writeLog(`[loadAudioFile] fileHash=${fileHash}`);
+
+    const context = getAudioContext();
+    let buffer: AudioBuffer;
+    const fastDecoded = decodeWavPcm(context, arrayBuf);
+    if (fastDecoded) {
+      buffer = fastDecoded;
+      writeLog(`[loadAudioFile] WAV PCM快速解码完成`);
+    } else {
+      buffer = await context.decodeAudioData(arrayBuf);
+      writeLog(`[loadAudioFile] 浏览器解码完成`);
+    }
+
+    audioBufferRef.current = buffer;
+    setAudioBuffer(buffer);
+    setDuration(buffer.duration);
+
+    const analysis = detectAudioIssues(buffer);
+    setAudioAnalysis(analysis);
 
     (async () => {
       try {

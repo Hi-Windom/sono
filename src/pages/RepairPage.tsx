@@ -233,10 +233,10 @@ export default function RepairPage() {
                       <p className="text-gray-400 text-sm">
                         {(audioFile.size / (1024 * 1024)).toFixed(2)} MB
                         {' • '}
-                        {originalSampleRate/1000} kHz
+                        {(wavInfo ? wavInfo.sampleRate : originalSampleRate) / 1000} kHz
                         {wavInfo && ` • ${wavInfo.bitDepth}bit`}
                         {' • '}
-                        {audioBuffer ? (audioBuffer.numberOfChannels === 1 ? '单声道' : '立体声') : ''}
+                        {wavInfo ? (wavInfo.channels === 1 ? '单声道' : '立体声') : (audioBuffer ? (audioBuffer.numberOfChannels === 1 ? '单声道' : '立体声') : '')}
                         {hasBeenProcessed && (
                           <span className="text-green-400 ml-2">✓ 已修复</span>
                         )}
@@ -292,7 +292,7 @@ export default function RepairPage() {
                   </div>
                 )}
 
-                {(activeBuffer || (playMode === 'backend' && backendWaveformPeaks)) && (
+                {(duration > 0 || (playMode === 'backend' && backendWaveformPeaks)) && (
                   <div className="mt-6">
                     <WaveformVisualizer
                       key={`waveform-${playMode}-${isBufferReady}`}
