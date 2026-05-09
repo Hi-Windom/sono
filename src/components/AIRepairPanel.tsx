@@ -228,19 +228,19 @@ export function AIRepairPanel({
 
       {availableAlgorithms.length > 0 ? (
         <div className="mb-4 p-3 bg-gradient-to-r from-cyan-900/30 to-purple-900/30 rounded-lg border border-cyan-500/20">
-          <div className="flex items-center justify-between">
-            <h4 className="text-cyan-400 text-sm font-medium flex items-center gap-1.5">
+          <div className="flex items-center justify-between gap-2">
+            <h4 className="text-cyan-400 text-sm font-medium flex items-center gap-1.5 shrink-0">
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
               </svg>
               算法版本
             </h4>
-            <div className="relative">
+            <div className="relative max-w-[200px] sm:max-w-none">
               <select
                 value={algorithmVersion}
                 onChange={(e) => onAlgorithmChange(e.target.value)}
                 disabled={disabled}
-                className="appearance-none bg-cyan-500/20 text-white text-sm font-medium py-1.5 pl-3 pr-8 rounded-lg border border-cyan-400/40 focus:outline-none focus:border-cyan-400 cursor-pointer hover:bg-cyan-500/30 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                className="appearance-none bg-cyan-500/20 text-white text-sm font-medium py-1.5 pl-3 pr-8 rounded-lg border border-cyan-400/40 focus:outline-none focus:border-cyan-400 cursor-pointer hover:bg-cyan-500/30 transition disabled:opacity-50 disabled:cursor-not-allowed w-full truncate"
               >
                 {[...availableAlgorithms].reverse().map((algo) => (
                   <option key={algo.name} value={algo.name} className="bg-gray-900 text-white">
@@ -475,11 +475,35 @@ export function AIRepairPanel({
                   </span>
                 </div>
                 <div className="flex items-center justify-between text-xs mt-1">
-                  <span className="text-gray-400">预估处理占用</span>
+                  <span className="text-gray-400 flex items-center gap-1.5">
+                    预估处理占用
+                    {memoryInfo.memory_saving > 0 && (
+                      <span className="inline-flex items-center gap-0.5 text-[10px] bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded-full font-medium">
+                        <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+                        </svg>
+                        -{Math.round(memoryInfo.memory_saving * 100)}%
+                      </span>
+                    )}
+                  </span>
                   <span className={memoryInfo.is_sufficient ? 'text-gray-300' : 'text-amber-400'}>
                     {(memoryInfo.estimated_memory_bytes / 1024 / 1024).toFixed(0)} MB
                   </span>
                 </div>
+                {(memoryInfo.has_streaming || memoryInfo.use_float32) && (
+                  <div className="flex flex-wrap gap-1 mt-1.5">
+                    {memoryInfo.has_streaming && (
+                      <span className="text-[10px] bg-cyan-500/15 text-cyan-400 px-1.5 py-0.5 rounded">
+                        流式分块处理
+                      </span>
+                    )}
+                    {memoryInfo.use_float32 && (
+                      <span className="text-[10px] bg-blue-500/15 text-blue-400 px-1.5 py-0.5 rounded">
+                        Float32 自动降精度
+                      </span>
+                    )}
+                  </div>
+                )}
                 {!memoryInfo.is_sufficient && (
                   <div className="mt-1.5 text-[10px] text-amber-400/90">
                     ⚠️ 服务器可用内存不足以处理此音频，可能导致处理失败

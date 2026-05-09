@@ -980,6 +980,9 @@ export interface MemoryInfoResult {
   estimated_memory_bytes: number;
   is_sufficient: boolean;
   working_sr: number;
+  use_float32: boolean;
+  has_streaming: boolean;
+  memory_saving: number;
 }
 
 export async function fetchMemoryInfo(

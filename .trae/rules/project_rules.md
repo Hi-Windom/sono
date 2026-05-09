@@ -64,6 +64,23 @@ cd /workspace/backend && SERVE_STATIC=1 python main.py
 - Compatibility layer: `backend/services/librosa_compat.py` (re-exports dsp_utils)
 - librosa is ONLY used in `backend/training/feature_extractor.py` (desktop-only training)
 
+## Memory Optimization (v2.2/v2.3/v2.3a)
+
+Design target: **60min audio @ 4GB RAM** without quality reduction.
+
+4-layer optimization:
+1. **Corrected estimation** (`memory_guard.py`): Formula accounts for streaming STFT, algorithm-specific peak_temp, and float32 elem_size
+2. **Float32 auto-conversion**: Audio >10min auto-converts to float32 (halves memory), converts back to float64 before WAV export
+3. **Streaming spectral processing** (`dsp_utils.py::streaming_spectral_process`): Processes audio in 10s chunks with overlap-add, keeping STFT memory fixed at ~15MB regardless of audio length. Used by spectral_group_a/b, subband_processing, v2.3a denoise
+4. **In-place operations**: All repair steps modify `y` directly instead of creating copies (peak memory 4x→1x for multiband compress)
+
+Memory estimation is algorithm-version-aware:
+- v2.2/v2.3: +50% peak_temp (full processing pipeline)
+- v2.2a/v2.3a: +15% peak_temp (lightweight pipeline)
+- v1.x: +30% peak_temp (moderate pipeline)
+
+Result: 5min audio 3907MB→537MB, 60min audio ~3108MB (fits 4GB target)
+
 ## Directory Structure
 
 ```

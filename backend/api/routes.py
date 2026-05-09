@@ -52,11 +52,21 @@ async def memory_info(request: MemoryInfoRequest):
     is_sufficient = True
     if available is not None:
         is_sufficient = estimated <= available * 0.7
+    use_f32 = should_use_float32(n_samples, request.channels)
+    has_streaming = request.algorithm_version in ("v2.2", "v2.3", "v2.3a")
+    estimated_no_optim = estimate_repair_memory_bytes(
+        n_samples, request.channels, request.sample_rate, working_sr,
+        algorithm_version=None
+    )
+    memory_saving = max(0, 1 - estimated / estimated_no_optim) if estimated_no_optim > 0 else 0
     return {
         "available_memory_bytes": available,
         "estimated_memory_bytes": estimated,
         "is_sufficient": is_sufficient,
         "working_sr": working_sr,
+        "use_float32": use_f32,
+        "has_streaming": has_streaming,
+        "memory_saving": round(memory_saving, 2),
     }
 
 @router.post("/log")

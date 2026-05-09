@@ -349,7 +349,7 @@ ALGORITHM_VERSIONS = {
     "v2.2": {
         "name": "v2.2",
         "label": "v2.2 桌面版",
-        "description": "最佳音质，完整处理（仅桌面端）",
+        "description": "最佳音质，流式分块处理（仅桌面端）",
         "mobile_compatible": False,
         "repair_fn": repair_audio_v2_2,
         "default_params": {
@@ -498,7 +498,7 @@ ALGORITHM_VERSIONS = {
     "v2.3": {
         "name": "v2.3",
         "label": "v2.3 桌面版",
-        "description": "零AM伪影，完整处理（仅桌面端）",
+        "description": "零AM伪影，流式分块+低内存（仅桌面端）",
         "mobile_compatible": False,
         "repair_fn": repair_audio_v2_3,
         "default_params": {
@@ -593,7 +593,7 @@ ALGORITHM_VERSIONS = {
     "v2.3a": {
         "name": "v2.3a",
         "label": "v2.3a 移动版",
-        "description": "零AM伪影，增强降噪+齿音抑制（移动端）",
+        "description": "零AM伪影，流式降噪+低内存（移动端）",
         "mobile_compatible": True,
         "repair_fn": repair_audio_v2_3a,
         "default_params": {
