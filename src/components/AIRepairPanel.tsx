@@ -82,6 +82,12 @@ function isRecommendedCombo(sampleRate: number, bitDepth: number): boolean {
 // 警告阈值 186MB（留出余量）
 const WARNING_THRESHOLD_MB = 186;
 
+function formatBytes(bytes: number): string {
+  if (bytes >= 1024 * 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024 / 1024 / 1024).toFixed(2)} TB`;
+  if (bytes >= 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
+  return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
+}
+
 export function AIRepairPanel({
   params,
   analysis,
@@ -389,8 +395,9 @@ export function AIRepairPanel({
         </div>
 
         {/* 预估输出大小 */}
-        {duration > 0 && currentEstimate && (
-          <div className="mt-3 p-2.5 rounded-lg border bg-gray-800/50 border-gray-700">
+        <div className="mt-3 p-2.5 rounded-lg border bg-gray-800/50 border-gray-700">
+          {duration > 0 && currentEstimate ? (
+          <>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -416,7 +423,7 @@ export function AIRepairPanel({
                       key={`${est.sampleRate}-${est.bitDepth}`}
                       className={`px-1.5 py-1 rounded text-center ${
                         isCurrent
-                          ? 'text-white border border-secondary/50'
+                          ? `border border-secondary/50 ${est.isWarning ? 'bg-red-500/10 text-red-400' : est.isRecommended ? 'bg-emerald-500/10 text-emerald-400' : 'bg-gray-800/50 text-white'}`
                           : est.isWarning
                             ? 'bg-red-500/10 text-red-400/70'
                             : est.isRecommended
@@ -445,7 +452,7 @@ export function AIRepairPanel({
                     服务器存储
                   </span>
                   <span className={storageEstimate.is_sufficient ? 'text-emerald-400' : 'text-red-400'}>
-                    {(storageEstimate.available_disk_bytes / 1024 / 1024).toFixed(0)} MB 可用
+                    {formatBytes(storageEstimate.available_disk_bytes)} 可用
                   </span>
                 </div>
                 <div className="flex items-center justify-between text-xs mt-1">
@@ -453,7 +460,7 @@ export function AIRepairPanel({
                     预估输出占用
                   </span>
                   <span className={storageEstimate.is_sufficient ? 'text-gray-300' : 'text-red-400'}>
-                    {storageEstimate.estimated_output_mb.toFixed(1)} MB
+                    {formatBytes(storageEstimate.estimated_output_bytes)}
                   </span>
                 </div>
                 {!storageEstimate.is_sufficient && (
@@ -490,7 +497,7 @@ export function AIRepairPanel({
                           预估
                         </span>
                       </div>
-                      <span>{(storageEstimate.total_disk_bytes / 1024 / 1024).toFixed(0)} MB</span>
+                      <span>{formatBytes(storageEstimate.total_disk_bytes)}</span>
                     </div>
                   </div>
                 )}
@@ -511,7 +518,7 @@ export function AIRepairPanel({
                   </span>
                   <span className={memoryInfo.is_sufficient ? 'text-emerald-400' : (memoryInfo.available_memory_bytes != null && memoryInfo.estimated_memory_bytes > memoryInfo.available_memory_bytes) ? 'text-red-400' : 'text-amber-400'}>
                     {memoryInfo.available_memory_bytes != null
-                      ? `${(memoryInfo.available_memory_bytes / 1024 / 1024).toFixed(0)} MB 可用`
+                      ? `${formatBytes(memoryInfo.available_memory_bytes)} 可用`
                       : '未知'}
                   </span>
                 </div>
@@ -528,7 +535,7 @@ export function AIRepairPanel({
                     )}
                   </span>
                   <span className={memoryInfo.is_sufficient ? 'text-gray-300' : (memoryInfo.available_memory_bytes != null && memoryInfo.estimated_memory_bytes > memoryInfo.available_memory_bytes) ? 'text-red-400' : 'text-amber-400'}>
-                    {(memoryInfo.estimated_memory_bytes / 1024 / 1024).toFixed(0)} MB
+                    {formatBytes(memoryInfo.estimated_memory_bytes)}
                   </span>
                 </div>
                 {(memoryInfo.has_streaming || memoryInfo.use_float32) && (
@@ -586,14 +593,19 @@ export function AIRepairPanel({
                           预估
                         </span>
                       </div>
-                      <span>{(memoryInfo.total_memory_bytes / 1024 / 1024).toFixed(0)} MB</span>
+                      <span>{formatBytes(memoryInfo.total_memory_bytes)}</span>
                     </div>
                   </div>
                 )}
               </div>
             )}
+          </>
+          ) : (
+            <div className="text-center text-gray-500 text-xs py-3">
+              加载音频后显示预估信息
+            </div>
+          )}
           </div>
-        )}
 
         <p className="text-gray-500 text-xs mt-2">交付规格在导出时应用，修改后即时渲染无需重新修复</p>
       </div>

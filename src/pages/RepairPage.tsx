@@ -292,20 +292,18 @@ export default function RepairPage() {
                   </div>
                 )}
 
-                {(duration > 0 || (playMode === 'backend' && backendWaveformPeaks)) && (
-                  <div className="mt-6">
-                    <WaveformVisualizer
-                      key={`waveform-${playMode}-${isBufferReady}`}
-                      audioBuffer={activeBuffer}
-                      waveformPeaks={playMode === 'backend' && !activeBuffer ? backendWaveformPeaks : null}
-                      color={playMode === 'original' ? '#6B7280' : playMode === 'browser' ? '#A855F7' : '#00D9FF'}
-                      label={playMode === 'original' ? '原始波形' : playMode === 'browser' ? (isBufferReady ? '浏览器修复波形' : '浏览器修复波形 (加载中...)') : (isBufferReady ? '后端修复波形' : '后端修复波形 (预览中...)')}
-                      currentTime={currentTime}
-                      duration={duration}
-                      onSeek={seek}
-                    />
-                  </div>
-                )}
+                <div className="mt-6">
+                  <WaveformVisualizer
+                    key={`waveform-${playMode}-${isBufferReady}`}
+                    audioBuffer={activeBuffer}
+                    waveformPeaks={playMode === 'backend' && !activeBuffer ? backendWaveformPeaks : null}
+                    color={playMode === 'original' ? '#6B7280' : playMode === 'browser' ? '#A855F7' : '#00D9FF'}
+                    label={playMode === 'original' ? '原始波形' : playMode === 'browser' ? (isBufferReady ? '浏览器修复波形' : '浏览器修复波形 (加载中...)') : (isBufferReady ? '后端修复波形' : '后端修复波形 (预览中...)')}
+                    currentTime={currentTime}
+                    duration={duration}
+                    onSeek={seek}
+                  />
+                </div>
               </div>
 
               {backendError && (

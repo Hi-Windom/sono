@@ -197,17 +197,15 @@ export default function Home() {
                   </div>
                 )}
 
-                {duration > 0 && (
-                  <div className="mt-6">
-                    <WaveformVisualizer
-                      audioBuffer={activeBuffer ?? audioBuffer}
-                      label={playMode !== 'original' && activeBuffer ? '修复后波形' : '原始波形'}
-                      currentTime={currentTime}
-                      duration={duration}
-                      onSeek={seek}
-                    />
-                  </div>
-                )}
+                <div className="mt-6">
+                  <WaveformVisualizer
+                    audioBuffer={activeBuffer ?? audioBuffer}
+                    label={playMode !== 'original' && activeBuffer ? '修复后波形' : '原始波形'}
+                    currentTime={currentTime}
+                    duration={duration}
+                    onSeek={seek}
+                  />
+                </div>
               </div>
 
               {backendError && (
