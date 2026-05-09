@@ -660,11 +660,16 @@ export function useAudioProcessor() {
     setIsProcessing(true);
     setProcessingProgress(0);
 
+    setProcessingStep('读取音频文件...');
+    setProcessingProgress(0.02);
     const context = getAudioContext();
     const arrayBuf = await file.arrayBuffer();
+    setProcessingStep('解析音频数据...');
+    setProcessingProgress(0.05);
     const wavHeaderInfo = parseWavHeader(arrayBuf.slice(0, 44 + 4096));
     setWavInfo(wavHeaderInfo);
     const buffer = await context.decodeAudioData(arrayBuf);
+    setProcessingProgress(0.1);
 
     // 立即设置audioBuffer，让AIRepairPanel（含预估大小）显示
     audioBufferRef.current = buffer;

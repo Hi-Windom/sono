@@ -459,7 +459,7 @@ export function AIRepairPanel({
             {/* 服务器内存状态 */}
             {memoryInfo && (
               <div className={`mt-3 pt-2 border-t border-gray-700/50 ${
-                memoryInfo.is_sufficient ? '' : 'text-amber-400'
+                memoryInfo.is_sufficient ? '' : (memoryInfo.available_memory_bytes != null && memoryInfo.estimated_memory_bytes > memoryInfo.available_memory_bytes) ? 'text-red-400' : 'text-amber-400'
               }`}>
                 <div className="flex items-center justify-between text-xs">
                   <span className="text-gray-400 flex items-center gap-1">
@@ -468,7 +468,7 @@ export function AIRepairPanel({
                     </svg>
                     服务器内存
                   </span>
-                  <span className={memoryInfo.is_sufficient ? 'text-emerald-400' : 'text-amber-400'}>
+                  <span className={memoryInfo.is_sufficient ? 'text-emerald-400' : (memoryInfo.available_memory_bytes != null && memoryInfo.estimated_memory_bytes > memoryInfo.available_memory_bytes) ? 'text-red-400' : 'text-amber-400'}>
                     {memoryInfo.available_memory_bytes != null
                       ? `${(memoryInfo.available_memory_bytes / 1024 / 1024).toFixed(0)} MB 可用`
                       : '未知'}
@@ -486,7 +486,7 @@ export function AIRepairPanel({
                       </span>
                     )}
                   </span>
-                  <span className={memoryInfo.is_sufficient ? 'text-gray-300' : 'text-amber-400'}>
+                  <span className={memoryInfo.is_sufficient ? 'text-gray-300' : (memoryInfo.available_memory_bytes != null && memoryInfo.estimated_memory_bytes > memoryInfo.available_memory_bytes) ? 'text-red-400' : 'text-amber-400'}>
                     {(memoryInfo.estimated_memory_bytes / 1024 / 1024).toFixed(0)} MB
                   </span>
                 </div>
@@ -504,9 +504,14 @@ export function AIRepairPanel({
                     )}
                   </div>
                 )}
-                {!memoryInfo.is_sufficient && (
+                {memoryInfo.available_memory_bytes != null && memoryInfo.estimated_memory_bytes > memoryInfo.available_memory_bytes && (
+                  <div className="mt-1.5 text-[10px] text-red-400/90">
+                    🔴 内存不足！预估占用超出可用内存，处理将失败。请选择低内存算法或缩短音频。
+                  </div>
+                )}
+                {!memoryInfo.is_sufficient && !(memoryInfo.available_memory_bytes != null && memoryInfo.estimated_memory_bytes > memoryInfo.available_memory_bytes) && (
                   <div className="mt-1.5 text-[10px] text-amber-400/90">
-                    ⚠️ 服务器可用内存不足以处理此音频，可能导致处理失败
+                    ⚠️ 服务器可用内存偏低，可能导致处理失败
                   </div>
                 )}
                 {memoryInfo.total_memory_bytes != null && (
@@ -522,7 +527,7 @@ export function AIRepairPanel({
                       )}
                       <div
                         className={`h-full transition-all ${
-                          memoryInfo.is_sufficient ? 'bg-emerald-500' : 'bg-amber-500'
+                          memoryInfo.is_sufficient ? 'bg-emerald-500' : (memoryInfo.available_memory_bytes != null && memoryInfo.estimated_memory_bytes > memoryInfo.available_memory_bytes) ? 'bg-red-500' : 'bg-amber-500'
                         }`}
                         style={{
                           width: `${Math.min(100, (memoryInfo.estimated_memory_bytes / memoryInfo.total_memory_bytes) * 100)}%`,
@@ -536,7 +541,7 @@ export function AIRepairPanel({
                           已用
                         </span>
                         <span className="flex items-center gap-0.5">
-                          <span className={`inline-block w-1.5 h-1.5 rounded-sm ${memoryInfo.is_sufficient ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+                          <span className={`inline-block w-1.5 h-1.5 rounded-sm ${memoryInfo.is_sufficient ? 'bg-emerald-500' : (memoryInfo.available_memory_bytes != null && memoryInfo.estimated_memory_bytes > memoryInfo.available_memory_bytes) ? 'bg-red-500' : 'bg-amber-500'}`} />
                           预估
                         </span>
                       </div>
