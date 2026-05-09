@@ -973,4 +973,36 @@ export function connectProgressWS(
   };
 }
 
+export interface MemoryInfoResult {
+  available_memory_bytes: number | null;
+  estimated_memory_bytes: number;
+  is_sufficient: boolean;
+  working_sr: number;
+}
+
+export async function fetchMemoryInfo(
+  duration: number,
+  channels: number,
+  sampleRate: number,
+  algorithmVersion: string,
+): Promise<MemoryInfoResult | null> {
+  try {
+    const res = await fetch(`${API_BASE}/memory/info`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        duration,
+        channels,
+        sample_rate: sampleRate,
+        algorithm_version: algorithmVersion,
+      }),
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
 export { mapDetectionResult, type BackendDetectionResult, type BackendRepairResult, type ProgressEvent, type TaskStatus };

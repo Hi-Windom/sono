@@ -9,6 +9,7 @@ from database import create_task, find_task_by_hash, get_queue_status, get_task
 from services.task_manager import generate_task_id, submit_detect_task, submit_repair_task, cancel_task
 from services.audio_repair import get_available_versions
 from services.ai_detector import get_detector_versions
+from services.memory_guard import get_available_memory_bytes, estimate_repair_memory_bytes
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +18,41 @@ router = APIRouter(prefix="/api/v1")
 class LogRequest(BaseModel):
     message: str
     level: str = "info"
+
+class MemoryInfoRequest(BaseModel):
+    duration: float
+    channels: int = 2
+    sample_rate: int = 44100
+    algorithm_version: str = "v2.3a"
+
+@router.post("/memory/info")
+async def memory_info(request: MemoryInfoRequest):
+    if request.duration <= 0:
+        return {
+            "available_memory_bytes": None,
+            "estimated_memory_bytes": 0,
+            "is_sufficient": True,
+        }
+    available = get_available_memory_bytes()
+    n_samples = int(request.duration * request.sample_rate)
+    if request.algorithm_version == "v2.3a":
+        working_sr = 48000
+    elif MOBILE_MODE:
+        working_sr = request.sample_rate
+    else:
+        working_sr = 48000
+    estimated = estimate_repair_memory_bytes(
+        n_samples, request.channels, request.sample_rate, working_sr
+    )
+    is_sufficient = True
+    if available is not None:
+        is_sufficient = estimated <= available * 0.7
+    return {
+        "available_memory_bytes": available,
+        "estimated_memory_bytes": estimated,
+        "is_sufficient": is_sufficient,
+        "working_sr": working_sr,
+    }
 
 @router.post("/log")
 async def log_message(request: LogRequest):

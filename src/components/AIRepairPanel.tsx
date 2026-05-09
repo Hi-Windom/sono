@@ -1,6 +1,6 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { AIRepairParams, RepairMode } from '../utils/advancedAudioProcessing';
-import { ProcessingOptions, AlgorithmVersion } from '../services/backendApi';
+import { ProcessingOptions, AlgorithmVersion, fetchMemoryInfo, MemoryInfoResult } from '../services/backendApi';
 
 interface AIRepairPanelProps {
   params: AIRepairParams;
@@ -104,6 +104,20 @@ export function AIRepairPanel({
   channels = 2,
 }: AIRepairPanelProps) {
   const [showParams, setShowParams] = useState(false);
+  const [memoryInfo, setMemoryInfo] = useState<MemoryInfoResult | null>(null);
+  const memoryFetchRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (duration <= 0) {
+      setMemoryInfo(null);
+      return;
+    }
+    if (memoryFetchRef.current) clearTimeout(memoryFetchRef.current);
+    memoryFetchRef.current = setTimeout(() => {
+      fetchMemoryInfo(duration, channels, processingOptions.sampleRate, algorithmVersion).then(setMemoryInfo);
+    }, 300);
+    return () => { if (memoryFetchRef.current) clearTimeout(memoryFetchRef.current); };
+  }, [duration, channels, processingOptions.sampleRate, algorithmVersion]);
 
   const paramLabels: Record<keyof AIRepairParams, string> = {
     deClipping: '去削波',
@@ -441,6 +455,56 @@ export function AIRepairPanel({
                 })}
               </div>
             </div>
+
+            {/* 服务器内存状态 */}
+            {memoryInfo && (
+              <div className={`mt-3 pt-2 border-t border-gray-700/50 ${
+                memoryInfo.is_sufficient ? '' : 'text-amber-400'
+              }`}>
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-gray-400 flex items-center gap-1">
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
+                    </svg>
+                    服务器内存
+                  </span>
+                  <span className={memoryInfo.is_sufficient ? 'text-emerald-400' : 'text-amber-400'}>
+                    {memoryInfo.available_memory_bytes != null
+                      ? `${(memoryInfo.available_memory_bytes / 1024 / 1024).toFixed(0)} MB 可用`
+                      : '未知'}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-xs mt-1">
+                  <span className="text-gray-400">预估处理占用</span>
+                  <span className={memoryInfo.is_sufficient ? 'text-gray-300' : 'text-amber-400'}>
+                    {(memoryInfo.estimated_memory_bytes / 1024 / 1024).toFixed(0)} MB
+                  </span>
+                </div>
+                {!memoryInfo.is_sufficient && (
+                  <div className="mt-1.5 text-[10px] text-amber-400/90">
+                    ⚠️ 服务器可用内存不足以处理此音频，可能导致处理失败
+                  </div>
+                )}
+                {memoryInfo.available_memory_bytes != null && (
+                  <div className="mt-2">
+                    <div className="h-1.5 bg-gray-700 rounded-full overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all ${
+                          memoryInfo.is_sufficient ? 'bg-emerald-500' : 'bg-amber-500'
+                        }`}
+                        style={{
+                          width: `${Math.min(100, (memoryInfo.estimated_memory_bytes / memoryInfo.available_memory_bytes) * 100)}%`,
+                        }}
+                      />
+                    </div>
+                    <div className="flex justify-between text-[9px] text-gray-500 mt-0.5">
+                      <span>0</span>
+                      <span>可用内存</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
 

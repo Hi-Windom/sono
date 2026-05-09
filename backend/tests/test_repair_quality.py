@@ -681,17 +681,17 @@ class TestMemoryGuard:
         )
         assert result == 48000, f"short audio should pass at full working_sr, got {result}"
 
-    def test_check_memory_downgrades_on_low_memory(self):
+    def test_check_memory_raises_on_low_memory(self):
         from unittest.mock import patch
         from services.memory_guard import check_memory_before_repair
         with patch("services.memory_guard.get_available_memory_bytes", return_value=500 * 1024 * 1024):
-            result = check_memory_before_repair(
-                n_samples=48000 * 30,
-                n_channels=2,
-                sr=44100,
-                working_sr=48000,
-            )
-            assert result < 48000, f"should downgrade working_sr when memory low, got {result}"
+            with pytest.raises(MemoryError):
+                check_memory_before_repair(
+                    n_samples=48000 * 30,
+                    n_channels=2,
+                    sr=44100,
+                    working_sr=48000,
+                )
 
     def test_check_memory_raises_on_insufficient(self):
         from unittest.mock import patch
