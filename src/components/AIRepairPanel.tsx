@@ -509,21 +509,38 @@ export function AIRepairPanel({
                     ⚠️ 服务器可用内存不足以处理此音频，可能导致处理失败
                   </div>
                 )}
-                {memoryInfo.available_memory_bytes != null && (
+                {memoryInfo.total_memory_bytes != null && (
                   <div className="mt-2">
-                    <div className="h-1.5 bg-gray-700 rounded-full overflow-hidden">
+                    <div className="h-2.5 bg-gray-700 rounded-full overflow-hidden flex">
+                      {memoryInfo.used_memory_bytes != null && (
+                        <div
+                          className="h-full bg-gray-500/60 transition-all"
+                          style={{
+                            width: `${Math.min(100, (memoryInfo.used_memory_bytes / memoryInfo.total_memory_bytes) * 100)}%`,
+                          }}
+                        />
+                      )}
                       <div
-                        className={`h-full rounded-full transition-all ${
+                        className={`h-full transition-all ${
                           memoryInfo.is_sufficient ? 'bg-emerald-500' : 'bg-amber-500'
                         }`}
                         style={{
-                          width: `${Math.min(100, (memoryInfo.estimated_memory_bytes / memoryInfo.available_memory_bytes) * 100)}%`,
+                          width: `${Math.min(100, (memoryInfo.estimated_memory_bytes / memoryInfo.total_memory_bytes) * 100)}%`,
                         }}
                       />
                     </div>
-                    <div className="flex justify-between text-[9px] text-gray-500 mt-0.5">
-                      <span>0</span>
-                      <span>可用内存</span>
+                    <div className="flex items-center justify-between text-[9px] text-gray-500 mt-0.5">
+                      <div className="flex items-center gap-2">
+                        <span className="flex items-center gap-0.5">
+                          <span className="inline-block w-1.5 h-1.5 rounded-sm bg-gray-500/60" />
+                          已用
+                        </span>
+                        <span className="flex items-center gap-0.5">
+                          <span className={`inline-block w-1.5 h-1.5 rounded-sm ${memoryInfo.is_sufficient ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+                          预估
+                        </span>
+                      </div>
+                      <span>{(memoryInfo.total_memory_bytes / 1024 / 1024).toFixed(0)} MB</span>
                     </div>
                   </div>
                 )}

@@ -9,7 +9,7 @@ from database import create_task, find_task_by_hash, get_queue_status, get_task
 from services.task_manager import generate_task_id, submit_detect_task, submit_repair_task, cancel_task
 from services.audio_repair import get_available_versions
 from services.ai_detector import get_detector_versions
-from services.memory_guard import get_available_memory_bytes, estimate_repair_memory_bytes, should_use_float32
+from services.memory_guard import get_available_memory_bytes, estimate_repair_memory_bytes, should_use_float32, get_total_memory_bytes
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +54,8 @@ async def memory_info(request: MemoryInfoRequest):
         is_sufficient = estimated <= available * 0.7
     use_f32 = should_use_float32(n_samples, request.channels)
     has_streaming = request.algorithm_version in ("v2.2", "v2.3", "v2.3a")
+    total_mem = get_total_memory_bytes()
+    used_mem = (total_mem - available) if (total_mem is not None and available is not None) else None
     baseline_samples = int(n_samples * working_sr / request.sample_rate) if working_sr > request.sample_rate else n_samples
     baseline_bytes = request.channels * baseline_samples * 8
     baseline_peak = baseline_samples * 8 * 3
@@ -61,6 +63,8 @@ async def memory_info(request: MemoryInfoRequest):
     memory_saving = max(0, 1 - estimated / baseline_total) if baseline_total > 0 else 0
     return {
         "available_memory_bytes": available,
+        "total_memory_bytes": total_mem,
+        "used_memory_bytes": used_mem,
         "estimated_memory_bytes": estimated,
         "is_sufficient": is_sufficient,
         "working_sr": working_sr,

@@ -767,7 +767,14 @@ class TestMemoryGuard:
 
     def test_estimate_memory_float32_for_long_audio(self):
         from services.memory_guard import estimate_repair_memory_bytes
-        est_short = estimate_repair_memory_bytes(48000 * 300, 2, 44100, 48000)
-        est_long = estimate_repair_memory_bytes(48000 * 3600, 2, 44100, 48000)
+        est_short = estimate_repair_memory_bytes(48000 * 300, 2, 44100, 48000, algorithm_version="v2.3")
+        est_long = estimate_repair_memory_bytes(48000 * 3600, 2, 44100, 48000, algorithm_version="v2.3")
         assert est_short < 1000 * 1024 * 1024
         assert est_long < 4000 * 1024 * 1024
+
+    def test_streaming_uses_less_memory_than_non_streaming(self):
+        from services.memory_guard import estimate_repair_memory_bytes
+        n = 48000 * 300
+        est_streaming = estimate_repair_memory_bytes(n, 2, 44100, 48000, algorithm_version="v2.3")
+        est_non_streaming = estimate_repair_memory_bytes(n, 2, 44100, 48000, algorithm_version="v1.1")
+        assert est_streaming < est_non_streaming

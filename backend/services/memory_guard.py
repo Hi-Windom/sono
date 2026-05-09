@@ -22,15 +22,38 @@ def get_available_memory_bytes():
 def should_use_float32(n_samples, n_channels):
     return n_samples * n_channels > FLOAT32_THRESHOLD_SAMPLES
 
+def get_total_memory_bytes():
+    try:
+        with open("/proc/meminfo", "r") as f:
+            for line in f:
+                if line.startswith("MemTotal:"):
+                    return int(line.split()[1]) * 1024
+    except Exception:
+        pass
+    try:
+        import psutil
+        return psutil.virtual_memory().total
+    except ImportError:
+        pass
+    return None
+
 def estimate_repair_memory_bytes(n_samples, n_channels, sr, working_sr, algorithm_version=None):
     upsampled_samples = int(n_samples * working_sr / sr)
     use_f32 = should_use_float32(n_samples, n_channels)
     elem_size = 4 if use_f32 else 8
     audio_bytes = n_channels * upsampled_samples * elem_size
 
-    chunk_stft_bytes = 1025 * (working_sr * 10 // 512 + 1) * 16
+    n_fft = 2048
+    hop_length = 512
+    n_frames = upsampled_samples // hop_length + 1
+    has_streaming = algorithm_version in ("v2.2", "v2.3", "v2.3a")
 
-    peak_temp = upsampled_samples * elem_size + chunk_stft_bytes
+    if has_streaming:
+        stft_bytes = (n_fft // 2 + 1) * (working_sr * 10 // hop_length + 1) * 16
+    else:
+        stft_bytes = (n_fft // 2 + 1) * n_frames * 16
+
+    peak_temp = upsampled_samples * elem_size + stft_bytes
 
     if algorithm_version in ("v2.2", "v2.3"):
         peak_temp += upsampled_samples * elem_size * 0.5
@@ -38,6 +61,8 @@ def estimate_repair_memory_bytes(n_samples, n_channels, sr, working_sr, algorith
         peak_temp += upsampled_samples * elem_size * 0.15
     elif algorithm_version in ("v1.0", "v1.1", "v1.2"):
         peak_temp += upsampled_samples * elem_size * 0.3
+    elif algorithm_version in ("v2.0", "v2.1"):
+        peak_temp += upsampled_samples * elem_size * 0.2
 
     python_overhead = 1.3
     safety = 1.2

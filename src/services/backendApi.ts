@@ -977,6 +977,8 @@ export function connectProgressWS(
 
 export interface MemoryInfoResult {
   available_memory_bytes: number | null;
+  total_memory_bytes: number | null;
+  used_memory_bytes: number | null;
   estimated_memory_bytes: number;
   is_sufficient: boolean;
   working_sr: number;
