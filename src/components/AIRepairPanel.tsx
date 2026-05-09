@@ -396,8 +396,6 @@ export function AIRepairPanel({
 
         {/* 预估输出大小 */}
         <div className="mt-3 p-2.5 rounded-lg border bg-gray-800/50 border-gray-700">
-          {duration > 0 && currentEstimate ? (
-          <>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -408,11 +406,14 @@ export function AIRepairPanel({
                 </span>
               </div>
               <span className="text-sm font-bold text-white">
-                {storageEstimate ? storageEstimate.estimated_output_mb : currentEstimate.sizeMB.toFixed(1)} MB
+                {currentEstimate
+                  ? `${storageEstimate ? storageEstimate.estimated_output_mb : currentEstimate.sizeMB.toFixed(1)} MB`
+                  : '—'}
               </span>
             </div>
 
             {/* 各组合大小参考 */}
+            {allEstimates.length > 0 ? (
             <div className="mt-3 pt-2 border-t border-gray-700/50">
               <div className="text-[10px] text-gray-500 mb-1.5">各组合预估大小参考：</div>
               <div className="grid grid-cols-3 gap-1 text-[10px]">
@@ -438,9 +439,14 @@ export function AIRepairPanel({
                 })}
               </div>
             </div>
+            ) : (
+              <div className="mt-3 pt-2 border-t border-gray-700/50 text-center text-gray-500 text-[10px] py-2">
+                加载音频后显示预估大小
+              </div>
+            )}
 
             {/* 服务器存储状态 */}
-            {storageEstimate && storageEstimate.available_disk_bytes != null && (
+            {storageEstimate && storageEstimate.available_disk_bytes != null ? (
               <div className={`mt-3 pt-2 border-t border-gray-700/50 ${
                 storageEstimate.is_sufficient ? '' : 'text-red-400'
               }`}>
@@ -502,10 +508,14 @@ export function AIRepairPanel({
                   </div>
                 )}
               </div>
+            ) : (
+              <div className="mt-3 pt-2 border-t border-gray-700/50 text-center text-gray-500 text-[10px] py-2">
+                连接服务器后显示存储信息
+              </div>
             )}
 
             {/* 服务器内存状态 */}
-            {memoryInfo && (
+            {memoryInfo ? (
               <div className={`mt-3 pt-2 border-t border-gray-700/50 ${
                 memoryInfo.is_sufficient ? '' : (memoryInfo.available_memory_bytes != null && memoryInfo.estimated_memory_bytes > memoryInfo.available_memory_bytes) ? 'text-red-400' : 'text-amber-400'
               }`}>
@@ -598,13 +608,11 @@ export function AIRepairPanel({
                   </div>
                 )}
               </div>
+            ) : (
+              <div className="mt-3 pt-2 border-t border-gray-700/50 text-center text-gray-500 text-[10px] py-2">
+                连接服务器后显示内存信息
+              </div>
             )}
-          </>
-          ) : (
-            <div className="text-center text-gray-500 text-xs py-3">
-              加载音频后显示预估信息
-            </div>
-          )}
           </div>
 
         <p className="text-gray-500 text-xs mt-2">交付规格在导出时应用，修改后即时渲染无需重新修复</p>

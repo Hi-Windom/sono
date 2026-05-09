@@ -657,20 +657,8 @@ export function useAudioProcessor() {
     setBackendError(null);
     setAudioFile(file);
 
-    setProcessingStep('加载音频...');
-    setIsProcessing(true);
-    setProcessingProgress(0);
-
-    setProcessingStep('读取音频信息...');
-    setProcessingProgress(0.02);
-    const headerBuf = await file.slice(0, 44 + 4096).arrayBuffer();
-    const wavHeaderInfo = parseWavHeader(headerBuf);
-    setWavInfo(wavHeaderInfo);
-
-    if (wavHeaderInfo) {
-      setDuration(wavHeaderInfo.duration);
-    }
-
+    audioBufferRef.current = null;
+    setAudioBuffer(null);
     browserProcessedBufferRef.current = null;
     setBrowserProcessedBuffer(null);
     backendProcessedBufferRef.current = null;
@@ -687,6 +675,20 @@ export function useAudioProcessor() {
     setBackendWaveformPeaks(null);
     setBackendAvailable(false);
     setBackendPreviewUrl(null);
+    setAudioAnalysis(null);
+    setDuration(0);
+    setWavInfo(null);
+
+    setProcessingStep('读取音频信息...');
+    setIsProcessing(true);
+    setProcessingProgress(0.02);
+    const headerBuf = await file.slice(0, 44 + 4096).arrayBuffer();
+    const wavHeaderInfo = parseWavHeader(headerBuf);
+    setWavInfo(wavHeaderInfo);
+
+    if (wavHeaderInfo) {
+      setDuration(wavHeaderInfo.duration);
+    }
 
     setIsProcessing(false);
     setProcessingStep('');
