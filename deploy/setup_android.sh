@@ -79,6 +79,7 @@ python -c "import pydantic; print(f'  pydantic {pydantic.__version__} OK')" 2>/d
 python -c "import fastapi; print(f'  fastapi {fastapi.__version__} OK')" 2>/dev/null || echo -e "${RED}  fastapi 未安装！${NC}"
 python -c "import miniaudio; print(f'  miniaudio {miniaudio.__version__} OK')" 2>/dev/null || echo -e "${RED}  miniaudio 未安装！音频加载将不可用${NC}"
 python -c "import soundfile; print(f'  soundfile {soundfile.__version__} OK')" 2>/dev/null || echo -e "${RED}  soundfile 未安装！${NC}"
+python -c "import pytest; print(f'  pytest {pytest.__version__} OK')" 2>/dev/null || echo -e "${RED}  pytest 未安装！质量测试将不可用${NC}"
 cd ..
 
 cat > start_android.sh << 'STARTEOF'
