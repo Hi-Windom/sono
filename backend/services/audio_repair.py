@@ -2,15 +2,33 @@ from __future__ import annotations
 
 from typing import Any
 
-from services.repair.audio_repair_v1_0 import repair_audio as repair_audio_v1_0
-from services.repair.audio_repair_v1_1 import repair_audio as repair_audio_v1_1
-from services.repair.audio_repair_v1_2 import repair_audio as repair_audio_v1_2
-from services.repair.repair_v2_0 import repair_audio as repair_audio_v2_0
-from services.repair.repair_v2_1 import repair_audio as repair_audio_v2_1
-from services.repair.repair_v2_2 import repair_audio as repair_audio_v2_2
-from services.repair.repair_v2_2a import repair_audio as repair_audio_v2_2a
-from services.repair.repair_v2_3 import repair_audio as repair_audio_v2_3
-from services.repair.repair_v2_3a import repair_audio as repair_audio_v2_3a
+_REPAIR_MODULES = {
+    "v1.0": "services.repair.audio_repair_v1_0",
+    "v1.1": "services.repair.audio_repair_v1_1",
+    "v1.2": "services.repair.audio_repair_v1_2",
+    "v2.0": "services.repair.repair_v2_0",
+    "v2.1": "services.repair.repair_v2_1",
+    "v2.2": "services.repair.repair_v2_2",
+    "v2.2a": "services.repair.repair_v2_2a",
+    "v2.3": "services.repair.repair_v2_3",
+    "v2.3a": "services.repair.repair_v2_3a",
+}
+
+_REPAIR_FN_CACHE: dict[str, Any] = {}
+
+
+def _get_repair_fn(version: str):
+    if version in _REPAIR_FN_CACHE:
+        return _REPAIR_FN_CACHE[version]
+    module_path = _REPAIR_MODULES.get(version)
+    if not module_path:
+        return None
+    import importlib
+    mod = importlib.import_module(module_path)
+    fn = getattr(mod, "repair_audio", None)
+    if fn:
+        _REPAIR_FN_CACHE[version] = fn
+    return fn
 
 PARAM_DEFINITIONS = {
     "music_type": {"key": "musicType", "label": "音乐类型", "min": 0, "max": 5, "step": 1},
@@ -41,7 +59,7 @@ ALGORITHM_VERSIONS = {
         "label": "v1.0",
         "description": "基础修复算法，稳定可靠",
         "mobile_compatible": False,
-        "repair_fn": repair_audio_v1_0,
+        "repair_version": "v1.0",
         "default_params": {
             "de_clipping": 0.25, "noise_reduction": 0.18, "de_essing": 0.22,
             "de_crackle": 0.2, "de_pop": 0.15, "harmonic_enhance": 0.12,
@@ -100,7 +118,7 @@ ALGORITHM_VERSIONS = {
         "label": "v1.1",
         "description": "多频段压缩、自适应降噪、响度归一化",
         "mobile_compatible": False,
-        "repair_fn": repair_audio_v1_1,
+        "repair_version": "v1.1",
         "default_params": {
             "de_clipping": 0.3, "noise_reduction": 0.22, "de_essing": 0.2,
             "de_crackle": 0.22, "de_pop": 0.18, "harmonic_enhance": 0.1,
@@ -159,7 +177,7 @@ ALGORITHM_VERSIONS = {
         "label": "v1.2",
         "description": "深度学习辅助修复，智能谐波增强",
         "mobile_compatible": False,
-        "repair_fn": repair_audio_v1_2,
+        "repair_version": "v1.2",
         "default_params": {
             "de_clipping": 0.35, "noise_reduction": 0.25, "de_essing": 0.25,
             "de_crackle": 0.28, "de_pop": 0.2, "harmonic_enhance": 0.15,
@@ -223,7 +241,7 @@ ALGORITHM_VERSIONS = {
         "label": "v2.0",
         "description": "移动端友好，自适应采样率，频域合并优化",
         "mobile_compatible": True,
-        "repair_fn": repair_audio_v2_0,
+        "repair_version": "v2.0",
         "default_params": {
             "de_clipping": 0.4, "noise_reduction": 0.3, "de_essing": 0.3,
             "de_crackle": 0.3, "de_pop": 0.25, "harmonic_enhance": 0.18,
@@ -287,7 +305,7 @@ ALGORITHM_VERSIONS = {
         "label": "v2.1",
         "description": "移动端优化升级版，增强降噪和清晰度",
         "mobile_compatible": True,
-        "repair_fn": repair_audio_v2_1,
+        "repair_version": "v2.1",
         "default_params": {
             "de_clipping": 0.45, "noise_reduction": 0.35, "de_essing": 0.35,
             "de_crackle": 0.35, "de_pop": 0.28, "harmonic_enhance": 0.2,
@@ -351,7 +369,7 @@ ALGORITHM_VERSIONS = {
         "label": "v2.2 桌面版",
         "description": "最佳音质，流式分块处理（仅桌面端）",
         "mobile_compatible": False,
-        "repair_fn": repair_audio_v2_2,
+        "repair_version": "v2.2",
         "default_params": {
             "de_clipping": 0.35, "noise_reduction": 0.25, "de_essing": 0.25,
             "de_crackle": 0.25, "de_pop": 0.2, "harmonic_enhance": 0.12,
@@ -446,7 +464,7 @@ ALGORITHM_VERSIONS = {
         "label": "v2.2a 移动版",
         "description": "速度优先，精简处理（移动端专用）",
         "mobile_compatible": True,
-        "repair_fn": repair_audio_v2_2a,
+        "repair_version": "v2.2a",
         "default_params": {
             "de_clipping": 0.3, "noise_reduction": 0.2, "de_essing": 0.2,
             "de_pop": 0.15, "dynamic_range": 0.1,
@@ -500,7 +518,7 @@ ALGORITHM_VERSIONS = {
         "label": "v2.3 桌面版",
         "description": "零AM伪影，流式分块+低内存（仅桌面端）",
         "mobile_compatible": False,
-        "repair_fn": repair_audio_v2_3,
+        "repair_version": "v2.3",
         "default_params": {
             "de_clipping": 0.35, "noise_reduction": 0.25, "de_essing": 0.25,
             "de_crackle": 0.25, "de_pop": 0.2, "harmonic_enhance": 0.12,
@@ -595,7 +613,7 @@ ALGORITHM_VERSIONS = {
         "label": "v2.3a 移动版",
         "description": "零AM伪影，流式降噪+低内存（移动端）",
         "mobile_compatible": True,
-        "repair_fn": repair_audio_v2_3a,
+        "repair_version": "v2.3a",
         "default_params": {
             "de_clipping": 0.3, "noise_reduction": 0.15, "de_essing": 0.15,
             "de_pop": 0.15, "dynamic_range": 0.1,
@@ -682,5 +700,8 @@ def repair_audio(input_path: str, output_path: str, params: dict[str, Any], prog
     if mobile_mode and not version_info.get("mobile_compatible", True):
         raise ValueError(f"算法版本 {version} 不支持移动端，请使用 v2.0")
     
-    return version_info["repair_fn"](input_path, output_path, params, progress_callback)
+    repair_fn = _get_repair_fn(version_info["repair_version"])
+    if not repair_fn:
+        raise ValueError(f"算法版本 {version} 加载失败")
+    return repair_fn(input_path, output_path, params, progress_callback)
 

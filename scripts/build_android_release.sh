@@ -46,6 +46,9 @@ if [ ! -d "backend" ] || [ ! -f "backend/main.py" ]; then
 fi
 echo "  后端代码确认: backend/"
 
+echo "  预编译 .pyc 文件..."
+python -m compileall -q backend/ 2>/dev/null || echo "  预编译跳过（非关键）"
+
 echo -e "${YELLOW}[4/4] 打包 release_android.tar.gz...${NC}"
 
 TMP_DIR=$(mktemp -d)

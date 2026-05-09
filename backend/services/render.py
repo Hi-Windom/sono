@@ -1,6 +1,5 @@
 import gc
 import numpy as np
-from scipy.signal import butter, sosfiltfilt, resample_poly
 
 from services.audio_loader import load_audio_with_fallback
 
@@ -16,6 +15,8 @@ def _harmonic_enhance(y, sr, amount=0.15):
 def _harmonic_enhance_1d(y, sr, amount):
     if amount <= 0 or len(y) < 2048:
         return y
+
+    from scipy.signal import butter, sosfiltfilt
 
     y_64 = y.astype(np.float64)
     rms = np.sqrt(np.mean(y_64 ** 2))
@@ -56,6 +57,8 @@ def _harmonic_enhance_1d(y, sr, amount):
 
 
 def render_output(input_path, output_path, target_sr, bit_depth, progress_callback=None):
+    from scipy.signal import butter, sosfiltfilt, resample_poly
+
     if progress_callback:
         progress_callback(0.1, "加载修复结果...")
 

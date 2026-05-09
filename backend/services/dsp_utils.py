@@ -1,7 +1,21 @@
 import numpy as np
-from scipy.signal import get_window, medfilt
-from scipy.fftpack import dct
 from functools import lru_cache
+
+
+@lru_cache(maxsize=16)
+def _get_window(window: str, n_fft: int) -> np.ndarray:
+    from scipy.signal import get_window
+    return get_window(window, n_fft, fftbins=True)
+
+
+def _dct(x, **kwargs):
+    from scipy.fftpack import dct
+    return dct(x, **kwargs)
+
+
+def _medfilt(x, **kwargs):
+    from scipy.signal import medfilt
+    return medfilt(x, **kwargs)
 
 
 def _stride_frames(y, frame_length, hop_length):
@@ -13,7 +27,7 @@ def _stride_frames(y, frame_length, hop_length):
 
 
 def stft(y, n_fft=2048, hop_length=512, window='hann'):
-    fft_window = get_window(window, n_fft, fftbins=True)
+    fft_window = _get_window(window, n_fft)
     pad_length = n_fft // 2
     y_padded = np.pad(y, (pad_length, pad_length), mode='reflect')
     frames = _stride_frames(y_padded, n_fft, hop_length)
@@ -25,7 +39,7 @@ def stft(y, n_fft=2048, hop_length=512, window='hann'):
 
 
 def stft_chunked(y, n_fft=2048, hop_length=512, window='hann', chunk_frames=4096):
-    fft_window = get_window(window, n_fft, fftbins=True)
+    fft_window = _get_window(window, n_fft)
     pad_length = n_fft // 2
     y_padded = np.pad(y, (pad_length, pad_length), mode='reflect')
     n_frames = 1 + (len(y_padded) - n_fft) // hop_length
@@ -48,7 +62,7 @@ def stft_chunked(y, n_fft=2048, hop_length=512, window='hann', chunk_frames=4096
 
 def istft(S, hop_length=512, length=None, window='hann'):
     n_fft = 2 * (S.shape[0] - 1)
-    fft_window = get_window(window, n_fft, fftbins=True)
+    fft_window = _get_window(window, n_fft)
     n_frames = S.shape[1]
     expected_signal_len = n_fft + hop_length * (n_frames - 1)
     y = np.zeros(expected_signal_len)
@@ -71,7 +85,7 @@ def istft(S, hop_length=512, length=None, window='hann'):
 
 def istft_chunked(S, hop_length=512, length=None, window='hann', chunk_frames=4096):
     n_fft = 2 * (S.shape[0] - 1)
-    fft_window = get_window(window, n_fft, fftbins=True)
+    fft_window = _get_window(window, n_fft)
     n_frames = S.shape[1]
     expected_signal_len = n_fft + hop_length * (n_frames - 1)
     y = np.zeros(expected_signal_len)
@@ -256,7 +270,7 @@ def mfcc(y=None, sr=22050, S=None, n_mfcc=20, n_fft=2048, hop_length=512, n_mels
     mel_spec = np.dot(mel_fb, mag)
     mel_spec = np.maximum(mel_spec, 1e-10)
     log_mel_spec = np.log(mel_spec)
-    mfcc_result = dct(log_mel_spec, axis=0, type=2, norm='ortho')[:n_mfcc]
+    mfcc_result = _dct(log_mel_spec, axis=0, type=2, norm='ortho')[:n_mfcc]
     return mfcc_result
 
 
@@ -408,7 +422,7 @@ def harmonic(y, margin=1.0):
         return result
     S = stft(y)
     mag = np.abs(S)
-    harm_mag = medfilt(mag, kernel_size=(1, 5))
+    harm_mag = _medfilt(mag, kernel_size=(1, 5))
     perc_mag = mag - harm_mag
     if margin > 1.0:
         mask = harm_mag > margin * perc_mag
@@ -430,8 +444,8 @@ def hpss(y, margin=1.0):
         return h_result, p_result
     S = stft(y)
     mag = np.abs(S)
-    harm_mag = medfilt(mag, kernel_size=(1, 5))
-    perc_mag = medfilt(mag, kernel_size=(5, 1))
+    harm_mag = _medfilt(mag, kernel_size=(1, 5))
+    perc_mag = _medfilt(mag, kernel_size=(5, 1))
     harm_mask = harm_mag >= perc_mag
     S_harm = S * harm_mask
     S_perc = S * (~harm_mask)
