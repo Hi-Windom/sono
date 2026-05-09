@@ -51,7 +51,7 @@ async def memory_info(request: MemoryInfoRequest):
     )
     is_sufficient = True
     if available is not None:
-        is_sufficient = estimated <= available * 0.7
+        is_sufficient = estimated <= available
     use_f32 = should_use_float32(n_samples, request.channels)
     has_streaming = request.algorithm_version in ("v2.2", "v2.3", "v2.3a")
     total_mem = get_total_memory_bytes()

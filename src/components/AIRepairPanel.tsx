@@ -389,16 +389,16 @@ export function AIRepairPanel({
           </div>
         </div>
 
-        {/* 预估输出大小 */}
+        {/* 存储占用预估 */}
         {duration > 0 && currentEstimate && (
-          <div className="mt-3 p-2.5 rounded-lg border bg-gray-800/50 border-gray-700">
+          <div className="mt-3 p-2.5 rounded-lg border bg-blue-900/20 border-blue-500/30">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                <svg className="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4" />
                 </svg>
-                <span className="text-sm font-medium text-gray-300">
-                  预估输出大小
+                <span className="text-sm font-medium text-blue-300">
+                  存储占用预估
                 </span>
               </div>
               <span className="text-sm font-bold text-white">

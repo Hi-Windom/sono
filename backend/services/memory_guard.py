@@ -69,18 +69,17 @@ def estimate_repair_memory_bytes(n_samples, n_channels, sr, working_sr, algorith
     total = (audio_bytes + peak_temp) * python_overhead * safety
     return int(total)
 
-def check_memory_before_repair(n_samples, n_channels, sr, working_sr, safety_margin=0.3, algorithm_version=None):
+def check_memory_before_repair(n_samples, n_channels, sr, working_sr, safety_margin=0.0, algorithm_version=None):
     available = get_available_memory_bytes()
     if available is None:
         logger.warning("[memory_guard] 无法获取可用内存，跳过检查")
         return working_sr
     estimated = estimate_repair_memory_bytes(n_samples, n_channels, sr, working_sr, algorithm_version=algorithm_version)
-    safe_limit = available * (1.0 - safety_margin)
-    if estimated <= safe_limit:
+    if estimated <= available:
         logger.info(f"[memory_guard] 内存检查通过: 预估 {estimated/1024/1024:.0f}MB, 可用 {available/1024/1024:.0f}MB, 工作采样率 {working_sr}Hz")
         return working_sr
     logger.error(
-        f"[memory_guard] 内存不足: 预估 {estimated/1024/1024:.0f}MB > 安全上限 {safe_limit/1024/1024:.0f}MB (可用 {available/1024/1024:.0f}MB × {(1-safety_margin)*100:.0f}%), "
+        f"[memory_guard] 内存不足: 预估 {estimated/1024/1024:.0f}MB > 可用 {available/1024/1024:.0f}MB, "
         f"音频参数: n_samples={n_samples}, channels={n_channels}, sr={sr}, working_sr={working_sr}"
     )
     raise MemoryError(
