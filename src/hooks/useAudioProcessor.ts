@@ -157,6 +157,7 @@ export function useAudioProcessor() {
   } | null>(null);
   const pendingObjectURLRef = useRef<string | null>(null);
   const pendingPlayRef = useRef(false);
+  const durationRef = useRef(0);
   // 任务卡住状态
   const [isTaskStuck, setIsTaskStuck] = useState(false);
   const [stuckInfo, setStuckInfo] = useState<{ taskId: string; lastProgress: number; lastStep: string; duration: number } | null>(null);
@@ -491,6 +492,7 @@ export function useAudioProcessor() {
 
         setAudioBuffer(buffer);
         setDuration(buffer.duration);
+        durationRef.current = buffer.duration;
         setCurrentTime(0);
         pausedAtRef.current = 0;
 
@@ -685,6 +687,7 @@ export function useAudioProcessor() {
     setBackendPreviewUrl(null);
     setAudioAnalysis(null);
     setDuration(0);
+    durationRef.current = 0;
     setWavInfo(null);
 
     setProcessingStep('读取音频信息...');
@@ -696,6 +699,7 @@ export function useAudioProcessor() {
 
     if (wavHeaderInfo) {
       setDuration(wavHeaderInfo.duration);
+      durationRef.current = wavHeaderInfo.duration;
     }
 
     if (pendingObjectURLRef.current) {
@@ -728,6 +732,7 @@ export function useAudioProcessor() {
     audioBufferRef.current = buffer;
     setAudioBuffer(buffer);
     setDuration(buffer.duration);
+    durationRef.current = buffer.duration;
 
     if (pendingPlayRef.current && streamingAudioRef.current) {
       const resumeTime = streamingAudioRef.current.currentTime;
@@ -1820,13 +1825,13 @@ export function useAudioProcessor() {
 
     const buffer = getCurrentBuffer() ?? audioBufferRef.current;
     if (!buffer) {
-      if (duration > 0 && pendingObjectURLRef.current) {
+      if (durationRef.current > 0 && pendingObjectURLRef.current) {
         writeLog(`[play] buffer未就绪，使用streaming播放`);
         startStreamingPlayback(pendingObjectURLRef.current, 'original');
         pendingPlayRef.current = true;
         return;
       }
-      if (duration > 0) {
+      if (durationRef.current > 0) {
         writeLog(`[play] buffer未就绪，标记pendingPlay`);
         pendingPlayRef.current = true;
       }
@@ -1921,7 +1926,7 @@ export function useAudioProcessor() {
       }
     };
     updateTime();
-  }, [playMode, getCurrentBuffer, getAudioContext, stopPlaying, stopAllModeNodes]);
+  }, [playMode, getCurrentBuffer, getAudioContext, stopPlaying, stopAllModeNodes, startStreamingPlayback]);
 
   // 更新 playRef
   useEffect(() => {

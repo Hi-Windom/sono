@@ -121,10 +121,11 @@ export function AIRepairPanel({
       setMemoryInfo(null);
       return;
     }
-    if (duration <= 0) return;
+    const fetchDuration = duration > 0 ? duration : 300;
+    const fetchChannels = channels > 0 ? channels : 2;
     if (memoryFetchRef.current) clearTimeout(memoryFetchRef.current);
     memoryFetchRef.current = setTimeout(() => {
-      fetchMemoryInfo(duration, channels, processingOptions.sampleRate, algorithmVersion).then(setMemoryInfo);
+      fetchMemoryInfo(fetchDuration, fetchChannels, processingOptions.sampleRate, algorithmVersion).then(setMemoryInfo);
     }, 300);
     return () => { if (memoryFetchRef.current) clearTimeout(memoryFetchRef.current); };
   }, [duration, channels, processingOptions.sampleRate, algorithmVersion, backendAvailable]);
@@ -134,10 +135,11 @@ export function AIRepairPanel({
       setStorageEstimate(null);
       return;
     }
-    if (duration <= 0) return;
+    const fetchDuration = duration > 0 ? duration : 300;
+    const fetchChannels = channels > 0 ? channels : 2;
     if (storageFetchRef.current) clearTimeout(storageFetchRef.current);
     storageFetchRef.current = setTimeout(() => {
-      fetchStorageEstimate(duration, channels, processingOptions.sampleRate, processingOptions.bitDepth).then(setStorageEstimate);
+      fetchStorageEstimate(fetchDuration, fetchChannels, processingOptions.sampleRate, processingOptions.bitDepth).then(setStorageEstimate);
     }, 300);
     return () => { if (storageFetchRef.current) clearTimeout(storageFetchRef.current); };
   }, [duration, channels, processingOptions.sampleRate, processingOptions.bitDepth, backendAvailable]);

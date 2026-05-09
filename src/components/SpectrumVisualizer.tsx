@@ -75,12 +75,14 @@ export function SpectrumVisualizer({
       const barWidth = (width / bufferLength) * 2.5;
       let x = 0;
 
+      ctx.beginPath();
       for (let i = 0; i < bufferLength; i++) {
         const barHeight = (dataArray[i] / 255) * height;
-        ctx.fillStyle = gradient;
-        ctx.fillRect(x, height - barHeight, barWidth - 2, barHeight);
+        ctx.rect(x, height - barHeight, barWidth - 2, barHeight);
         x += barWidth;
       }
+      ctx.fillStyle = gradient;
+      ctx.fill();
     };
 
     draw(0);
