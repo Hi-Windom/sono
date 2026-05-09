@@ -60,11 +60,10 @@ def apply_spatial_enhance_v6(y, sr, intensity, music_type="generic"):
     enhanced_mid = mid * (1 - intensity * 0.02)
     enhanced_side = side * side_gain
 
-    result = np.zeros_like(y)
-    result[0] = enhanced_mid + enhanced_side
-    result[1] = enhanced_mid - enhanced_side
+    y[0] = enhanced_mid + enhanced_side
+    y[1] = enhanced_mid - enhanced_side
 
-    return result
+    return y
 
 
 def apply_stereo_width_v3(y, sr, intensity):
@@ -75,12 +74,11 @@ def apply_stereo_width_v3(y, sr, intensity):
     side = (y[0] - y[1]) * 0.5
 
     width = 1 + intensity * 0.5
-    result = np.zeros_like(y)
-    result[0] = mid + side * width
-    result[1] = mid - side * width
+    y[0] = mid + side * width
+    y[1] = mid - side * width
 
-    max_val = np.max(np.abs(result))
+    max_val = np.max(np.abs(y))
     if max_val > 1.0:
-        result /= max_val
+        y /= max_val
 
-    return result
+    return y

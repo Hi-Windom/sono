@@ -2,6 +2,8 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+FLOAT32_THRESHOLD_SAMPLES = 10 * 60 * 48000
+
 def get_available_memory_bytes():
     try:
         with open("/proc/meminfo", "r") as f:
@@ -17,15 +19,22 @@ def get_available_memory_bytes():
         pass
     return None
 
+def should_use_float32(n_samples, n_channels):
+    return n_samples * n_channels > FLOAT32_THRESHOLD_SAMPLES
+
 def estimate_repair_memory_bytes(n_samples, n_channels, sr, working_sr):
     upsampled_samples = int(n_samples * working_sr / sr)
-    audio_bytes = n_channels * upsampled_samples * 8
-    n_fft = 2048
-    hop = 512
-    n_frames = upsampled_samples // hop + 1
-    stft_bytes = (n_fft // 2 + 1) * n_frames * 16
-    peak_multiplier = 2.5
-    total = (audio_bytes * 3 + stft_bytes * 2) * peak_multiplier
+    use_f32 = should_use_float32(n_samples, n_channels)
+    elem_size = 4 if use_f32 else 8
+    audio_bytes = n_channels * upsampled_samples * elem_size
+
+    chunk_stft_bytes = 1025 * (working_sr * 10 // 512 + 1) * 16
+
+    peak_temp = upsampled_samples * elem_size + chunk_stft_bytes
+
+    python_overhead = 1.3
+    safety = 1.2
+    total = (audio_bytes + peak_temp) * python_overhead * safety
     return int(total)
 
 def check_memory_before_repair(n_samples, n_channels, sr, working_sr, safety_margin=0.3):

@@ -5,7 +5,7 @@ from functools import lru_cache
 from scipy.signal import butter, sosfiltfilt, resample_poly
 
 from services.audio_loader import load_audio_with_fallback
-from services.dsp_utils import stft, istft, stft_chunked, istft_chunked
+from services.dsp_utils import stft, istft, stft_chunked, istft_chunked, streaming_spectral_process
 
 MOBILE_WORKING_SR = 48000
 
@@ -61,33 +61,36 @@ def _transparent_compress(y, sr, amount, threshold_db=-18.0, ratio=2.0):
 
     is_stereo = y.ndim > 1 and y.shape[0] == 2
     if is_stereo:
-        ch_out = np.zeros_like(y)
         for ch in range(y.shape[0]):
-            ch_out[ch] = _transparent_compress(y[ch], sr, amount, threshold_db, ratio)
-        return ch_out
+            _transparent_compress_1d_inplace(y[ch], sr, amount, threshold_db, ratio)
+        return y
 
+    _transparent_compress_1d_inplace(y, sr, amount, threshold_db, ratio)
+    return y
+
+
+def _transparent_compress_1d_inplace(y, sr, amount, threshold_db, ratio):
     n = len(y)
     if n < 1024:
-        return y
+        return
 
     y_64 = y.astype(np.float64)
     input_rms = np.sqrt(np.mean(y_64 ** 2))
     if input_rms < 1e-10:
-        return y
+        return
 
     threshold_lin = 10 ** (threshold_db / 20.0)
     effective_ratio = 1.0 + (ratio - 1.0) * min(amount, 1.0)
 
     global_rms = np.sqrt(np.mean(y_64 ** 2))
     if global_rms <= threshold_lin:
-        return y
+        return
 
     target_rms = threshold_lin + (global_rms - threshold_lin) / effective_ratio
     global_gain = target_rms / global_rms
 
-    out = y_64 * global_gain
-
-    return out.astype(y.dtype)
+    y_64 *= global_gain
+    y[:] = y_64.astype(y.dtype)
 
 
 def _simple_declip(y, amount):
@@ -98,12 +101,12 @@ def _simple_declip(y, amount):
     if not np.any(mask):
         return y
 
-    y_out = y.copy().astype(np.float64)
-    abs_y = np.abs(y_out[mask])
-    over = abs_y - threshold
+    masked_vals = y[mask].astype(np.float64)
+    abs_masked = np.abs(masked_vals)
+    over = abs_masked - threshold
     headroom = 1.0 - threshold
-    y_out[mask] = np.sign(y_out[mask]) * (threshold + headroom * np.tanh(over / headroom))
-    return y_out.astype(y.dtype)
+    y[mask] = (np.sign(masked_vals) * (threshold + headroom * np.tanh(over / headroom))).astype(y.dtype)
+    return y
 
 
 def _simple_depop(y, sr, amount):
@@ -111,13 +114,15 @@ def _simple_depop(y, sr, amount):
         return y
     is_stereo = y.ndim > 1 and y.shape[0] == 2
     if is_stereo:
-        ch_out = np.zeros_like(y)
         for ch in range(y.shape[0]):
-            ch_out[ch] = _simple_depop_1d(y[ch], sr, amount)
-        return ch_out
+            _simple_depop_1d(y[ch], sr, amount)
+        return y
 
     data = y.flatten() if y.ndim > 1 else y
-    return _simple_depop_1d(data, sr, amount).reshape(y.shape)
+    _simple_depop_1d(data, sr, amount)
+    if y.ndim > 1:
+        y[:] = data.reshape(y.shape)
+    return y
 
 
 def _simple_depop_1d(data, sr, amount):
@@ -131,36 +136,36 @@ def _simple_depop_1d(data, sr, amount):
     if not np.any(pop_mask):
         return data
 
-    y_out = data.copy()
     indices = np.where(pop_mask)[0]
-    valid = (indices > 0) & (indices < len(y_out) - 1)
+    valid = (indices > 0) & (indices < len(data) - 1)
     indices = indices[valid]
     if len(indices) == 0:
-        return y_out
+        return data
 
-    prev_vals = y_out[indices - 1]
-    next_vals = y_out[indices + 1]
-    actual_diffs = y_out[indices] - prev_vals
+    prev_vals = data[indices - 1].astype(np.float64)
+    next_vals = data[indices + 1].astype(np.float64)
+    actual_diffs = data[indices].astype(np.float64) - prev_vals
     over_mask = np.abs(actual_diffs) > threshold
     indices = indices[over_mask]
     if len(indices) == 0:
-        return y_out
+        return data
 
-    prev_vals = y_out[indices - 1]
-    next_vals = y_out[indices + 1]
-    actual_diffs = y_out[indices] - prev_vals
+    prev_vals = data[indices - 1].astype(np.float64)
+    next_vals = data[indices + 1].astype(np.float64)
+    actual_diffs = data[indices].astype(np.float64) - prev_vals
     clamped = prev_vals + np.sign(actual_diffs) * threshold
-    y_out[indices] = 0.5 * (clamped + next_vals)
-    return y_out
+    data[indices] = (0.5 * (clamped + next_vals)).astype(data.dtype)
+    return data
 
 
 def _remove_dc(y, sr):
     is_stereo = y.ndim > 1 and y.shape[0] == 2
     if is_stereo:
         for ch in range(y.shape[0]):
-            y[ch] = y[ch] - np.mean(y[ch])
+            y[ch] -= np.mean(y[ch])
         return y
-    return y - np.mean(y)
+    y -= np.mean(y)
+    return y
 
 
 def _soft_peak_limit(y, threshold=0.9):
@@ -168,34 +173,30 @@ def _soft_peak_limit(y, threshold=0.9):
     if abs_max <= threshold:
         return y
 
-    y_out = y.copy().astype(np.float64)
-
-    is_stereo = y_out.ndim > 1 and y_out.shape[0] == 2
+    is_stereo = y.ndim > 1 and y.shape[0] == 2
     if is_stereo:
-        for ch in range(y_out.shape[0]):
-            y_out[ch] = _soft_peak_limit_1d(y_out[ch], threshold)
+        for ch in range(y.shape[0]):
+            _soft_peak_limit_1d_inplace(y[ch], threshold)
     else:
-        data = y_out.flatten() if y_out.ndim > 1 else y_out
-        data = _soft_peak_limit_1d(data, threshold)
-        if y_out.ndim > 1:
-            y_out = data.reshape(y_out.shape)
-        else:
-            y_out = data
+        data = y.flatten() if y.ndim > 1 else y
+        _soft_peak_limit_1d_inplace(data, threshold)
+        if y.ndim > 1:
+            y[:] = data.reshape(y.shape)
 
-    return y_out.astype(y.dtype)
+    return y
 
 
-def _soft_peak_limit_1d(data, threshold):
+def _soft_peak_limit_1d_inplace(data, threshold):
     abs_data = np.abs(data)
     mask = abs_data > threshold
     if not np.any(mask):
-        return data
+        return
 
     headroom = 1.0 - threshold
-    over = abs_data[mask] - threshold
+    masked_vals = data[mask].astype(np.float64)
+    over = np.abs(masked_vals) - threshold
     scale = headroom * 0.98
-    data[mask] = np.sign(data[mask]) * (threshold + scale * np.tanh(over / scale))
-    return data
+    data[mask] = (np.sign(masked_vals) * (threshold + scale * np.tanh(over / scale))).astype(data.dtype)
 
 
 def _loudness_normalize(y, sr, target_lufs=-16.0):
@@ -213,9 +214,8 @@ def _loudness_normalize(y, sr, target_lufs=-16.0):
     gain_db = np.clip(target_lufs - current_lufs, -12, 6)
     gain = 10 ** (gain_db / 20.0)
 
-    if is_stereo:
-        return y * gain
-    return y * gain
+    y *= gain
+    return y
 
 
 def _spectral_denoise(y, sr, amount):
@@ -238,7 +238,46 @@ def _spectral_denoise_1d(data, sr, amount):
     hop_length = 512
     n_samples = len(data)
     n_frames_est = n_samples // hop_length + 1
+    use_streaming = n_samples > 5 * 60 * sr
     use_chunked = n_frames_est > 8192
+
+    if use_streaming:
+        def _analyze_fn(y_ch, sr_ch):
+            chunk_dur = 1.0
+            chunk_len = int(sr_ch * chunk_dur)
+            n_positions = min(20, max(5, len(y_ch) // chunk_len))
+            positions = np.linspace(0, max(0, len(y_ch) - chunk_len), n_positions, dtype=int)
+            all_mag = []
+            for pos in positions:
+                segment = y_ch[pos:pos + chunk_len].astype(np.float64)
+                if len(segment) < n_fft:
+                    continue
+                S_seg = stft(segment, n_fft=n_fft, hop_length=hop_length)
+                all_mag.append(np.abs(S_seg))
+            if not all_mag:
+                return 0.0
+            combined_mag = np.concatenate([m.flatten() for m in all_mag])
+            return np.median(combined_mag)
+
+        def _process_fn(S, sr_p, n_fft_p, hop_length_p, global_median):
+            magnitude = np.abs(S)
+            threshold = global_median * (1 + amount * 3)
+            mask = np.ones_like(magnitude)
+            below = magnitude < threshold
+            mask[below] = magnitude[below] / (threshold + 1e-10)
+            denoised_magnitude = magnitude * mask
+            return denoised_magnitude * np.exp(1j * np.angle(S))
+
+        y_out = streaming_spectral_process(
+            data, sr, _process_fn,
+            n_fft=n_fft, hop_length=hop_length,
+            analyze_fn=_analyze_fn
+        )
+        if len(y_out) > n_samples:
+            y_out = y_out[:n_samples]
+        elif len(y_out) < n_samples:
+            y_out = np.pad(y_out, (0, n_samples - len(y_out)))
+        return y_out
 
     if use_chunked:
         S = stft_chunked(data, n_fft=n_fft, hop_length=hop_length, chunk_frames=4096)
@@ -280,13 +319,15 @@ def _de_ess(y, sr, amount):
 
     is_stereo = y.ndim > 1 and y.shape[0] == 2
     if is_stereo:
-        ch_out = np.zeros_like(y)
         for ch in range(y.shape[0]):
-            ch_out[ch] = _de_ess_1d(y[ch], sr, amount)
-        return ch_out
+            _de_ess_1d_inplace(y[ch], sr, amount)
+        return y
 
     data = y.flatten() if y.ndim > 1 else y
-    return _de_ess_1d(data, sr, amount).reshape(y.shape)
+    _de_ess_1d_inplace(data, sr, amount)
+    if y.ndim > 1:
+        y[:] = data.reshape(y.shape)
+    return y
 
 
 @lru_cache(maxsize=32)
@@ -299,7 +340,7 @@ def _de_ess_bandpass_sos(sr, low_hz, high_hz):
     return butter(4, [norm_low, norm_high], btype='band', output='sos')
 
 
-def _de_ess_1d(data, sr, amount):
+def _de_ess_1d_inplace(data, sr, amount):
     nyq = sr / 2
     low_hz = 4000
     high_hz = 8000
@@ -307,31 +348,31 @@ def _de_ess_1d(data, sr, amount):
     if high_hz >= nyq:
         high_hz = nyq * 0.95
     if low_hz >= high_hz:
-        return data
+        return
 
     sos = _de_ess_bandpass_sos(sr, low_hz, high_hz)
     if sos is None:
-        return data
+        return
     high_band = sosfiltfilt(sos, data)
-    low_band = data - high_band
+    low_band = data.astype(np.float64) - high_band.astype(np.float64)
 
     full_rms = np.sqrt(np.mean(data.astype(np.float64) ** 2))
     high_rms = np.sqrt(np.mean(high_band.astype(np.float64) ** 2))
 
     if full_rms < 1e-10:
-        return data
+        return
 
     ratio = high_rms / full_rms
     threshold_ratio = 1 + amount * 0.5
 
     if ratio <= threshold_ratio:
-        return data
+        return
 
     gain = 1 - amount * 0.3
     gain = max(gain, 0.1)
 
-    result = low_band + high_band * gain
-    return result.astype(data.dtype)
+    result = low_band + high_band.astype(np.float64) * gain
+    data[:] = result.astype(data.dtype)
 
 
 def repair_audio(input_path: str, output_path: str, params: dict, progress_callback=None) -> dict:
@@ -347,13 +388,17 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
 
     working_sr = MOBILE_WORKING_SR
 
-    from services.memory_guard import check_memory_before_repair
+    from services.memory_guard import check_memory_before_repair, should_use_float32
     working_sr = check_memory_before_repair(
         n_samples=y.shape[1],
         n_channels=y.shape[0],
         sr=original_sr,
         working_sr=working_sr,
     )
+
+    use_f32 = should_use_float32(y.shape[1], y.shape[0])
+    if use_f32:
+        y = y.astype(np.float32)
 
     if sr != working_sr:
         if progress_callback:
@@ -433,6 +478,9 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
 
     if was_mono:
         y = y[0]
+
+    if y.dtype == np.float32:
+        y = y.astype(np.float64)
 
     if progress_callback:
         progress_callback(0.95, "v2.3a 导出...")

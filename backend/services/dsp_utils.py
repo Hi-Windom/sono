@@ -97,6 +97,65 @@ def istft_chunked(S, hop_length=512, length=None, window='hann', chunk_frames=40
     return y
 
 
+def streaming_spectral_process(y, sr, process_fn, n_fft=2048, hop_length=512,
+                                chunk_seconds=10, analyze_fn=None):
+    n_samples = len(y)
+    chunk_samples = int(sr * chunk_seconds)
+    overlap_samples = n_fft * 2
+    hop_out = chunk_samples
+
+    if analyze_fn is not None:
+        global_stats = analyze_fn(y, sr)
+    else:
+        global_stats = None
+
+    output = np.zeros(n_samples, dtype=np.float64)
+    window_sum = np.zeros(n_samples, dtype=np.float64)
+
+    fade_len = min(hop_length * 8, chunk_samples // 2)
+
+    pos = 0
+    while pos < n_samples:
+        start = max(0, pos - overlap_samples)
+        end = min(n_samples, pos + chunk_samples + overlap_samples)
+        chunk = y[start:end].astype(np.float64)
+
+        S = stft(chunk, n_fft=n_fft, hop_length=hop_length)
+        if global_stats is not None:
+            S = process_fn(S, sr, n_fft, hop_length, global_stats)
+        else:
+            S = process_fn(S, sr, n_fft, hop_length)
+
+        chunk_out = istft(S, hop_length=hop_length, length=len(chunk))
+
+        out_start = pos - start
+        out_end = out_start + min(chunk_samples, n_samples - pos)
+        region = chunk_out[out_start:out_end]
+
+        region_len = len(region)
+        win = np.ones(region_len, dtype=np.float64)
+        if pos > 0 and fade_len > 0:
+            fl = min(fade_len, region_len // 2)
+            win[:fl] = np.linspace(0, 1, fl)
+        remaining = n_samples - pos - region_len
+        if remaining > 0 and fade_len > 0:
+            fl = min(fade_len, region_len // 2)
+            win[-fl:] = np.linspace(1, 0, fl)
+
+        write_start = pos
+        write_end = pos + region_len
+        if write_end <= n_samples:
+            output[write_start:write_end] += region * win
+            window_sum[write_start:write_end] += win
+
+        del S, chunk_out, region, win
+        pos += hop_out
+
+    valid = window_sum > 1e-10
+    output[valid] /= window_sum[valid]
+    return output.astype(y.dtype)
+
+
 def fft_frequencies(sr=22050, n_fft=2048):
     return np.fft.rfftfreq(n_fft, 1.0 / sr)
 

@@ -36,17 +36,11 @@ def _tanh_declip(y, amount):
     if amount <= 0:
         return y
     threshold = 0.90
-    is_stereo = y.ndim > 1 and y.shape[0] == 2
-    if is_stereo:
-        result = y.copy()
-        for ch in range(y.shape[0]):
-            result[ch] = _tanh_declip_1d(y[ch], threshold)
-        return result
-    data = y.flatten() if y.ndim > 1 else y
-    out = _tanh_declip_1d(data, threshold)
-    if y.ndim > 1:
-        return out.reshape(y.shape)
-    return out
+    if y.ndim == 1:
+        return _tanh_declip_1d(y, threshold)
+    for ch in range(y.shape[0]):
+        y[ch] = _tanh_declip_1d(y[ch], threshold)
+    return y
 
 
 def _diff_clamp_depop_1d(data, sr, amount):
@@ -84,24 +78,21 @@ def _diff_clamp_depop_1d(data, sr, amount):
 def _diff_clamp_depop(y, sr, amount):
     if amount <= 0:
         return y
-    is_stereo = y.ndim > 1 and y.shape[0] == 2
-    if is_stereo:
-        result = y.copy()
-        for ch in range(y.shape[0]):
-            result[ch] = _diff_clamp_depop_1d(y[ch], sr, amount)
-        return result
-    data = y.flatten() if y.ndim > 1 else y
-    out = _diff_clamp_depop_1d(data, sr, amount)
-    if y.ndim > 1:
-        return out.reshape(y.shape)
-    return out
+    if y.ndim == 1:
+        return _diff_clamp_depop_1d(y, sr, amount)
+    for ch in range(y.shape[0]):
+        y[ch] = _diff_clamp_depop_1d(y[ch], sr, amount)
+    return y
 
 
 def _global_loudness_normalize(y, sr, target_lufs):
-    result = y.copy()
+    if y.ndim == 1:
+        y_2d = y.reshape(1, -1)
+        _global_loudness_normalize(y_2d, sr, target_lufs)
+        return y
     try:
         for ch in range(y.shape[0]):
-            data = result[ch].copy()
+            data = y[ch].copy()
             if 60 < sr / 2:
                 sos_hp = butter(2, 60 / (sr / 2), btype='high', output='sos')
                 data = sosfiltfilt(sos_hp, data)
@@ -116,15 +107,15 @@ def _global_loudness_normalize(y, sr, target_lufs):
                 continue
             current_lufs = -0.691 + 20 * np.log10(rms_val)
             gain_db = np.clip(target_lufs - current_lufs, -12, 6)
-            result[ch] *= 10 ** (gain_db / 20)
+            y[ch] *= 10 ** (gain_db / 20)
     except Exception:
         for ch in range(y.shape[0]):
-            rms = np.sqrt(np.mean(result[ch] ** 2))
+            rms = np.sqrt(np.mean(y[ch] ** 2))
             if rms > 1e-10:
                 current_lufs = -0.691 + 20 * np.log10(rms)
                 gain_db = np.clip(target_lufs - current_lufs, -12, 6)
-                result[ch] *= 10 ** (gain_db / 20)
-    return result
+                y[ch] *= 10 ** (gain_db / 20)
+    return y
 
 
 @lru_cache(maxsize=32)
@@ -143,6 +134,10 @@ def _multiband_sos_cache(sr, low_cross, high_cross):
 
 def _transparent_multiband_compress(y, sr, amount, music_type):
     if amount <= 0:
+        return y
+    if y.ndim == 1:
+        y_2d = y.reshape(1, -1)
+        _transparent_multiband_compress(y_2d, sr, amount, music_type)
         return y
     if music_type == "vocal":
         low_cross = 250
@@ -163,38 +158,43 @@ def _transparent_multiband_compress(y, sr, amount, music_type):
     if cached is None:
         return y
     sos_low, sos_mid_low, sos_mid_high, sos_high = cached
-    result = np.zeros_like(y)
+    threshold_db = -18.0
+    threshold_lin = 10 ** (threshold_db / 20.0)
+    effective_ratio = 1.0 + (2.0 - 1.0) * min(amount, 1.0)
     for ch in range(y.shape[0]):
-        data = y[ch]
+        data = y[ch].copy()
         low_band = sosfiltfilt(sos_low, data)
-        mid_band = sosfiltfilt(sos_mid_low, data)
-        mid_band = sosfiltfilt(sos_mid_high, mid_band)
-        high_band = sosfiltfilt(sos_high, data)
-        threshold_db = -18.0
-        threshold_lin = 10 ** (threshold_db / 20.0)
-        effective_ratio = 1.0 + (2.0 - 1.0) * min(amount, 1.0)
         low_rms = np.sqrt(np.mean(low_band ** 2))
-        mid_rms = np.sqrt(np.mean(mid_band ** 2))
-        high_rms = np.sqrt(np.mean(high_band ** 2))
         low_gain = 1.0
         if low_rms > threshold_lin and low_rms > 1e-10:
             target_rms = threshold_lin + (low_rms - threshold_lin) / effective_ratio
             low_gain = target_rms / low_rms
+        y[ch] = low_band * low_gain
+        del low_band
+        mid_band = sosfiltfilt(sos_mid_low, data)
+        mid_band = sosfiltfilt(sos_mid_high, mid_band)
+        mid_rms = np.sqrt(np.mean(mid_band ** 2))
         mid_gain = 1.0
         if mid_rms > threshold_lin and mid_rms > 1e-10:
             target_rms = threshold_lin + (mid_rms - threshold_lin) / effective_ratio
             mid_gain = target_rms / mid_rms
+        y[ch] += mid_band * mid_gain
+        del mid_band
+        high_band = sosfiltfilt(sos_high, data)
+        high_rms = np.sqrt(np.mean(high_band ** 2))
         high_gain = 1.0
         if high_rms > threshold_lin and high_rms > 1e-10:
             target_rms = threshold_lin + (high_rms - threshold_lin) / effective_ratio
             high_gain = target_rms / high_rms
-        result[ch] = low_band * low_gain + mid_band * mid_gain + high_band * high_gain
+        y[ch] += high_band * high_gain
+        del high_band
+        del data
     makeup_gain_db = min(3.0, 0.8 * amount)
-    result *= 10 ** (makeup_gain_db / 20)
-    peak = np.max(np.abs(result))
+    y *= 10 ** (makeup_gain_db / 20)
+    peak = np.max(np.abs(y))
     if peak > 0.95:
-        result *= 0.95 / peak
-    return result
+        y *= 0.95 / peak
+    return y
 
 
 def _soft_peak_limit_1d(data, threshold):
@@ -214,28 +214,23 @@ def _soft_peak_limit(y, threshold=0.9):
     abs_max = np.max(np.abs(y))
     if abs_max <= threshold:
         return y
-    y_out = y.copy().astype(np.float64)
-    is_stereo = y_out.ndim > 1 and y_out.shape[0] == 2
-    if is_stereo:
-        for ch in range(y_out.shape[0]):
-            y_out[ch] = _soft_peak_limit_1d(y_out[ch], threshold)
-    else:
-        data = y_out.flatten() if y_out.ndim > 1 else y_out
-        data = _soft_peak_limit_1d(data, threshold)
-        if y_out.ndim > 1:
-            y_out = data.reshape(y_out.shape)
-        else:
-            y_out = data
-    return y_out.astype(y.dtype)
+    if y.ndim == 1:
+        return _soft_peak_limit_1d(y, threshold)
+    for ch in range(y.shape[0]):
+        y[ch] = _soft_peak_limit_1d(y[ch], threshold)
+    return y
 
 
 def _soft_transient_limit(y, sr, amount):
     if amount < 0.05:
         return y
-    result = y.copy()
+    if y.ndim == 1:
+        y_2d = y.reshape(1, -1)
+        _soft_transient_limit(y_2d, sr, amount)
+        return y
     frame_size = int(sr * 0.1)
     for ch in range(y.shape[0]):
-        data = result[ch]
+        data = y[ch]
         n_frames = len(data) // frame_size
         if n_frames < 4:
             continue
@@ -263,13 +258,13 @@ def _soft_transient_limit(y, sr, amount):
         for idx in anomaly_indices:
             start = idx * frame_size
             end = min(len(data), (idx + 1) * frame_size)
-            region = result[ch, start:end]
+            region = y[ch, start:end]
             peak = np.max(np.abs(region))
             if peak > 0:
                 target_peak = peak * global_gain
                 if target_peak < peak:
-                    result[ch, start:end] = _soft_peak_limit_1d(region, target_peak / peak * 0.98)
-    return result
+                    y[ch, start:end] = _soft_peak_limit_1d(region, target_peak / peak * 0.98)
+    return y
 
 
 def repair_audio(input_path: str, output_path: str, params: dict, progress_callback=None) -> dict:
@@ -291,13 +286,17 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
     else:
         working_sr = DESKTOP_WORKING_SR
 
-    from services.memory_guard import check_memory_before_repair
+    from services.memory_guard import check_memory_before_repair, should_use_float32
     working_sr = check_memory_before_repair(
         n_samples=y.shape[1],
         n_channels=y.shape[0],
         sr=original_sr,
         working_sr=working_sr,
     )
+
+    use_f32 = should_use_float32(y.shape[1], y.shape[0])
+    if use_f32:
+        y = y.astype(np.float32)
 
     if sr != working_sr:
         if progress_callback:
@@ -469,6 +468,9 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
         progress_callback(0.95, "v2.3 峰值限制...")
 
     y = _soft_peak_limit(y, threshold=0.9)
+
+    if y.dtype == np.float32:
+        y = y.astype(np.float64)
 
     if was_mono:
         y = y[0]

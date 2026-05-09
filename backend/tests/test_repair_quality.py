@@ -684,10 +684,10 @@ class TestMemoryGuard:
     def test_check_memory_raises_on_low_memory(self):
         from unittest.mock import patch
         from services.memory_guard import check_memory_before_repair
-        with patch("services.memory_guard.get_available_memory_bytes", return_value=500 * 1024 * 1024):
+        with patch("services.memory_guard.get_available_memory_bytes", return_value=100 * 1024 * 1024):
             with pytest.raises(MemoryError):
                 check_memory_before_repair(
-                    n_samples=48000 * 30,
+                    n_samples=48000 * 300,
                     n_channels=2,
                     sr=44100,
                     working_sr=48000,
@@ -719,3 +719,55 @@ class TestMemoryGuard:
         y_full = istft(S, hop_length=512, length=len(y))
         y_chunked = istft_chunked(S, hop_length=512, length=len(y), chunk_frames=256)
         np.testing.assert_allclose(y_full, y_chunked, rtol=1e-10, atol=1e-12)
+
+    def test_streaming_spectral_process_matches_full(self):
+        from services.dsp_utils import stft, istft, streaming_spectral_process
+        y = generate_speech_like(sr=SR, duration=5.0)
+        def process_fn(S, sr, n_fft, hop_length):
+            mag = np.abs(S)
+            mask = np.ones_like(mag)
+            threshold = np.median(mag) * 2
+            below = mag < threshold
+            mask[below] = mag[below] / (threshold + 1e-10)
+            return S * mask
+        S = stft(y, n_fft=2048, hop_length=512)
+        S_processed = process_fn(S, SR, 2048, 512)
+        y_full = istft(S_processed, hop_length=512, length=len(y))
+        y_streaming = streaming_spectral_process(
+            y, SR, process_fn, n_fft=2048, hop_length=512, chunk_seconds=2
+        )
+        min_len = min(len(y_full), len(y_streaming))
+        np.testing.assert_allclose(y_full[:min_len], y_streaming[:min_len], rtol=0.01, atol=0.01)
+
+    def test_streaming_with_analyze_fn(self):
+        from services.dsp_utils import streaming_spectral_process
+        y = generate_speech_like(sr=SR, duration=5.0)
+        def analyze_fn(y, sr):
+            from services.dsp_utils import stft
+            S = stft(y[:sr*2], n_fft=2048, hop_length=512)
+            return {"global_median": float(np.median(np.abs(S)))}
+        def process_fn(S, sr, n_fft, hop_length, global_stats):
+            threshold = global_stats["global_median"] * 2
+            mag = np.abs(S)
+            mask = np.ones_like(mag)
+            below = mag < threshold
+            mask[below] = mag[below] / (threshold + 1e-10)
+            return S * mask
+        result = streaming_spectral_process(
+            y, SR, process_fn, n_fft=2048, hop_length=512,
+            chunk_seconds=2, analyze_fn=analyze_fn
+        )
+        assert result.shape == y.shape
+        assert not np.allclose(result, y)
+
+    def test_should_use_float32(self):
+        from services.memory_guard import should_use_float32
+        assert not should_use_float32(48000 * 60, 2)
+        assert should_use_float32(48000 * 3600, 2)
+
+    def test_estimate_memory_float32_for_long_audio(self):
+        from services.memory_guard import estimate_repair_memory_bytes
+        est_short = estimate_repair_memory_bytes(48000 * 300, 2, 44100, 48000)
+        est_long = estimate_repair_memory_bytes(48000 * 3600, 2, 44100, 48000)
+        assert est_short < 1000 * 1024 * 1024
+        assert est_long < 4000 * 1024 * 1024
