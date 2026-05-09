@@ -1,6 +1,7 @@
 import numpy as np
 import soundfile as sf
-from scipy.signal import butter, filtfilt, resample_poly, sosfiltfilt
+from functools import lru_cache
+from scipy.signal import butter, resample_poly, sosfiltfilt
 from config import MOBILE_MODE
 import gc
 from services.audio_loader import load_audio_with_fallback
@@ -14,7 +15,7 @@ from services.repair.repair_v2_2.dynamics import apply_softness_v5
 from services.repair.repair_v2_2.music_type_detector import detect_music_type
 from services.repair.repair_v2_2.type_params import apply_music_type_params, get_repair_mode_params
 
-DESKTOP_WORKING_SR = 48000
+DESKTOP_WORKING_SR = 96000
 N_FFT = 2048
 HOP_LENGTH = 512
 
@@ -102,13 +103,13 @@ def _global_loudness_normalize(y, sr, target_lufs):
         for ch in range(y.shape[0]):
             data = result[ch].copy()
             if 60 < sr / 2:
-                b_hp, a_hp = butter(2, 60 / (sr / 2), btype='high')
-                data = filtfilt(b_hp, a_hp, data)
+                sos_hp = butter(2, 60 / (sr / 2), btype='high', output='sos')
+                data = sosfiltfilt(sos_hp, data)
             shelf_low = 1000 / (sr / 2)
             shelf_high = 4000 / (sr / 2)
             if shelf_high < 1.0 and shelf_high > shelf_low:
-                b_shelf, a_shelf = butter(2, [shelf_low, shelf_high], btype='band')
-                shelf_signal = filtfilt(b_shelf, a_shelf, data)
+                sos_shelf = butter(2, [shelf_low, shelf_high], btype='band', output='sos')
+                shelf_signal = sosfiltfilt(sos_shelf, data)
                 data = data + shelf_signal * (10 ** (4.0 / 20) - 1)
             rms_val = np.sqrt(np.mean(data ** 2))
             if rms_val < 1e-10:
@@ -124,6 +125,20 @@ def _global_loudness_normalize(y, sr, target_lufs):
                 gain_db = np.clip(target_lufs - current_lufs, -12, 6)
                 result[ch] *= 10 ** (gain_db / 20)
     return result
+
+
+@lru_cache(maxsize=32)
+def _multiband_sos_cache(sr, low_cross, high_cross):
+    nyq = sr / 2
+    w_low = low_cross / nyq
+    w_high = high_cross / nyq
+    if w_low >= 1.0 or w_high >= 1.0 or w_low <= 0 or w_high <= 0:
+        return None
+    sos_low = butter(4, w_low, btype='low', output='sos')
+    sos_mid_low = butter(4, w_low, btype='high', output='sos')
+    sos_mid_high = butter(4, w_high, btype='low', output='sos')
+    sos_high = butter(4, w_high, btype='high', output='sos')
+    return sos_low, sos_mid_low, sos_mid_high, sos_high
 
 
 def _transparent_multiband_compress(y, sr, amount, music_type):
@@ -144,12 +159,10 @@ def _transparent_multiband_compress(y, sr, amount, music_type):
     nyq = sr / 2
     w_low = low_cross / nyq
     w_high = high_cross / nyq
-    if w_low >= 1.0 or w_high >= 1.0 or w_low <= 0 or w_high <= 0:
+    cached = _multiband_sos_cache(sr, low_cross, high_cross)
+    if cached is None:
         return y
-    sos_low = butter(4, w_low, btype='low', output='sos')
-    sos_mid_low = butter(4, w_low, btype='high', output='sos')
-    sos_mid_high = butter(4, w_high, btype='low', output='sos')
-    sos_high = butter(4, w_high, btype='high', output='sos')
+    sos_low, sos_mid_low, sos_mid_high, sos_high = cached
     result = np.zeros_like(y)
     for ch in range(y.shape[0]):
         data = y[ch]
@@ -236,17 +249,18 @@ def _soft_transient_limit(y, sr, amount):
         anomaly = diff > threshold
         if not np.any(anomaly):
             continue
-        max_ratio = 1.0
-        for idx in np.where(anomaly)[0]:
-            left = smooth_rms[max(0, idx - 1)]
-            right = smooth_rms[min(n_frames - 1, idx + 1)]
-            target_rms = (left + right) / 2
-            current_rms = frame_rms[idx]
-            if current_rms > 0 and target_rms > 0:
-                ratio = target_rms / current_rms
-                max_ratio = min(max_ratio, ratio)
+        anomaly_indices = np.where(anomaly)[0]
+        left_rms = smooth_rms[np.maximum(anomaly_indices - 1, 0)]
+        right_rms = smooth_rms[np.minimum(anomaly_indices + 1, n_frames - 1)]
+        target_rms_arr = (left_rms + right_rms) / 2
+        current_rms_arr = frame_rms[anomaly_indices]
+        valid = (current_rms_arr > 0) & (target_rms_arr > 0)
+        if not np.any(valid):
+            continue
+        ratios = target_rms_arr[valid] / current_rms_arr[valid]
+        max_ratio = float(np.min(ratios)) if len(ratios) > 0 else 1.0
         global_gain = max_ratio * amount * 0.3 + 1.0 * (1 - amount * 0.3)
-        for idx in np.where(anomaly)[0]:
+        for idx in anomaly_indices:
             start = idx * frame_size
             end = min(len(data), (idx + 1) * frame_size)
             region = result[ch, start:end]
@@ -266,7 +280,7 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
         was_mono = True
 
     original_sr = sr
-    target_sr = params.get("sample_rate", sr)
+    target_sr = params.get("sample_rate", None)
     original_duration = round(y.shape[1] / sr, 2)
 
     quality_mode = params.get("quality", "standard")
@@ -275,7 +289,7 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
     if MOBILE_MODE:
         working_sr = sr
     else:
-        working_sr = min(DESKTOP_WORKING_SR, sr) if sr > DESKTOP_WORKING_SR else sr
+        working_sr = DESKTOP_WORKING_SR
 
     if sr != working_sr:
         if progress_callback:
@@ -326,7 +340,6 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
     def advance(label):
         nonlocal step_idx
         step_idx += 1
-        gc.collect()
         if progress_callback:
             progress_callback(0.05 + 0.85 * step_idx / total_steps, f"v2.3 {label}...")
 
@@ -427,15 +440,15 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
             issues_found.append("柔化处理v5")
         advance("柔化处理")
 
-    if target_sr != sr:
+    if target_sr is not None and target_sr != sr:
         if progress_callback:
             progress_callback(0.92, f"v2.3 重采样到 {target_sr//1000}kHz...")
         if target_sr < sr:
             nyquist = target_sr / 2
             cutoff = nyquist * 0.95
-            b, a = butter(6, cutoff / (sr / 2), btype='low')
+            sos = butter(6, cutoff / (sr / 2), btype='low', output='sos')
             for ch in range(y.shape[0]):
-                y[ch] = filtfilt(b, a, y[ch])
+                y[ch] = sosfiltfilt(sos, y[ch])
         y_resampled = np.zeros((y.shape[0], int(y.shape[1] * target_sr / sr)))
         for ch in range(y.shape[0]):
             resampled = resample_poly(y[ch], target_sr, sr)

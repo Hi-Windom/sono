@@ -161,6 +161,17 @@ def compute_per_step_snr(input_signal, step_fn, *args):
     return compute_scale_adjusted_snr(inp, out)
 
 
+def benchmark_step(step_fn, *args, repeat=3):
+    import time
+    times = []
+    for _ in range(repeat):
+        t0 = time.perf_counter()
+        step_fn(*args)
+        t1 = time.perf_counter()
+        times.append(t1 - t0)
+    return min(times)
+
+
 ACTIVE_VERSIONS = ["v2.0", "v2.1", "v2.2", "v2.2a", "v2.3", "v2.3a"]
 
 

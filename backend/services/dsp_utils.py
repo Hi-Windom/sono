@@ -34,10 +34,10 @@ def istft(S, hop_length=512, length=None, window='hann'):
     frames = np.fft.irfft(S.T, n=n_fft, axis=1)
     windowed = frames * fft_window[np.newaxis, :]
     win_sq = fft_window ** 2
-    for i in range(n_frames):
-        start = i * hop_length
-        y[start:start + n_fft] += windowed[i]
-        window_sum[start:start + n_fft] += win_sq
+    frame_starts = np.arange(n_frames) * hop_length
+    for i in range(n_fft):
+        y[frame_starts + i] += windowed[:, i]
+        window_sum[frame_starts + i] += win_sq[i]
     nonzero = window_sum > 1e-10
     y[nonzero] /= window_sum[nonzero]
     pad_length = n_fft // 2

@@ -14,6 +14,7 @@ from backend.tests.conftest import (
     compute_hf_noise,
     count_flat_top_samples,
     compute_per_step_snr,
+    benchmark_step,
     SR,
 )
 
@@ -77,6 +78,9 @@ class TestRepairQualityBaseline:
     def test_scale_adjusted_snr(self, repair_fn, default_params, tmp_wav_dir, repair_version):
         y = generate_speech_like(sr=SR, duration=2.0)
         y_out, sr_out = _run_repair_and_read(repair_fn, y, default_params, tmp_wav_dir)
+        if sr_out != SR:
+            from scipy.signal import resample_poly
+            y_out = resample_poly(y_out, SR, sr_out)
         min_len = min(len(y), len(y_out))
         snr = compute_scale_adjusted_snr(y[:min_len], y_out[:min_len])
         assert snr > 5.0, (
@@ -109,9 +113,11 @@ class TestRepairQualityBaseline:
     def test_output_length_preserved(self, repair_fn, default_params, tmp_wav_dir, repair_version):
         y = generate_speech_like(sr=SR, duration=2.0)
         y_out, sr_out = _run_repair_and_read(repair_fn, y, default_params, tmp_wav_dir)
-        ratio = len(y_out) / len(y)
+        duration_in = len(y) / SR
+        duration_out = len(y_out) / sr_out
+        ratio = duration_out / duration_in
         assert 0.95 < ratio < 1.05, (
-            f"[{repair_version}] Length ratio: {ratio:.3f} (in: {len(y)}, out: {len(y_out)})"
+            f"[{repair_version}] Duration ratio: {ratio:.3f} (in: {duration_in:.2f}s, out: {duration_out:.2f}s)"
         )
 
 
@@ -478,3 +484,176 @@ class TestV23aPerStepQuality:
             f"de_ess gain varies: mean={ratio_mean:.6f}, std={ratio_std:.6f}. "
             f"Should use global constant attenuation."
         )
+
+
+class TestV23aResample:
+
+    def test_v23a_upsample_to_48k(self, tmp_wav_dir):
+        from services.repair.repair_v2_3a import repair_audio
+        from services.audio_repair import ALGORITHM_VERSIONS
+        y = generate_speech_like(sr=22050, duration=1.0)
+        input_path = write_temp_wav(y, 22050, tmp_wav_dir)
+        output_path = str(tmp_wav_dir / "output_v23a.wav")
+        params = dict(ALGORITHM_VERSIONS["v2.3a"]["default_params"])
+        repair_audio(input_path, output_path, params)
+        import soundfile as sf
+        y_out, sr_out = sf.read(output_path)
+        assert sr_out == 48000, f"v2.3a output sr should be 48000, got {sr_out}"
+
+    def test_v23a_output_resample(self, tmp_wav_dir):
+        from services.repair.repair_v2_3a import repair_audio
+        from services.audio_repair import ALGORITHM_VERSIONS
+        y = generate_speech_like(sr=44100, duration=1.0)
+        input_path = write_temp_wav(y, 44100, tmp_wav_dir)
+        output_path = str(tmp_wav_dir / "output_v23a_22k.wav")
+        params = dict(ALGORITHM_VERSIONS["v2.3a"]["default_params"])
+        params["sample_rate"] = 22050
+        repair_audio(input_path, output_path, params)
+        import soundfile as sf
+        y_out, sr_out = sf.read(output_path)
+        assert sr_out == 22050, f"v2.3a output sr should be 22050, got {sr_out}"
+
+    def test_v23a_no_resample_when_same(self, tmp_wav_dir):
+        from services.repair.repair_v2_3a import repair_audio
+        from services.audio_repair import ALGORITHM_VERSIONS
+        y = generate_speech_like(sr=48000, duration=1.0)
+        input_path = write_temp_wav(y, 48000, tmp_wav_dir)
+        output_path = str(tmp_wav_dir / "output_v23a_native.wav")
+        params = dict(ALGORITHM_VERSIONS["v2.3a"]["default_params"])
+        repair_audio(input_path, output_path, params)
+        import soundfile as sf
+        y_out, sr_out = sf.read(output_path)
+        assert sr_out == 48000, f"v2.3a output sr should stay 48000, got {sr_out}"
+
+    def test_v23_upsample_to_96k(self, tmp_wav_dir):
+        import unittest.mock as mock
+        import os
+        from services.repair.repair_v2_3 import repair_audio
+        from services.audio_repair import ALGORITHM_VERSIONS
+        y = generate_speech_like(sr=44100, duration=1.0)
+        input_path = write_temp_wav(y, 44100, tmp_wav_dir)
+        output_path = str(tmp_wav_dir / "output_v23.wav")
+        params = dict(ALGORITHM_VERSIONS["v2.3"]["default_params"])
+        with mock.patch.dict(os.environ, {"MOBILE_MODE": "0"}):
+            with mock.patch("config.MOBILE_MODE", False):
+                repair_audio(input_path, output_path, params)
+        import soundfile as sf
+        y_out, sr_out = sf.read(output_path)
+        assert sr_out == 96000, f"v2.3 output sr should be 96000, got {sr_out}"
+
+
+class TestV23Performance:
+
+    @pytest.fixture(autouse=True)
+    def import_v23_functions(self):
+        from services.repair.repair_v2_3.core import (
+            _tanh_declip,
+            _diff_clamp_depop,
+            _global_loudness_normalize,
+            _transparent_multiband_compress,
+            _soft_peak_limit,
+            _soft_transient_limit,
+        )
+        self._tanh_declip = _tanh_declip
+        self._diff_clamp_depop = _diff_clamp_depop
+        self._global_loudness_normalize = _global_loudness_normalize
+        self._transparent_multiband_compress = _transparent_multiband_compress
+        self._soft_peak_limit = _soft_peak_limit
+        self._soft_transient_limit = _soft_transient_limit
+
+    def test_declip_performance(self):
+        y = generate_with_clipping(sr=SR, duration=2.0).reshape(1, -1)
+        elapsed = benchmark_step(self._tanh_declip, y, 0.5)
+        assert elapsed < 2.0, f"declip too slow: {elapsed:.3f}s"
+
+    def test_depop_performance(self):
+        y = generate_with_pops(sr=SR, duration=2.0).reshape(1, -1)
+        elapsed = benchmark_step(self._diff_clamp_depop, y, SR, 0.5)
+        assert elapsed < 2.0, f"depop too slow: {elapsed:.3f}s"
+
+    def test_loudness_norm_performance(self):
+        y = generate_speech_like(sr=SR, duration=2.0).reshape(1, -1)
+        elapsed = benchmark_step(self._global_loudness_normalize, y, SR, -16.0)
+        assert elapsed < 2.0, f"loudness_norm too slow: {elapsed:.3f}s"
+
+    def test_compress_performance(self):
+        y = generate_speech_like(sr=SR, duration=2.0).reshape(1, -1)
+        elapsed = benchmark_step(self._transparent_multiband_compress, y, SR, 0.5, "generic")
+        assert elapsed < 2.0, f"compress too slow: {elapsed:.3f}s"
+
+    def test_peak_limit_performance(self):
+        y = (generate_speech_like(sr=SR, duration=2.0) * 0.8).reshape(1, -1)
+        elapsed = benchmark_step(self._soft_peak_limit, y, 0.9)
+        assert elapsed < 2.0, f"peak_limit too slow: {elapsed:.3f}s"
+
+    def test_transient_performance(self):
+        y = generate_speech_like(sr=SR, duration=2.0).reshape(1, -1)
+        elapsed = benchmark_step(self._soft_transient_limit, y, SR, 0.5)
+        assert elapsed < 2.0, f"transient too slow: {elapsed:.3f}s"
+
+
+class TestV23aPerformance:
+
+    @pytest.fixture(autouse=True)
+    def import_v23a_functions(self):
+        from services.repair.repair_v2_3a.core import (
+            _simple_declip,
+            _simple_depop,
+            _spectral_denoise,
+            _de_ess,
+            _loudness_normalize,
+            _transparent_compress,
+            _soft_peak_limit,
+        )
+        self._simple_declip = _simple_declip
+        self._simple_depop = _simple_depop
+        self._spectral_denoise = _spectral_denoise
+        self._de_ess = _de_ess
+        self._loudness_normalize = _loudness_normalize
+        self._transparent_compress = _transparent_compress
+        self._soft_peak_limit = _soft_peak_limit
+
+    def test_declip_performance(self):
+        y = generate_with_clipping(sr=SR, duration=2.0)
+        elapsed = benchmark_step(self._simple_declip, y, 0.5)
+        assert elapsed < 2.0, f"declip too slow: {elapsed:.3f}s"
+
+    def test_depop_performance(self):
+        y = generate_with_pops(sr=SR, duration=2.0)
+        elapsed = benchmark_step(self._simple_depop, y, SR, 0.5)
+        assert elapsed < 2.0, f"depop too slow: {elapsed:.3f}s"
+
+    def test_spectral_denoise_performance(self):
+        y = generate_speech_like(sr=SR, duration=2.0)
+        elapsed = benchmark_step(self._spectral_denoise, y, SR, 0.3)
+        assert elapsed < 5.0, f"spectral_denoise too slow: {elapsed:.3f}s"
+
+    def test_de_ess_performance(self):
+        y = generate_speech_like(sr=SR, duration=2.0)
+        elapsed = benchmark_step(self._de_ess, y, SR, 0.3)
+        assert elapsed < 2.0, f"de_ess too slow: {elapsed:.3f}s"
+
+    def test_loudness_norm_performance(self):
+        y = generate_speech_like(sr=SR, duration=2.0)
+        elapsed = benchmark_step(self._loudness_normalize, y, SR, -16.0)
+        assert elapsed < 2.0, f"loudness_norm too slow: {elapsed:.3f}s"
+
+    def test_compress_performance(self):
+        y = generate_speech_like(sr=SR, duration=2.0)
+        elapsed = benchmark_step(self._transparent_compress, y, SR, 0.5)
+        assert elapsed < 2.0, f"compress too slow: {elapsed:.3f}s"
+
+    def test_peak_limit_performance(self):
+        y = generate_speech_like(sr=SR, duration=2.0) * 0.8
+        elapsed = benchmark_step(self._soft_peak_limit, y, 0.9)
+        assert elapsed < 2.0, f"peak_limit too slow: {elapsed:.3f}s"
+
+
+class TestIstftPerformance:
+
+    def test_istft_performance(self):
+        from services.dsp_utils import stft, istft
+        y = generate_speech_like(sr=SR, duration=5.0)
+        S = stft(y, n_fft=2048, hop_length=512)
+        elapsed = benchmark_step(istft, S, 512, len(y))
+        assert elapsed < 1.0, f"istft too slow: {elapsed:.3f}s"

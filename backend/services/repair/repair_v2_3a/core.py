@@ -1,9 +1,13 @@
 import numpy as np
 import gc
+from functools import lru_cache
 
-from scipy.signal import butter, sosfiltfilt
+from scipy.signal import butter, sosfiltfilt, resample_poly
 
 from services.audio_loader import load_audio_with_fallback
+from services.dsp_utils import stft, istft
+
+MOBILE_WORKING_SR = 48000
 
 
 def _detect_music_type_fast(y, sr):
@@ -129,14 +133,24 @@ def _simple_depop_1d(data, sr, amount):
 
     y_out = data.copy()
     indices = np.where(pop_mask)[0]
-    for idx in indices:
-        if idx > 0 and idx < len(y_out) - 1:
-            prev = y_out[idx - 1]
-            next_val = y_out[idx + 1]
-            actual_diff = y_out[idx] - prev
-            if abs(actual_diff) > threshold:
-                clamped = prev + np.sign(actual_diff) * threshold
-                y_out[idx] = 0.5 * (clamped + next_val)
+    valid = (indices > 0) & (indices < len(y_out) - 1)
+    indices = indices[valid]
+    if len(indices) == 0:
+        return y_out
+
+    prev_vals = y_out[indices - 1]
+    next_vals = y_out[indices + 1]
+    actual_diffs = y_out[indices] - prev_vals
+    over_mask = np.abs(actual_diffs) > threshold
+    indices = indices[over_mask]
+    if len(indices) == 0:
+        return y_out
+
+    prev_vals = y_out[indices - 1]
+    next_vals = y_out[indices + 1]
+    actual_diffs = y_out[indices] - prev_vals
+    clamped = prev_vals + np.sign(actual_diffs) * threshold
+    y_out[indices] = 0.5 * (clamped + next_vals)
     return y_out
 
 
@@ -220,8 +234,6 @@ def _spectral_denoise(y, sr, amount):
 
 
 def _spectral_denoise_1d(data, sr, amount):
-    from services.dsp_utils import stft, istft
-
     n_fft = 2048
     hop_length = 512
 
@@ -264,6 +276,16 @@ def _de_ess(y, sr, amount):
     return _de_ess_1d(data, sr, amount).reshape(y.shape)
 
 
+@lru_cache(maxsize=32)
+def _de_ess_bandpass_sos(sr, low_hz, high_hz):
+    nyq = sr / 2
+    norm_low = low_hz / nyq
+    norm_high = min(high_hz, nyq * 0.95) / nyq
+    if norm_low >= norm_high or norm_high >= 1.0:
+        return None
+    return butter(4, [norm_low, norm_high], btype='band', output='sos')
+
+
 def _de_ess_1d(data, sr, amount):
     nyq = sr / 2
     low_hz = 4000
@@ -274,7 +296,9 @@ def _de_ess_1d(data, sr, amount):
     if low_hz >= high_hz:
         return data
 
-    sos = butter(4, [low_hz / nyq, high_hz / nyq], btype='band', output='sos')
+    sos = _de_ess_bandpass_sos(sr, low_hz, high_hz)
+    if sos is None:
+        return data
     high_band = sosfiltfilt(sos, data)
     low_band = data - high_band
 
@@ -305,15 +329,27 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
         was_mono = True
 
     original_sr = sr
+    target_sr = params.get("sample_rate", None)
     original_duration = round(y.shape[1] / sr, 2)
+
+    working_sr = MOBILE_WORKING_SR
+    if sr != working_sr:
+        if progress_callback:
+            progress_callback(0.02, f"v2.3a 重采样到 {working_sr//1000}kHz...")
+        target_len = int(y.shape[1] * working_sr / sr)
+        y_new = np.zeros((y.shape[0], target_len))
+        for ch in range(y.shape[0]):
+            resampled = resample_poly(y[ch], working_sr, sr)
+            y_new[ch, :len(resampled)] = resampled[:target_len]
+        y = y_new
+        sr = working_sr
+        gc.collect()
 
     if progress_callback:
         progress_callback(0.05, "v2.3a 快速分析...")
 
     music_type, confidence = _detect_music_type_fast(y, sr)
     issues_found = [f"类型检测: {music_type} ({confidence:.0%})"]
-
-    gc.collect()
 
     if progress_callback:
         progress_callback(0.15, f"v2.3a {music_type} 处理中...")
@@ -325,8 +361,6 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
     if params.get("de_pop", 0) > 0:
         y = _simple_depop(y, sr, params["de_pop"])
         issues_found.append("爆音修复")
-
-    gc.collect()
 
     if params.get("noise_reduction", 0) > 0:
         if progress_callback:
@@ -340,7 +374,6 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
             progress_callback(0.40, "v2.3a 齿音抑制...")
         y = _de_ess(y, sr, params["de_essing"])
         issues_found.append("齿音抑制")
-        gc.collect()
 
     y = _loudness_normalize(y, sr, -16.0)
     issues_found.append("响度归一化")
@@ -350,16 +383,31 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
             progress_callback(0.55, "v2.3a 动态压缩...")
         y = _transparent_compress(y, sr, params["dynamic_range"])
         issues_found.append("动态压缩")
-        gc.collect()
 
     y = _remove_dc(y, sr)
     issues_found.append("直流移除")
-    gc.collect()
 
     if progress_callback:
         progress_callback(0.85, "v2.3a 峰值限制...")
     y = _soft_peak_limit(y, threshold=0.9)
     issues_found.append("峰值限制")
+
+    if target_sr is not None and target_sr != sr:
+        if progress_callback:
+            progress_callback(0.88, f"v2.3a 重采样到 {target_sr//1000}kHz...")
+        if target_sr < sr:
+            nyquist = target_sr / 2
+            cutoff = nyquist * 0.95
+            sos = butter(6, cutoff / (sr / 2), btype='low', output='sos')
+            for ch in range(y.shape[0]):
+                y[ch] = sosfiltfilt(sos, y[ch])
+        y_resampled = np.zeros((y.shape[0], int(y.shape[1] * target_sr / sr)))
+        for ch in range(y.shape[0]):
+            resampled = resample_poly(y[ch], target_sr, sr)
+            y_resampled[ch, :len(resampled)] = resampled[:y_resampled.shape[1]]
+        y = y_resampled
+        sr = target_sr
+        gc.collect()
 
     if was_mono:
         y = y[0]
@@ -382,8 +430,6 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
         if y_out.dtype != np.int16:
             y_out = np.clip(y_out * 32767, -32768, 32767).astype(np.int16)
         wavfile.write(output_path, sr, y_out)
-
-    gc.collect()
 
     if progress_callback:
         progress_callback(1.0, "v2.3a 修复完成")
