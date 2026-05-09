@@ -61,6 +61,7 @@ export default function LandingPage() {
   const [cleaningStep, setCleaningStep] = useState('');
   const [algorithmVersions, setAlgorithmVersions] = useState<{ name: string; description?: string }[]>([]);
   const [detectorVersions, setDetectorVersions] = useState<{ name: string; description?: string }[]>([]);
+  const [deployDays, setDeployDays] = useState<number | null>(null);
 
   const fetchCacheInfo = async () => {
     setLoading(true);
@@ -79,9 +80,10 @@ export default function LandingPage() {
 
   const fetchVersions = async () => {
     try {
-      const [algRes, detRes] = await Promise.all([
+      const [algRes, detRes, deployRes] = await Promise.all([
         fetch('/api/v1/algorithm-versions'),
         fetch('/api/v1/detector-versions'),
+        fetch('/api/v1/deploy-info'),
       ]);
       if (algRes.ok) {
         const algData = await algRes.json();
@@ -90,6 +92,10 @@ export default function LandingPage() {
       if (detRes.ok) {
         const detData = await detRes.json();
         setDetectorVersions(detData.versions || []);
+      }
+      if (deployRes.ok) {
+        const deployData = await deployRes.json();
+        setDeployDays(deployData.deploy_days ?? null);
       }
     } catch (err) {
       console.error('获取版本信息失败:', err);
@@ -510,8 +516,8 @@ export default function LandingPage() {
         {/* Stats Section */}
         <div className="mt-16 grid grid-cols-2 md:grid-cols-4 gap-6 max-w-4xl mx-auto">
           <div className="text-center p-4 bg-white/5 rounded-xl">
-            <div className="text-3xl font-bold text-cyan-400 mb-1">{algorithmVersions.length > 0 ? algorithmVersions[0].name : '-'}</div>
-            <div className="text-sm text-gray-400">最新算法版本</div>
+            <div className="text-3xl font-bold text-cyan-400 mb-1">{deployDays !== null ? `${deployDays}` : '-'}</div>
+            <div className="text-sm text-gray-400">已部署天数</div>
           </div>
           <div className="text-center p-4 bg-white/5 rounded-xl">
             <div className="text-3xl font-bold text-purple-400 mb-1">{algorithmVersions.length || '-'}</div>

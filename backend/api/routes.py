@@ -4,7 +4,7 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile, WebSocket,
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from config import ALLOWED_EXTENSIONS, MAX_UPLOAD_SIZE, MOBILE_MODE, OUTPUT_DIR, UPLOAD_DIR
+from config import ALLOWED_EXTENSIONS, MAX_UPLOAD_SIZE, MOBILE_MODE, OUTPUT_DIR, UPLOAD_DIR, DEPLOY_TIME_FILE
 from database import create_task, find_task_by_hash, get_queue_status, get_task
 from services.task_manager import generate_task_id, submit_detect_task, submit_repair_task, cancel_task
 from services.audio_repair import get_available_versions
@@ -108,6 +108,21 @@ async def list_algorithm_versions():
 @router.get("/detector-versions")
 async def list_detector_versions():
     return {"versions": get_detector_versions()}
+
+@router.get("/deploy-info")
+async def deploy_info():
+    from datetime import datetime, timezone
+    deploy_time = None
+    deploy_days = None
+    try:
+        with open(DEPLOY_TIME_FILE, "r") as f:
+            content = f.read().strip()
+        dt = datetime.fromisoformat(content)
+        deploy_time = content
+        deploy_days = (datetime.now(timezone.utc) - dt).days
+    except (FileNotFoundError, ValueError, OSError):
+        pass
+    return {"deploy_time": deploy_time, "deploy_days": deploy_days}
 
 class CheckHashRequest(BaseModel):
     file_hash: str
