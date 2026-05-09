@@ -12,6 +12,7 @@ interface DownloadButtonProps {
     output_bit_depth: number;
     duration: number;
     channels: number;
+    algorithm_version?: string;
   } | null;
   browserBufferInfo?: {
     sampleRate: number;
@@ -79,7 +80,7 @@ export function DownloadButton({
               {backendAlgorithmVersion && (
                 <div className="flex justify-between text-xs">
                   <span className="text-gray-400">修复算法</span>
-                  <span className="text-cyan-400">{backendAlgorithmVersion}</span>
+                  <span className="text-cyan-400">{backendAlgorithmVersion}{backendRepairResult?.algorithm_version && backendRepairResult.algorithm_version !== backendAlgorithmVersion ? ` (${backendRepairResult.algorithm_version})` : ''}</span>
                 </div>
               )}
               {backendCompletedAt && (

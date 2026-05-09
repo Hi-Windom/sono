@@ -56,6 +56,8 @@ interface BackendRepairResult {
   output_bit_depth: number;
   duration: number;
   channels: number;
+  algorithm_version?: string;
+  waveform_peaks?: number[][];
 }
 
 interface ProgressEvent {

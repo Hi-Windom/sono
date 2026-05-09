@@ -497,6 +497,7 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
         "music_type": music_type,
         "confidence": confidence,
         "quality_mode": quality_mode,
+        "algorithm_version": "v2.3",
     }
 
 

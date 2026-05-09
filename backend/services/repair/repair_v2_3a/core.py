@@ -224,13 +224,24 @@ def _spectral_denoise(y, sr, amount):
 
     is_stereo = y.ndim > 1 and y.shape[0] == 2
     if is_stereo:
-        ch_out = np.zeros_like(y)
         for ch in range(y.shape[0]):
-            ch_out[ch] = _spectral_denoise_1d(y[ch], sr, amount)
-        return ch_out
+            result = _spectral_denoise_1d(y[ch], sr, amount)
+            if result.dtype != y.dtype:
+                result = result.astype(y.dtype)
+            y[ch] = result
+        return y
 
-    data = y.flatten() if y.ndim > 1 else y
-    return _spectral_denoise_1d(data, sr, amount).reshape(y.shape)
+    if y.ndim > 1:
+        result = _spectral_denoise_1d(y[0], sr, amount)
+        if result.dtype != y.dtype:
+            result = result.astype(y.dtype)
+        y[0] = result
+    else:
+        result = _spectral_denoise_1d(y, sr, amount)
+        if result.dtype != y.dtype:
+            result = result.astype(y.dtype)
+        y[:] = result
+    return y
 
 
 def _spectral_denoise_1d(data, sr, amount):
@@ -514,4 +525,5 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
         "music_type": music_type,
         "confidence": confidence,
         "quality_mode": params.get("quality", "standard"),
+        "algorithm_version": "v2.3a",
     }

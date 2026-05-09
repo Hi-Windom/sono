@@ -8,6 +8,8 @@ import time
 import traceback
 import uuid
 from concurrent.futures import Future, ThreadPoolExecutor, TimeoutError as FutureTimeoutError
+
+import numpy as np
 from typing import Any
 
 from config import MAX_WORKERS, MOBILE_MODE, OUTPUT_DIR
@@ -17,6 +19,36 @@ from services.audio_repair import ALGORITHM_VERSIONS, DEFAULT_VERSION, repair_au
 from services.ws_manager import ws_manager
 
 logger = logging.getLogger(__name__)
+
+WAVEFORM_PEAKS_COUNT = 2000
+
+
+def _generate_waveform_peaks(output_path: str, num_peaks: int = WAVEFORM_PEAKS_COUNT) -> list[list[float]] | None:
+    try:
+        import soundfile as sf
+        with sf.SoundFile(output_path) as f:
+            n_frames = f.frames
+            if n_frames == 0:
+                return None
+            samples_per_peak = max(1, n_frames // num_peaks)
+            peaks = []
+            for _ in range(num_peaks):
+                remaining = n_frames - f.tell()
+                if remaining <= 0:
+                    break
+                to_read = min(samples_per_peak, remaining)
+                block = f.read(to_read, dtype='float32')
+                if block.size == 0:
+                    break
+                if block.ndim == 1:
+                    peaks.append([float(np.min(block)), float(np.max(block))])
+                else:
+                    mono = np.mean(block, axis=1)
+                    peaks.append([float(np.min(mono)), float(np.max(mono))])
+            return peaks if peaks else None
+    except Exception as e:
+        logger.warning(f"[waveform] 生成波形峰值失败: {e}")
+        return None
 
 _loop = None
 
@@ -269,6 +301,9 @@ def _run_repair(task_id: str, audio_path: str, params: dict[str, Any], mobile_mo
         if os.path.exists(output_path):
             output_size = os.path.getsize(output_path)
             logger.info(f"[repair] 输出文件 task_id={task_id} size={output_size/1024/1024:.2f}MB")
+            waveform_peaks = _generate_waveform_peaks(output_path)
+            if waveform_peaks:
+                repair_result["waveform_peaks"] = waveform_peaks
 
         update_task(
             task_id,

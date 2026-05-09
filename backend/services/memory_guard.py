@@ -22,7 +22,7 @@ def get_available_memory_bytes():
 def should_use_float32(n_samples, n_channels):
     return n_samples * n_channels > FLOAT32_THRESHOLD_SAMPLES
 
-def estimate_repair_memory_bytes(n_samples, n_channels, sr, working_sr):
+def estimate_repair_memory_bytes(n_samples, n_channels, sr, working_sr, algorithm_version=None):
     upsampled_samples = int(n_samples * working_sr / sr)
     use_f32 = should_use_float32(n_samples, n_channels)
     elem_size = 4 if use_f32 else 8
@@ -31,6 +31,13 @@ def estimate_repair_memory_bytes(n_samples, n_channels, sr, working_sr):
     chunk_stft_bytes = 1025 * (working_sr * 10 // 512 + 1) * 16
 
     peak_temp = upsampled_samples * elem_size + chunk_stft_bytes
+
+    if algorithm_version in ("v2.2", "v2.3"):
+        peak_temp += upsampled_samples * elem_size * 0.5
+    elif algorithm_version in ("v2.2a", "v2.3a"):
+        peak_temp += upsampled_samples * elem_size * 0.15
+    elif algorithm_version in ("v1.0", "v1.1", "v1.2"):
+        peak_temp += upsampled_samples * elem_size * 0.3
 
     python_overhead = 1.3
     safety = 1.2

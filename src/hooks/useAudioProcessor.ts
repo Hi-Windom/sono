@@ -144,8 +144,12 @@ export function useAudioProcessor() {
     output_bit_depth: number;
     duration: number;
     channels: number;
+    algorithm_version?: string;
+    waveform_peaks?: number[][];
     completed_at?: string;
   } | null>(null);
+
+  const [backendWaveformPeaks, setBackendWaveformPeaks] = useState<number[][] | null>(null);
   const [browserRepairInfo, setBrowserRepairInfo] = useState<{
     completedAt: string;
     algorithmVersion: string;
@@ -679,6 +683,7 @@ export function useAudioProcessor() {
     setTaskId(null);
     taskIdRef.current = null;
     setRepairResult(null);
+    setBackendWaveformPeaks(null);
     setBackendAvailable(false);
     setBackendPreviewUrl(null);
 
@@ -971,6 +976,9 @@ export function useAudioProcessor() {
                 ...cacheResult.repair_result,
                 completed_at: new Date().toISOString(),
               });
+              if (cacheResult.repair_result.waveform_peaks) {
+                setBackendWaveformPeaks(cacheResult.repair_result.waveform_peaks);
+              }
             }
 
             if (cacheResult.detection_result) {
@@ -1244,6 +1252,9 @@ export function useAudioProcessor() {
           ...effectiveBackendResult.value.repairResult,
           completed_at: new Date().toISOString(),
         });
+        if (effectiveBackendResult.value.repairResult.waveform_peaks) {
+          setBackendWaveformPeaks(effectiveBackendResult.value.repairResult.waveform_peaks);
+        }
       }
       anySuccess = true;
 
@@ -2095,6 +2106,7 @@ export function useAudioProcessor() {
     runBackendDiag,
     wavInfo,
     repairResult,
+    backendWaveformPeaks,
     algorithmVersion,
     availableAlgorithms,
     applyAlgorithmVersion,

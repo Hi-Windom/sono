@@ -35,14 +35,19 @@ async def memory_info(request: MemoryInfoRequest):
         }
     available = get_available_memory_bytes()
     n_samples = int(request.duration * request.sample_rate)
-    if request.algorithm_version == "v2.3a":
+    if request.algorithm_version == "v1.2":
+        working_sr = 96000
+    elif request.algorithm_version in ("v1.0", "v1.1", "v2.2a"):
+        working_sr = request.sample_rate
+    elif request.algorithm_version == "v2.3a":
         working_sr = 48000
     elif MOBILE_MODE:
         working_sr = request.sample_rate
     else:
         working_sr = 48000
     estimated = estimate_repair_memory_bytes(
-        n_samples, request.channels, request.sample_rate, working_sr
+        n_samples, request.channels, request.sample_rate, working_sr,
+        algorithm_version=request.algorithm_version
     )
     is_sufficient = True
     if available is not None:
@@ -465,12 +470,24 @@ async def lookup_repair_cache(req: RepairCacheLookupRequest):
     if not cached:
         return {"found": False}
 
+    repair_result = cached.get("repair_result")
+
+    if repair_result and not repair_result.get("waveform_peaks"):
+        output_path = cached.get("output_path", "")
+        if output_path and os.path.exists(output_path):
+            from services.task_manager import _generate_waveform_peaks
+            peaks = _generate_waveform_peaks(output_path)
+            if peaks:
+                repair_result["waveform_peaks"] = peaks
+                from database import update_task
+                update_task(cached["id"], repair_result=repair_result)
+
     return {
         "found": True,
         "task_id": cached["id"],
         "output_path": cached.get("output_path", ""),
         "output_size": cached.get("output_size", 0),
-        "repair_result": cached.get("repair_result"),
+        "repair_result": repair_result,
         "detection_result": cached.get("detection_result"),
         "repaired_detection_result": cached.get("repaired_detection_result"),
     }
