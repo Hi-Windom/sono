@@ -174,13 +174,30 @@ async def upload_audio(file: UploadFile = File(...), file_hash: str = Form("")):
             raise HTTPException(status_code=413, detail=f"文件过大，最大支持 {MAX_UPLOAD_SIZE // 1024 // 1024}MB")
         f.write(content)
 
-    create_task(task_id, file.filename or "audio", upload_path, {}, file_hash, len(content))
+    file_size = len(content)
+
+    try:
+        disk_usage = os.statvfs(UPLOAD_DIR)
+        available_bytes = disk_usage.f_bavail * disk_usage.f_frsize
+        min_required = file_size * 2
+        if available_bytes < min_required:
+            os.remove(upload_path)
+            available_mb = available_bytes // 1024 // 1024
+            required_mb = min_required // 1024 // 1024
+            raise HTTPException(
+                status_code=507,
+                detail=f"存储空间不足：可用 {available_mb}MB，至少需要 {required_mb}MB（文件大小的2倍）"
+            )
+    except OSError:
+        pass
+
+    create_task(task_id, file.filename or "audio", upload_path, {}, file_hash, file_size)
     logger.info(f"[/upload] task_id={task_id} file_hash={file_hash or 'none'}")
 
     return {
         "task_id": task_id,
         "filename": file.filename,
-        "size": len(content),
+        "size": file_size,
     }
 
 class DetectRequest(BaseModel):

@@ -10,7 +10,7 @@ DEPLOY_TIME_FILE = os.path.join(BASE_DIR, "storage", "deploy_time")
 
 HOST = os.getenv("HOST", "0.0.0.0")
 PORT = int(os.getenv("PORT", "8000"))
-MAX_UPLOAD_SIZE = 200 * 1024 * 1024
+MAX_UPLOAD_SIZE = 1 * 1024 * 1024 * 1024
 
 ALLOWED_EXTENSIONS = {".wav", ".mp3", ".flac", ".ogg", ".aac", ".m4a", ".wma"}
 

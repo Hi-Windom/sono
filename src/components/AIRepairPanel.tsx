@@ -390,7 +390,7 @@ export function AIRepairPanel({
         </div>
 
         {/* 预估输出大小 */}
-        {duration > 0 && storageEstimate && (
+        {duration > 0 && currentEstimate && (
           <div className="mt-3 p-2.5 rounded-lg border bg-gray-800/50 border-gray-700">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
@@ -402,7 +402,7 @@ export function AIRepairPanel({
                 </span>
               </div>
               <span className="text-sm font-bold text-white">
-                {storageEstimate.estimated_output_mb} MB
+                {storageEstimate ? storageEstimate.estimated_output_mb : currentEstimate.sizeMB.toFixed(1)} MB
               </span>
             </div>
 

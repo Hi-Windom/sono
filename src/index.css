@@ -13,7 +13,11 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
+html {
+  background-color: #0D1117;
+}
+
 body {
   overflow-x: hidden;
-  overscroll-behavior-x: none;
+  overscroll-behavior: none;
 }
