@@ -405,6 +405,7 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
         n_channels=y.shape[0],
         sr=original_sr,
         working_sr=working_sr,
+        algorithm_version="v2.3a",
     )
 
     use_f32 = should_use_float32(y.shape[1], y.shape[0])
