@@ -655,23 +655,36 @@ export function useAudioProcessor() {
     setBackendError(null);
     setAudioFile(file);
 
-    // 阶段1: 立即解码音频，让UI尽快显示波形和预估大小
     setProcessingStep('加载音频...');
     setIsProcessing(true);
     setProcessingProgress(0);
 
-    setProcessingStep('读取音频文件...');
+    setProcessingStep('读取音频信息...');
     setProcessingProgress(0.02);
-    const context = getAudioContext();
-    const arrayBuf = await file.arrayBuffer();
-    setProcessingStep('解析音频数据...');
-    setProcessingProgress(0.05);
-    const wavHeaderInfo = parseWavHeader(arrayBuf.slice(0, 44 + 4096));
+    const headerBuf = await file.slice(0, 44 + 4096).arrayBuffer();
+    const wavHeaderInfo = parseWavHeader(headerBuf);
     setWavInfo(wavHeaderInfo);
+
+    if (wavHeaderInfo) {
+      setDuration(wavHeaderInfo.duration);
+    }
+
+    setProcessingStep('读取音频数据...');
+    setProcessingProgress(0.05);
+
+    const [arrayBuf, fileHash] = await Promise.all([
+      file.arrayBuffer(),
+      computeFileHash(file),
+    ]);
+    fileHashRef.current = fileHash;
+    writeLog(`[loadAudioFile] fileHash=${fileHash}`);
+
+    setProcessingStep('解析音频数据...');
+    setProcessingProgress(0.08);
+    const context = getAudioContext();
     const buffer = await context.decodeAudioData(arrayBuf);
     setProcessingProgress(0.1);
 
-    // 立即设置audioBuffer，让AIRepairPanel（含预估大小）显示
     audioBufferRef.current = buffer;
     setAudioBuffer(buffer);
     browserProcessedBufferRef.current = null;
@@ -695,59 +708,47 @@ export function useAudioProcessor() {
     const analysis = detectAudioIssues(buffer);
     setAudioAnalysis(analysis);
 
-    // 阶段2: 后台计算哈希（不阻塞UI）
-    setProcessingStep('计算文件哈希...');
-    const fileHash = await computeFileHash(file);
-    fileHashRef.current = fileHash;
-    writeLog(`[loadAudioFile] fileHash=${fileHash}`);
-
-    // 阶段3: 上传文件
-    try {
-      setProcessingStep('上传到后端...');
-      setProcessingProgress(0);
-
-      const uploadRes = await uploadAudio(file, (loaded, total, speed) => {
-        const pct = total > 0 ? loaded / total : 0;
-        setProcessingProgress(pct);
-        setProcessingStep(`上传中 ${formatBytes(loaded)}/${formatBytes(total)} ${formatSpeed(speed)}`);
-      }, fileHash);
-
-      const newTaskId = uploadRes.task_id;
-      setTaskId(newTaskId);
-      taskIdRef.current = newTaskId;
-      setBackendAvailable(true);
-      if (uploadRes.cached) {
-        writeLog(`[loadAudioFile] 文件已缓存，跳过上传 taskId=${newTaskId}`);
-      } else {
-        writeLog(`[loadAudioFile] 上传成功 taskId=${newTaskId}`);
-      }
-
-      saveSession({
-        file,
-        fileName: file.name,
-        fileSize: file.size,
-        fileHash,
-        taskId: newTaskId,
-        backendAvailable: true,
-        hasBeenProcessed: false,
-        wavInfo: wavHeaderInfo ? JSON.stringify(wavHeaderInfo) : '',
-        repairResult: '',
-        originalDetectTime: originalDetectTime || '',
-        repairedDetectTime: repairedDetectTime || '',
-      });
-
-      // 阻止旧会话恢复逻辑覆盖新上传的任务
-      pendingSessionRef.current = null;
-      sessionRestoredRef.current = true;
-      writeLog(`[loadAudioFile] 新文件上传完成，阻止旧会话恢复`);
-    } catch (err) {
-      console.warn('[loadAudioFile] 上传失败:', err);
-      setBackendAvailable(false);
-    }
-
     setIsProcessing(false);
     setProcessingStep('');
     setProcessingProgress(0);
+
+    (async () => {
+      try {
+        writeLog(`[loadAudioFile] 后台上传开始...`);
+        const uploadRes = await uploadAudio(file, undefined, fileHash);
+
+        const newTaskId = uploadRes.task_id;
+        setTaskId(newTaskId);
+        taskIdRef.current = newTaskId;
+        setBackendAvailable(true);
+        if (uploadRes.cached) {
+          writeLog(`[loadAudioFile] 文件已缓存，跳过上传 taskId=${newTaskId}`);
+        } else {
+          writeLog(`[loadAudioFile] 上传成功 taskId=${newTaskId}`);
+        }
+
+        saveSession({
+          file,
+          fileName: file.name,
+          fileSize: file.size,
+          fileHash,
+          taskId: newTaskId,
+          backendAvailable: true,
+          hasBeenProcessed: false,
+          wavInfo: wavHeaderInfo ? JSON.stringify(wavHeaderInfo) : '',
+          repairResult: '',
+          originalDetectTime: originalDetectTime || '',
+          repairedDetectTime: repairedDetectTime || '',
+        });
+
+        pendingSessionRef.current = null;
+        sessionRestoredRef.current = true;
+        writeLog(`[loadAudioFile] 新文件上传完成，阻止旧会话恢复`);
+      } catch (err) {
+        console.warn('[loadAudioFile] 上传失败:', err);
+        setBackendAvailable(false);
+      }
+    })();
   }, [getAudioContext, stopPlaying]);
 
   const applyRepairMode = useCallback((mode: RepairMode) => {
