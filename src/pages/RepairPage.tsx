@@ -282,7 +282,7 @@ export default function RepairPage() {
                   onSwitchPlayMode={switchPlayMode}
                 />
 
-                {isPlaying && analyserRef.current && (
+                {analyserRef.current && (
                   <div className="mt-6">
                     <SpectrumVisualizer
                       analyser={analyserRef.current}

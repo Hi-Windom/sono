@@ -155,6 +155,7 @@ export function useAudioProcessor() {
     completedAt: string;
     algorithmVersion: string;
   } | null>(null);
+  const pendingObjectURLRef = useRef<string | null>(null);
   const pendingPlayRef = useRef(false);
   // 任务卡住状态
   const [isTaskStuck, setIsTaskStuck] = useState(false);
@@ -573,6 +574,7 @@ export function useAudioProcessor() {
   const stopPlaying = useCallback((immediate = true) => {
     stopAllModeNodes(immediate);
     pendingPlayRef.current = false;
+    pendingObjectURLRef.current = null;
 
     if (mediaSourceRef.current) {
       try { mediaSourceRef.current.disconnect(); } catch {}
@@ -627,10 +629,15 @@ export function useAudioProcessor() {
     pausedAtRef.current = 0;
     setCurrentTime(0);
 
+    const lastUiUpdateRef = { current: 0 };
     const updateTime = () => {
       if (isPlayingRef.current && streamingAudioRef.current) {
         const current = streamingAudioRef.current.currentTime;
-        setCurrentTime(current);
+        const now = performance.now();
+        if (now - lastUiUpdateRef.current >= 100) {
+          setCurrentTime(current);
+          lastUiUpdateRef.current = now;
+        }
         if (streamingAudioRef.current.ended) {
           stopPlaying();
           setCurrentTime(0);
@@ -675,7 +682,6 @@ export function useAudioProcessor() {
     taskIdRef.current = null;
     setRepairResult(null);
     setBackendWaveformPeaks(null);
-    setBackendAvailable(false);
     setBackendPreviewUrl(null);
     setAudioAnalysis(null);
     setDuration(0);
@@ -691,6 +697,11 @@ export function useAudioProcessor() {
     if (wavHeaderInfo) {
       setDuration(wavHeaderInfo.duration);
     }
+
+    if (pendingObjectURLRef.current) {
+      URL.revokeObjectURL(pendingObjectURLRef.current);
+    }
+    pendingObjectURLRef.current = URL.createObjectURL(file);
 
     setIsProcessing(false);
     setProcessingStep('');
@@ -718,8 +729,23 @@ export function useAudioProcessor() {
     setAudioBuffer(buffer);
     setDuration(buffer.duration);
 
-    if (pendingPlayRef.current) {
+    if (pendingPlayRef.current && streamingAudioRef.current) {
+      const resumeTime = streamingAudioRef.current.currentTime;
+      pausedAtRef.current = resumeTime;
+      streamingAudioRef.current.pause();
+      streamingAudioRef.current.src = '';
+      streamingAudioRef.current = null;
+      if (mediaSourceRef.current) {
+        try { mediaSourceRef.current.disconnect(); } catch {}
+        mediaSourceRef.current = null;
+      }
       pendingPlayRef.current = false;
+      pendingObjectURLRef.current = null;
+      writeLog(`[loadAudioFile] 从streaming切换到BufferSource播放 offset=${resumeTime.toFixed(3)}`);
+      play();
+    } else if (pendingPlayRef.current) {
+      pendingPlayRef.current = false;
+      pendingObjectURLRef.current = null;
       writeLog(`[loadAudioFile] 执行pendingPlay`);
       play();
     }
@@ -1756,10 +1782,15 @@ export function useAudioProcessor() {
       isPlayingRef.current = true;
       setIsPlaying(true);
       activeModeRef.current = 'backend';
+      const lastUiUpdateRef = { current: 0 };
       const updateTime = () => {
         if (isPlayingRef.current && streamingAudioRef.current) {
           const current = streamingAudioRef.current.currentTime;
-          setCurrentTime(current);
+          const now = performance.now();
+          if (now - lastUiUpdateRef.current >= 100) {
+            setCurrentTime(current);
+            lastUiUpdateRef.current = now;
+          }
           if (streamingAudioRef.current.ended) {
             stopPlaying();
             setCurrentTime(0);
@@ -1789,6 +1820,12 @@ export function useAudioProcessor() {
 
     const buffer = getCurrentBuffer() ?? audioBufferRef.current;
     if (!buffer) {
+      if (duration > 0 && pendingObjectURLRef.current) {
+        writeLog(`[play] buffer未就绪，使用streaming播放`);
+        startStreamingPlayback(pendingObjectURLRef.current, 'original');
+        pendingPlayRef.current = true;
+        return;
+      }
       if (duration > 0) {
         writeLog(`[play] buffer未就绪，标记pendingPlay`);
         pendingPlayRef.current = true;
@@ -1864,6 +1901,7 @@ export function useAudioProcessor() {
     isPlayingRef.current = true;
     setIsPlaying(true);
 
+    const lastUiUpdateRef = { current: 0 };
     const updateTime = () => {
       if (isPlayingRef.current) {
         const elapsed = (performance.now() - playStartTimeRef.current) / 1000;
@@ -1873,7 +1911,11 @@ export function useAudioProcessor() {
           setCurrentTime(0);
           pausedAtRef.current = 0;
         } else {
-          setCurrentTime(current);
+          const now = performance.now();
+          if (now - lastUiUpdateRef.current >= 100) {
+            setCurrentTime(current);
+            lastUiUpdateRef.current = now;
+          }
           animationFrameRef.current = requestAnimationFrame(updateTime);
         }
       }
