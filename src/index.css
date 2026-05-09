@@ -13,8 +13,7 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
-html, body {
+body {
   overflow-x: hidden;
-  overscroll-behavior: none;
-  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: none;
 }
