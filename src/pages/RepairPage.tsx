@@ -355,6 +355,7 @@ export default function RepairPage() {
                 disabled={isProcessing}
                 duration={duration}
                 channels={audioBuffer?.numberOfChannels ?? 2}
+                backendAvailable={backendAvailable}
               />
 
               <DownloadButton

@@ -256,6 +256,7 @@ export default function Home() {
                 disabled={isProcessing}
                 duration={duration}
                 channels={audioBuffer?.numberOfChannels ?? 2}
+                backendAvailable={backendAvailable}
               />
 
               <DownloadButton

@@ -1,4 +1,4 @@
-# 播放即时就绪 + 波形性能 + 服务器数据重连
+# 播放即时就绪 + 频谱/波形性能 + 服务器数据重连
 
 ## 问题分析
 
@@ -7,11 +7,11 @@
 - **期望**：WAV头解析后，播放按钮应可点击，但由于 `audioBuffer` 尚未就绪，应显示加载提示或自动等待解码完成后播放。
 
 ### 问题2：1小时FLAC音频频谱卡顿
-- **根因**：`WaveformVisualizer` 的 `drawWaveform` 在每次 `currentTime` 变化时（~60fps），都重新扫描整个 `Float32Array` 求峰值（L67-68），然后逐像素重绘整个波形。1小时44.1kHz音频有~1.58亿样本，每帧全量扫描导致严重卡顿。
-- **关键问题**：
-  1. 峰值归一化（L67-68）每帧重复计算，应缓存
-  2. 波形数据每帧全量重绘，应只更新进度条部分
-  3. 长音频的 step 计算不够激进（`width * 2` 仍太小）
+- **根因**：`SpectrumVisualizer` 每帧（~60fps）都执行以下昂贵操作：
+  1. **重设canvas尺寸**（L38-42）：每帧设置 `canvas.width/height`，强制清除画布并重置上下文
+  2. **每条bar创建渐变**（L53-55）：`createLinearGradient` 每帧调用 bufferLength 次
+  3. **无帧率控制**：`requestAnimationFrame` 无节流
+- **波形也有性能问题**：`WaveformVisualizer` 的 `drawWaveform` 在每次 `currentTime` 变化时，重新扫描整个 `Float32Array` 求峰值（L67-68），然后逐像素重绘整个波形。1小时44.1kHz音频有~1.58亿样本，每帧全量扫描导致严重卡顿。
 
 ### 问题3：服务器数据恢复连接后不获取
 - **根因**：`AIRepairPanel` 中 `fetchMemoryInfo` 和 `fetchStorageEstimate` 的 effect 依赖 `[duration, channels, sampleRate, algorithmVersion]`，不依赖 `backendAvailable`。当后端断开再恢复时，这些 effect 不会重新触发。
@@ -30,7 +30,17 @@
 - `play()` 中：若 buffer 为 null 且 duration > 0，设置 `pendingPlayRef.current = true` 并返回（不静默失败）
 - `loadAudioFile` 解码完成后：检查 `pendingPlayRef.current`，若为 true 则自动调用 `play()`
 
-### 2. 波形性能优化（WaveformVisualizer.tsx）
+### 2. 频谱性能优化（SpectrumVisualizer.tsx）
+
+**方案**：避免每帧重设canvas和创建渐变，添加帧率节流。
+
+具体改动：
+- canvas 尺寸只在初始化和 resize 时设置，不在每帧重设
+- 渐变对象缓存为 ref，不每帧创建
+- 添加帧率节流：30fps 上限（`performance.now()` 判断间隔 ≥ 33ms）
+- 用 `ctx.clearRect` + `ctx.fillRect` 替代重设 canvas 尺寸来清屏
+
+### 3. 波形性能优化（WaveformVisualizer.tsx）
 
 **方案**：缓存波形峰值数据，播放时只更新进度区域，避免每帧全量重绘。
 
@@ -41,7 +51,7 @@
 - 峰值归一化值一并缓存，不每帧重算
 - 长音频（>5min）的峰值采样步长更激进：`width * 1` 而非 `width * 2`
 
-### 3. 服务器数据重连获取（AIRepairPanel.tsx）
+### 4. 服务器数据重连获取（AIRepairPanel.tsx）
 
 **方案**：将 `backendAvailable` 作为 effect 依赖，后端恢复时重新获取数据。
 
@@ -55,15 +65,16 @@
 ## 涉及文件
 
 1. `/workspace/src/hooks/useAudioProcessor.ts` - pendingPlay 逻辑
-2. `/workspace/src/components/WaveformVisualizer.tsx` - 峰值缓存 + 增量绘制
-3. `/workspace/src/components/AIRepairPanel.tsx` - backendAvailable 依赖 + 数据不清除
-4. `/workspace/src/pages/Home.tsx` - 传递 backendAvailable 给 AIRepairPanel
-5. `/workspace/src/pages/RepairPage.tsx` - 传递 backendAvailable 给 AIRepairPanel
+2. `/workspace/src/components/SpectrumVisualizer.tsx` - canvas缓存 + 渐变缓存 + 帧率节流
+3. `/workspace/src/components/WaveformVisualizer.tsx` - 峰值缓存 + 增量绘制
+4. `/workspace/src/components/AIRepairPanel.tsx` - backendAvailable 依赖 + 数据不清除
+5. `/workspace/src/pages/Home.tsx` - 传递 backendAvailable 给 AIRepairPanel
+6. `/workspace/src/pages/RepairPage.tsx` - 传递 backendAvailable 给 AIRepairPanel
 
 ## 验证步骤
 
 1. 上传500MB音频，确认WAV头解析后播放按钮可点击，解码完成后自动播放
-2. 上传1小时FLAC，播放时波形流畅无卡顿
+2. 上传1小时FLAC，播放时频谱和波形流畅无卡顿
 3. 断开后端，确认预估卡片保留上次数据；恢复后端，确认数据自动刷新
 4. `npx tsc --noEmit` 编译通过
 5. `bash scripts/build_android_release.sh` 打包成功

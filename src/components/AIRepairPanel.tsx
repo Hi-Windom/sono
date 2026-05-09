@@ -27,6 +27,7 @@ interface AIRepairPanelProps {
   disabled?: boolean;
   duration?: number;
   channels?: number;
+  backendAvailable?: boolean;
 }
 
 const sampleRateOptions = [
@@ -107,6 +108,7 @@ export function AIRepairPanel({
   disabled,
   duration = 0,
   channels = 2,
+  backendAvailable = false,
 }: AIRepairPanelProps) {
   const [showParams, setShowParams] = useState(false);
   const [memoryInfo, setMemoryInfo] = useState<MemoryInfoResult | null>(null);
@@ -115,28 +117,30 @@ export function AIRepairPanel({
   const storageFetchRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    if (duration <= 0) {
+    if (!backendAvailable) {
       setMemoryInfo(null);
       return;
     }
+    if (duration <= 0) return;
     if (memoryFetchRef.current) clearTimeout(memoryFetchRef.current);
     memoryFetchRef.current = setTimeout(() => {
       fetchMemoryInfo(duration, channels, processingOptions.sampleRate, algorithmVersion).then(setMemoryInfo);
     }, 300);
     return () => { if (memoryFetchRef.current) clearTimeout(memoryFetchRef.current); };
-  }, [duration, channels, processingOptions.sampleRate, algorithmVersion]);
+  }, [duration, channels, processingOptions.sampleRate, algorithmVersion, backendAvailable]);
 
   useEffect(() => {
-    if (duration <= 0) {
+    if (!backendAvailable) {
       setStorageEstimate(null);
       return;
     }
+    if (duration <= 0) return;
     if (storageFetchRef.current) clearTimeout(storageFetchRef.current);
     storageFetchRef.current = setTimeout(() => {
       fetchStorageEstimate(duration, channels, processingOptions.sampleRate, processingOptions.bitDepth).then(setStorageEstimate);
     }, 300);
     return () => { if (storageFetchRef.current) clearTimeout(storageFetchRef.current); };
-  }, [duration, channels, processingOptions.sampleRate, processingOptions.bitDepth]);
+  }, [duration, channels, processingOptions.sampleRate, processingOptions.bitDepth, backendAvailable]);
 
   const paramLabels: Record<keyof AIRepairParams, string> = {
     deClipping: '去削波',

@@ -24,6 +24,7 @@ export function WaveformVisualizer({
   const audioBufferRef = useRef<AudioBuffer | null>(null);
   const peaksRef = useRef<number[][] | null>(null);
   const peakRef = useRef<number>(0);
+  const lastBufferKeyRef = useRef<string>('');
 
   useEffect(() => {
     audioBufferRef.current = audioBuffer;
@@ -64,9 +65,13 @@ export function WaveformVisualizer({
       const step = isLongAudio
         ? Math.max(1, Math.floor(data.length / (width * 2)))
         : Math.max(1, Math.floor(data.length / width));
-      let peak = 0;
-      for (let i = 0; i < data.length; i += (isLongAudio ? 8 : 1)) peak = Math.max(peak, Math.abs(data[i]));
-      peakRef.current = peak > 0.05 ? 1 / peak : 20;
+      const bufferKey = `${data.length}`;
+      if (bufferKey !== lastBufferKeyRef.current) {
+        let peak = 0;
+        for (let i = 0; i < data.length; i += (isLongAudio ? 8 : 1)) peak = Math.max(peak, Math.abs(data[i]));
+        peakRef.current = peak > 0.05 ? 1 / peak : 20;
+        lastBufferKeyRef.current = bufferKey;
+      }
       const norm = peakRef.current;
 
       ctx.fillStyle = 'rgba(100, 116, 139, 0.5)';

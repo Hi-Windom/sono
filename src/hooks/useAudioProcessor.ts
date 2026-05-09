@@ -155,6 +155,7 @@ export function useAudioProcessor() {
     completedAt: string;
     algorithmVersion: string;
   } | null>(null);
+  const pendingPlayRef = useRef(false);
   // 任务卡住状态
   const [isTaskStuck, setIsTaskStuck] = useState(false);
   const [stuckInfo, setStuckInfo] = useState<{ taskId: string; lastProgress: number; lastStep: string; duration: number } | null>(null);
@@ -571,6 +572,7 @@ export function useAudioProcessor() {
 
   const stopPlaying = useCallback((immediate = true) => {
     stopAllModeNodes(immediate);
+    pendingPlayRef.current = false;
 
     if (mediaSourceRef.current) {
       try { mediaSourceRef.current.disconnect(); } catch {}
@@ -715,6 +717,12 @@ export function useAudioProcessor() {
     audioBufferRef.current = buffer;
     setAudioBuffer(buffer);
     setDuration(buffer.duration);
+
+    if (pendingPlayRef.current) {
+      pendingPlayRef.current = false;
+      writeLog(`[loadAudioFile] 执行pendingPlay`);
+      play();
+    }
 
     const analysis = detectAudioIssues(buffer);
     setAudioAnalysis(analysis);
@@ -1781,7 +1789,10 @@ export function useAudioProcessor() {
 
     const buffer = getCurrentBuffer() ?? audioBufferRef.current;
     if (!buffer) {
-      writeLog(`[play] 没有可用buffer，返回`);
+      if (duration > 0) {
+        writeLog(`[play] buffer未就绪，标记pendingPlay`);
+        pendingPlayRef.current = true;
+      }
       return;
     }
 
