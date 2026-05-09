@@ -1013,6 +1013,10 @@ export async function fetchMemoryInfo(
 export interface StorageEstimateResult {
   estimated_output_bytes: number;
   estimated_output_mb: number;
+  available_disk_bytes: number | null;
+  total_disk_bytes: number | null;
+  used_disk_bytes: number | null;
+  is_sufficient: boolean;
 }
 
 export async function fetchStorageEstimate(

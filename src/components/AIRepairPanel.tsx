@@ -433,6 +433,71 @@ export function AIRepairPanel({
               </div>
             </div>
 
+            {/* 服务器存储状态 */}
+            {storageEstimate && storageEstimate.available_disk_bytes != null && (
+              <div className={`mt-3 pt-2 border-t border-gray-700/50 ${
+                storageEstimate.is_sufficient ? '' : 'text-red-400'
+              }`}>
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-gray-400 flex items-center gap-1">
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4" />
+                    </svg>
+                    服务器存储
+                  </span>
+                  <span className={storageEstimate.is_sufficient ? 'text-emerald-400' : 'text-red-400'}>
+                    {(storageEstimate.available_disk_bytes / 1024 / 1024).toFixed(0)} MB 可用
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-xs mt-1">
+                  <span className="text-gray-400">
+                    预估输出占用
+                  </span>
+                  <span className={storageEstimate.is_sufficient ? 'text-gray-300' : 'text-red-400'}>
+                    {storageEstimate.estimated_output_mb.toFixed(1)} MB
+                  </span>
+                </div>
+                {!storageEstimate.is_sufficient && (
+                  <div className="mt-1.5 text-[10px] text-red-400/90">
+                    🔴 存储空间不足！预估输出超出可用磁盘空间。
+                  </div>
+                )}
+                {storageEstimate.total_disk_bytes != null && (
+                  <div className="mt-2">
+                    <div className="h-2.5 bg-gray-700 rounded-full overflow-hidden flex">
+                      {storageEstimate.used_disk_bytes != null && (
+                        <div
+                          className="h-full bg-gray-500/60 transition-all"
+                          style={{
+                            width: `${Math.min(100, (storageEstimate.used_disk_bytes / storageEstimate.total_disk_bytes) * 100)}%`,
+                          }}
+                        />
+                      )}
+                      <div
+                        className={`h-full transition-all ${storageEstimate.is_sufficient ? 'bg-blue-500' : 'bg-red-500'}`}
+                        style={{
+                          width: `${Math.min(100, (storageEstimate.estimated_output_bytes / storageEstimate.total_disk_bytes) * 100)}%`,
+                        }}
+                      />
+                    </div>
+                    <div className="flex items-center justify-between text-[9px] text-gray-500 mt-0.5">
+                      <div className="flex items-center gap-2">
+                        <span className="flex items-center gap-0.5">
+                          <span className="inline-block w-1.5 h-1.5 rounded-sm bg-gray-500/60" />
+                          已用
+                        </span>
+                        <span className="flex items-center gap-0.5">
+                          <span className={`inline-block w-1.5 h-1.5 rounded-sm ${storageEstimate.is_sufficient ? 'bg-blue-500' : 'bg-red-500'}`} />
+                          预估
+                        </span>
+                      </div>
+                      <span>{(storageEstimate.total_disk_bytes / 1024 / 1024).toFixed(0)} MB</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* 服务器内存状态 */}
             {memoryInfo && (
               <div className={`mt-3 pt-2 border-t border-gray-700/50 ${

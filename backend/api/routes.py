@@ -135,9 +135,28 @@ async def storage_estimate(request: StorageEstimateRequest):
     bytes_per_sample = request.bit_depth // 8
     data_bytes = int(request.duration * request.sample_rate * request.channels * bytes_per_sample)
     total_bytes = data_bytes + 44
+    estimated_mb = round(total_bytes / (1024 * 1024), 1)
+
+    available_bytes = None
+    total_disk_bytes = None
+    used_disk_bytes = None
+    is_sufficient = True
+    try:
+        disk_usage = os.statvfs(UPLOAD_DIR)
+        available_bytes = disk_usage.f_bavail * disk_usage.f_frsize
+        total_disk_bytes = disk_usage.f_blocks * disk_usage.f_frsize
+        used_disk_bytes = total_disk_bytes - available_bytes
+        is_sufficient = total_bytes <= available_bytes
+    except OSError:
+        pass
+
     return {
         "estimated_output_bytes": total_bytes,
-        "estimated_output_mb": round(total_bytes / (1024 * 1024), 1),
+        "estimated_output_mb": estimated_mb,
+        "available_disk_bytes": available_bytes,
+        "total_disk_bytes": total_disk_bytes,
+        "used_disk_bytes": used_disk_bytes,
+        "is_sufficient": is_sufficient,
     }
 
 class CheckHashRequest(BaseModel):

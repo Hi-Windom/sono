@@ -2,7 +2,7 @@ import { useRef, useState, useCallback, useEffect } from 'react';
 import { AIRepairParams, defaultAIRepairParams, detectAudioIssues, RepairMode } from '../utils/advancedAudioProcessing';
 import { AISongDetectionResult } from '../utils/aiSongChecker';
 import { loadSettings, saveSettings, resetSettings as resetStoredSettings } from '../utils/settingsStorage';
-import { parseWavHeader, WavInfo } from '../utils/wavParser';
+import { parseWavHeader, WavInfo, decodeWavPcm } from '../utils/wavParser';
 import { saveSession, loadSession, clearSession } from '../utils/sessionDB';
 import { computeFileHash } from '../utils/fileHash';
 import {
@@ -484,7 +484,8 @@ export function useAudioProcessor() {
         const arrayBuf = await file.arrayBuffer();
         const wavHeaderInfo = parseWavHeader(arrayBuf.slice(0, 44 + 4096));
         setWavInfo(wavHeaderInfo);
-        const buffer = await context.decodeAudioData(arrayBuf);
+        const fastDecoded = decodeWavPcm(context, arrayBuf);
+        const buffer = fastDecoded || await context.decodeAudioData(arrayBuf);
 
         setAudioBuffer(buffer);
         setDuration(buffer.duration);
@@ -683,7 +684,15 @@ export function useAudioProcessor() {
     setProcessingStep('解析音频数据...');
     setProcessingProgress(0.08);
     const context = getAudioContext();
-    const buffer = await context.decodeAudioData(arrayBuf);
+    let buffer: AudioBuffer;
+    const fastDecoded = decodeWavPcm(context, arrayBuf);
+    if (fastDecoded) {
+      buffer = fastDecoded;
+      writeLog(`[loadAudioFile] WAV PCM快速解码完成`);
+    } else {
+      buffer = await context.decodeAudioData(arrayBuf);
+      writeLog(`[loadAudioFile] 浏览器解码完成`);
+    }
     setProcessingProgress(0.1);
 
     audioBufferRef.current = buffer;
