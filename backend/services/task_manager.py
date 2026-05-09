@@ -286,6 +286,12 @@ def _run_repair(task_id: str, audio_path: str, params: dict[str, Any], mobile_mo
         elapsed = time.time() - start_time
         logger.info(f"[repair] 已取消 task_id={task_id} elapsed={elapsed:.1f}s")
         _ws_send_final(task_id, {"task_id": task_id, "status": "cancelled", "progress": 0, "step": f"已取消 ({elapsed:.1f}s)"})
+    except MemoryError as e:
+        elapsed = time.time() - start_time
+        error_msg = str(e)
+        logger.error(f"[repair] 内存不足 task_id={task_id} elapsed={elapsed:.1f}s: {error_msg}")
+        update_task(task_id, status="error", error=error_msg[:500], step=f"内存不足 ({elapsed:.1f}s)")
+        _ws_send_final(task_id, {"task_id": task_id, "status": "error", "progress": 0, "step": f"内存不足", "error": error_msg})
     except Exception as e:
         elapsed = time.time() - start_time
         error_msg = f"{type(e).__name__}: {e}\n{traceback.format_exc()}"

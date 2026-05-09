@@ -657,3 +657,65 @@ class TestIstftPerformance:
         S = stft(y, n_fft=2048, hop_length=512)
         elapsed = benchmark_step(istft, S, 512, len(y))
         assert elapsed < 1.0, f"istft too slow: {elapsed:.3f}s"
+
+
+class TestMemoryGuard:
+
+    def test_estimate_memory(self):
+        from services.memory_guard import estimate_repair_memory_bytes
+        estimated = estimate_repair_memory_bytes(
+            n_samples=48000 * 60,
+            n_channels=2,
+            sr=44100,
+            working_sr=48000,
+        )
+        assert estimated > 0, "estimated memory should be positive"
+
+    def test_check_memory_passes(self):
+        from services.memory_guard import check_memory_before_repair
+        result = check_memory_before_repair(
+            n_samples=48000,
+            n_channels=2,
+            sr=44100,
+            working_sr=48000,
+        )
+        assert result == 48000, f"short audio should pass at full working_sr, got {result}"
+
+    def test_check_memory_downgrades_on_low_memory(self):
+        from unittest.mock import patch
+        from services.memory_guard import check_memory_before_repair
+        with patch("services.memory_guard.get_available_memory_bytes", return_value=500 * 1024 * 1024):
+            result = check_memory_before_repair(
+                n_samples=48000 * 30,
+                n_channels=2,
+                sr=44100,
+                working_sr=48000,
+            )
+            assert result < 48000, f"should downgrade working_sr when memory low, got {result}"
+
+    def test_check_memory_raises_on_insufficient(self):
+        from unittest.mock import patch
+        from services.memory_guard import check_memory_before_repair
+        with patch("services.memory_guard.get_available_memory_bytes", return_value=10 * 1024 * 1024):
+            with pytest.raises(MemoryError):
+                check_memory_before_repair(
+                    n_samples=48000 * 600,
+                    n_channels=2,
+                    sr=44100,
+                    working_sr=48000,
+                )
+
+    def test_stft_chunked_matches_stft(self):
+        from services.dsp_utils import stft, stft_chunked
+        y = generate_speech_like(sr=SR, duration=2.0)
+        S_full = stft(y, n_fft=2048, hop_length=512)
+        S_chunked = stft_chunked(y, n_fft=2048, hop_length=512, chunk_frames=256)
+        np.testing.assert_allclose(S_full, S_chunked, rtol=1e-10, atol=1e-12)
+
+    def test_istft_chunked_matches_istft(self):
+        from services.dsp_utils import stft, istft, istft_chunked
+        y = generate_speech_like(sr=SR, duration=2.0)
+        S = stft(y, n_fft=2048, hop_length=512)
+        y_full = istft(S, hop_length=512, length=len(y))
+        y_chunked = istft_chunked(S, hop_length=512, length=len(y), chunk_frames=256)
+        np.testing.assert_allclose(y_full, y_chunked, rtol=1e-10, atol=1e-12)

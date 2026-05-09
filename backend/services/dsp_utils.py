@@ -24,6 +24,28 @@ def stft(y, n_fft=2048, hop_length=512, window='hann'):
     return S
 
 
+def stft_chunked(y, n_fft=2048, hop_length=512, window='hann', chunk_frames=4096):
+    fft_window = get_window(window, n_fft, fftbins=True)
+    pad_length = n_fft // 2
+    y_padded = np.pad(y, (pad_length, pad_length), mode='reflect')
+    n_frames = 1 + (len(y_padded) - n_fft) // hop_length
+    if n_frames <= 0:
+        return np.empty((1 + n_fft // 2, 0), dtype=np.complex128)
+    n_bins = 1 + n_fft // 2
+    S = np.empty((n_bins, n_frames), dtype=np.complex128)
+    for start in range(0, n_frames, chunk_frames):
+        end = min(start + chunk_frames, n_frames)
+        starts = start * hop_length
+        ends = starts + n_fft + (end - start - 1) * hop_length
+        chunk_data = y_padded[starts:ends]
+        chunk_frames_data = _stride_frames(
+            np.ascontiguousarray(chunk_data), n_fft, hop_length
+        )[:end - start]
+        windowed = chunk_frames_data * fft_window[np.newaxis, :]
+        S[:, start:end] = np.fft.rfft(windowed, axis=1).T
+    return S
+
+
 def istft(S, hop_length=512, length=None, window='hann'):
     n_fft = 2 * (S.shape[0] - 1)
     fft_window = get_window(window, n_fft, fftbins=True)
@@ -38,6 +60,34 @@ def istft(S, hop_length=512, length=None, window='hann'):
     for i in range(n_fft):
         y[frame_starts + i] += windowed[:, i]
         window_sum[frame_starts + i] += win_sq[i]
+    nonzero = window_sum > 1e-10
+    y[nonzero] /= window_sum[nonzero]
+    pad_length = n_fft // 2
+    y = y[pad_length:]
+    if length is not None:
+        y = y[:length]
+    return y
+
+
+def istft_chunked(S, hop_length=512, length=None, window='hann', chunk_frames=4096):
+    n_fft = 2 * (S.shape[0] - 1)
+    fft_window = get_window(window, n_fft, fftbins=True)
+    n_frames = S.shape[1]
+    expected_signal_len = n_fft + hop_length * (n_frames - 1)
+    y = np.zeros(expected_signal_len)
+    window_sum = np.zeros(expected_signal_len)
+    win_sq = fft_window ** 2
+    for start in range(0, n_frames, chunk_frames):
+        end = min(start + chunk_frames, n_frames)
+        S_chunk = S[:, start:end]
+        frames = np.fft.irfft(S_chunk.T, n=n_fft, axis=1)
+        windowed = frames * fft_window[np.newaxis, :]
+        chunk_n_frames = end - start
+        frame_starts = np.arange(start, end) * hop_length
+        for i in range(n_fft):
+            y[frame_starts + i] += windowed[:, i]
+            window_sum[frame_starts + i] += win_sq[i]
+        del frames, windowed, S_chunk
     nonzero = window_sum > 1e-10
     y[nonzero] /= window_sum[nonzero]
     pad_length = n_fft // 2

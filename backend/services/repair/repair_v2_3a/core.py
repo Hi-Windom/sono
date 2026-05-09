@@ -5,7 +5,7 @@ from functools import lru_cache
 from scipy.signal import butter, sosfiltfilt, resample_poly
 
 from services.audio_loader import load_audio_with_fallback
-from services.dsp_utils import stft, istft
+from services.dsp_utils import stft, istft, stft_chunked, istft_chunked
 
 MOBILE_WORKING_SR = 48000
 
@@ -236,8 +236,14 @@ def _spectral_denoise(y, sr, amount):
 def _spectral_denoise_1d(data, sr, amount):
     n_fft = 2048
     hop_length = 512
+    n_samples = len(data)
+    n_frames_est = n_samples // hop_length + 1
+    use_chunked = n_frames_est > 8192
 
-    S = stft(data, n_fft=n_fft, hop_length=hop_length)
+    if use_chunked:
+        S = stft_chunked(data, n_fft=n_fft, hop_length=hop_length, chunk_frames=4096)
+    else:
+        S = stft(data, n_fft=n_fft, hop_length=hop_length)
     magnitude = np.abs(S)
     phase = np.angle(S)
 
@@ -251,12 +257,19 @@ def _spectral_denoise_1d(data, sr, amount):
     denoised_magnitude = magnitude * mask
     S_denoised = denoised_magnitude * np.exp(1j * phase)
 
-    y_out = istft(S_denoised, hop_length=hop_length, length=len(data))
+    del magnitude, phase, mask, denoised_magnitude
 
-    if len(y_out) > len(data):
-        y_out = y_out[:len(data)]
-    elif len(y_out) < len(data):
-        y_out = np.pad(y_out, (0, len(data) - len(y_out)))
+    if use_chunked:
+        y_out = istft_chunked(S_denoised, hop_length=hop_length, length=n_samples, chunk_frames=4096)
+    else:
+        y_out = istft(S_denoised, hop_length=hop_length, length=n_samples)
+
+    del S_denoised
+
+    if len(y_out) > n_samples:
+        y_out = y_out[:n_samples]
+    elif len(y_out) < n_samples:
+        y_out = np.pad(y_out, (0, n_samples - len(y_out)))
 
     return y_out
 
@@ -333,6 +346,15 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
     original_duration = round(y.shape[1] / sr, 2)
 
     working_sr = MOBILE_WORKING_SR
+
+    from services.memory_guard import check_memory_before_repair
+    working_sr = check_memory_before_repair(
+        n_samples=y.shape[1],
+        n_channels=y.shape[0],
+        sr=original_sr,
+        working_sr=working_sr,
+    )
+
     if sr != working_sr:
         if progress_callback:
             progress_callback(0.02, f"v2.3a 重采样到 {working_sr//1000}kHz...")

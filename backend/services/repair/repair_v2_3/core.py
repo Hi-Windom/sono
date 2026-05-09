@@ -291,6 +291,14 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
     else:
         working_sr = DESKTOP_WORKING_SR
 
+    from services.memory_guard import check_memory_before_repair
+    working_sr = check_memory_before_repair(
+        n_samples=y.shape[1],
+        n_channels=y.shape[0],
+        sr=original_sr,
+        working_sr=working_sr,
+    )
+
     if sr != working_sr:
         if progress_callback:
             progress_callback(0.02, f"v2.3 重采样到 {working_sr//1000}kHz...")
