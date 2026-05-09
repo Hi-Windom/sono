@@ -525,7 +525,7 @@ class TestV23aResample:
         y_out, sr_out = sf.read(output_path)
         assert sr_out == 48000, f"v2.3a output sr should stay 48000, got {sr_out}"
 
-    def test_v23_upsample_to_96k(self, tmp_wav_dir):
+    def test_v23_upsample_to_48k(self, tmp_wav_dir):
         import unittest.mock as mock
         import os
         from services.repair.repair_v2_3 import repair_audio
@@ -539,7 +539,7 @@ class TestV23aResample:
                 repair_audio(input_path, output_path, params)
         import soundfile as sf
         y_out, sr_out = sf.read(output_path)
-        assert sr_out == 96000, f"v2.3 output sr should be 96000, got {sr_out}"
+        assert sr_out == 48000, f"v2.3 output sr should be 48000, got {sr_out}"
 
 
 class TestV23Performance:

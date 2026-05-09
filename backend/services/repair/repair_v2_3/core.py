@@ -15,7 +15,7 @@ from services.repair.repair_v2_2.dynamics import apply_softness_v5
 from services.repair.repair_v2_2.music_type_detector import detect_music_type
 from services.repair.repair_v2_2.type_params import apply_music_type_params, get_repair_mode_params
 
-DESKTOP_WORKING_SR = 96000
+DESKTOP_WORKING_SR = 48000
 N_FFT = 2048
 HOP_LENGTH = 512
 
