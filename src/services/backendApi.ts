@@ -1046,9 +1046,9 @@ export async function fetchStorageEstimate(
 
 export interface RenderResult {
   task_id: string;
-  render_path: string;
-  render_filename: string;
-  render_result: {
+  status: string;
+  render_filename?: string;
+  render_result?: {
     original_sample_rate: number;
     output_sample_rate: number;
     output_bit_depth: number;
@@ -1078,6 +1078,32 @@ export async function renderAudio(
     throw new Error(data.detail || `渲染失败 (${res.status})`);
   }
   return await res.json();
+}
+
+export async function pollRenderStatus(
+  taskId: string,
+  onProgress?: (progress: number, step: string) => void,
+): Promise<RenderResult> {
+  const MAX_POLL = 600;
+  for (let i = 0; i < MAX_POLL; i++) {
+    const task = await getTaskStatus(taskId);
+    if (task.status === 'render_completed') {
+      return {
+        task_id: taskId,
+        status: 'render_completed',
+        render_filename: task.render_filename,
+        render_result: task.render_result,
+      };
+    }
+    if (task.status === 'error') {
+      throw new Error(task.error || '渲染失败');
+    }
+    if (onProgress && task.progress != null) {
+      onProgress(task.progress, task.step || '');
+    }
+    await new Promise(r => setTimeout(r, 500));
+  }
+  throw new Error('渲染超时');
 }
 
 export { mapDetectionResult, type BackendDetectionResult, type BackendRepairResult, type ProgressEvent, type TaskStatus };

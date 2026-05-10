@@ -5,8 +5,8 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from config import ALLOWED_EXTENSIONS, MAX_UPLOAD_SIZE, MOBILE_MODE, OUTPUT_DIR, UPLOAD_DIR, DEPLOY_TIME_FILE
-from database import create_task, find_task_by_hash, get_queue_status, get_task
-from services.task_manager import generate_task_id, submit_detect_task, submit_repair_task, cancel_task
+from database import create_task, find_task_by_hash, get_queue_status, get_task, update_task
+from services.task_manager import generate_task_id, submit_detect_task, submit_repair_task, cancel_task, executor
 from services.audio_repair import get_available_versions
 from services.ai_detector import get_detector_versions
 from services.memory_guard import get_available_memory_bytes, estimate_repair_memory_bytes, should_use_float32, get_total_memory_bytes
@@ -307,18 +307,55 @@ async def render_audio_endpoint(request: RenderRequest):
     if not output_path or not os.path.exists(output_path):
         raise HTTPException(status_code=400, detail="修复结果不存在，请先完成修复")
 
-    from services.render import render_output
     render_filename = f"{request.task_id}_rendered_{request.sample_rate}_{request.bit_depth}.wav"
     render_path = os.path.join(OUTPUT_DIR, render_filename)
 
-    result = render_output(output_path, render_path, request.sample_rate, request.bit_depth)
+    update_task(request.task_id, status="rendering", step="渲染交付规格...", progress=0)
 
-    return {
-        "task_id": request.task_id,
-        "render_path": render_path,
-        "render_filename": render_filename,
-        "render_result": result,
-    }
+    executor.submit(_run_render, request.task_id, output_path, render_path, request.sample_rate, request.bit_depth, render_filename)
+
+    return {"task_id": request.task_id, "status": "rendering"}
+
+
+def _run_render(task_id, input_path, output_path, target_sr, bit_depth, render_filename):
+    from services.render import render_output
+    from services.task_manager import _ws_send_progress
+
+    def progress_callback(pct, step):
+        update_task(task_id, progress=pct, step=step)
+        _ws_send_progress(task_id, {
+            "task_id": task_id,
+            "status": "rendering",
+            "progress": pct,
+            "step": step,
+        })
+
+    try:
+        result = render_output(input_path, output_path, target_sr, bit_depth, progress_callback=progress_callback)
+        update_task(task_id,
+            status="render_completed",
+            progress=1.0,
+            step="渲染完成",
+            render_filename=render_filename,
+            render_result=result,
+        )
+        _ws_send_progress(task_id, {
+            "task_id": task_id,
+            "status": "render_completed",
+            "progress": 1.0,
+            "step": "渲染完成",
+            "render_filename": render_filename,
+            "render_result": result,
+        })
+    except Exception as e:
+        logger.error(f"[render] 渲染失败 task_id={task_id}: {e}")
+        update_task(task_id, status="error", error=str(e), step="渲染失败")
+        _ws_send_progress(task_id, {
+            "task_id": task_id,
+            "status": "error",
+            "error": str(e),
+            "step": "渲染失败",
+        })
 
 @router.get("/status/{task_id}")
 async def get_task_status(task_id: str):

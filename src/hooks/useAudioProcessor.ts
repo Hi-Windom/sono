@@ -27,6 +27,7 @@ import {
   DetectorVersion,
   QueueStatus,
   renderAudio,
+  pollRenderStatus,
 } from '../services/backendApi';
 
 function writeLog(message: string) {
@@ -2107,16 +2108,26 @@ export function useAudioProcessor() {
       try {
         setProcessingStep('渲染交付规格...');
         setProcessingProgress(0);
-        const renderRes = await renderAudio(
+        await renderAudio(
           taskIdRef.current,
           processingOptions.sampleRate,
           processingOptions.bitDepth,
         );
+        const renderRes = await pollRenderStatus(
+          taskIdRef.current,
+          (progress, step) => {
+            setProcessingProgress(progress);
+            setProcessingStep(step);
+          },
+        );
+        if (!renderRes.render_filename || !renderRes.render_result) {
+          throw new Error('渲染结果不完整');
+        }
         writeLog(`[downloadProcessedAudio] 渲染完成: sr=${renderRes.render_result.output_sample_rate} bd=${renderRes.render_result.output_bit_depth}`);
         setRepairResult(prev => prev ? {
           ...prev,
-          output_sample_rate: renderRes.render_result.output_sample_rate,
-          output_bit_depth: renderRes.render_result.output_bit_depth,
+          output_sample_rate: renderRes.render_result!.output_sample_rate,
+          output_bit_depth: renderRes.render_result!.output_bit_depth,
         } : null);
         const url = `/api/v1/download-file/${renderRes.render_filename}`;
         downloadUrl(url, fileName);
