@@ -2199,16 +2199,45 @@ export function useAudioProcessor() {
   /** 渲染交付规格并下载（修复完成后自动调用） */
   const renderAndDownload = useCallback(async () => {
     const baseName = audioFile ? audioFile.name.replace(/\.[^/.]+$/, '') : 'audio';
-    const fileName = `${baseName}_repaired_${processingOptions.sampleRate / 1000}k_${processingOptions.bitDepth}bit.wav`;
+    const ts = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 15); // YYYYMMDD_HHMMSS
+    const fileName = `${baseName}_${algorithmVersion}_${processingOptions.sampleRate / 1000}k_${processingOptions.bitDepth}bit_${ts}.wav`;
 
     if (!taskIdRef.current) return;
 
-    // 检查当前规格是否已有渲染缓存
+    // 检查当前规格+算法版本是否已有渲染缓存
     try {
       const caches = await fetchRenderCache(taskIdRef.current);
-      const hit = caches.find(c => c.sample_rate === processingOptions.sampleRate && c.bit_depth === processingOptions.bitDepth);
+      const hit = caches.find(c => c.sample_rate === processingOptions.sampleRate && c.bit_depth === processingOptions.bitDepth && c.algorithm_version === algorithmVersion);
       if (hit) {
         writeLog(`[renderAndDownload] 渲染缓存命中: ${hit.filename}`);
+        // 用 fetch+blob 下载，从 Content-Disposition 获取正确文件名
+        try {
+          const url = `/api/v1/download-file/${hit.filename}`;
+          const res = await fetch(url);
+          if (res.ok) {
+            const blob = await res.blob();
+            const disposition = res.headers.get('Content-Disposition');
+            let saveName = fileName;
+            if (disposition) {
+              const match = disposition.match(/filename\*?=(?:UTF-8''|["']?)([^"';\n]+)/);
+              if (match?.[1]) saveName = decodeURIComponent(match[1].replace(/["']/g, ''));
+            }
+            const blobUrl = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = blobUrl;
+            a.download = saveName;
+            a.style.display = 'none';
+            document.body.appendChild(a);
+            a.click();
+            setTimeout(() => { URL.revokeObjectURL(blobUrl); document.body.removeChild(a); }, 5000);
+            setProcessingStep('');
+            setProcessingProgress(0);
+            return;
+          }
+        } catch (fetchErr) {
+          writeLog(`[renderAndDownload] fetch+blob 下载失败，回退到直链: ${fetchErr}`);
+        }
+        // 回退到直链
         const url = `/api/v1/download-file/${hit.filename}`;
         downloadUrl(url, fileName);
         setProcessingStep('');
@@ -2253,13 +2282,14 @@ export function useAudioProcessor() {
       setProcessingStep('');
       setProcessingProgress(0);
     }
-  }, [audioFile, processingOptions]);
+  }, [audioFile, processingOptions, algorithmVersion]);
 
   const downloadProcessedAudio = useCallback(async (source: 'browser') => {
     const baseName = audioFile
       ? audioFile.name.replace(/\.[^/.]+$/, '')
       : 'audio';
-    const fileName = `${baseName}_browser_repaired.wav`;
+    const ts = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 15);
+    const fileName = `${baseName}_browser_${algorithmVersion}_${processingOptions.sampleRate / 1000}k_${processingOptions.bitDepth}bit_${ts}.wav`;
 
     const targetBuffer = browserProcessedBuffer;
 
@@ -2297,7 +2327,7 @@ export function useAudioProcessor() {
     }
 
     alert('请先完成修复后再下载');
-  }, [backendProcessedBuffer, browserProcessedBuffer, audioFile, processingOptions, encodeWavWithWorker, taskIdRef]);
+  }, [backendProcessedBuffer, browserProcessedBuffer, audioFile, processingOptions, encodeWavWithWorker, taskIdRef, algorithmVersion]);
 
   useEffect(() => {
     return () => {

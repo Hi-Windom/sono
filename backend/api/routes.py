@@ -497,21 +497,44 @@ async def download_file(filename: str, request: Request):
     file_path = os.path.join(OUTPUT_DIR, filename)
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="文件不存在")
-    # 生成更友好的下载文件名
+    # 生成友好下载文件名: 原始文件名_算法版本_交付规格_时间戳.wav
     download_name = filename
     if "_rendered_" in filename:
-        # 新格式: {task_id}_rendered_{algo_ver}_{sr}_{bd}.wav
-        # 旧格式: {task_id}_rendered_{sr}_{bd}.wav
         parts = filename.replace(".wav", "").split("_rendered_")
         task_id_prefix = parts[0]
         task = get_task(task_id_prefix)
+        original_basename = "audio"
+        algo_ver_display = ""
+        sr_display = ""
+        bd_display = ""
         if task and task.get("filename"):
-            original_name = task["filename"].rsplit(".", 1)[0]
-            suffix = parts[1] if len(parts) > 1 else ""
-            segments = suffix.split("_")
-            # 取最后两段作为 sr_bd
-            sr_bd = "_".join(segments[-2:]) if len(segments) >= 2 else suffix
-            download_name = f"{original_name}_repaired_{sr_bd}.wav"
+            original_basename = os.path.splitext(task["filename"])[0]
+        suffix = parts[1] if len(parts) > 1 else ""
+        segments = suffix.split("_")
+        if len(segments) >= 3:
+            # 新格式: algo_ver / sr / bd
+            sr_val = int(segments[-2]) if segments[-2].isdigit() else 0
+            sr_display = f"{sr_val // 1000}k" if sr_val >= 1000 else f"{sr_val}k"
+            bd_display = f"{segments[-1]}bit"
+            algo_ver_raw = "_".join(segments[:-2])
+            algo_ver_display = algo_ver_raw.replace("p", ".")
+        elif len(segments) == 2:
+            sr_val = int(segments[0]) if segments[0].isdigit() else 0
+            sr_display = f"{sr_val // 1000}k" if sr_val >= 1000 else f"{sr_val}k"
+            bd_display = f"{segments[1]}bit"
+            algo_ver_display = task.get("params", {}).get("algorithm_version", "") if task else ""
+        # 生成时间戳 (文件修改时间)
+        from datetime import datetime, timezone
+        mtime = os.path.getmtime(file_path)
+        ts = datetime.fromtimestamp(mtime, tz=timezone.utc).strftime("%Y%m%d_%H%M%S")
+        # 拼接: 原始文件名_算法版本_交付规格_时间戳.wav
+        name_parts = [original_basename]
+        if algo_ver_display:
+            name_parts.append(algo_ver_display)
+        if sr_display and bd_display:
+            name_parts.append(f"{sr_display}_{bd_display}")
+        name_parts.append(ts)
+        download_name = "_".join(name_parts) + ".wav"
     # 使用 StreamingResponse 支持 Range 请求（断点续传 + 多线程下载）
     file_size = os.path.getsize(file_path)
     range_header = request.headers.get("range")
