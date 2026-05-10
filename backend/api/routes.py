@@ -1,14 +1,15 @@
 import os
 import logging
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from config import ALLOWED_EXTENSIONS, MAX_UPLOAD_SIZE, MOBILE_MODE, OUTPUT_DIR, UPLOAD_DIR
-from database import create_task, find_task_by_hash, get_queue_status, get_task
-from services.task_manager import generate_task_id, submit_detect_task, submit_repair_task, cancel_task
+from config import ALLOWED_EXTENSIONS, MAX_UPLOAD_SIZE, MOBILE_MODE, OUTPUT_DIR, UPLOAD_DIR, DECODED_DIR, DEPLOY_TIME_FILE
+from database import create_task, find_task_by_hash, get_queue_status, get_task, update_task
+from services.task_manager import generate_task_id, submit_detect_task, submit_repair_task, cancel_task, executor
 from services.audio_repair import get_available_versions
 from services.ai_detector import get_detector_versions
+from services.memory_guard import get_available_memory_bytes, estimate_repair_memory_bytes, should_use_float32, get_total_memory_bytes
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +18,60 @@ router = APIRouter(prefix="/api/v1")
 class LogRequest(BaseModel):
     message: str
     level: str = "info"
+
+class MemoryInfoRequest(BaseModel):
+    duration: float
+    channels: int = 2
+    sample_rate: int = 44100
+    algorithm_version: str = "v2.3a"
+
+@router.post("/memory/info")
+async def memory_info(request: MemoryInfoRequest):
+    if request.duration <= 0:
+        return {
+            "available_memory_bytes": None,
+            "estimated_memory_bytes": 0,
+            "is_sufficient": True,
+        }
+    available = get_available_memory_bytes()
+    n_samples = int(request.duration * request.sample_rate)
+    if request.algorithm_version == "v1.2":
+        working_sr = 96000
+    elif request.algorithm_version in ("v1.0", "v1.1", "v2.2a"):
+        working_sr = request.sample_rate
+    elif request.algorithm_version == "v2.3a":
+        working_sr = 48000
+    elif MOBILE_MODE:
+        working_sr = request.sample_rate
+    else:
+        working_sr = 48000
+    estimated = estimate_repair_memory_bytes(
+        n_samples, request.channels, request.sample_rate, working_sr,
+        algorithm_version=request.algorithm_version
+    )
+    is_sufficient = True
+    if available is not None:
+        is_sufficient = estimated <= available
+    use_f32 = should_use_float32(n_samples, request.channels)
+    has_streaming = request.algorithm_version in ("v2.2", "v2.3", "v2.3a")
+    total_mem = get_total_memory_bytes()
+    used_mem = (total_mem - available) if (total_mem is not None and available is not None) else None
+    baseline_samples = int(n_samples * working_sr / request.sample_rate) if working_sr > request.sample_rate else n_samples
+    baseline_bytes = request.channels * baseline_samples * 8
+    baseline_peak = baseline_samples * 8 * 3
+    baseline_total = (baseline_bytes + baseline_peak) * 1.3 * 1.2
+    memory_saving = max(0, 1 - estimated / baseline_total) if baseline_total > 0 else 0
+    return {
+        "available_memory_bytes": available,
+        "total_memory_bytes": total_mem,
+        "used_memory_bytes": used_mem,
+        "estimated_memory_bytes": estimated,
+        "is_sufficient": is_sufficient,
+        "working_sr": working_sr,
+        "use_float32": use_f32,
+        "has_streaming": has_streaming,
+        "memory_saving": round(memory_saving, 2),
+    }
 
 @router.post("/log")
 async def log_message(request: LogRequest):
@@ -54,6 +109,56 @@ async def list_algorithm_versions():
 async def list_detector_versions():
     return {"versions": get_detector_versions()}
 
+@router.get("/deploy-info")
+async def deploy_info():
+    from datetime import datetime, timezone
+    deploy_time = None
+    deploy_days = None
+    try:
+        with open(DEPLOY_TIME_FILE, "r") as f:
+            content = f.read().strip()
+        dt = datetime.fromisoformat(content)
+        deploy_time = content
+        deploy_days = (datetime.now(timezone.utc) - dt).days
+    except (FileNotFoundError, ValueError, OSError):
+        pass
+    return {"deploy_time": deploy_time, "deploy_days": deploy_days}
+
+class StorageEstimateRequest(BaseModel):
+    duration: float
+    channels: int = 2
+    sample_rate: int = 44100
+    bit_depth: int = 24
+
+@router.post("/storage/estimate")
+async def storage_estimate(request: StorageEstimateRequest):
+    bytes_per_sample = request.bit_depth // 8
+    data_bytes = int(request.duration * request.sample_rate * request.channels * bytes_per_sample)
+    total_bytes = data_bytes + 44
+    estimated_mb = round(total_bytes / (1024 * 1024), 1)
+
+    available_bytes = None
+    total_disk_bytes = None
+    used_disk_bytes = None
+    is_sufficient = True
+    try:
+        disk_usage = os.statvfs(UPLOAD_DIR)
+        available_bytes = disk_usage.f_bavail * disk_usage.f_frsize
+        total_disk_bytes = disk_usage.f_blocks * disk_usage.f_frsize
+        used_disk_bytes = total_disk_bytes - available_bytes
+        is_sufficient = total_bytes <= available_bytes
+    except OSError:
+        pass
+
+    return {
+        "estimated_output_bytes": total_bytes,
+        "estimated_output_mb": estimated_mb,
+        "available_disk_bytes": available_bytes,
+        "total_disk_bytes": total_disk_bytes,
+        "used_disk_bytes": used_disk_bytes,
+        "is_sufficient": is_sufficient,
+    }
+
 class CheckHashRequest(BaseModel):
     file_hash: str
 
@@ -88,13 +193,46 @@ async def upload_audio(file: UploadFile = File(...), file_hash: str = Form("")):
             raise HTTPException(status_code=413, detail=f"文件过大，最大支持 {MAX_UPLOAD_SIZE // 1024 // 1024}MB")
         f.write(content)
 
-    create_task(task_id, file.filename or "audio", upload_path, {}, file_hash, len(content))
+    file_size = len(content)
+
+    try:
+        disk_usage = os.statvfs(UPLOAD_DIR)
+        available_bytes = disk_usage.f_bavail * disk_usage.f_frsize
+        min_required = file_size * 2
+        if available_bytes < min_required:
+            os.remove(upload_path)
+            available_mb = available_bytes // 1024 // 1024
+            required_mb = min_required // 1024 // 1024
+            raise HTTPException(
+                status_code=507,
+                detail=f"存储空间不足：可用 {available_mb}MB，至少需要 {required_mb}MB（文件大小的2倍）"
+            )
+    except OSError:
+        pass
+
+    create_task(task_id, file.filename or "audio", upload_path, {}, file_hash, file_size)
     logger.info(f"[/upload] task_id={task_id} file_hash={file_hash or 'none'}")
+
+    audio_info = None
+    try:
+        import miniaudio
+        info = miniaudio.get_file_info(upload_path)
+        audio_info = {
+            "sample_rate": info.sample_rate,
+            "channels": info.nchannels,
+            "duration": info.duration,
+            "num_frames": info.num_frames,
+            "format": str(info.file_format),
+            "sample_width": info.sample_width,
+        }
+    except Exception:
+        pass
 
     return {
         "task_id": task_id,
         "filename": file.filename,
-        "size": len(content),
+        "size": file_size,
+        "audio_info": audio_info,
     }
 
 class DetectRequest(BaseModel):
@@ -169,6 +307,72 @@ async def repair_audio_endpoint(request: RepairRequest):
     submit_repair_task(request.task_id, audio_path, request.params)
     
     return {"task_id": request.task_id, "status": "pending"}
+
+class RenderRequest(BaseModel):
+    task_id: str
+    sample_rate: int = 44100
+    bit_depth: int = 24
+
+@router.post("/render")
+async def render_audio_endpoint(request: RenderRequest):
+    task = get_task(request.task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    output_path = task.get("output_path")
+    if not output_path or not os.path.exists(output_path):
+        raise HTTPException(status_code=400, detail="修复结果不存在，请先完成修复")
+
+    algo_ver = task.get("params", {}).get("algorithm_version", "v2.0").replace(".", "p")
+    render_filename = f"{request.task_id}_rendered_{algo_ver}_{request.sample_rate}_{request.bit_depth}.wav"
+    render_path = os.path.join(OUTPUT_DIR, render_filename)
+
+    update_task(request.task_id, status="rendering", step="渲染交付规格...", progress=0)
+
+    executor.submit(_run_render, request.task_id, output_path, render_path, request.sample_rate, request.bit_depth, render_filename)
+
+    return {"task_id": request.task_id, "status": "rendering"}
+
+
+def _run_render(task_id, input_path, output_path, target_sr, bit_depth, render_filename):
+    from services.render import render_output
+    from services.task_manager import _ws_send_progress
+
+    def progress_callback(pct, step):
+        update_task(task_id, progress=pct, step=step)
+        _ws_send_progress(task_id, {
+            "task_id": task_id,
+            "status": "rendering",
+            "progress": pct,
+            "step": step,
+        })
+
+    try:
+        result = render_output(input_path, output_path, target_sr, bit_depth, progress_callback=progress_callback)
+        update_task(task_id,
+            status="render_completed",
+            progress=1.0,
+            step="渲染完成",
+            render_filename=render_filename,
+            render_result=result,
+        )
+        _ws_send_progress(task_id, {
+            "task_id": task_id,
+            "status": "render_completed",
+            "progress": 1.0,
+            "step": "渲染完成",
+            "render_filename": render_filename,
+            "render_result": result,
+        })
+    except Exception as e:
+        logger.error(f"[render] 渲染失败 task_id={task_id}: {e}")
+        update_task(task_id, status="error", error=str(e), step="渲染失败")
+        _ws_send_progress(task_id, {
+            "task_id": task_id,
+            "status": "error",
+            "error": str(e),
+            "step": "渲染失败",
+        })
 
 @router.get("/status/{task_id}")
 async def get_task_status(task_id: str):
@@ -295,12 +499,432 @@ async def download_audio(task_id: str):
     original_name = task.get("original_filename", "audio")
     base_name = os.path.splitext(original_name)[0]
     download_name = f"{base_name}_repaired.wav"
-    
-    return FileResponse(
-        output_path,
+
+    file_size = os.path.getsize(output_path)
+    from urllib.parse import quote
+    encoded_name = quote(download_name)
+    disposition = f"attachment; filename*=UTF-8''{encoded_name}"
+
+    def iter_full_file():
+        with open(output_path, "rb") as f:
+            while True:
+                data = f.read(65536)
+                if not data:
+                    break
+                yield data
+
+    from fastapi.responses import StreamingResponse
+    return StreamingResponse(
+        iter_full_file(),
         media_type="audio/wav",
-        filename=download_name,
+        headers={
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(file_size),
+            "Content-Disposition": disposition,
+        },
     )
+
+@router.get("/download-file/{filename}")
+async def download_file(filename: str, request: Request):
+    file_path = os.path.join(OUTPUT_DIR, filename)
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="文件不存在")
+    # 生成友好下载文件名: 原始文件名_算法版本_交付规格_时间戳.wav
+    download_name = filename
+    if "_rendered_" in filename:
+        parts = filename.replace(".wav", "").split("_rendered_")
+        task_id_prefix = parts[0]
+        task = get_task(task_id_prefix)
+        original_basename = "audio"
+        algo_ver_display = ""
+        sr_display = ""
+        bd_display = ""
+        if task and task.get("original_filename"):
+            original_basename = os.path.splitext(task["original_filename"])[0]
+        suffix = parts[1] if len(parts) > 1 else ""
+        segments = suffix.split("_")
+        if len(segments) >= 3:
+            # 新格式: algo_ver / sr / bd
+            sr_val = int(segments[-2]) if segments[-2].isdigit() else 0
+            sr_display = f"{sr_val // 1000}k" if sr_val >= 1000 else f"{sr_val}k"
+            bd_display = f"{segments[-1]}bit"
+            algo_ver_raw = "_".join(segments[:-2])
+            algo_ver_display = algo_ver_raw.replace("p", ".")
+        elif len(segments) == 2:
+            sr_val = int(segments[0]) if segments[0].isdigit() else 0
+            sr_display = f"{sr_val // 1000}k" if sr_val >= 1000 else f"{sr_val}k"
+            bd_display = f"{segments[1]}bit"
+            algo_ver_display = task.get("params", {}).get("algorithm_version", "") if task else ""
+        # 生成时间戳 (文件修改时间)
+        from datetime import datetime, timezone
+        mtime = os.path.getmtime(file_path)
+        ts = datetime.fromtimestamp(mtime, tz=timezone.utc).strftime("%Y%m%d_%H%M%S")
+        # 拼接: 原始文件名_算法版本_交付规格_时间戳.wav
+        name_parts = [original_basename]
+        if algo_ver_display:
+            name_parts.append(algo_ver_display)
+        if sr_display and bd_display:
+            name_parts.append(f"{sr_display}_{bd_display}")
+        name_parts.append(ts)
+        download_name = "_".join(name_parts) + ".wav"
+    # 使用 StreamingResponse 支持 Range 请求（断点续传 + 多线程下载）
+    file_size = os.path.getsize(file_path)
+    range_header = request.headers.get("range")
+    # 统一使用 RFC 5987 编码 Content-Disposition，确保中文文件名正确
+    from urllib.parse import quote
+    encoded_name = quote(download_name)
+    disposition = f"attachment; filename*=UTF-8''{encoded_name}"
+
+    if range_header:
+        # 解析 Range: bytes=start-end
+        range_match = __import__("re").match(r"bytes=(\d+)-(\d*)", range_header)
+        if range_match:
+            start = int(range_match.group(1))
+            end = int(range_match.group(2)) if range_match.group(2) else file_size - 1
+            if start >= file_size:
+                from fastapi.responses import Response
+                return Response(status_code=416, headers={"Content-Range": f"bytes */{file_size}"})
+            end = min(end, file_size - 1)
+            chunk_size = end - start + 1
+
+            def iter_file():
+                with open(file_path, "rb") as f:
+                    f.seek(start)
+                    remaining = chunk_size
+                    while remaining > 0:
+                        read_size = min(8192, remaining)
+                        data = f.read(read_size)
+                        if not data:
+                            break
+                        remaining -= len(data)
+                        yield data
+
+            from fastapi.responses import StreamingResponse
+            return StreamingResponse(
+                iter_file(),
+                status_code=206,
+                media_type="audio/wav",
+                headers={
+                    "Content-Range": f"bytes {start}-{end}/{file_size}",
+                    "Content-Length": str(chunk_size),
+                    "Accept-Ranges": "bytes",
+                    "Content-Disposition": disposition,
+                },
+            )
+
+    # 无 Range 请求，返回完整文件（使用 StreamingResponse 统一 Content-Disposition 格式）
+    def iter_full_file():
+        with open(file_path, "rb") as f:
+            while True:
+                data = f.read(65536)
+                if not data:
+                    break
+                yield data
+
+    from fastapi.responses import StreamingResponse
+    return StreamingResponse(
+        iter_full_file(),
+        media_type="audio/wav",
+        headers={
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(file_size),
+            "Content-Disposition": disposition,
+        },
+    )
+
+@router.get("/render-cache/{task_id}")
+async def get_render_cache(task_id: str):
+    """查询某个任务已有的渲染交付规格缓存"""
+    task = get_task(task_id)
+    if not task:
+        return {"caches": []}
+
+    # 获取修复时使用的算法版本
+    algo_version = task.get("params", {}).get("algorithm_version", "")
+
+    caches = []
+    # 检查 OUTPUT_DIR 中是否有该 task 的渲染文件
+    if os.path.isdir(OUTPUT_DIR):
+        for fname in os.listdir(OUTPUT_DIR):
+            if not fname.startswith(f"{task_id}_rendered_") or not fname.endswith(".wav"):
+                continue
+            base = fname.replace(".wav", "")
+            # 新格式: {task_id}_rendered_{algo_ver}_{sr}_{bd}
+            # 旧格式: {task_id}_rendered_{sr}_{bd}
+            parts = base.split("_rendered_")
+            if len(parts) != 2:
+                continue
+            suffix = parts[1]
+            segments = suffix.split("_")
+            try:
+                if len(segments) >= 3:
+                    # 新格式: algo_ver / sr / bd
+                    sr = int(segments[-2])
+                    bd = int(segments[-1])
+                    file_algo_ver = "_".join(segments[:-2])
+                elif len(segments) == 2:
+                    # 旧格式: sr / bd (无算法版本)
+                    sr = int(segments[0])
+                    bd = int(segments[1])
+                    file_algo_ver = ""
+                else:
+                    continue
+                fpath = os.path.join(OUTPUT_DIR, fname)
+                mtime = os.path.getmtime(fpath)
+                from datetime import datetime, timezone
+                mtime_str = datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat()
+                caches.append({
+                    "sample_rate": sr,
+                    "bit_depth": bd,
+                    "filename": fname,
+                    "size": os.path.getsize(fpath),
+                    "mtime": mtime_str,
+                    "algorithm_version": file_algo_ver.replace("p", ".") if file_algo_ver else algo_version,
+                })
+            except ValueError:
+                pass
+    return {"caches": caches}
+
+@router.delete("/render-cache/{filename}")
+async def delete_render_cache(filename: str):
+    """删除单个渲染缓存文件"""
+    file_path = os.path.join(OUTPUT_DIR, filename)
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="文件不存在")
+    if "_rendered_" not in filename:
+        raise HTTPException(status_code=400, detail="不是渲染缓存文件")
+    released = os.path.getsize(file_path)
+    os.remove(file_path)
+    return {"released_bytes": released, "filename": filename}
+
+# ===== 分析缓存 API =====
+
+class AnalysisCacheRequest(BaseModel):
+    quick_hash: str
+    file_name: str = ""
+    file_size: int = 0
+    wav_info: str = ""
+    analysis: str = ""
+
+@router.get("/analysis-cache/{quick_hash}")
+async def get_analysis_cache_endpoint(quick_hash: str):
+    """获取单条分析缓存"""
+    from database import get_analysis_cache as db_get
+    cached = db_get(quick_hash)
+    if not cached:
+        return {"found": False}
+    return {"found": True, "data": cached}
+
+@router.post("/analysis-cache")
+async def save_analysis_cache_endpoint(request: AnalysisCacheRequest):
+    """保存分析缓存"""
+    from database import save_analysis_cache as db_save
+    db_save(request.quick_hash, request.file_name, request.file_size, request.wav_info, request.analysis)
+    return {"status": "ok"}
+
+@router.get("/analysis-cache-list")
+async def list_analysis_cache():
+    """获取所有分析缓存列表"""
+    from database import get_all_analysis_cache
+    entries = get_all_analysis_cache()
+    return {"entries": entries, "count": len(entries)}
+
+@router.delete("/analysis-cache/{quick_hash}")
+async def delete_analysis_cache_endpoint(quick_hash: str):
+    """删除单条分析缓存"""
+    from database import delete_analysis_cache as db_delete
+    db_delete(quick_hash)
+    return {"status": "ok"}
+
+@router.post("/analysis-cache-clear")
+async def clear_analysis_cache():
+    """清空所有分析缓存"""
+    from database import clear_all_analysis_cache
+    count = clear_all_analysis_cache()
+    return {"deleted_count": count}
+
+
+@router.get("/decoded-wav/{file_hash}")
+async def get_decoded_wav(file_hash: str, request: Request):
+    """获取非WAV文件的解码WAV缓存，支持Range断点续传"""
+    decoded_path = os.path.join(DECODED_DIR, f"{file_hash}.wav")
+    if not os.path.exists(decoded_path):
+        raise HTTPException(status_code=404, detail="解码缓存不存在")
+
+    file_size = os.path.getsize(decoded_path)
+    range_header = request.headers.get("range")
+
+    if range_header:
+        range_match = __import__("re").match(r"bytes=(\d+)-(\d*)", range_header)
+        if range_match:
+            start = int(range_match.group(1))
+            end = int(range_match.group(2)) if range_match.group(2) else file_size - 1
+            if start >= file_size:
+                from fastapi.responses import Response
+                return Response(status_code=416, headers={"Content-Range": f"bytes */{file_size}"})
+            end = min(end, file_size - 1)
+            chunk_size = end - start + 1
+
+            def iter_file():
+                with open(decoded_path, "rb") as f:
+                    f.seek(start)
+                    remaining = chunk_size
+                    while remaining > 0:
+                        read_size = min(8192, remaining)
+                        data = f.read(read_size)
+                        if not data:
+                            break
+                        remaining -= len(data)
+                        yield data
+
+            from fastapi.responses import StreamingResponse
+            return StreamingResponse(
+                iter_file(),
+                status_code=206,
+                media_type="audio/wav",
+                headers={
+                    "Content-Range": f"bytes {start}-{end}/{file_size}",
+                    "Content-Length": str(chunk_size),
+                    "Accept-Ranges": "bytes",
+                },
+            )
+
+    def iter_full_file():
+        with open(decoded_path, "rb") as f:
+            while True:
+                data = f.read(65536)
+                if not data:
+                    break
+                yield data
+
+    from fastapi.responses import StreamingResponse
+    return StreamingResponse(
+        iter_full_file(),
+        media_type="audio/wav",
+        headers={
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(file_size),
+        },
+    )
+
+
+@router.head("/decoded-wav/{file_hash}")
+async def head_decoded_wav(file_hash: str):
+    """检查解码WAV缓存是否存在"""
+    decoded_path = os.path.join(DECODED_DIR, f"{file_hash}.wav")
+    if not os.path.exists(decoded_path):
+        raise HTTPException(status_code=404, detail="解码缓存不存在")
+    from fastapi.responses import Response
+    file_size = os.path.getsize(decoded_path)
+    return Response(
+        headers={
+            "Content-Length": str(file_size),
+            "Accept-Ranges": "bytes",
+            "Content-Type": "audio/wav",
+        },
+    )
+
+
+@router.post("/decoded-wav/{file_hash}")
+async def create_decoded_wav(file_hash: str):
+    """为非WAV文件创建解码WAV缓存（后台异步）"""
+    decoded_path = os.path.join(DECODED_DIR, f"{file_hash}.wav")
+    if os.path.exists(decoded_path):
+        return {"status": "ok", "message": "缓存已存在"}
+
+    task = find_task_by_hash(file_hash)
+    if not task:
+        raise HTTPException(status_code=404, detail="未找到对应的上传文件")
+
+    original_path = task.get("original_path", "")
+    if not original_path or not os.path.exists(original_path):
+        raise HTTPException(status_code=404, detail="原始文件不存在")
+
+    ext = os.path.splitext(original_path)[1].lower()
+    if ext == ".wav":
+        return {"status": "ok", "message": "WAV文件无需解码缓存"}
+
+    task_id = task.get("id", "")
+
+    def _convert_to_wav():
+        try:
+            import numpy as np
+            from services.audio_loader import load_audio_with_fallback
+            y, sr = load_audio_with_fallback(original_path)
+            if y.ndim == 2:
+                y = y.T
+            os.makedirs(DECODED_DIR, exist_ok=True)
+            import soundfile as sf
+            sf.write(decoded_path, y, sr)
+            logger.info(f"解码WAV缓存创建完成: {decoded_path} size={os.path.getsize(decoded_path)}")
+            from database import update_task
+            update_task(task_id, original_path=decoded_path)
+            if original_path != decoded_path and os.path.exists(original_path):
+                os.remove(original_path)
+                logger.info(f"已删除原始文件: {original_path}")
+        except Exception as e:
+            logger.warning(f"解码WAV缓存创建失败: {e}")
+
+    executor.submit(_convert_to_wav)
+    return {"status": "ok", "message": "正在后台创建解码缓存"}
+
+@router.get("/audio-info/{file_hash}")
+async def get_audio_info(file_hash: str):
+    task = find_task_by_hash(file_hash)
+    if not task:
+        raise HTTPException(status_code=404, detail="未找到对应的上传文件")
+
+    original_path = task.get("original_path", "")
+    if not original_path or not os.path.exists(original_path):
+        raise HTTPException(status_code=404, detail="音频文件不存在")
+
+    try:
+        import miniaudio
+        info = miniaudio.get_file_info(original_path)
+        return {
+            "sample_rate": info.sample_rate,
+            "channels": info.nchannels,
+            "duration": info.duration,
+            "num_frames": info.num_frames,
+            "format": str(info.file_format),
+            "sample_width": info.sample_width,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取音频信息失败: {e}")
+
+@router.get("/waveform/{file_hash}")
+async def get_waveform(file_hash: str):
+    task = find_task_by_hash(file_hash)
+    if not task:
+        raise HTTPException(status_code=404, detail="未找到对应的上传文件")
+
+    from database import get_analysis_cache as db_get, save_analysis_cache as db_save
+    cached = db_get(file_hash)
+    if cached and cached.get("waveform_peaks"):
+        try:
+            return {"peaks": json.loads(cached["waveform_peaks"])}
+        except Exception:
+            pass
+
+    original_path = task.get("original_path", "")
+    if not original_path or not os.path.exists(original_path):
+        raise HTTPException(status_code=404, detail="音频文件不存在")
+
+    from services.task_manager import _generate_waveform_peaks
+    peaks = _generate_waveform_peaks(original_path)
+    if not peaks:
+        raise HTTPException(status_code=500, detail="波形生成失败")
+
+    if cached:
+        from database import get_db
+        conn = get_db()
+        conn.execute("UPDATE analysis_cache SET waveform_peaks = ? WHERE quick_hash = ?", (json.dumps(peaks), file_hash))
+        conn.commit()
+        conn.close()
+    else:
+        db_save(file_hash, task.get("original_filename", ""), task.get("file_size", 0), "", "", waveform_peaks=json.dumps(peaks))
+
+    return {"peaks": peaks}
 
 @router.post("/cancel/{task_id}")
 async def cancel_task_endpoint(task_id: str):
@@ -355,45 +979,86 @@ async def training_upload(
 @router.get("/cache/info")
 async def get_cache_info():
     from database import get_db
-    
+
     upload_size = 0
     output_size = 0
+    render_size = 0
+    repair_size = 0
     upload_count = 0
     output_count = 0
-    
+    render_count = 0
+    repair_count = 0
+    invalid_count = 0
+    invalid_size = 0
+
+    conn = get_db()
+    db_files = set()
+    try:
+        all_tasks = conn.execute(
+            "SELECT id, original_filename, original_path, output_path, status, created_at FROM tasks ORDER BY created_at DESC"
+        ).fetchall()
+        for row in all_tasks:
+            if row["original_path"]:
+                db_files.add(row["original_path"])
+            if row["output_path"]:
+                db_files.add(row["output_path"])
+    finally:
+        conn.close()
+
+    def _check_invalid(filepath):
+        nonlocal invalid_count, invalid_size
+        is_valid, _ = _is_valid_audio_file(filepath)
+        is_orphaned = filepath not in db_files
+        if not is_valid or is_orphaned:
+            invalid_count += 1
+            invalid_size += os.path.getsize(filepath) if os.path.exists(filepath) else 0
+
     if os.path.exists(UPLOAD_DIR):
         for f in os.listdir(UPLOAD_DIR):
             fp = os.path.join(UPLOAD_DIR, f)
             if os.path.isfile(fp):
                 upload_size += os.path.getsize(fp)
                 upload_count += 1
-    
+                _check_invalid(fp)
+
     if os.path.exists(OUTPUT_DIR):
         for f in os.listdir(OUTPUT_DIR):
             fp = os.path.join(OUTPUT_DIR, f)
             if os.path.isfile(fp):
                 output_size += os.path.getsize(fp)
                 output_count += 1
-    
-    conn = get_db()
-    try:
-        all_tasks = conn.execute(
-            "SELECT id, original_filename, original_path, output_path, status, created_at FROM tasks ORDER BY created_at DESC"
-        ).fetchall()
-    finally:
-        conn.close()
-    
+                if "_rendered_" in f:
+                    render_size += os.path.getsize(fp)
+                    render_count += 1
+                else:
+                    repair_count += 1
+                _check_invalid(fp)
+
+    repair_size = output_size - render_size
+
     tasks = []
     for row in all_tasks:
         orig_path = row["original_path"] if row["original_path"] else ""
         out_path = row["output_path"] if row["output_path"] else ""
-        
+
         orig_exists = bool(orig_path) and os.path.exists(orig_path)
         out_exists = bool(out_path) and os.path.exists(out_path)
-        
+
         orig_size = os.path.getsize(orig_path) if orig_exists else 0
         out_size = os.path.getsize(out_path) if out_exists else 0
-        
+
+        # 收集该任务的渲染缓存
+        task_render_caches = []
+        if os.path.isdir(OUTPUT_DIR):
+            task_id_prefix = row["id"]
+            for fname in os.listdir(OUTPUT_DIR):
+                if fname.startswith(f"{task_id_prefix}_rendered_") and fname.endswith(".wav"):
+                    fp = os.path.join(OUTPUT_DIR, fname)
+                    task_render_caches.append({
+                        "filename": fname,
+                        "size": os.path.getsize(fp),
+                    })
+
         task_info = {
             "id": row["id"],
             "filename": row["original_filename"] or "unknown",
@@ -404,16 +1069,23 @@ async def get_cache_info():
             "original_size": orig_size,
             "output_size": out_size,
             "total_size": orig_size + out_size,
+            "render_caches": task_render_caches,
         }
         tasks.append(task_info)
-    
+
     return {
         "total_size": upload_size + output_size,
         "upload_size": upload_size,
         "output_size": output_size,
+        "repair_size": repair_size,
+        "render_size": render_size,
         "upload_count": upload_count,
         "output_count": output_count,
+        "repair_count": repair_count,
+        "render_count": render_count,
         "task_count": len(tasks),
+        "invalid_count": invalid_count,
+        "invalid_size": invalid_size,
         "tasks": tasks,
     }
 
@@ -429,12 +1101,24 @@ async def lookup_repair_cache(req: RepairCacheLookupRequest):
     if not cached:
         return {"found": False}
 
+    repair_result = cached.get("repair_result")
+
+    if repair_result and not repair_result.get("waveform_peaks"):
+        output_path = cached.get("output_path", "")
+        if output_path and os.path.exists(output_path):
+            from services.task_manager import _generate_waveform_peaks
+            peaks = _generate_waveform_peaks(output_path)
+            if peaks:
+                repair_result["waveform_peaks"] = peaks
+                from database import update_task
+                update_task(cached["id"], repair_result=repair_result)
+
     return {
         "found": True,
         "task_id": cached["id"],
         "output_path": cached.get("output_path", ""),
         "output_size": cached.get("output_size", 0),
-        "repair_result": cached.get("repair_result"),
+        "repair_result": repair_result,
         "detection_result": cached.get("detection_result"),
         "repaired_detection_result": cached.get("repaired_detection_result"),
     }
@@ -570,6 +1254,26 @@ async def clear_output_cache():
     
     return {"released_bytes": released}
 
+@router.post("/cache/clear-render")
+async def clear_render_cache():
+    """清理交付渲染缓存（仅删除 _rendered_ 文件）"""
+    released = 0
+    cleaned_count = 0
+
+    if os.path.exists(OUTPUT_DIR):
+        for filename in os.listdir(OUTPUT_DIR):
+            if "_rendered_" in filename and filename.endswith(".wav"):
+                filepath = os.path.join(OUTPUT_DIR, filename)
+                if os.path.isfile(filepath):
+                    try:
+                        released += os.path.getsize(filepath)
+                        os.remove(filepath)
+                        cleaned_count += 1
+                    except Exception as e:
+                        logger.warning(f"删除渲染缓存失败: {filepath}, {e}")
+
+    return {"released_bytes": released, "cleaned_count": cleaned_count}
+
 @router.post("/cache/clear-upload")
 async def clear_upload_cache():
     """清理上传缓存"""
@@ -648,28 +1352,36 @@ def _parse_pytest_output(output: str) -> dict:
         stripped = line.strip()
         if " PASSED" in stripped:
             test_name = stripped.split(" PASSED")[0].strip()
+            full_name = test_name
             if "::" in test_name:
                 test_name = test_name.split("::")[-1]
-            tests.append({"name": test_name, "status": "passed"})
+            tests.append({"name": test_name, "full_name": full_name, "status": "passed"})
         elif " FAILED" in stripped:
             test_name = stripped.split(" FAILED")[0].strip()
+            full_name = test_name
             if "::" in test_name:
                 test_name = test_name.split("::")[-1]
-            tests.append({"name": test_name, "status": "failed", "error": ""})
+            tests.append({"name": test_name, "full_name": full_name, "status": "failed", "error": ""})
         elif " SKIPPED" in stripped:
             test_name = stripped.split(" SKIPPED")[0].strip()
+            full_name = test_name
             if "::" in test_name:
                 test_name = test_name.split("::")[-1]
-            tests.append({"name": test_name, "status": "skipped"})
+            tests.append({"name": test_name, "full_name": full_name, "status": "skipped"})
         elif "passed" in stripped and ("failed" in stripped or "skipped" in stripped or stripped.endswith("passed")):
             summary_line = stripped
 
     for t in tests:
         name = t["name"]
+        full_name = t.get("full_name", name)
         if "[" in name:
             m = re.search(r'\[(v[\d.]+[\w]*)\]', name)
             t["version"] = m.group(1) if m else ""
-        elif "V22a" in name or "v22a" in name.lower():
+        elif "V23a" in full_name or "v23a" in full_name.lower():
+            t["version"] = "v2.3a"
+        elif "V23" in full_name or "v23" in full_name.lower():
+            t["version"] = "v2.3"
+        elif "V22a" in full_name or "v22a" in full_name.lower():
             t["version"] = "v2.2a"
         else:
             t["version"] = ""
@@ -695,6 +1407,11 @@ def _parse_pytest_output(output: str) -> dict:
             "test_peak_limit_uses_soft": ("iron_rule", "Flat-top", "Peak Limit 不增加 flat-top 样本（使用软削波）"),
             "test_loudness_norm_is_constant": ("iron_rule", "Gain CV", "Loudness Norm 是纯常量增益（CV < 0.1%）"),
             "test_dc_remove_reduces": ("per_step", "DC", "DC Remove 有效降低直流偏移"),
+            "test_transient_snr": ("per_step", "SNR", "瞬态修复 SNR > 15 dB"),
+            "test_transient_uses_constant": ("iron_rule", "Gain CV", "瞬态修复使用全局常量增益（CV < 5%）"),
+            "test_spectral_denoise_snr": ("per_step", "SNR", "频谱降噪 SNR > 10 dB"),
+            "test_de_ess_snr": ("per_step", "SNR", "齿音抑制 SNR > 15 dB"),
+            "test_de_ess_is_constant": ("iron_rule", "Gain CV", "齿音抑制使用全局常量衰减"),
         }
         matched = False
         for key, val in category_map.items():
@@ -706,6 +1423,7 @@ def _parse_pytest_output(output: str) -> dict:
             t["category"] = "other"
             t["metric"] = ""
             t["description"] = ""
+        t.pop("full_name", None)
 
     passed = sum(1 for t in tests if t["status"] == "passed")
     failed = sum(1 for t in tests if t["status"] == "failed")

@@ -132,22 +132,19 @@ def apply_softness_v5(y, sr, intensity):
     if intensity < 0.01:
         return y
 
-    result = y.copy()
-
     cutoff = max(10000, 20000 - intensity * 8000)
     cutoff = min(cutoff, sr / 2 - 200)
     nyq = sr / 2
     norm_cutoff = cutoff / nyq
 
     if norm_cutoff <= 0 or norm_cutoff >= 1:
-        return result
+        return y
 
-    # 使用 SOS 格式，更高效
     sos = butter(2, norm_cutoff, btype='low', output='sos')
     blend = intensity * 0.12
 
     for ch in range(y.shape[0]):
-        filtered = sosfiltfilt(sos, result[ch])
-        result[ch] = filtered * blend + result[ch] * (1 - blend)
+        filtered = sosfiltfilt(sos, y[ch])
+        y[ch] = filtered * blend + y[ch] * (1 - blend)
 
-    return result
+    return y

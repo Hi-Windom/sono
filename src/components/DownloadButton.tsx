@@ -12,6 +12,7 @@ interface DownloadButtonProps {
     output_bit_depth: number;
     duration: number;
     channels: number;
+    algorithm_version?: string;
   } | null;
   browserBufferInfo?: {
     sampleRate: number;
@@ -24,6 +25,7 @@ interface DownloadButtonProps {
   browserAlgorithmVersion?: string;
   backendCompletedAt?: string;
   browserCompletedAt?: string;
+  isBackendLoading?: boolean;
 }
 
 export function DownloadButton({
@@ -39,6 +41,7 @@ export function DownloadButton({
   browserAlgorithmVersion,
   backendCompletedAt,
   browserCompletedAt,
+  isBackendLoading = false,
 }: DownloadButtonProps) {
   const baseName = audioFileName
     ? audioFileName.replace(/\.[^/.]+$/, '')
@@ -55,12 +58,24 @@ export function DownloadButton({
         <div>
           <button
             onClick={onDownloadBackend}
-            className="w-full py-3 px-6 rounded-xl font-bold text-base flex items-center justify-center gap-3 transition-all bg-gradient-to-r from-cyan-600 to-cyan-500 text-white hover:scale-[1.02] shadow-lg shadow-cyan-500/30"
+            disabled={isBackendLoading}
+            className={`w-full py-3 px-6 rounded-xl font-bold text-base flex items-center justify-center gap-3 transition-all bg-gradient-to-r from-cyan-600 to-cyan-500 text-white hover:scale-[1.02] shadow-lg shadow-cyan-500/30 ${isBackendLoading ? 'opacity-70 cursor-not-allowed' : ''}`}
           >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-            </svg>
-            导出后端修复音频
+            {isBackendLoading ? (
+              <>
+                <svg className="w-5 h-5 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                等待后端加载中...
+              </>
+            ) : (
+              <>
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+                导出后端修复音频
+              </>
+            )}
           </button>
           {backendRepairResult && (
             <div className="mt-2 p-2 bg-black/20 rounded-lg space-y-1">
@@ -79,7 +94,7 @@ export function DownloadButton({
               {backendAlgorithmVersion && (
                 <div className="flex justify-between text-xs">
                   <span className="text-gray-400">修复算法</span>
-                  <span className="text-cyan-400">{backendAlgorithmVersion}</span>
+                  <span className="text-cyan-400">{backendAlgorithmVersion}{backendRepairResult?.algorithm_version && backendRepairResult.algorithm_version !== backendAlgorithmVersion ? ` (${backendRepairResult.algorithm_version})` : ''}</span>
                 </div>
               )}
               {backendCompletedAt && (

@@ -17,12 +17,22 @@ function log(tag: string, ...args: unknown[]) {
   console.log(msg);
 }
 
+interface AudioInfo {
+  sample_rate: number;
+  channels: number;
+  duration: number;
+  num_frames: number;
+  format: string;
+  sample_width: number;
+}
+
 interface UploadResponse {
   task_id: string;
   filename: string;
   size: number;
   message: string;
   cached?: boolean;
+  audio_info?: AudioInfo | null;
 }
 
 interface TaskStatus {
@@ -56,6 +66,8 @@ interface BackendRepairResult {
   output_bit_depth: number;
   duration: number;
   channels: number;
+  algorithm_version?: string;
+  waveform_peaks?: number[][];
 }
 
 interface ProgressEvent {
@@ -66,6 +78,14 @@ interface ProgressEvent {
   detection_result?: BackendDetectionResult;
   repaired_detection_result?: BackendDetectionResult;
   repair_result?: BackendRepairResult;
+  render_filename?: string;
+  render_result?: {
+    original_sample_rate: number;
+    output_sample_rate: number;
+    output_bit_depth: number;
+    duration: number;
+    channels: number;
+  };
   error?: string;
 }
 
@@ -74,6 +94,12 @@ export interface AlgorithmVersion {
   label: string;
   description: string;
   defaultParams: Record<string, number>;
+  paramRanges: Record<string, {
+    min: number;
+    max: number;
+    step: number;
+    label: string;
+  }>;
   modes: {
     name: string;
     description: string;
@@ -88,7 +114,7 @@ export interface DetectorVersion {
   description: string;
 }
 
-export function mapParamsToBackend(params: AIRepairParams, options: ProcessingOptions, algorithmVersion?: string): Record<string, unknown> {
+export function mapParamsToBackend(params: AIRepairParams, _options?: ProcessingOptions, algorithmVersion?: string): Record<string, unknown> {
   return {
     de_clipping: params.deClipping,
     noise_reduction: params.noiseReduction,
@@ -104,8 +130,6 @@ export function mapParamsToBackend(params: AIRepairParams, options: ProcessingOp
     transient_repair: params.transientRepair,
     warmth: params.warmth,
     clarity: params.clarity,
-    sample_rate: options.sampleRate,
-    bit_depth: options.bitDepth,
     algorithm_version: algorithmVersion || 'v2.0',
   };
 }
@@ -754,6 +778,27 @@ export async function fetchDetectorVersions(): Promise<DetectorVersion[]> {
   }
 }
 
+// 渲染缓存查询
+export interface RenderCacheEntry {
+  sample_rate: number;
+  bit_depth: number;
+  filename: string;
+  size: number;
+  mtime: string;
+  algorithm_version: string;
+}
+
+export async function fetchRenderCache(taskId: string): Promise<RenderCacheEntry[]> {
+  try {
+    const res = await fetch(`${API_BASE}/render-cache/${taskId}`, { signal: AbortSignal.timeout(5000) });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.caches || [];
+  } catch {
+    return [];
+  }
+}
+
 // 训练素材哈希检查
 export async function checkTrainingHash(fileHash: string): Promise<{ exists: boolean; filename?: string; size?: number }> {
   const url = `${API_BASE}/training/check-hash`;
@@ -973,4 +1018,165 @@ export function connectProgressWS(
   };
 }
 
+export interface MemoryInfoResult {
+  available_memory_bytes: number | null;
+  total_memory_bytes: number | null;
+  used_memory_bytes: number | null;
+  estimated_memory_bytes: number;
+  is_sufficient: boolean;
+  working_sr: number;
+  use_float32: boolean;
+  has_streaming: boolean;
+  memory_saving: number;
+}
+
+export async function fetchMemoryInfo(
+  duration: number,
+  channels: number,
+  sampleRate: number,
+  algorithmVersion: string,
+): Promise<MemoryInfoResult | null> {
+  try {
+    const res = await fetch(`${API_BASE}/memory/info`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        duration,
+        channels,
+        sample_rate: sampleRate,
+        algorithm_version: algorithmVersion,
+      }),
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+export interface StorageEstimateResult {
+  estimated_output_bytes: number;
+  estimated_output_mb: number;
+  available_disk_bytes: number | null;
+  total_disk_bytes: number | null;
+  used_disk_bytes: number | null;
+  is_sufficient: boolean;
+}
+
+export async function fetchStorageEstimate(
+  duration: number,
+  channels: number,
+  sampleRate: number,
+  bitDepth: number,
+): Promise<StorageEstimateResult | null> {
+  try {
+    const res = await fetch(`${API_BASE}/storage/estimate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        duration,
+        channels,
+        sample_rate: sampleRate,
+        bit_depth: bitDepth,
+      }),
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+export interface RenderResult {
+  task_id: string;
+  status: string;
+  render_filename?: string;
+  render_result?: {
+    original_sample_rate: number;
+    output_sample_rate: number;
+    output_bit_depth: number;
+    duration: number;
+    channels: number;
+  };
+}
+
+export async function renderAudio(
+  taskId: string,
+  sampleRate: number,
+  bitDepth: number,
+): Promise<RenderResult> {
+  const url = `${API_BASE}/render`;
+  log('render', `POST ${url} task_id=${taskId} sr=${sampleRate} bd=${bitDepth}`);
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      task_id: taskId,
+      sample_rate: sampleRate,
+      bit_depth: bitDepth,
+    }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.detail || `渲染失败 (${res.status})`);
+  }
+  return await res.json();
+}
+
+/** 通过 WebSocket 等待渲染完成，替代轮询 */
+export function waitRenderWithWS(
+  taskId: string,
+  onProgress?: (progress: number, step: string) => void,
+): { promise: Promise<RenderResult>; close: () => void } {
+  let closeFn = () => {};
+  const terminals = new Set(['render_completed', 'error', 'completed']);
+
+  const promise = new Promise<RenderResult>((resolve, reject) => {
+    const wsControl = connectProgressWS(
+      taskId,
+      {
+        onProgress: (data) => {
+          if (onProgress) onProgress(data.progress, data.step || '');
+        },
+        onComplete: (data) => {
+          if (data.status === 'render_completed') {
+            resolve({
+              task_id: taskId,
+              status: 'render_completed',
+              render_filename: data.render_filename,
+              render_result: data.render_result,
+            });
+          } else {
+            reject(new Error(data.error || data.step || '渲染失败'));
+          }
+        },
+        onError: (err) => reject(err),
+        onStuck: undefined,
+        onUnstuck: undefined,
+      },
+      terminals,
+    );
+    closeFn = wsControl.close;
+  });
+
+  return { promise, close: closeFn };
+}
+
 export { mapDetectionResult, type BackendDetectionResult, type BackendRepairResult, type ProgressEvent, type TaskStatus };
+
+/**
+ * 从 Content-Disposition 头解析文件名
+ * 支持 RFC 5987 (filename*=UTF-8''xxx) 和普通格式 (filename="xxx")
+ */
+export function parseFilenameFromDisposition(disposition: string | null): string | null {
+  if (!disposition) return null;
+  // 优先匹配 RFC 5987: filename*=UTF-8''xxx（URL编码，支持中文）
+  const utf8 = disposition.match(/filename\*=UTF-8''(.+?)(?:;|$)/i);
+  if (utf8?.[1]) return decodeURIComponent(utf8[1]);
+  // 其次匹配 filename="xxx" 或 filename=xxx
+  const plain = disposition.match(/filename=["']?([^"';\n]+)["']?/i);
+  if (plain?.[1]) return plain[1].trim();
+  return null;
+}

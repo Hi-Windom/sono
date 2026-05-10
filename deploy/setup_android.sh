@@ -79,6 +79,22 @@ python -c "import pydantic; print(f'  pydantic {pydantic.__version__} OK')" 2>/d
 python -c "import fastapi; print(f'  fastapi {fastapi.__version__} OK')" 2>/dev/null || echo -e "${RED}  fastapi 未安装！${NC}"
 python -c "import miniaudio; print(f'  miniaudio {miniaudio.__version__} OK')" 2>/dev/null || echo -e "${RED}  miniaudio 未安装！音频加载将不可用${NC}"
 python -c "import soundfile; print(f'  soundfile {soundfile.__version__} OK')" 2>/dev/null || echo -e "${RED}  soundfile 未安装！${NC}"
+python -c "import pytest; print(f'  pytest {pytest.__version__} OK')" 2>/dev/null || echo -e "${RED}  pytest 未安装！质量测试将不可用${NC}"
+
+echo -e "${YELLOW}  编译 DSP 原生加速库...${NC}"
+if [ -d "services/dsp_native" ] && command -v make &>/dev/null && command -v gcc &>/dev/null; then
+    cd services/dsp_native
+    if make 2>/dev/null; then
+        cp libdsp_native.so ../repair/repair_v2_2/ 2>/dev/null || true
+        echo -e "${GREEN}  DSP 原生库编译成功 (ARM NEON 加速)${NC}"
+    else
+        echo -e "${YELLOW}  DSP 原生库编译失败，将使用 numpy 回退${NC}"
+    fi
+    cd ../..
+else
+    echo -e "${YELLOW}  缺少 gcc/make，跳过 DSP 原生库编译${NC}"
+fi
+
 cd ..
 
 cat > start_android.sh << 'STARTEOF'

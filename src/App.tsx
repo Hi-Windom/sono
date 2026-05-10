@@ -3,6 +3,8 @@ import LandingPage from "@/pages/LandingPage";
 import RepairPage from "@/pages/RepairPage";
 import TrainingUploadPage from "@/pages/TrainingUploadPage";
 import QualityTestPage from "@/pages/QualityTestPage";
+import ProfileManagerPage from "@/pages/ProfileManagerPage";
+import CacheManagerPage from "@/pages/CacheManagerPage";
 import { BuildInfo } from "@/components/BuildInfo";
 import { useEffect } from "react";
 
@@ -37,6 +39,8 @@ export default function App() {
         <Route path="/repair" element={<RepairPage />} />
         <Route path="/training-upload" element={<TrainingUploadPage />} />
         <Route path="/quality-tests" element={<QualityTestPage />} />
+        <Route path="/profile-manager" element={<ProfileManagerPage />} />
+        <Route path="/cache-manager" element={<CacheManagerPage />} />
       </Routes>
       <BuildInfo />
     </Router>

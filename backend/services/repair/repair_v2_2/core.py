@@ -34,7 +34,6 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
         was_mono = True
 
     original_sr = sr
-    target_sr = params.get("sample_rate", sr)
     original_duration = round(y.shape[1] / sr, 2)
 
     # 获取处理质量模式
@@ -214,25 +213,6 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
             issues_found.append("柔化处理v5")
         advance("柔化处理")
 
-    # 重采样
-    if target_sr != sr:
-        if progress_callback:
-            progress_callback(0.92, f"v2.2 重采样到 {target_sr//1000}kHz...")
-        if target_sr < sr:
-            nyquist = target_sr / 2
-            cutoff = nyquist * 0.95
-            b, a = butter(6, cutoff / (sr / 2), btype='low')
-            for ch in range(y.shape[0]):
-                y[ch] = filtfilt(b, a, y[ch])
-        y_resampled = np.zeros((y.shape[0], int(y.shape[1] * target_sr / sr)))
-        for ch in range(y.shape[0]):
-            resampled = resample_poly(y[ch], target_sr, sr)
-            y_resampled[ch, :len(resampled)] = resampled[:y_resampled.shape[1]]
-        y = y_resampled
-        sr = target_sr
-        gc.collect()
-
-    # 最终峰值限制（防止任何削波）
     if progress_callback:
         progress_callback(0.95, "v2.2 峰值限制...")
 
@@ -256,13 +236,14 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
     return {
         "issues_found": issues_found,
         "original_sample_rate": original_sr,
-        "output_sample_rate": sr,
+        "output_sample_rate": working_sr,
         "output_bit_depth": bit_depth,
         "duration": original_duration,
         "channels": y.shape[0] if y.ndim > 1 else 1,
         "music_type": music_type,
         "confidence": confidence,
         "quality_mode": quality_mode,
+        "algorithm_version": "v2.2",
     }
 
 

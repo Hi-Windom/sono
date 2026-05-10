@@ -10,26 +10,30 @@ v2.3/v2.3a 的目标是：将 v2.2a 的铁律修复（零 AM 伪影）应用到 
 
 ## What Changes
 
-- 新增 `backend/services/repair/repair_v2_3/` 包：v2.3 桌面版，基于 v2.2 处理链但替换所有 AM 伪影步骤
-- 新增 `backend/services/repair/repair_v2_3a/` 包：v2.3a 移动版，基于 v2.2a 扩展处理链
-- 修改 `backend/services/audio_repair.py`：注册 v2.3/v2.3a 版本
-- 修改 `backend/tests/conftest.py`：ACTIVE_VERSIONS 增加 v2.3/v2.3a
-- 修改 `backend/tests/test_repair_quality.py`：增加 v2.3/v2.3a 逐步测试类
-- 修改 `backend/api/routes.py`：质量测试 API 的 category_map 增加新测试项
+- 新增 `backend/services/repair/repair_v2_3/` 包：v2.3 桌面版，基于 v2.2 处理链但替换所有 AM 伪影步骤（**关键变更**：瞬态修复替换为 `_soft_transient_limit`，响度归一化保留 K-加权）
+- 新增 `backend/services/repair/repair_v2_3a/` 包：v2.3a 移动版，基于 v2.2a 扩展处理链（增加频谱降噪和齿音抑制）
+- 修改 `backend/services/audio_repair.py`：注册 v2.3/v2.3a 版本，**调整 v2.3a 的 `noise_reduction` 默认值从 0.2 到 0.15**
+- 修改 `backend/tests/conftest.py`：`ACTIVE_VERSIONS` 增加 v2.3/v2.3a，`repair_fn` fixture 支持新版本导入
+- 修改 `backend/tests/test_repair_quality.py`：增加 `TestV23PerStepQuality`（含 `_soft_transient_limit` 测试）和 `TestV23aPerStepQuality` 逐步测试类
+- 修改 `backend/api/routes.py`：质量测试 API 的 category_map 增加 v2.3/v2.3a 测试项
 
 ### v2.3 桌面版处理链（基于 v2.2，替换 AM 步骤）
 
 | 步骤 | v2.2 实现 | v2.3 实现 | 变更原因 |
 |------|-----------|-----------|----------|
-| 削波修复 | `apply_de_clipping_v5` (外部模块) | `_tanh_declip` (内联，tanh软削波) | 铁律1：禁止硬削波 |
-| 爆音修复 | `apply_de_pop_v5` (外部模块) | `_diff_clamp_depop` (内联，差分钳制) | 铁律3：禁止大窗口替换 |
-| 瞬态修复 | `apply_transient_repair_v7` | 保留（无 AM 风险） | — |
-| 响度归一化 | `apply_loudness_normalize_v5` (逐窗口增益) | `_global_loudness_normalize` (全局常量增益) | 铁律2：禁止时变增益 |
-| 多段压缩 | `apply_multiband_compression_v5` | `_transparent_multiband_compress` (每子带全局增益) | 铁律2：禁止时变增益 |
-| 频谱修复 | `apply_spectral_group_a/b` | 保留（频域操作，无 AM 风险） | — |
-| 空间处理 | `apply_spatial_enhance_v6` | 保留（无 AM 风险） | — |
+| 削波修复 | `apply_de_clipping_v5` (CubicSpline 插值) | `_tanh_declip` (内联，tanh软削波) | 铁律1：禁止硬削波 |
+| 爆音修复 | `apply_de_pop_v5` (大窗口 RMS 替换) | `_diff_clamp_depop` (内联，差分钳制) | 铁律3：禁止大窗口替换 |
+| 瞬态修复 | `apply_transient_repair_v7` (逐帧时变增益) | `_soft_transient_limit` (内联，全局常量增益 + tanh软限制) | 铁律2：禁止时变增益（v2.2 原实现有逐帧 AM 风险） |
+| 响度归一化 | `apply_loudness_normalize_v5` (逐窗口 LUFS 增益) | `_global_loudness_normalize` (全局 LUFS + K-加权 + 全局常量增益) | 铁律2：禁止时变增益；保留 K-加权以维持响度测量精度 |
+| 多段压缩 | `apply_multiband_compression_v5` (IIR 增益包络) | `_transparent_multiband_compress` (每子带全局常量增益，分频点 250/4000Hz) | 铁律2：禁止时变增益 |
+| 频谱修复 | `apply_spectral_group_a/b` | 保留（频域操作，固有时频耦合，无额外 AM 风险） | — |
+| 空间处理 | `apply_spatial_enhance_v6` | 保留（side_gain 为全局常量，无 AM 风险） | — |
+| 立体声宽度 | `apply_stereo_width_v3` | 保留（全局常量 width，全局归一化，无 AM 风险） | — |
 | 音色调整 | presence/bass/warmth/clarity 滤波器 | 保留（FIR/IIR 滤波器，无 AM 风险） | — |
-| 峰值限制 | `apply_peak_limit_v5` (IIR增益包络) | `_soft_peak_limit` (tanh软削波) | 铁律1+2：禁止硬削波+时变增益 |
+| 柔化处理 | `apply_softness_v5` | 保留（低通滤波混合，FIR 操作，无 AM 风险） | — |
+| 峰值限制 | `apply_peak_limit_v5` (IIR 增益包络) | `_soft_peak_limit` (tanh 软削波) | 铁律1+2：禁止硬削波+时变增益 |
+
+> ⚠️ **频谱降噪的门限掩码说明**：`_spectral_denoise` 的掩码是逐帧逐频点变化的，属于频域操作的固有时频特性。其 AM 风险已通过全局噪声底门限（非逐帧更新）和后置平滑降至最低，可接受。
 
 ### v2.3a 移动版处理链（基于 v2.2a，扩展步骤）
 
@@ -37,12 +41,14 @@ v2.3/v2.3a 的目标是：将 v2.2a 的铁律修复（零 AM 伪影）应用到 
 |------|-----------|-----------|----------|
 | 削波修复 | `_simple_declip` | 保留 | 已符合铁律 |
 | 爆音修复 | `_simple_depop` | 保留 | 已符合铁律 |
-| 频谱降噪 | 无 | `_spectral_denoise` (新增，频谱门限降噪) | 补齐关键能力 |
-| 齿音抑制 | 无 | `_de_ess` (新增，高频带增益衰减) | 补齐关键能力 |
-| 响度归一化 | `_loudness_normalize` | 保留 | 已符合铁律 |
+| 频谱降噪 | 无 | `_spectral_denoise` (新增，频谱门限降噪) | 补齐关键能力（⚠️ 掩码为频域固有特性，AM 风险可接受，见上方说明） |
+| 齿音抑制 | 无 | `_de_ess` (新增，高频带全局常量衰减) | 补齐关键能力 |
+| 响度归一化 | `_loudness_normalize` | 保留（简单 RMS，全局常量增益） | 已符合铁律 |
 | 动态压缩 | `_transparent_compress` | 保留 | 已符合铁律 |
-| DC 移除 | `_remove_dc` | 保留 | — |
+| 直流移除 | `_remove_dc` | 保留（独立步骤，非 `noise_reduction`） | — |
 | 峰值限制 | `_soft_peak_limit` | 保留 | 已符合铁律 |
+
+> ⚠️ **v2.2a → v2.3a 参数语义变更**：`noise_reduction` 参数在 v2.2a 中连接到 DC 移除，在 v2.3a 中连接到频谱降噪。默认值从 `0.2`（DC 移除）调整为 `0.15`（频谱降噪），需在 `ALGORITHM_VERSIONS` 中同步更新。
 
 ## Impact
 
@@ -50,9 +56,9 @@ v2.3/v2.3a 的目标是：将 v2.2a 的铁律修复（零 AM 伪影）应用到 
 - Affected code:
   - `backend/services/repair/repair_v2_3/` (新建)
   - `backend/services/repair/repair_v2_3a/` (新建)
-  - `backend/services/audio_repair.py` (修改：注册新版本)
+  - `backend/services/audio_repair.py` (修改：注册新版本，调整 v2.3a 的 `noise_reduction` 默认值)
   - `backend/tests/conftest.py` (修改：增加版本)
-  - `backend/tests/test_repair_quality.py` (修改：增加测试类)
+  - `backend/tests/test_repair_quality.py` (修改：增加 `TestV23PerStepQuality`（含 `_soft_transient_limit`）和 `TestV23aPerStepQuality` 测试类)
   - `backend/api/routes.py` (修改：category_map 扩展)
 
 ## ADDED Requirements
@@ -63,7 +69,7 @@ v2.3/v2.3a 的目标是：将 v2.2a 的铁律修复（零 AM 伪影）应用到 
 
 #### Scenario: v2.3 处理链无 AM 伪影
 - **WHEN** 用户使用 v2.3 处理任意音频
-- **THEN** 所有增益操作使用全局常量增益，所有削波操作使用 tanh 软削波，所有爆音修复使用差分钳制
+- **THEN** 所有增益操作使用全局常量增益（瞬态修复/响度归一化/多段压缩），所有削波操作使用 tanh 软削波（削波修复/峰值限制），所有爆音修复使用差分钳制
 
 #### Scenario: v2.3 音质不低于 v2.2
 - **WHEN** 对同一音频分别使用 v2.2 和 v2.3 处理
@@ -73,13 +79,17 @@ v2.3/v2.3a 的目标是：将 v2.2a 的铁律修复（零 AM 伪影）应用到 
 - **WHEN** 音频峰值超过阈值
 - **THEN** 使用 tanh 软削波而非 IIR 增益包络，确保零 AM 伪影
 
+#### Scenario: v2.3 瞬态修复无逐帧时变增益
+- **WHEN** 音频存在瞬态能量突变
+- **THEN** 使用全局常量增益或 tanh 软限制，而非逐帧计算的时变增益（修复 `apply_transient_repair_v7` 的 AM 风险）
+
 ### Requirement: v2.3a 移动版修复算法
 
 系统 SHALL 提供 v2.3a 版本修复算法，在 v2.2a 基础上增加频谱降噪和齿音抑制步骤。
 
 #### Scenario: v2.3a 支持频谱降噪
 - **WHEN** 用户设置 `noise_reduction > 0`
-- **THEN** 执行频谱门限降噪（STFT → 幅度谱门限 → ISTFT），不引入时变增益
+- **THEN** 执行频谱门限降噪（STFT → 幅度谱门限 → ISTFT），不引入逐帧时变增益（门限基于全局统计量）；注意：此参数在 v2.2a 中为 DC 移除，v2.3a 中为频谱降噪
 
 #### Scenario: v2.3a 支持齿音抑制
 - **WHEN** 用户设置 `de_essing > 0`
@@ -120,6 +130,10 @@ v2.3/v2.3a 的目标是：将 v2.2a 的铁律修复（零 AM 伪影）应用到 
 原要求覆盖 v2.0/v2.1/v2.2/v2.2a，现扩展为 v2.0/v2.1/v2.2/v2.2a/v2.3/v2.3a。
 
 `conftest.py` 中 `ACTIVE_VERSIONS` 列表增加 `"v2.3"` 和 `"v2.3a"`。
+
+### Requirement: v2.3a 参数语义同步
+
+v2.3a 的 `noise_reduction` 参数从 DC 移除变更为频谱降噪。`ALGORITHM_VERSIONS` 中 v2.3a 的 `default_params["noise_reduction"]` 应从 `0.2` 调整为 `0.15`。
 
 ## REMOVED Requirements
 

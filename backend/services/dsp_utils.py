@@ -1,7 +1,21 @@
 import numpy as np
-from scipy.signal import get_window, medfilt
-from scipy.fftpack import dct
 from functools import lru_cache
+
+
+@lru_cache(maxsize=16)
+def _get_window(window: str, n_fft: int) -> np.ndarray:
+    from scipy.signal import get_window
+    return get_window(window, n_fft, fftbins=True)
+
+
+def _dct(x, **kwargs):
+    from scipy.fftpack import dct
+    return dct(x, **kwargs)
+
+
+def _medfilt(x, **kwargs):
+    from scipy.signal import medfilt
+    return medfilt(x, **kwargs)
 
 
 def _stride_frames(y, frame_length, hop_length):
@@ -13,7 +27,7 @@ def _stride_frames(y, frame_length, hop_length):
 
 
 def stft(y, n_fft=2048, hop_length=512, window='hann'):
-    fft_window = get_window(window, n_fft, fftbins=True)
+    fft_window = _get_window(window, n_fft)
     pad_length = n_fft // 2
     y_padded = np.pad(y, (pad_length, pad_length), mode='reflect')
     frames = _stride_frames(y_padded, n_fft, hop_length)
@@ -24,9 +38,31 @@ def stft(y, n_fft=2048, hop_length=512, window='hann'):
     return S
 
 
+def stft_chunked(y, n_fft=2048, hop_length=512, window='hann', chunk_frames=4096):
+    fft_window = _get_window(window, n_fft)
+    pad_length = n_fft // 2
+    y_padded = np.pad(y, (pad_length, pad_length), mode='reflect')
+    n_frames = 1 + (len(y_padded) - n_fft) // hop_length
+    if n_frames <= 0:
+        return np.empty((1 + n_fft // 2, 0), dtype=np.complex128)
+    n_bins = 1 + n_fft // 2
+    S = np.empty((n_bins, n_frames), dtype=np.complex128)
+    for start in range(0, n_frames, chunk_frames):
+        end = min(start + chunk_frames, n_frames)
+        starts = start * hop_length
+        ends = starts + n_fft + (end - start - 1) * hop_length
+        chunk_data = y_padded[starts:ends]
+        chunk_frames_data = _stride_frames(
+            np.ascontiguousarray(chunk_data), n_fft, hop_length
+        )[:end - start]
+        windowed = chunk_frames_data * fft_window[np.newaxis, :]
+        S[:, start:end] = np.fft.rfft(windowed, axis=1).T
+    return S
+
+
 def istft(S, hop_length=512, length=None, window='hann'):
     n_fft = 2 * (S.shape[0] - 1)
-    fft_window = get_window(window, n_fft, fftbins=True)
+    fft_window = _get_window(window, n_fft)
     n_frames = S.shape[1]
     expected_signal_len = n_fft + hop_length * (n_frames - 1)
     y = np.zeros(expected_signal_len)
@@ -34,10 +70,10 @@ def istft(S, hop_length=512, length=None, window='hann'):
     frames = np.fft.irfft(S.T, n=n_fft, axis=1)
     windowed = frames * fft_window[np.newaxis, :]
     win_sq = fft_window ** 2
-    for i in range(n_frames):
-        start = i * hop_length
-        y[start:start + n_fft] += windowed[i]
-        window_sum[start:start + n_fft] += win_sq
+    frame_starts = np.arange(n_frames) * hop_length
+    for i in range(n_fft):
+        y[frame_starts + i] += windowed[:, i]
+        window_sum[frame_starts + i] += win_sq[i]
     nonzero = window_sum > 1e-10
     y[nonzero] /= window_sum[nonzero]
     pad_length = n_fft // 2
@@ -45,6 +81,93 @@ def istft(S, hop_length=512, length=None, window='hann'):
     if length is not None:
         y = y[:length]
     return y
+
+
+def istft_chunked(S, hop_length=512, length=None, window='hann', chunk_frames=4096):
+    n_fft = 2 * (S.shape[0] - 1)
+    fft_window = _get_window(window, n_fft)
+    n_frames = S.shape[1]
+    expected_signal_len = n_fft + hop_length * (n_frames - 1)
+    y = np.zeros(expected_signal_len)
+    window_sum = np.zeros(expected_signal_len)
+    win_sq = fft_window ** 2
+    for start in range(0, n_frames, chunk_frames):
+        end = min(start + chunk_frames, n_frames)
+        S_chunk = S[:, start:end]
+        frames = np.fft.irfft(S_chunk.T, n=n_fft, axis=1)
+        windowed = frames * fft_window[np.newaxis, :]
+        chunk_n_frames = end - start
+        frame_starts = np.arange(start, end) * hop_length
+        for i in range(n_fft):
+            y[frame_starts + i] += windowed[:, i]
+            window_sum[frame_starts + i] += win_sq[i]
+        del frames, windowed, S_chunk
+    nonzero = window_sum > 1e-10
+    y[nonzero] /= window_sum[nonzero]
+    pad_length = n_fft // 2
+    y = y[pad_length:]
+    if length is not None:
+        y = y[:length]
+    return y
+
+
+def streaming_spectral_process(y, sr, process_fn, n_fft=2048, hop_length=512,
+                                chunk_seconds=10, analyze_fn=None):
+    n_samples = len(y)
+    chunk_samples = int(sr * chunk_seconds)
+    overlap_samples = n_fft * 2
+    hop_out = chunk_samples
+
+    if analyze_fn is not None:
+        global_stats = analyze_fn(y, sr)
+    else:
+        global_stats = None
+
+    output = np.zeros(n_samples, dtype=np.float64)
+    window_sum = np.zeros(n_samples, dtype=np.float64)
+
+    fade_len = min(hop_length * 8, chunk_samples // 2)
+
+    pos = 0
+    while pos < n_samples:
+        start = max(0, pos - overlap_samples)
+        end = min(n_samples, pos + chunk_samples + overlap_samples)
+        chunk = y[start:end].astype(np.float64)
+
+        S = stft(chunk, n_fft=n_fft, hop_length=hop_length)
+        if global_stats is not None:
+            S = process_fn(S, sr, n_fft, hop_length, global_stats)
+        else:
+            S = process_fn(S, sr, n_fft, hop_length)
+
+        chunk_out = istft(S, hop_length=hop_length, length=len(chunk))
+
+        out_start = pos - start
+        out_end = out_start + min(chunk_samples, n_samples - pos)
+        region = chunk_out[out_start:out_end]
+
+        region_len = len(region)
+        win = np.ones(region_len, dtype=np.float64)
+        if pos > 0 and fade_len > 0:
+            fl = min(fade_len, region_len // 2)
+            win[:fl] = np.linspace(0, 1, fl)
+        remaining = n_samples - pos - region_len
+        if remaining > 0 and fade_len > 0:
+            fl = min(fade_len, region_len // 2)
+            win[-fl:] = np.linspace(1, 0, fl)
+
+        write_start = pos
+        write_end = pos + region_len
+        if write_end <= n_samples:
+            output[write_start:write_end] += region * win
+            window_sum[write_start:write_end] += win
+
+        del S, chunk_out, region, win
+        pos += hop_out
+
+    valid = window_sum > 1e-10
+    output[valid] /= window_sum[valid]
+    return output.astype(y.dtype)
 
 
 def fft_frequencies(sr=22050, n_fft=2048):
@@ -147,7 +270,7 @@ def mfcc(y=None, sr=22050, S=None, n_mfcc=20, n_fft=2048, hop_length=512, n_mels
     mel_spec = np.dot(mel_fb, mag)
     mel_spec = np.maximum(mel_spec, 1e-10)
     log_mel_spec = np.log(mel_spec)
-    mfcc_result = dct(log_mel_spec, axis=0, type=2, norm='ortho')[:n_mfcc]
+    mfcc_result = _dct(log_mel_spec, axis=0, type=2, norm='ortho')[:n_mfcc]
     return mfcc_result
 
 
@@ -299,7 +422,7 @@ def harmonic(y, margin=1.0):
         return result
     S = stft(y)
     mag = np.abs(S)
-    harm_mag = medfilt(mag, kernel_size=(1, 5))
+    harm_mag = _medfilt(mag, kernel_size=(1, 5))
     perc_mag = mag - harm_mag
     if margin > 1.0:
         mask = harm_mag > margin * perc_mag
@@ -321,8 +444,8 @@ def hpss(y, margin=1.0):
         return h_result, p_result
     S = stft(y)
     mag = np.abs(S)
-    harm_mag = medfilt(mag, kernel_size=(1, 5))
-    perc_mag = medfilt(mag, kernel_size=(5, 1))
+    harm_mag = _medfilt(mag, kernel_size=(1, 5))
+    perc_mag = _medfilt(mag, kernel_size=(5, 1))
     harm_mask = harm_mag >= perc_mag
     S_harm = S * harm_mask
     S_perc = S * (~harm_mask)

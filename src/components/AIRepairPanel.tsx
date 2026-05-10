@@ -1,9 +1,10 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { AIRepairParams, RepairMode } from '../utils/advancedAudioProcessing';
-import { ProcessingOptions, AlgorithmVersion } from '../services/backendApi';
+import { ProcessingOptions, AlgorithmVersion, fetchMemoryInfo, MemoryInfoResult, fetchStorageEstimate, StorageEstimateResult, fetchRenderCache, RenderCacheEntry } from '../services/backendApi';
 
 interface AIRepairPanelProps {
   params: AIRepairParams;
+  fileHash?: string | null;
   analysis: {
     spectralFlatness: number;
     dynamicRange: number;
@@ -27,10 +28,16 @@ interface AIRepairPanelProps {
   disabled?: boolean;
   duration?: number;
   channels?: number;
+  backendAvailable?: boolean;
+  onSaveProfile?: () => void;
+  taskId?: string | null;
+  onRenderCacheRefresh?: (fn: () => Promise<void>) => void;
+  cacheTriggerKey?: number;
+  onInstantDownload?: (cacheEntry: RenderCacheEntry) => void;
 }
 
 const sampleRateOptions = [
-  { value: 44100, label: '44.1k', recommended: true },
+  { value: 44100, label: '44.1k', recommended: false },
   { value: 48000, label: '48k', recommended: true },
   { value: 96000, label: '96k', recommended: false },
 ];
@@ -76,15 +83,21 @@ function formatSize(size: number, sizeMiB: number, sizeMB: number): string {
 
 // 判断是否为推荐组合
 function isRecommendedCombo(sampleRate: number, bitDepth: number): boolean {
-  // 推荐组合：48k/24bit 或 44.1k/24bit
-  return (sampleRate === 48000 || sampleRate === 44100) && bitDepth === 24;
+  return sampleRate === 48000 && bitDepth === 24;
 }
 
 // 警告阈值 186MB（留出余量）
 const WARNING_THRESHOLD_MB = 186;
 
+function formatBytes(bytes: number): string {
+  if (bytes >= 1024 * 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024 / 1024 / 1024).toFixed(2)} TB`;
+  if (bytes >= 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
+  return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
+}
+
 export function AIRepairPanel({
   params,
+  fileHash,
   analysis,
   selectedMode,
   modes,
@@ -102,8 +115,77 @@ export function AIRepairPanel({
   disabled,
   duration = 0,
   channels = 2,
+  backendAvailable = false,
+  onSaveProfile,
+  taskId,
+  onRenderCacheRefresh,
+  cacheTriggerKey,
+  onInstantDownload,
 }: AIRepairPanelProps) {
   const [showParams, setShowParams] = useState(false);
+  const [memoryInfo, setMemoryInfo] = useState<MemoryInfoResult | null>(null);
+  const [storageEstimate, setStorageEstimate] = useState<StorageEstimateResult | null>(null);
+  const memoryFetchRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const storageFetchRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 渲染缓存状态
+  const [renderCaches, setRenderCaches] = useState<RenderCacheEntry[]>([]);
+  const [selectedCache, setSelectedCache] = useState<RenderCacheEntry | null>(null);
+  const cacheCheckRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (!backendAvailable) {
+      setMemoryInfo(null);
+      return;
+    }
+    const fetchDuration = duration > 0 ? duration : 300;
+    const fetchChannels = channels > 0 ? channels : 2;
+    if (memoryFetchRef.current) clearTimeout(memoryFetchRef.current);
+    memoryFetchRef.current = setTimeout(() => {
+      fetchMemoryInfo(fetchDuration, fetchChannels, processingOptions.sampleRate, algorithmVersion).then(setMemoryInfo);
+    }, 300);
+    return () => { if (memoryFetchRef.current) clearTimeout(memoryFetchRef.current); };
+  }, [duration, channels, processingOptions.sampleRate, algorithmVersion, backendAvailable]);
+
+  useEffect(() => {
+    if (!backendAvailable) {
+      setStorageEstimate(null);
+      return;
+    }
+    const fetchDuration = duration > 0 ? duration : 300;
+    const fetchChannels = channels > 0 ? channels : 2;
+    if (storageFetchRef.current) clearTimeout(storageFetchRef.current);
+    storageFetchRef.current = setTimeout(() => {
+      fetchStorageEstimate(fetchDuration, fetchChannels, processingOptions.sampleRate, processingOptions.bitDepth).then(setStorageEstimate);
+    }, 300);
+    return () => { if (storageFetchRef.current) clearTimeout(storageFetchRef.current); };
+  }, [duration, channels, processingOptions.sampleRate, processingOptions.bitDepth, backendAvailable]);
+
+  // 查询渲染交付规格缓存（算法版本变化/修复完成时也会刷新）
+  const refreshRenderCache = useCallback(async () => {
+    if (!taskId || !backendAvailable) {
+      setRenderCaches([]);
+      return;
+    }
+    const caches = await fetchRenderCache(taskId);
+    setRenderCaches(caches);
+  }, [taskId, backendAvailable]);
+
+  useEffect(() => {
+    if (!taskId || !backendAvailable) {
+      setRenderCaches([]);
+      return;
+    }
+    if (cacheCheckRef.current) clearTimeout(cacheCheckRef.current);
+    cacheCheckRef.current = setTimeout(refreshRenderCache, 500);
+    return () => {
+      if (cacheCheckRef.current) clearTimeout(cacheCheckRef.current);
+    };
+  }, [taskId, backendAvailable, algorithmVersion, refreshRenderCache, cacheTriggerKey]);
+
+  // 注册缓存刷新回调给父组件
+  useEffect(() => {
+    if (onRenderCacheRefresh) onRenderCacheRefresh(refreshRenderCache);
+  }, [refreshRenderCache, onRenderCacheRefresh]);
 
   const paramLabels: Record<keyof AIRepairParams, string> = {
     deClipping: '去削波',
@@ -214,19 +296,19 @@ export function AIRepairPanel({
 
       {availableAlgorithms.length > 0 ? (
         <div className="mb-4 p-3 bg-gradient-to-r from-cyan-900/30 to-purple-900/30 rounded-lg border border-cyan-500/20">
-          <div className="flex items-center justify-between">
-            <h4 className="text-cyan-400 text-sm font-medium flex items-center gap-1.5">
+          <div className="flex items-center justify-between gap-2">
+            <h4 className="text-cyan-400 text-sm font-medium flex items-center gap-1.5 shrink-0">
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
               </svg>
               算法版本
             </h4>
-            <div className="relative">
+            <div className="relative max-w-[200px] sm:max-w-none">
               <select
                 value={algorithmVersion}
                 onChange={(e) => onAlgorithmChange(e.target.value)}
                 disabled={disabled}
-                className="appearance-none bg-cyan-500/20 text-white text-sm font-medium py-1.5 pl-3 pr-8 rounded-lg border border-cyan-400/40 focus:outline-none focus:border-cyan-400 cursor-pointer hover:bg-cyan-500/30 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                className="appearance-none bg-cyan-500/20 text-white text-sm font-medium py-1.5 pl-3 pr-8 rounded-lg border border-cyan-400/40 focus:outline-none focus:border-cyan-400 cursor-pointer hover:bg-cyan-500/30 transition disabled:opacity-50 disabled:cursor-not-allowed w-full truncate"
               >
                 {[...availableAlgorithms].reverse().map((algo) => (
                   <option key={algo.name} value={algo.name} className="bg-gray-900 text-white">
@@ -278,7 +360,7 @@ export function AIRepairPanel({
       </div>
 
       <div className="mb-4 p-3 bg-black/20 rounded-lg">
-        <h4 className="text-secondary text-sm font-medium mb-3">处理选项</h4>
+        <h4 className="text-secondary text-sm font-medium mb-3">交付规格</h4>
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="text-gray-400 text-xs mb-2 block flex items-center gap-1">
@@ -333,7 +415,7 @@ export function AIRepairPanel({
                 const isRecommended = option.recommended;
                 // 检查与当前采样率的组合是否推荐
                 const comboRecommended = isRecommended &&
-                  (processingOptions.sampleRate === 44100 || processingOptions.sampleRate === 48000);
+                  processingOptions.sampleRate === 48000;
 
                 return (
                   <button
@@ -361,90 +443,290 @@ export function AIRepairPanel({
           </div>
         </div>
 
-        {/* 预估大小显示 */}
-        {duration > 0 && currentEstimate && (
-          <div className={`mt-3 p-2.5 rounded-lg border ${
-            isCurrentWarning
-              ? 'bg-red-500/10 border-red-500/30'
-              : currentCombo?.isRecommended
-                ? 'bg-emerald-500/10 border-emerald-500/30'
-                : 'bg-gray-800/50 border-gray-700'
-          }`}>
+        {/* 预估输出大小 */}
+        <div className="mt-3 p-2.5 rounded-lg border bg-gray-800/50 border-gray-700">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                {isCurrentWarning ? (
-                  <svg className="w-4 h-4 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                  </svg>
-                ) : currentCombo?.isRecommended ? (
-                  <svg className="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                  </svg>
-                ) : (
-                  <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                )}
-                <span className={`text-sm font-medium ${
-                  isCurrentWarning ? 'text-red-400' : currentCombo?.isRecommended ? 'text-emerald-400' : 'text-gray-300'
-                }`}>
-                  预估文件大小
+                <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <span className="text-sm font-medium text-gray-300">
+                  预估输出大小
                 </span>
               </div>
-              <span className={`text-sm font-bold ${
-                isCurrentWarning ? 'text-red-400' : currentCombo?.isRecommended ? 'text-emerald-400' : 'text-white'
-              }`}>
-                {formatSize(currentEstimate.size, currentEstimate.sizeMiB, currentEstimate.sizeMB)}
+              <span className="text-sm font-bold text-white">
+                {currentEstimate
+                  ? `${storageEstimate ? storageEstimate.estimated_output_mb : currentEstimate.sizeMB.toFixed(1)} MB`
+                  : '—'}
               </span>
             </div>
 
-            {/* 警告信息 */}
-            {isCurrentWarning && (
-              <div className="mt-2 text-xs text-red-400/80">
-                <span className="font-medium">⚠️ 超过平台限制：</span>
-                音乐平台通常限制上传最大200MB，当前设置可能无法上传。
-                建议使用 48k/24bit 或 44.1k/24bit 组合。
-              </div>
-            )}
-
-            {/* 推荐信息 */}
-            {!isCurrentWarning && currentCombo?.isRecommended && (
-              <div className="mt-2 text-xs text-emerald-400/80">
-                <span className="font-medium">✓ 推荐设置：</span>
-                音质与文件大小的最佳平衡，兼容大多数音乐平台。
-              </div>
-            )}
-
-            {/* 所有组合大小参考 */}
+            {/* 各组合大小参考 */}
+            {allEstimates.length > 0 ? (
             <div className="mt-3 pt-2 border-t border-gray-700/50">
-              <div className="text-[10px] text-gray-500 mb-1.5">各组合预估大小参考：</div>
+              <div className="text-[10px] text-gray-500 mb-1.5">各组合预估大小参考（🟢 = 可秒下）：</div>
               <div className="grid grid-cols-3 gap-1 text-[10px]">
                 {allEstimates.map((est) => {
                   const isCurrent = est.sampleRate === processingOptions.sampleRate && est.bitDepth === processingOptions.bitDepth;
+                  const cacheKey = `${est.sampleRate}-${est.bitDepth}`;
+                  // 只匹配当前算法版本的缓存
+                  const renderCache = renderCaches.find(c => c.sample_rate === est.sampleRate && c.bit_depth === est.bitDepth && c.algorithm_version === algorithmVersion);
+                  const isCached = !!renderCache;
                   return (
                     <div
-                      key={`${est.sampleRate}-${est.bitDepth}`}
-                      className={`px-1.5 py-1 rounded text-center ${
+                      key={cacheKey}
+                      onClick={() => {
+                        if (isCached && renderCache) {
+                          setSelectedCache(renderCache);
+                        } else {
+                          onOptionsChange?.({
+                            sampleRate: est.sampleRate,
+                            bitDepth: est.bitDepth as 16 | 24 | 32,
+                          });
+                        }
+                      }}
+                      className={`px-1.5 py-1 rounded text-center cursor-pointer transition-all relative ${
                         isCurrent
-                          ? 'bg-secondary/30 text-white border border-secondary/50'
+                          ? `border border-secondary/50 ${est.isWarning ? 'bg-red-500/10 text-red-400' : est.isRecommended ? 'bg-emerald-500/10 text-emerald-400' : 'bg-gray-800/50 text-white'}`
                           : est.isWarning
-                            ? 'bg-red-500/10 text-red-400/70'
+                            ? 'bg-red-500/10 text-red-400/70 hover:bg-red-500/20'
                             : est.isRecommended
-                              ? 'bg-emerald-500/10 text-emerald-400/70'
-                              : 'bg-gray-800/50 text-gray-500'
+                              ? 'bg-emerald-500/10 text-emerald-400/70 hover:bg-emerald-500/20'
+                              : 'bg-gray-800/50 text-gray-500 hover:bg-gray-700/50'
                       }`}
                     >
+                      {isCached && (
+                        <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-emerald-400 rounded-full" title="当前版本有渲染缓存" />
+                      )}
                       <div className="font-medium">{est.sampleRate / 1000}k/{est.bitDepth}bit</div>
                       <div>{isMobile ? est.sizeMB.toFixed(0) : est.sizeMiB.toFixed(0)}{isMobile ? 'MB' : 'MiB'}</div>
+                      {isCached && <div className="text-[8px] text-emerald-400">可秒下</div>}
                     </div>
                   );
                 })}
               </div>
             </div>
-          </div>
-        )}
+            ) : (
+              <div className="mt-3 pt-2 border-t border-gray-700/50 text-center text-gray-500 text-[10px] py-2">
+                加载音频后显示预估大小
+              </div>
+            )}
 
-        <p className="text-gray-500 text-xs mt-2">采样率和位深在修复时应用，修改后需重新修复</p>
+            {/* 缓存详情弹窗 */}
+            {selectedCache && (
+              <div className="mt-3 p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-lg text-[12px]">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-emerald-400 font-medium">📦 渲染缓存详情</span>
+                  <button onClick={() => setSelectedCache(null)} className="text-gray-400 hover:text-white text-lg leading-none">×</button>
+                </div>
+                <div className="flex justify-between"><span className="text-gray-400">格式</span><span className="text-white">{selectedCache.sample_rate / 1000}kHz / {selectedCache.bit_depth}bit</span></div>
+                <div className="flex justify-between"><span className="text-gray-400">文件大小</span><span className="text-white">{(selectedCache.size / (1024 * 1024)).toFixed(1)} MiB</span></div>
+                <div className="flex justify-between"><span className="text-gray-400">算法版本</span><span className="text-emerald-400">{selectedCache.algorithm_version || '—'}</span></div>
+                <div className="flex justify-between"><span className="text-gray-400">生成时间</span><span className="text-white">{selectedCache.mtime ? new Date(selectedCache.mtime).toLocaleString('zh-CN') : '—'}</span></div>
+                <div className="mt-2 flex gap-2">
+                  <button
+                    onClick={() => {
+                      if (onInstantDownload) {
+                        onInstantDownload(selectedCache);
+                      }
+                    }}
+                    className="flex-1 py-1 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 rounded text-[11px] transition font-medium"
+                  >
+                    ⬇ 秒下
+                  </button>
+                  <button
+                    onClick={() => {
+                      onOptionsChange?.({
+                        sampleRate: selectedCache.sample_rate,
+                        bitDepth: selectedCache.bit_depth as 16 | 24 | 32,
+                      });
+                      setSelectedCache(null);
+                    }}
+                    className="flex-1 py-1 bg-white/5 hover:bg-white/10 text-gray-400 rounded text-[11px] transition"
+                  >
+                    应用此规格
+                  </button>
+                  <button
+                    onClick={() => setSelectedCache(null)}
+                    className="flex-1 py-1 bg-white/5 hover:bg-white/10 text-gray-400 rounded text-[11px] transition"
+                  >
+                    关闭
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* 服务器存储状态 */}
+            {storageEstimate && storageEstimate.available_disk_bytes != null ? (
+              <div className={`mt-3 pt-2 border-t border-gray-700/50 ${
+                storageEstimate.is_sufficient ? '' : 'text-red-400'
+              }`}>
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-gray-400 flex items-center gap-1">
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4" />
+                    </svg>
+                    服务器存储
+                  </span>
+                  <span className={storageEstimate.is_sufficient ? 'text-emerald-400' : 'text-red-400'}>
+                    {formatBytes(storageEstimate.available_disk_bytes)} 可用
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-xs mt-1">
+                  <span className="text-gray-400">
+                    预估输出占用
+                  </span>
+                  <span className={storageEstimate.is_sufficient ? 'text-gray-300' : 'text-red-400'}>
+                    {formatBytes(storageEstimate.estimated_output_bytes)}
+                  </span>
+                </div>
+                {!storageEstimate.is_sufficient && (
+                  <div className="mt-1.5 text-[10px] text-red-400/90">
+                    🔴 存储空间不足！预估输出超出可用磁盘空间。
+                  </div>
+                )}
+                {storageEstimate.total_disk_bytes != null && (
+                  <div className="mt-2">
+                    <div className="h-2.5 bg-gray-700 rounded-full overflow-hidden flex">
+                      {storageEstimate.used_disk_bytes != null && (
+                        <div
+                          className="h-full bg-gray-500/60 transition-all"
+                          style={{
+                            width: `${Math.min(100, (storageEstimate.used_disk_bytes / storageEstimate.total_disk_bytes) * 100)}%`,
+                          }}
+                        />
+                      )}
+                      <div
+                        className={`h-full transition-all ${storageEstimate.is_sufficient ? 'bg-blue-500' : 'bg-red-500'}`}
+                        style={{
+                          width: `${Math.min(100, (storageEstimate.estimated_output_bytes / storageEstimate.total_disk_bytes) * 100)}%`,
+                        }}
+                      />
+                    </div>
+                    <div className="flex items-center justify-between text-[9px] text-gray-500 mt-0.5">
+                      <div className="flex items-center gap-2">
+                        <span className="flex items-center gap-0.5">
+                          <span className="inline-block w-1.5 h-1.5 rounded-sm bg-gray-500/60" />
+                          已用
+                        </span>
+                        <span className="flex items-center gap-0.5">
+                          <span className={`inline-block w-1.5 h-1.5 rounded-sm ${storageEstimate.is_sufficient ? 'bg-blue-500' : 'bg-red-500'}`} />
+                          预估
+                        </span>
+                      </div>
+                      <span>{formatBytes(storageEstimate.total_disk_bytes)}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="mt-3 pt-2 border-t border-gray-700/50 text-center text-gray-500 text-[10px] py-2">
+                连接服务器后显示存储信息
+              </div>
+            )}
+
+            {/* 服务器内存状态 */}
+            {memoryInfo ? (
+              <div className={`mt-3 pt-2 border-t border-gray-700/50 ${
+                memoryInfo.is_sufficient ? '' : (memoryInfo.available_memory_bytes != null && memoryInfo.estimated_memory_bytes > memoryInfo.available_memory_bytes) ? 'text-red-400' : 'text-amber-400'
+              }`}>
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-gray-400 flex items-center gap-1">
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
+                    </svg>
+                    服务器内存
+                  </span>
+                  <span className={memoryInfo.is_sufficient ? 'text-emerald-400' : (memoryInfo.available_memory_bytes != null && memoryInfo.estimated_memory_bytes > memoryInfo.available_memory_bytes) ? 'text-red-400' : 'text-amber-400'}>
+                    {memoryInfo.available_memory_bytes != null
+                      ? `${formatBytes(memoryInfo.available_memory_bytes)} 可用`
+                      : '未知'}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-xs mt-1">
+                  <span className="text-gray-400 flex items-center gap-1.5">
+                    预估处理占用
+                    {memoryInfo.memory_saving > 0 && (
+                      <span className="inline-flex items-center gap-0.5 text-[10px] bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded-full font-medium">
+                        <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+                        </svg>
+                        -{Math.round(memoryInfo.memory_saving * 100)}%
+                      </span>
+                    )}
+                  </span>
+                  <span className={memoryInfo.is_sufficient ? 'text-gray-300' : (memoryInfo.available_memory_bytes != null && memoryInfo.estimated_memory_bytes > memoryInfo.available_memory_bytes) ? 'text-red-400' : 'text-amber-400'}>
+                    {formatBytes(memoryInfo.estimated_memory_bytes)}
+                  </span>
+                </div>
+                {(memoryInfo.has_streaming || memoryInfo.use_float32) && (
+                  <div className="flex flex-wrap gap-1 mt-1.5">
+                    {memoryInfo.has_streaming && (
+                      <span className="text-[10px] bg-cyan-500/15 text-cyan-400 px-1.5 py-0.5 rounded">
+                        流式分块处理
+                      </span>
+                    )}
+                    {memoryInfo.use_float32 && (
+                      <span className="text-[10px] bg-blue-500/15 text-blue-400 px-1.5 py-0.5 rounded">
+                        Float32 自动降精度
+                      </span>
+                    )}
+                  </div>
+                )}
+                {memoryInfo.available_memory_bytes != null && memoryInfo.estimated_memory_bytes > memoryInfo.available_memory_bytes && (
+                  <div className="mt-1.5 text-[10px] text-red-400/90">
+                    🔴 内存不足！预估占用超出可用内存，处理将失败。请选择低内存算法或缩短音频。
+                  </div>
+                )}
+                {!memoryInfo.is_sufficient && !(memoryInfo.available_memory_bytes != null && memoryInfo.estimated_memory_bytes > memoryInfo.available_memory_bytes) && (
+                  <div className="mt-1.5 text-[10px] text-amber-400/90">
+                    ⚠️ 服务器可用内存偏低，可能导致处理失败
+                  </div>
+                )}
+                {memoryInfo.total_memory_bytes != null && (
+                  <div className="mt-2">
+                    <div className="h-2.5 bg-gray-700 rounded-full overflow-hidden flex">
+                      {memoryInfo.used_memory_bytes != null && (
+                        <div
+                          className="h-full bg-gray-500/60 transition-all"
+                          style={{
+                            width: `${Math.min(100, (memoryInfo.used_memory_bytes / memoryInfo.total_memory_bytes) * 100)}%`,
+                          }}
+                        />
+                      )}
+                      <div
+                        className={`h-full transition-all ${
+                          memoryInfo.is_sufficient ? 'bg-emerald-500' : (memoryInfo.available_memory_bytes != null && memoryInfo.estimated_memory_bytes > memoryInfo.available_memory_bytes) ? 'bg-red-500' : 'bg-amber-500'
+                        }`}
+                        style={{
+                          width: `${Math.min(100, (memoryInfo.estimated_memory_bytes / memoryInfo.total_memory_bytes) * 100)}%`,
+                        }}
+                      />
+                    </div>
+                    <div className="flex items-center justify-between text-[9px] text-gray-500 mt-0.5">
+                      <div className="flex items-center gap-2">
+                        <span className="flex items-center gap-0.5">
+                          <span className="inline-block w-1.5 h-1.5 rounded-sm bg-gray-500/60" />
+                          已用
+                        </span>
+                        <span className="flex items-center gap-0.5">
+                          <span className={`inline-block w-1.5 h-1.5 rounded-sm ${memoryInfo.is_sufficient ? 'bg-emerald-500' : (memoryInfo.available_memory_bytes != null && memoryInfo.estimated_memory_bytes > memoryInfo.available_memory_bytes) ? 'bg-red-500' : 'bg-amber-500'}`} />
+                          预估
+                        </span>
+                      </div>
+                      <span>{formatBytes(memoryInfo.total_memory_bytes)}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="mt-3 pt-2 border-t border-gray-700/50 text-center text-gray-500 text-[10px] py-2">
+                连接服务器后显示内存信息
+              </div>
+            )}
+          </div>
+
+        <p className="text-gray-500 text-xs mt-2">交付规格在导出时应用，修改后即时渲染无需重新修复</p>
       </div>
 
       <div className="mb-4">
@@ -488,6 +770,16 @@ export function AIRepairPanel({
           </div>
         )}
       </div>
+
+      {/* 保存当前参数为配置 */}
+      {onSaveProfile && showParams && (
+        <button
+          onClick={onSaveProfile}
+          className="w-full mb-3 py-2 rounded-lg bg-purple-500/20 hover:bg-purple-500/30 text-purple-400 text-sm font-medium transition"
+        >
+          💾 保存当前参数为配置
+        </button>
+      )}
 
       <div className="mb-3">
         <label className="flex items-center gap-2 cursor-pointer">

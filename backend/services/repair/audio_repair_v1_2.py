@@ -21,7 +21,6 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
         was_mono = True
 
     original_sr = sr
-    target_sr = params.get("sample_rate", sr)
     original_duration = round(y.shape[1] / sr, 2)
 
     # v1.2 核心：始终升采样到 96kHz 进行全频带处理
@@ -78,26 +77,6 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
     gc.collect()
 
     # 降采样到目标采样率
-    if target_sr != WORKING_SR:
-        if progress_callback:
-            progress_callback(0.95, f"v1.2 降采样到 {target_sr//1000}kHz...")
-
-        if target_sr < WORKING_SR:
-            nyquist = target_sr / 2
-            cutoff = nyquist * 0.95
-            b, a = butter(6, cutoff / (WORKING_SR / 2), btype='low')
-            for ch in range(y.shape[0]):
-                y[ch] = filtfilt(b, a, y[ch])
-
-        y_resampled = np.zeros((y.shape[0], int(y.shape[1] * target_sr / WORKING_SR)))
-        for ch in range(y.shape[0]):
-            resampled = resample_poly(y[ch], target_sr, WORKING_SR)
-            y_resampled[ch, :len(resampled)] = resampled[:y_resampled.shape[1]]
-        y = y_resampled
-        sr = target_sr
-        gc.collect()
-
-    # 最终处理
     if progress_callback:
         progress_callback(0.97, "v1.2 峰值限制...")
 
@@ -123,7 +102,7 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
         "issues_found": issues_found,
         "original_duration": original_duration,
         "output_duration": round(y.shape[1] / sr if y.ndim > 1 else len(y) / sr, 2),
-        "sample_rate": sr,
+        "sample_rate": WORKING_SR,
         "channels": y.shape[0] if y.ndim > 1 else 1,
     }
 

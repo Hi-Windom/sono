@@ -5,9 +5,8 @@ import { AudioPlayer } from '../components/AudioPlayer';
 import { WaveformVisualizer } from '../components/WaveformVisualizer';
 import { SpectrumVisualizer } from '../components/SpectrumVisualizer';
 import { AIRepairPanel } from '../components/AIRepairPanel';
-import { DownloadButton } from '../components/DownloadButton';
 import { AIDetectionComparison } from '../components/AIDetectionComparison';
-import { CacheManager } from '../components/CacheManager';
+import { DownloadModal, DownloadFileInfo } from '../components/DownloadModal';
 import { useAudioProcessor } from '../hooks/useAudioProcessor';
 
 export default function Home() {
@@ -20,6 +19,7 @@ export default function Home() {
     currentTime,
     duration,
     isProcessing,
+    isDecodingAudio,
     processingProgress,
     processingStep,
     params,
@@ -62,9 +62,19 @@ export default function Home() {
     setEnableBrowserRepair,
     backendError,
     clearBackendError,
+    renderAndDownload,
+    browserRepairInfo,
+    isRenderLoading,
+    taskId,
+    renderDownloadUrl,
+    setRenderDownloadUrl,
+    showDownloadModal,
+    setShowDownloadModal,
+    originalWaveformPeaks,
   } = useAudioProcessor();
 
   const [showDiag, setShowDiag] = useState(false);
+  const [instantDownloadInfo, setInstantDownloadInfo] = useState<DownloadFileInfo | null>(null);
 
   const hasBrowserResult = !!browserProcessedBuffer;
   const hasBackendResult = !!backendProcessedBuffer || !!repairResult;
@@ -118,30 +128,30 @@ export default function Home() {
               </div>
               <AudioUploader onFileSelect={loadAudioFile} />
             </div>
-            <CacheManager />
+            {/* CacheManager moved to /cache-manager page */}
           </div>
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
             <div className="lg:col-span-7 space-y-6">
-              <div className="bg-primary/50 border border-white/10 rounded-xl p-6">
-                <div className="flex items-center justify-between mb-6">
-                  <div className="flex items-center gap-3">
-                    <div className="w-12 h-12 bg-gradient-to-br from-cyan-500/20 to-purple-500/20 rounded-lg flex items-center justify-center border border-cyan-400/20">
+              <div className={`bg-primary/50 border border-white/10 rounded-xl p-6${isDecodingAudio ? ' audio-card-loading' : ''}`}>
+                <div className="flex items-center justify-between mb-6 gap-3">
+                  <div className="flex items-center gap-3 min-w-0 flex-1">
+                    <div className="w-12 h-12 bg-gradient-to-br from-cyan-500/20 to-purple-500/20 rounded-lg flex items-center justify-center border border-cyan-400/20 shrink-0">
                       <svg className="w-6 h-6 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2z" />
                       </svg>
                     </div>
-                    <div>
-                      <h3 className="text-white font-semibold text-lg truncate max-w-[300px]">
+                    <div className="min-w-0">
+                      <h3 className="text-white font-semibold text-lg truncate">
                         {audioFile.name}
                       </h3>
                       <p className="text-gray-400 text-sm">
                         {(audioFile.size / (1024 * 1024)).toFixed(2)} MB
                         {' • '}
-                        {originalSampleRate/1000} kHz
+                        {(wavInfo ? wavInfo.sampleRate : originalSampleRate) / 1000} kHz
                         {wavInfo && ` • ${wavInfo.bitDepth}bit`}
                         {' • '}
-                        {audioBuffer ? (audioBuffer.numberOfChannels === 1 ? '单声道' : '立体声') : ''}
+                        {wavInfo ? (wavInfo.channels === 1 ? '单声道' : '立体声') : (audioBuffer ? (audioBuffer.numberOfChannels === 1 ? '单声道' : '立体声') : '')}
                         {hasBeenProcessed && (
                           <span className="text-green-400 ml-2">✓ 已修复</span>
                         )}
@@ -156,7 +166,7 @@ export default function Home() {
                       </p>
                     </div>
                   </div>
-                  <label className="flex items-center gap-1.5 px-3 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg cursor-pointer transition text-gray-400 hover:text-white text-sm">
+                  <label className="flex items-center gap-1.5 px-3 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg cursor-pointer transition text-gray-400 hover:text-white text-sm shrink-0">
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                     </svg>
@@ -187,7 +197,7 @@ export default function Home() {
                   onSwitchPlayMode={switchPlayMode}
                 />
 
-                {isPlaying && analyserRef.current && (
+                {analyserRef.current && (
                   <div className="mt-6">
                     <SpectrumVisualizer
                       analyser={analyserRef.current}
@@ -197,17 +207,16 @@ export default function Home() {
                   </div>
                 )}
 
-                {audioBuffer && (
-                  <div className="mt-6">
-                    <WaveformVisualizer
-                      audioBuffer={activeBuffer ?? audioBuffer}
-                      label={playMode !== 'original' && activeBuffer ? '修复后波形' : '原始波形'}
-                      currentTime={currentTime}
-                      duration={duration}
-                      onSeek={seek}
-                    />
-                  </div>
-                )}
+                <div className="mt-6">
+                  <WaveformVisualizer
+                    audioBuffer={activeBuffer ?? audioBuffer}
+                    waveformPeaks={playMode === 'original' && !(activeBuffer ?? audioBuffer) ? originalWaveformPeaks : null}
+                    label={playMode !== 'original' && activeBuffer ? '修复后波形' : '原始波形'}
+                    currentTime={currentTime}
+                    duration={duration}
+                    onSeek={seek}
+                  />
+                </div>
               </div>
 
               {backendError && (
@@ -258,20 +267,24 @@ export default function Home() {
                 disabled={isProcessing}
                 duration={duration}
                 channels={audioBuffer?.numberOfChannels ?? 2}
+                backendAvailable={backendAvailable}
+                onInstantDownload={(cacheEntry) => {
+                  const downloadUrl = `/api/v1/download-file/${cacheEntry.filename}`;
+                  setRenderDownloadUrl(downloadUrl);
+                  setInstantDownloadInfo({
+                    filename: cacheEntry.filename,
+                    fileSize: `${(cacheEntry.size / (1024 * 1024)).toFixed(2)} MB`,
+                    sampleRate: `${cacheEntry.sample_rate / 1000} kHz`,
+                    bitDepth: cacheEntry.bit_depth,
+                    channels: 2,
+                    duration: duration,
+                    algorithmVersion: cacheEntry.algorithm_version,
+                  });
+                  setShowDownloadModal(true);
+                }}
               />
 
-              <DownloadButton
-                onDownloadBackend={() => downloadProcessedAudio('backend')}
-                onDownloadBrowser={() => downloadProcessedAudio('browser')}
-                hasBackendResult={hasBackendResult}
-                hasBrowserResult={hasBrowserResult}
-                backendRepairResult={repairResult}
-                browserBufferInfo={browserBufferInfo}
-                audioFileName={audioFile?.name}
-                bitDepth={processingOptions.bitDepth}
-              />
-
-              <CacheManager />
+              {/* CacheManager moved to /cache-manager page */}
             </div>
           </div>
         )}
@@ -305,6 +318,45 @@ export default function Home() {
           >重新检测</button>
         </div>
       )}
+
+      <DownloadModal
+        isOpen={showDownloadModal}
+        onClose={() => {
+          setShowDownloadModal(false);
+          setInstantDownloadInfo(null);
+        }}
+        backendInfo={instantDownloadInfo || (hasBackendResult && repairResult ? {
+          filename: `${(audioFile?.name || 'audio').replace(/\.[^/.]+$/, '')}_backend_repaired.wav`,
+          fileSize: repairResult.duration && repairResult.output_sample_rate && repairResult.channels && repairResult.output_bit_depth
+            ? `${((repairResult.duration * repairResult.output_sample_rate * repairResult.channels * (repairResult.output_bit_depth / 8)) / (1024 * 1024)).toFixed(2)} MB`
+            : '—',
+          sampleRate: repairResult.output_sample_rate ? `${(repairResult.output_sample_rate / 1000).toFixed(1)} kHz` : 'N/A',
+          bitDepth: repairResult.output_bit_depth || 32,
+          channels: repairResult.channels || 2,
+          duration: repairResult.duration || 0,
+          algorithmVersion: algorithmVersion,
+          completedAt: repairResult.completed_at,
+        } : null)}
+        browserInfo={hasBrowserResult && browserBufferInfo ? {
+          filename: `${(audioFile?.name || 'audio').replace(/\.[^/.]+$/, '')}_browser_repaired.wav`,
+          fileSize: `${((browserBufferInfo.duration * browserBufferInfo.sampleRate * browserBufferInfo.channels * (processingOptions.bitDepth / 8)) / (1024 * 1024)).toFixed(2)} MB`,
+          sampleRate: `${browserBufferInfo.sampleRate / 1000} kHz`,
+          bitDepth: processingOptions.bitDepth,
+          channels: browserBufferInfo.channels,
+          duration: browserBufferInfo.duration,
+          algorithmVersion: browserRepairInfo?.algorithmVersion,
+          completedAt: browserRepairInfo?.completedAt,
+        } : null}
+        backendDownloadUrl={renderDownloadUrl}
+        backendDownloadAction={hasBackendResult ? async () => {
+          const result = await renderAndDownload();
+          if (result?.downloadUrl) {
+            setRenderDownloadUrl(result.downloadUrl);
+          }
+        } : undefined}
+        browserDownloadAction={hasBrowserResult ? () => downloadProcessedAudio('browser') : undefined}
+        isBackendLoading={isRenderLoading}
+      />
     </div>
   );
 }

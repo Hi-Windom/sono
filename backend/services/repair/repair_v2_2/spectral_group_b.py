@@ -1,7 +1,10 @@
 import numpy as np
 from services.librosa_compat import stft, istft, fft_frequencies
+from services.dsp_utils import streaming_spectral_process
 from scipy.ndimage import gaussian_filter1d
 from .type_params import TYPE_PARAMS_MAP
+
+_STREAMING_THRESHOLD_SECONDS = 300
 
 
 def apply_spectral_group_b(y, sr, params, n_fft, hop_length, issues_found, music_type="generic"):
@@ -12,25 +15,48 @@ def apply_spectral_group_b(y, sr, params, n_fft, hop_length, issues_found, music
     enhance_added = "谐波增强v7" in issues_found
     richness_added = "谐波丰富度v4" in issues_found
 
+    use_streaming = y.shape[1] > _STREAMING_THRESHOLD_SECONDS * sr
+
     for ch in range(y.shape[0]):
         data = result[ch]
-        S = stft(data, n_fft=n_fft, hop_length=hop_length)
-        mag = np.abs(S)
 
-        if harmonic_enhance > 0:
-            _apply_harmonic_enhance_v7_inplace(S, mag, sr, n_fft, hop_length, harmonic_enhance, music_type)
-            if not enhance_added:
-                issues_found.append("谐波增强v7")
-                enhance_added = True
+        if use_streaming:
+            def _chunk_process(S, _sr, _n_fft, _hop_length, _he=harmonic_enhance, _hr=harmonic_richness, _mt=music_type):
+                mag = np.abs(S)
+                if _he > 0:
+                    _apply_harmonic_enhance_v7_inplace(S, mag, _sr, _n_fft, _hop_length, _he, _mt)
+                    mag = np.abs(S)
+                if _hr > 0:
+                    _apply_harmonic_richness_v4_inplace(S, mag, _sr, _n_fft, _hop_length, _hr, _mt)
+                return S
+
+            result[ch] = streaming_spectral_process(
+                data, sr, _chunk_process, n_fft=n_fft, hop_length=hop_length
+            )
+        else:
+            S = stft(data, n_fft=n_fft, hop_length=hop_length)
             mag = np.abs(S)
 
-        if harmonic_richness > 0:
-            _apply_harmonic_richness_v4_inplace(S, mag, sr, n_fft, hop_length, harmonic_richness, music_type)
-            if not richness_added:
-                issues_found.append("谐波丰富度v4")
-                richness_added = True
+            if harmonic_enhance > 0:
+                _apply_harmonic_enhance_v7_inplace(S, mag, sr, n_fft, hop_length, harmonic_enhance, music_type)
+                if not enhance_added:
+                    issues_found.append("谐波增强v7")
+                    enhance_added = True
+                mag = np.abs(S)
 
-        result[ch] = istft(S, hop_length=hop_length, length=len(data))
+            if harmonic_richness > 0:
+                _apply_harmonic_richness_v4_inplace(S, mag, sr, n_fft, hop_length, harmonic_richness, music_type)
+                if not richness_added:
+                    issues_found.append("谐波丰富度v4")
+                    richness_added = True
+
+            result[ch] = istft(S, hop_length=hop_length, length=len(data))
+
+    if use_streaming:
+        if harmonic_enhance > 0 and not enhance_added:
+            issues_found.append("谐波增强v7")
+        if harmonic_richness > 0 and not richness_added:
+            issues_found.append("谐波丰富度v4")
 
     return result
 
