@@ -81,6 +81,8 @@ export default function RepairPage() {
     fileHash,
     // 修复参数配置管理
     saveProfile,
+    // 任务ID
+    taskId,
   } = useAudioProcessor();
 
   const [showDiag, setShowDiag] = useState(false);
@@ -380,6 +382,8 @@ export default function RepairPage() {
                 duration={duration}
                 channels={audioBuffer?.numberOfChannels ?? 2}
                 backendAvailable={backendAvailable}
+                onSaveProfile={handleSaveProfile}
+                taskId={taskId}
               />
 
               <DownloadButton
@@ -397,14 +401,6 @@ export default function RepairPage() {
                 browserCompletedAt={browserRepairInfo?.completedAt}
                 isBackendLoading={isRenderLoading}
               />
-
-              <button
-                onClick={handleSaveProfile}
-                disabled={!audioFile}
-                className="w-full mt-3 py-2 rounded-lg bg-purple-500/20 hover:bg-purple-500/30 text-purple-400 text-sm font-medium transition disabled:opacity-40"
-              >
-                {profileSaveMsg || '💾 保存当前参数为配置'}
-              </button>
             </div>
           </div>
         )}

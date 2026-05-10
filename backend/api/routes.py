@@ -494,11 +494,53 @@ async def download_file(filename: str):
     file_path = os.path.join(OUTPUT_DIR, filename)
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="文件不存在")
+    # 生成更友好的下载文件名
+    download_name = filename
+    if filename.startswith("task_") and "_rendered_" in filename:
+        # 格式: {task_id}_rendered_{sr}_{bd}.wav → 尝试从 task 获取原始文件名
+        parts = filename.replace(".wav", "").split("_rendered_")
+        task_id_prefix = parts[0]
+        task = get_task(task_id_prefix)
+        if task and task.get("filename"):
+            original_name = task["filename"].rsplit(".", 1)[0]
+            sr_bd = parts[1] if len(parts) > 1 else "48000_24"
+            download_name = f"{original_name}_repaired_{sr_bd}.wav"
     return FileResponse(
         file_path,
         media_type="audio/wav",
-        filename=filename,
+        filename=download_name,
     )
+
+@router.get("/render-cache/{task_id}")
+async def get_render_cache(task_id: str):
+    """查询某个任务已有的渲染交付规格缓存"""
+    task = get_task(task_id)
+    if not task:
+        return {"caches": []}
+
+    caches = []
+    # 检查 OUTPUT_DIR 中是否有该 task 的渲染文件
+    if os.path.isdir(OUTPUT_DIR):
+        for fname in os.listdir(OUTPUT_DIR):
+            if fname.startswith(f"{task_id}_rendered_") and fname.endswith(".wav"):
+                # 解析规格: {task_id}_rendered_{sr}_{bd}.wav
+                parts = fname.replace(".wav", "").split("_rendered_")
+                if len(parts) == 2:
+                    sr_bd = parts[1].split("_")
+                    if len(sr_bd) == 2:
+                        try:
+                            sr = int(sr_bd[0])
+                            bd = int(sr_bd[1])
+                            fpath = os.path.join(OUTPUT_DIR, fname)
+                            caches.append({
+                                "sample_rate": sr,
+                                "bit_depth": bd,
+                                "filename": fname,
+                                "size": os.path.getsize(fpath),
+                            })
+                        except ValueError:
+                            pass
+    return {"caches": caches}
 
 @router.post("/cancel/{task_id}")
 async def cancel_task_endpoint(task_id: str):

@@ -68,6 +68,14 @@ interface ProgressEvent {
   detection_result?: BackendDetectionResult;
   repaired_detection_result?: BackendDetectionResult;
   repair_result?: BackendRepairResult;
+  render_filename?: string;
+  render_result?: {
+    original_sample_rate: number;
+    output_sample_rate: number;
+    output_bit_depth: number;
+    duration: number;
+    channels: number;
+  };
   error?: string;
 }
 
@@ -76,6 +84,12 @@ export interface AlgorithmVersion {
   label: string;
   description: string;
   defaultParams: Record<string, number>;
+  paramRanges: Record<string, {
+    min: number;
+    max: number;
+    step: number;
+    label: string;
+  }>;
   modes: {
     name: string;
     description: string;
@@ -750,6 +764,25 @@ export async function fetchDetectorVersions(): Promise<DetectorVersion[]> {
     return data.versions || [];
   } catch (e) {
     console.warn('[fetchDetectorVersions] failed:', e);
+    return [];
+  }
+}
+
+// 渲染缓存查询
+export interface RenderCacheEntry {
+  sample_rate: number;
+  bit_depth: number;
+  filename: string;
+  size: number;
+}
+
+export async function fetchRenderCache(taskId: string): Promise<RenderCacheEntry[]> {
+  try {
+    const res = await fetch(`${API_BASE}/render-cache/${taskId}`, { signal: AbortSignal.timeout(5000) });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.caches || [];
+  } catch {
     return [];
   }
 }

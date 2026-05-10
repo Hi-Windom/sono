@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { AIRepairParams, RepairMode } from '../utils/advancedAudioProcessing';
-import { ProcessingOptions, AlgorithmVersion, fetchMemoryInfo, MemoryInfoResult, fetchStorageEstimate, StorageEstimateResult, lookupRepairCache, RepairCacheLookupResult } from '../services/backendApi';
+import { ProcessingOptions, AlgorithmVersion, fetchMemoryInfo, MemoryInfoResult, fetchStorageEstimate, StorageEstimateResult, fetchRenderCache, RenderCacheEntry } from '../services/backendApi';
 
 interface AIRepairPanelProps {
   params: AIRepairParams;
@@ -29,6 +29,8 @@ interface AIRepairPanelProps {
   duration?: number;
   channels?: number;
   backendAvailable?: boolean;
+  onSaveProfile?: () => void;
+  taskId?: string | null;
 }
 
 const sampleRateOptions = [
@@ -111,15 +113,17 @@ export function AIRepairPanel({
   duration = 0,
   channels = 2,
   backendAvailable = false,
+  onSaveProfile,
+  taskId,
 }: AIRepairPanelProps) {
   const [showParams, setShowParams] = useState(false);
   const [memoryInfo, setMemoryInfo] = useState<MemoryInfoResult | null>(null);
   const [storageEstimate, setStorageEstimate] = useState<StorageEstimateResult | null>(null);
   const memoryFetchRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const storageFetchRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // 各组合缓存状态
-  const [cacheStatus, setCacheStatus] = useState<Record<string, RepairCacheLookupResult & { checked: boolean }>>({});
-  const [selectedCache, setSelectedCache] = useState<{ key: string; info: RepairCacheLookupResult } | null>(null);
+  // 渲染缓存状态
+  const [renderCaches, setRenderCaches] = useState<RenderCacheEntry[]>([]);
+  const [selectedCache, setSelectedCache] = useState<RenderCacheEntry | null>(null);
   const cacheCheckRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -150,35 +154,21 @@ export function AIRepairPanel({
     return () => { if (storageFetchRef.current) clearTimeout(storageFetchRef.current); };
   }, [duration, channels, processingOptions.sampleRate, processingOptions.bitDepth, backendAvailable]);
 
-  // 各组合缓存检查
+  // 查询渲染交付规格缓存
   useEffect(() => {
-    if (!fileHash || duration <= 0) {
-      setCacheStatus({});
+    if (!taskId || !backendAvailable) {
+      setRenderCaches([]);
       return;
     }
     if (cacheCheckRef.current) clearTimeout(cacheCheckRef.current);
     cacheCheckRef.current = setTimeout(async () => {
-      const newStatus: Record<string, RepairCacheLookupResult & { checked: boolean }> = {};
-      const entries = allEstimates;
-      const results = await Promise.allSettled(
-        entries.map(e => lookupRepairCache(fileHash, {
-          ...params,
-          sample_rate: e.sampleRate,
-          bit_depth: e.bitDepth,
-          algorithm_version: algorithmVersion,
-        }))
-      );
-      entries.forEach((e, i) => {
-        const key = `${e.sampleRate}-${e.bitDepth}`;
-        const r = results[i];
-        newStatus[key] = r.status === 'fulfilled' ? { ...r.value, checked: true } : { found: false, checked: true };
-      });
-      setCacheStatus(newStatus);
-    }, 600);
+      const caches = await fetchRenderCache(taskId);
+      setRenderCaches(caches);
+    }, 500);
     return () => {
       if (cacheCheckRef.current) clearTimeout(cacheCheckRef.current);
     };
-  }, [fileHash, duration, channels, params, algorithmVersion]);
+  }, [taskId, backendAvailable]);
 
   const paramLabels: Record<keyof AIRepairParams, string> = {
     deClipping: '去削波',
@@ -457,19 +447,19 @@ export function AIRepairPanel({
             {/* 各组合大小参考 */}
             {allEstimates.length > 0 ? (
             <div className="mt-3 pt-2 border-t border-gray-700/50">
-              <div className="text-[10px] text-gray-500 mb-1.5">各组合预估大小参考（🟢 = 有缓存可秒下）：</div>
+              <div className="text-[10px] text-gray-500 mb-1.5">各组合预估大小参考（🟢 = 已有渲染缓存可秒下）：</div>
               <div className="grid grid-cols-3 gap-1 text-[10px]">
                 {allEstimates.map((est) => {
                   const isCurrent = est.sampleRate === processingOptions.sampleRate && est.bitDepth === processingOptions.bitDepth;
                   const cacheKey = `${est.sampleRate}-${est.bitDepth}`;
-                  const cache = cacheStatus[cacheKey];
-                  const isCached = cache?.checked && cache.found;
+                  const renderCache = renderCaches.find(c => c.sample_rate === est.sampleRate && c.bit_depth === est.bitDepth);
+                  const isCached = !!renderCache;
                   return (
                     <div
                       key={cacheKey}
                       onClick={() => {
-                        if (isCached && cache.render_result) {
-                          setSelectedCache({ key: cacheKey, info: cache });
+                        if (isCached && renderCache) {
+                          setSelectedCache(renderCache);
                         } else {
                           onOptionsChange?.({
                             sampleRate: est.sampleRate,
@@ -488,11 +478,10 @@ export function AIRepairPanel({
                       }`}
                     >
                       {isCached && (
-                        <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-emerald-400 rounded-full" title="有缓存" />
+                        <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-emerald-400 rounded-full" title="有渲染缓存" />
                       )}
                       <div className="font-medium">{est.sampleRate / 1000}k/{est.bitDepth}bit</div>
                       <div>{isMobile ? est.sizeMB.toFixed(0) : est.sizeMiB.toFixed(0)}{isMobile ? 'MB' : 'MiB'}</div>
-                      {cache && !cache.checked && <div className="text-[8px] text-gray-500">查询中...</div>}
                       {isCached && <div className="text-[8px] text-emerald-400">可秒下</div>}
                     </div>
                   );
@@ -509,28 +498,18 @@ export function AIRepairPanel({
             {selectedCache && (
               <div className="mt-3 p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-lg text-[12px]">
                 <div className="flex items-center justify-between mb-2">
-                  <span className="text-emerald-400 font-medium">📦 缓存详情</span>
+                  <span className="text-emerald-400 font-medium">📦 渲染缓存详情</span>
                   <button onClick={() => setSelectedCache(null)} className="text-gray-400 hover:text-white text-lg leading-none">×</button>
                 </div>
-                {selectedCache.info.render_result && (
-                  <>
-                    <div className="flex justify-between"><span className="text-gray-400">格式</span><span className="text-white">{selectedCache.info.render_result.output_sample_rate / 1000}kHz / {selectedCache.info.render_result.output_bit_depth}bit</span></div>
-                    <div className="flex justify-between"><span className="text-gray-400">文件大小</span><span className="text-white">{((selectedCache.info.output_size || 0) / (1024 * 1024)).toFixed(1)} MiB</span></div>
-                  </>
-                )}
-                {selectedCache.info.repair_result && (
-                  <div className="flex justify-between"><span className="text-gray-400">修复算法</span><span className="text-emerald-400">{selectedCache.info.repair_result.algorithm_version || 'v2.3'}</span></div>
-                )}
-                {selectedCache.info.render_result && selectedCache.info.render_result.algorithm_version && (
-                  <div className="flex justify-between"><span className="text-gray-400">算法版本</span><span className="text-emerald-400">{selectedCache.info.render_result.algorithm_version}</span></div>
-                )}
+                <div className="flex justify-between"><span className="text-gray-400">格式</span><span className="text-white">{selectedCache.sample_rate / 1000}kHz / {selectedCache.bit_depth}bit</span></div>
+                <div className="flex justify-between"><span className="text-gray-400">文件大小</span><span className="text-white">{(selectedCache.size / (1024 * 1024)).toFixed(1)} MiB</span></div>
+                <div className="flex justify-between"><span className="text-gray-400">文件名</span><span className="text-white text-[11px] truncate ml-2">{selectedCache.filename}</span></div>
                 <div className="mt-2 flex gap-2">
                   <button
                     onClick={() => {
-                      const [sr, bd] = selectedCache.key.split('-').map(Number);
                       onOptionsChange?.({
-                        sampleRate: sr,
-                        bitDepth: bd as 16 | 24 | 32,
+                        sampleRate: selectedCache.sample_rate,
+                        bitDepth: selectedCache.bit_depth as 16 | 24 | 32,
                       });
                       setSelectedCache(null);
                     }}
@@ -762,6 +741,16 @@ export function AIRepairPanel({
           </div>
         )}
       </div>
+
+      {/* 保存当前参数为配置 */}
+      {onSaveProfile && showParams && (
+        <button
+          onClick={onSaveProfile}
+          className="w-full mb-3 py-2 rounded-lg bg-purple-500/20 hover:bg-purple-500/30 text-purple-400 text-sm font-medium transition"
+        >
+          💾 保存当前参数为配置
+        </button>
+      )}
 
       <div className="mb-3">
         <label className="flex items-center gap-2 cursor-pointer">

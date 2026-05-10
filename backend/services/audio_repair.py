@@ -672,11 +672,21 @@ def get_available_versions(mobile_mode: bool = False) -> list[dict[str, Any]]:
     for v in ALGORITHM_VERSIONS.values():
         if mobile_mode and not v.get("mobile_compatible", True):
             continue
+        # 构建参数范围信息
+        param_ranges = {}
+        for internal_key, pdef in PARAM_DEFINITIONS.items():
+            param_ranges[pdef["key"]] = {
+                "min": pdef["min"],
+                "max": pdef["max"],
+                "step": pdef["step"],
+                "label": pdef["label"],
+            }
         version_data = {
             "name": v["name"],
             "label": v["label"],
             "description": v["description"],
             "defaultParams": {PARAM_DEFINITIONS[k]["key"]: val for k, val in v["default_params"].items()},
+            "paramRanges": param_ranges,
             "modes": [
                 {
                     "name": m["name"],

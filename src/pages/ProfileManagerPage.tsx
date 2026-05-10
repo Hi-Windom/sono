@@ -120,7 +120,7 @@ export default function ProfileManagerPage() {
       (Object.keys(algoInfo.defaultParams) as string[]).forEach(backendKey => {
         const paramKey = backendKeyToParamKey(backendKey);
         if (paramKey) {
-          (newParams as Record<string, number>)[paramKey] = algoInfo.defaultParams[backendKey];
+          (newParams as unknown as Record<string, number>)[paramKey] = algoInfo.defaultParams[backendKey];
         }
       });
       setEditingParams(prev => prev ? { ...prev, algorithmVersion: newVersion, params: newParams } : null);
@@ -224,19 +224,32 @@ export default function ProfileManagerPage() {
     return backendKey ? currentAlgoInfo.defaultParams[backendKey] : undefined;
   }, [currentAlgoInfo]);
 
+  // 获取某参数在当前算法版本中的范围信息
+  const getParamRange = useCallback((key: keyof AIRepairParams): { min: number; max: number; step: number } => {
+    if (!currentAlgoInfo?.paramRanges) return { min: 0, max: 1, step: 0.01 };
+    const range = currentAlgoInfo.paramRanges[key];
+    if (range) return { min: range.min, max: range.max, step: range.step };
+    // 尝试通过前端 key 映射查找
+    const backendKey = paramKeyToBackend[key];
+    if (backendKey) {
+      const r = currentAlgoInfo.paramRanges[backendKey];
+      if (r) return { min: r.min, max: r.max, step: r.step };
+    }
+    return { min: 0, max: 1, step: 0.01 };
+  }, [currentAlgoInfo]);
+
   const paramSlider = (key: keyof AIRepairParams) => {
     const val = editingParams?.params?.[key] ?? 0;
     const defaultVal = getDefaultForParam(key);
-    // 根据默认值自适应最大值（默认值 > 0.5 时，max = 1；否则 max = 0.5）
-    const maxVal = (defaultVal !== undefined && defaultVal > 0.5) || key === 'warmth' || key === 'clarity' ? 1 : 0.5;
+    const { min: rangeMin, max: rangeMax, step: rangeStep } = getParamRange(key);
     return (
       <div key={key as string} className="flex items-center gap-2 py-1">
         <span className="text-xs text-gray-400 w-16 shrink-0">{PARAM_LABELS[key]}</span>
         <input
           type="range"
-          min={0}
-          max={maxVal}
-          step={0.01}
+          min={rangeMin}
+          max={rangeMax}
+          step={rangeStep}
           value={val}
           onChange={e => setEditingParams(prev => prev ? {
             ...prev,
