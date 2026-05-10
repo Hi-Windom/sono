@@ -1,0 +1,32 @@
+- [ ] v2.4 算法包 `backend/services/repair/repair_v2_4/` 已创建，包含 `__init__.py` 和 `core.py`
+- [ ] v2.4 `_adaptive_loudness_normalize` 目标 -14 LUFS，增益范围 -15~+9dB，保留 K-加权预滤波（铁律2合规）
+- [ ] v2.4 `_enhanced_multiband_compress` makeup gain 1.5×amount，低频子带额外 +2dB，每子带全局常量增益（铁律2合规）
+- [ ] v2.4 `_spectral_anomaly_repair` 谐波结构分析 + 窄带异常检测 + 频谱插值修复，修复掩码基于全局统计量（铁律2合规）
+- [ ] v2.4 `_spectral_anomaly_repair` 能正确修复模拟的"玻璃突刺"频谱异常信号
+- [ ] v2.4 `_harmonic_bass_enhance` 次谐波合成 + 谐波激励，所有增益为全局常量，tanh 软削波符合铁律1（铁律1+2合规）
+- [ ] v2.4 `_harmonic_bass_enhance` 低频段（<250Hz）RMS 增长不低于 3dB（相比 v2.3 的 `apply_bass_enhance_v5`）
+- [ ] v2.4 `_spectral_highfreq_reconstruct` 谐波镜像 + 频谱噪声填充 + 相位连续性，频域操作固有时频耦合（铁律2合规）
+- [ ] v2.4 `_spectral_highfreq_reconstruct` 高频段（8-16kHz）频谱平坦度不低于 0.3
+- [ ] v2.4 noisereduce 可选增强：检测 noisereduce 可用性，不可用时回退到 `apply_spectral_group_a`
+- [ ] v2.4 处理链顺序：削波→爆音→瞬态→响度→压缩→AI频谱异常修复→频谱→空间→音色→低频增强→高频重建→立体声宽度→温暖度→临场增强→柔化→峰值限制
+- [ ] v2.4a 算法包 `backend/services/repair/repair_v2_4a/` 已创建，包含 `__init__.py` 和 `core.py`
+- [ ] v2.4a `_spectral_anomaly_repair_lite` 简化版谐波异常检测+修复，仅检测 2-12kHz 范围（铁律2合规）
+- [ ] v2.4a `_spectral_anomaly_repair_lite` 能正确修复模拟的"玻璃突刺"频谱异常信号
+- [ ] v2.4a `_harmonic_bass_enhance_lite` 简化版次谐波合成（铁律1+2合规）
+- [ ] v2.4a `_spectral_highfreq_reconstruct_lite` 简化版频谱高频重建（铁律2合规）
+- [ ] v2.4a `_adaptive_loudness_normalize_lite` 目标 -14 LUFS，增益范围 -15~+9dB（铁律2合规）
+- [ ] v2.4a `_enhanced_compress_lite` 增加 makeup gain 1.2×amount（铁律2合规）
+- [ ] v2.4a 仅依赖 numpy + scipy + soundfile，无 librosa/pedalboard/noisereduce 依赖（移动端兼容）
+- [ ] v2.4a 处理链在 v2.3a 基础上增加了 AI 频谱异常修复、低频增强、高频重建步骤
+- [ ] `audio_repair.py` 已注册 v2.4（mobile_compatible: False, 6 模式）和 v2.4a（mobile_compatible: True, 4 模式）
+- [ ] v2.4a 的 default_params 包含 `bass_enhance` 和 `clarity` 参数
+- [ ] `memory_guard.py` 已增加 v2.4（+50% peak_temp）和 v2.4a（+15% peak_temp）内存估算分支
+- [ ] `memory_guard.py` 的 `has_streaming` 条件包含 v2.4/v2.4a
+- [ ] `conftest.py` 的 ACTIVE_VERSIONS 包含 `"v2.4"` 和 `"v2.4a"`
+- [ ] `conftest.py` 的 `repair_fn` fixture 支持 v2.4/v2.4a 导入
+- [ ] `conftest.py` 包含 `generate_glass_spike_signal` 测试信号生成器
+- [ ] `TestV24PerStepQuality` 类覆盖 v2.4 所有新增函数的 SNR 和铁律测试
+- [ ] `TestV24aPerStepQuality` 类覆盖 v2.4a 所有新增函数的 SNR 和铁律测试
+- [ ] 所有质量测试（per-step + iron-rule）通过
+- [ ] v2.4 的 scale-adjusted SNR 不低于 v2.3 的 80%
+- [ ] v2.4 的 HF 噪声增长不超过 v2.3 的 1.5 倍
