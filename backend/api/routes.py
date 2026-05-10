@@ -307,7 +307,8 @@ async def render_audio_endpoint(request: RenderRequest):
     if not output_path or not os.path.exists(output_path):
         raise HTTPException(status_code=400, detail="修复结果不存在，请先完成修复")
 
-    render_filename = f"{request.task_id}_rendered_{request.sample_rate}_{request.bit_depth}.wav"
+    algo_ver = task.get("params", {}).get("algorithm_version", "v2.0").replace(".", "p")
+    render_filename = f"{request.task_id}_rendered_{algo_ver}_{request.sample_rate}_{request.bit_depth}.wav"
     render_path = os.path.join(OUTPUT_DIR, render_filename)
 
     update_task(request.task_id, status="rendering", step="渲染交付规格...", progress=0)
@@ -499,13 +500,17 @@ async def download_file(filename: str, request: Request):
     # 生成更友好的下载文件名
     download_name = filename
     if "_rendered_" in filename:
-        # 格式: {task_id}_rendered_{sr}_{bd}.wav → 尝试从 task 获取原始文件名
+        # 新格式: {task_id}_rendered_{algo_ver}_{sr}_{bd}.wav
+        # 旧格式: {task_id}_rendered_{sr}_{bd}.wav
         parts = filename.replace(".wav", "").split("_rendered_")
         task_id_prefix = parts[0]
         task = get_task(task_id_prefix)
         if task and task.get("filename"):
             original_name = task["filename"].rsplit(".", 1)[0]
-            sr_bd = parts[1] if len(parts) > 1 else "48000_24"
+            suffix = parts[1] if len(parts) > 1 else ""
+            segments = suffix.split("_")
+            # 取最后两段作为 sr_bd
+            sr_bd = "_".join(segments[-2:]) if len(segments) >= 2 else suffix
             download_name = f"{original_name}_repaired_{sr_bd}.wav"
     # 使用 StreamingResponse 支持 Range 请求（断点续传 + 多线程下载）
     file_size = os.path.getsize(file_path)
@@ -570,29 +575,43 @@ async def get_render_cache(task_id: str):
     # 检查 OUTPUT_DIR 中是否有该 task 的渲染文件
     if os.path.isdir(OUTPUT_DIR):
         for fname in os.listdir(OUTPUT_DIR):
-            if fname.startswith(f"{task_id}_rendered_") and fname.endswith(".wav"):
-                # 解析规格: {task_id}_rendered_{sr}_{bd}.wav
-                parts = fname.replace(".wav", "").split("_rendered_")
-                if len(parts) == 2:
-                    sr_bd = parts[1].split("_")
-                    if len(sr_bd) == 2:
-                        try:
-                            sr = int(sr_bd[0])
-                            bd = int(sr_bd[1])
-                            fpath = os.path.join(OUTPUT_DIR, fname)
-                            mtime = os.path.getmtime(fpath)
-                            from datetime import datetime, timezone
-                            mtime_str = datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat()
-                            caches.append({
-                                "sample_rate": sr,
-                                "bit_depth": bd,
-                                "filename": fname,
-                                "size": os.path.getsize(fpath),
-                                "mtime": mtime_str,
-                                "algorithm_version": algo_version,
-                            })
-                        except ValueError:
-                            pass
+            if not fname.startswith(f"{task_id}_rendered_") or not fname.endswith(".wav"):
+                continue
+            base = fname.replace(".wav", "")
+            # 新格式: {task_id}_rendered_{algo_ver}_{sr}_{bd}
+            # 旧格式: {task_id}_rendered_{sr}_{bd}
+            parts = base.split("_rendered_")
+            if len(parts) != 2:
+                continue
+            suffix = parts[1]
+            segments = suffix.split("_")
+            try:
+                if len(segments) >= 3:
+                    # 新格式: algo_ver / sr / bd
+                    sr = int(segments[-2])
+                    bd = int(segments[-1])
+                    file_algo_ver = "_".join(segments[:-2])
+                elif len(segments) == 2:
+                    # 旧格式: sr / bd (无算法版本)
+                    sr = int(segments[0])
+                    bd = int(segments[1])
+                    file_algo_ver = ""
+                else:
+                    continue
+                fpath = os.path.join(OUTPUT_DIR, fname)
+                mtime = os.path.getmtime(fpath)
+                from datetime import datetime, timezone
+                mtime_str = datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat()
+                caches.append({
+                    "sample_rate": sr,
+                    "bit_depth": bd,
+                    "filename": fname,
+                    "size": os.path.getsize(fpath),
+                    "mtime": mtime_str,
+                    "algorithm_version": file_algo_ver.replace("p", ".") if file_algo_ver else algo_version,
+                })
+            except ValueError:
+                pass
     return {"caches": caches}
 
 @router.post("/cancel/{task_id}")

@@ -5,7 +5,6 @@ import { AudioPlayer } from '../components/AudioPlayer';
 import { WaveformVisualizer } from '../components/WaveformVisualizer';
 import { SpectrumVisualizer } from '../components/SpectrumVisualizer';
 import { AIRepairPanel } from '../components/AIRepairPanel';
-import { DownloadButton } from '../components/DownloadButton';
 import { AIDetectionComparison } from '../components/AIDetectionComparison';
 import { CacheManager } from '../components/CacheManager';
 import { useAudioProcessor } from '../hooks/useAudioProcessor';
@@ -260,16 +259,17 @@ export default function Home() {
                 backendAvailable={backendAvailable}
               />
 
-              <DownloadButton
-                onDownloadBackend={() => downloadProcessedAudio('backend')}
-                onDownloadBrowser={() => downloadProcessedAudio('browser')}
-                hasBackendResult={hasBackendResult}
-                hasBrowserResult={hasBrowserResult}
-                backendRepairResult={repairResult}
-                browserBufferInfo={browserBufferInfo}
-                audioFileName={audioFile?.name}
-                bitDepth={processingOptions.bitDepth}
-              />
+              {hasBrowserResult && (
+                <button
+                  onClick={() => downloadProcessedAudio('browser')}
+                  className="w-full py-3 px-6 rounded-xl font-bold text-base flex items-center justify-center gap-3 transition-all bg-gradient-to-r from-purple-600 to-purple-500 text-white hover:scale-[1.02] shadow-lg shadow-purple-500/30"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                  </svg>
+                  导出浏览器修复音频
+                </button>
+              )}
 
               <CacheManager />
             </div>

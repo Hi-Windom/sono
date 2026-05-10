@@ -28,6 +28,7 @@ import {
   QueueStatus,
   renderAudio,
   waitRenderWithWS,
+  fetchRenderCache,
 } from '../services/backendApi';
 
 function writeLog(message: string) {
@@ -1137,6 +1138,12 @@ export function useAudioProcessor() {
             });
 
             setIsProcessing(false);
+
+            // 使用缓存跳过修复后，自动渲染下载
+            renderAndDownload().catch(err => {
+              writeLog(`[applySettings] 缓存跳过修复后渲染下载失败: ${err}`);
+            });
+
             setTimeout(() => {
               setProcessingStep('');
               setProcessingProgress(0);
@@ -1494,6 +1501,14 @@ export function useAudioProcessor() {
             : '',
           originalDetectTime: originalDetectTime || '',
           repairedDetectTime: repairedDetectTime || '',
+        });
+      }
+
+      // 修复成功后自动渲染并下载
+      if (effectiveBackendResult.status === 'fulfilled' && effectiveBackendResult.value && taskIdRef.current) {
+        // 异步执行，不阻塞主流程
+        renderAndDownload().catch(err => {
+          writeLog(`[applySettings] 自动渲染下载失败: ${err}`);
         });
       }
     }
@@ -2181,63 +2196,72 @@ export function useAudioProcessor() {
     updateTime();
   }, [stopPlaying, getAudioContext]);
 
-  const downloadProcessedAudio = useCallback(async (source: 'browser' | 'backend') => {
-    const baseName = audioFile
-      ? audioFile.name.replace(/\.[^/.]+$/, '')
-      : 'audio';
-    const fileName = source === 'backend'
-      ? `${baseName}_backend_repaired.wav`
-      : `${baseName}_browser_repaired.wav`;
+  /** 渲染交付规格并下载（修复完成后自动调用） */
+  const renderAndDownload = useCallback(async () => {
+    const baseName = audioFile ? audioFile.name.replace(/\.[^/.]+$/, '') : 'audio';
+    const fileName = `${baseName}_repaired_${processingOptions.sampleRate / 1000}k_${processingOptions.bitDepth}bit.wav`;
 
-    if (source === 'backend' && taskIdRef.current) {
-      try {
-        setProcessingStep('渲染交付规格...');
-        setProcessingProgress(0);
-        setIsRenderLoading(true);
-        await renderAudio(
-          taskIdRef.current,
-          processingOptions.sampleRate,
-          processingOptions.bitDepth,
-        );
-        const { promise, close } = waitRenderWithWS(
-          taskIdRef.current,
-          (progress, step) => {
-            setProcessingProgress(progress);
-            setProcessingStep(step);
-          },
-        );
-        wsControlRef.current = { close };
-        const renderRes = await promise;
-        wsControlRef.current = null;
-        setIsRenderLoading(false);
-        if (!renderRes.render_filename || !renderRes.render_result) {
-          throw new Error('渲染结果不完整');
-        }
-        writeLog(`[downloadProcessedAudio] 渲染完成: sr=${renderRes.render_result.output_sample_rate} bd=${renderRes.render_result.output_bit_depth}`);
-        setRepairResult(prev => prev ? {
-          ...prev,
-          output_sample_rate: renderRes.render_result!.output_sample_rate,
-          output_bit_depth: renderRes.render_result!.output_bit_depth,
-        } : null);
-        const url = `/api/v1/download-file/${renderRes.render_filename}`;
-        downloadUrl(url, fileName);
-        setProcessingStep('');
-        setProcessingProgress(0);
-        return;
-      } catch (renderErr) {
-        wsControlRef.current?.close();
-        wsControlRef.current = null;
-        setIsRenderLoading(false);
-        writeLog(`[downloadProcessedAudio] 渲染失败，回退到原始下载: ${renderErr}`);
-        const url = getDownloadUrl(taskIdRef.current);
+    if (!taskIdRef.current) return;
+
+    // 检查当前规格是否已有渲染缓存
+    try {
+      const caches = await fetchRenderCache(taskIdRef.current);
+      const hit = caches.find(c => c.sample_rate === processingOptions.sampleRate && c.bit_depth === processingOptions.bitDepth);
+      if (hit) {
+        writeLog(`[renderAndDownload] 渲染缓存命中: ${hit.filename}`);
+        const url = `/api/v1/download-file/${hit.filename}`;
         downloadUrl(url, fileName);
         setProcessingStep('');
         setProcessingProgress(0);
         return;
       }
-    }
+    } catch { /* 忽略缓存查询失败，继续渲染 */ }
 
-    const targetBuffer = source === 'backend' ? backendProcessedBuffer : browserProcessedBuffer;
+    try {
+      setProcessingStep('渲染交付规格...');
+      setProcessingProgress(0);
+      setIsRenderLoading(true);
+      await renderAudio(taskIdRef.current, processingOptions.sampleRate, processingOptions.bitDepth);
+      const { promise, close } = waitRenderWithWS(taskIdRef.current, (progress, step) => {
+        setProcessingProgress(progress);
+        setProcessingStep(step);
+      });
+      wsControlRef.current = { close };
+      const renderRes = await promise;
+      wsControlRef.current = null;
+      setIsRenderLoading(false);
+      if (!renderRes.render_filename || !renderRes.render_result) {
+        throw new Error('渲染结果不完整');
+      }
+      writeLog(`[renderAndDownload] 渲染完成: sr=${renderRes.render_result.output_sample_rate} bd=${renderRes.render_result.output_bit_depth}`);
+      setRepairResult(prev => prev ? {
+        ...prev,
+        output_sample_rate: renderRes.render_result!.output_sample_rate,
+        output_bit_depth: renderRes.render_result!.output_bit_depth,
+      } : null);
+      const url = `/api/v1/download-file/${renderRes.render_filename}`;
+      downloadUrl(url, fileName);
+      setProcessingStep('');
+      setProcessingProgress(0);
+    } catch (renderErr) {
+      wsControlRef.current?.close();
+      wsControlRef.current = null;
+      setIsRenderLoading(false);
+      writeLog(`[renderAndDownload] 渲染失败，回退到原始下载: ${renderErr}`);
+      const url = getDownloadUrl(taskIdRef.current);
+      downloadUrl(url, fileName);
+      setProcessingStep('');
+      setProcessingProgress(0);
+    }
+  }, [audioFile, processingOptions]);
+
+  const downloadProcessedAudio = useCallback(async (source: 'browser') => {
+    const baseName = audioFile
+      ? audioFile.name.replace(/\.[^/.]+$/, '')
+      : 'audio';
+    const fileName = `${baseName}_browser_repaired.wav`;
+
+    const targetBuffer = browserProcessedBuffer;
 
     if (targetBuffer) {
       setProcessingStep('正在编码导出...');
@@ -2362,6 +2386,8 @@ export function useAudioProcessor() {
     isRenderLoading,
     // 任务ID
     taskId,
+    // 渲染并下载
+    renderAndDownload,
   };
 }
 

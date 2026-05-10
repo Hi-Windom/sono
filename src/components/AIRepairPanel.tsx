@@ -462,19 +462,23 @@ export function AIRepairPanel({
             {/* 各组合大小参考 */}
             {allEstimates.length > 0 ? (
             <div className="mt-3 pt-2 border-t border-gray-700/50">
-              <div className="text-[10px] text-gray-500 mb-1.5">各组合预估大小参考（🟢 = 已有渲染缓存可秒下）：</div>
+              <div className="text-[10px] text-gray-500 mb-1.5">各组合预估大小参考（🟢 = 当前版本可秒下 🟡 = 他版本有缓存）：</div>
               <div className="grid grid-cols-3 gap-1 text-[10px]">
                 {allEstimates.map((est) => {
                   const isCurrent = est.sampleRate === processingOptions.sampleRate && est.bitDepth === processingOptions.bitDepth;
                   const cacheKey = `${est.sampleRate}-${est.bitDepth}`;
-                  const renderCache = renderCaches.find(c => c.sample_rate === est.sampleRate && c.bit_depth === est.bitDepth);
+                  const renderCache = renderCaches.find(c => c.sample_rate === est.sampleRate && c.bit_depth === est.bitDepth && c.algorithm_version === algorithmVersion);
+                  const otherVerCache = !renderCache ? renderCaches.find(c => c.sample_rate === est.sampleRate && c.bit_depth === est.bitDepth) : null;
                   const isCached = !!renderCache;
+                  const hasOtherVerCache = !!otherVerCache;
                   return (
                     <div
                       key={cacheKey}
                       onClick={() => {
                         if (isCached && renderCache) {
                           setSelectedCache(renderCache);
+                        } else if (hasOtherVerCache && otherVerCache) {
+                          setSelectedCache(otherVerCache);
                         } else {
                           onOptionsChange?.({
                             sampleRate: est.sampleRate,
@@ -493,11 +497,15 @@ export function AIRepairPanel({
                       }`}
                     >
                       {isCached && (
-                        <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-emerald-400 rounded-full" title="有渲染缓存" />
+                        <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-emerald-400 rounded-full" title="当前版本有渲染缓存" />
+                      )}
+                      {hasOtherVerCache && !isCached && (
+                        <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-amber-400 rounded-full" title="其他版本有渲染缓存" />
                       )}
                       <div className="font-medium">{est.sampleRate / 1000}k/{est.bitDepth}bit</div>
                       <div>{isMobile ? est.sizeMB.toFixed(0) : est.sizeMiB.toFixed(0)}{isMobile ? 'MB' : 'MiB'}</div>
                       {isCached && <div className="text-[8px] text-emerald-400">可秒下</div>}
+                      {hasOtherVerCache && !isCached && <div className="text-[8px] text-amber-400">他版本</div>}
                     </div>
                   );
                 })}
@@ -518,19 +526,35 @@ export function AIRepairPanel({
                 </div>
                 <div className="flex justify-between"><span className="text-gray-400">格式</span><span className="text-white">{selectedCache.sample_rate / 1000}kHz / {selectedCache.bit_depth}bit</span></div>
                 <div className="flex justify-between"><span className="text-gray-400">文件大小</span><span className="text-white">{(selectedCache.size / (1024 * 1024)).toFixed(1)} MiB</span></div>
-                <div className="flex justify-between"><span className="text-gray-400">算法版本</span><span className="text-emerald-400">{selectedCache.algorithm_version || '—'}</span></div>
+                <div className="flex justify-between"><span className="text-gray-400">算法版本</span><span className={selectedCache.algorithm_version === algorithmVersion ? 'text-emerald-400' : 'text-amber-400'}>{selectedCache.algorithm_version || '—'}{selectedCache.algorithm_version !== algorithmVersion ? ' (非当前版本)' : ''}</span></div>
                 <div className="flex justify-between"><span className="text-gray-400">生成时间</span><span className="text-white">{selectedCache.mtime ? new Date(selectedCache.mtime).toLocaleString('zh-CN') : '—'}</span></div>
                 <div className="mt-2 flex gap-2">
                   <button
-                    onClick={() => {
-                      // 秒下：直接下载渲染缓存文件
-                      const downloadUrl = `/api/v1/download-file/${selectedCache.filename}`;
-                      const a = document.createElement('a');
-                      a.href = downloadUrl;
-                      a.style.display = 'none';
-                      document.body.appendChild(a);
-                      a.click();
-                      setTimeout(() => { document.body.removeChild(a); }, 5000);
+                    onClick={async () => {
+                      // 秒下：fetch+blob 下载，避免页面跳转，文件名正确
+                      try {
+                        const url = `/api/v1/download-file/${selectedCache.filename}`;
+                        const res = await fetch(url);
+                        if (!res.ok) throw new Error('下载失败');
+                        const blob = await res.blob();
+                        // 从 Content-Disposition 解析文件名，或构造友好名
+                        const disposition = res.headers.get('Content-Disposition');
+                        let saveName = `${selectedCache.sample_rate / 1000}k_${selectedCache.bit_depth}bit_repaired.wav`;
+                        if (disposition) {
+                          const match = disposition.match(/filename[^;=\n]*=(["']?)(.*?)\1(?:;|$)/);
+                          if (match?.[2]) saveName = decodeURIComponent(match[2]);
+                        }
+                        const blobUrl = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = blobUrl;
+                        a.download = saveName;
+                        a.style.display = 'none';
+                        document.body.appendChild(a);
+                        a.click();
+                        setTimeout(() => { URL.revokeObjectURL(blobUrl); document.body.removeChild(a); }, 5000);
+                      } catch (e) {
+                        console.warn('秒下失败:', e);
+                      }
                     }}
                     className="flex-1 py-1 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 rounded text-[11px] transition font-medium"
                   >
