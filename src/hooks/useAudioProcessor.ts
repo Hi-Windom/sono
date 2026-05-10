@@ -1,7 +1,7 @@
 import { useRef, useState, useCallback, useEffect } from 'react';
 import { AIRepairParams, defaultAIRepairParams, detectAudioIssues, RepairMode } from '../utils/advancedAudioProcessing';
 import { AISongDetectionResult } from '../utils/aiSongChecker';
-import { loadSettings, saveSettings, resetSettings as resetStoredSettings } from '../utils/settingsStorage';
+import { loadSettings, saveSettings, resetSettings as resetStoredSettings, saveProfileToStorage } from '../utils/settingsStorage';
 import { parseWavHeader, WavInfo, decodeWavPcm } from '../utils/wavParser';
 import { saveSession, loadSession, clearSession } from '../utils/sessionDB';
 import { computeFileHash } from '../utils/fileHash';
@@ -820,16 +820,16 @@ export function useAudioProcessor() {
   }, []);
 
   const updateParam = useCallback((key: keyof AIRepairParams, value: number) => {
-    setParams(prev => {
-      const next = { ...prev, [key]: value };
-      // 联动：检查当前参数是否命中某个预设模式
+    setParams(prev => ({ ...prev, [key]: value }));
+    // 联动：参数变化后检查是否命中预设模式（在 setParams 外部调用，避免嵌套 setState）
+    setParams(current => {
       const matched = repairModes.find(m => {
         return (Object.keys(m.params) as (keyof AIRepairParams)[]).every(
-          k => m.params[k] === next[k]
+          k => m.params[k] === current[k]
         );
       });
       setSelectedMode(matched ? matched.name : '');
-      return next;
+      return current; // 不修改，只用于读取最新值
     });
   }, [repairModes]);
 
@@ -1694,28 +1694,15 @@ export function useAudioProcessor() {
   }, []);
 
   const saveProfile = useCallback((name: string) => {
-    const settings = loadSettings();
-    const newProfile: import('../utils/settingsStorage').ProfileConfig = {
-      id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36),
-      name,
-      params: { ...params },
-      exportOptions: { ...processingOptions },
-      createdAt: new Date().toISOString(),
-    };
-    const updated = [...(settings.savedProfiles || []), newProfile];
-    saveSettings({ savedProfiles: updated });
-  }, [params, processingOptions]);
+    saveProfileToStorage(name, params, algorithmVersion);
+  }, [params, algorithmVersion]);
 
   const applyProfile = useCallback((id: string) => {
     const settings = loadSettings();
     const profile = (settings.savedProfiles || []).find(p => p.id === id);
     if (!profile) return;
     setParams(profile.params);
-    setProcessingOptionsState(prev => ({
-      ...prev,
-      sampleRate: profile.exportOptions.sampleRate,
-      bitDepth: profile.exportOptions.bitDepth,
-    }));
+    setAlgorithmVersionState(profile.algorithmVersion);
     setSelectedMode('');
   }, []);
 

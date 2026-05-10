@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Header } from '../components/Header';
-import { AIRepairParams, defaultAIRepairParams, repairModes } from '../utils/advancedAudioProcessing';
+import { AIRepairParams, defaultAIRepairParams } from '../utils/advancedAudioProcessing';
 import {
   getSavedProfiles,
   saveProfileToStorage,
@@ -30,12 +30,6 @@ const PARAM_LABELS: Record<keyof AIRepairParams, string> = {
   clarity: '清晰度',
 };
 
-const SAMPLE_RATE_LABELS: Record<number, string> = {
-  44100: '44.1k',
-  48000: '48k',
-  96000: '96k',
-};
-
 function paramsSummary(params: AIRepairParams): string[] {
   return (Object.keys(params) as (keyof AIRepairParams)[])
     .filter(k => (params[k] ?? 0) > 0)
@@ -48,7 +42,7 @@ export default function ProfileManagerPage() {
   const [profiles, setProfiles] = useState<ProfileConfig[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState('');
-  const [editingParams, setEditingParams] = useState<{ params: AIRepairParams; sampleRate: number; bitDepth: 16 | 24 | 32 } | null>(null);
+  const [editingParams, setEditingParams] = useState<{ params: AIRepairParams; algorithmVersion: string } | null>(null);
   const [showNewDialog, setShowNewDialog] = useState(false);
   const [newName, setNewName] = useState('');
   const [importInputKey, setImportInputKey] = useState(0);
@@ -61,16 +55,13 @@ export default function ProfileManagerPage() {
 
   const handleSaveNew = useCallback(() => {
     const name = newName.trim();
-    if (!name) return;
-    const settings = loadSettings();
-    saveProfileToStorage(name, settings.aiRepairParams, {
-      sampleRate: settings.exportOptions.sampleRate,
-      bitDepth: settings.exportOptions.bitDepth,
-    });
+    if (!name || !editingParams) return;
+    saveProfileToStorage(name, editingParams.params, editingParams.algorithmVersion);
     setNewName('');
     setShowNewDialog(false);
+    setEditingParams(null);
     refresh();
-  }, [newName, refresh]);
+  }, [newName, editingParams, refresh]);
 
   const handleDelete = useCallback((id: string, name: string) => {
     if (!confirm(`确定删除配置「${name}」？`)) return;
@@ -126,6 +117,7 @@ export default function ProfileManagerPage() {
           ...p,
           id: (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : Date.now().toString(36),
           createdAt: p.createdAt || new Date().toISOString(),
+          algorithmVersion: p.algorithmVersion || 'v2.0',
         }));
         saveSettings({ savedProfiles: [...existing, ...newProfiles] });
         refresh();
@@ -141,8 +133,7 @@ export default function ProfileManagerPage() {
   const openEditParams = useCallback((p: ProfileConfig) => {
     setEditingParams({
       params: { ...p.params },
-      sampleRate: p.exportOptions.sampleRate,
-      bitDepth: p.exportOptions.bitDepth,
+      algorithmVersion: p.algorithmVersion,
     });
     setEditingId(p.id);
     setEditingName(p.name);
@@ -156,10 +147,7 @@ export default function ProfileManagerPage() {
         ...p,
         name: editingName.trim() || p.name,
         params: { ...editingParams.params },
-        exportOptions: {
-          sampleRate: editingParams.sampleRate,
-          bitDepth: editingParams.bitDepth,
-        },
+        algorithmVersion: editingParams.algorithmVersion,
       } : p
     );
     saveSettings({ savedProfiles: updated });
@@ -228,23 +216,16 @@ export default function ProfileManagerPage() {
               />
             </label>
             <button
-              onClick={() => { setEditingParams({ params: { ...defaultAIRepairParams }, sampleRate: 48000, bitDepth: 24 }); setEditingId(null); setEditingName(''); setShowNewDialog(true); }}
+              onClick={() => {
+                setEditingParams({ params: { ...defaultAIRepairParams }, algorithmVersion: 'v2.0' });
+                setEditingId(null);
+                setEditingName('');
+                setShowNewDialog(true);
+              }}
               className="px-4 py-1.5 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-400 text-sm font-medium transition"
             >
               + 新增配置
             </button>
-          </div>
-        </div>
-
-        {/* 内置预设模式 */}
-        <div className="mb-6 p-4 bg-white/5 rounded-xl border border-white/10">
-          <div className="text-xs text-gray-500 mb-2">内置预设模式（只读）</div>
-          <div className="flex gap-2 flex-wrap">
-            {repairModes.map(m => (
-              <span key={m.name} className="px-3 py-1 rounded-full bg-white/5 text-gray-400 text-xs border border-white/10">
-                {m.name}
-              </span>
-            ))}
           </div>
         </div>
 
@@ -283,12 +264,12 @@ export default function ProfileManagerPage() {
                       <h3 className="text-white font-medium truncate">{p.name}</h3>
                     )}
                     <div className="flex items-center gap-2 mt-1 flex-wrap">
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400">
+                        {p.algorithmVersion}
+                      </span>
                       {paramsSummary(p.params).map(label => (
                         <span key={label} className="text-[10px] px-1.5 py-0.5 rounded bg-cyan-500/10 text-cyan-400">{label}</span>
                       ))}
-                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-500/10 text-purple-400">
-                        {SAMPLE_RATE_LABELS[p.exportOptions.sampleRate] || p.exportOptions.sampleRate} / {p.exportOptions.bitDepth}bit
-                      </span>
                     </div>
                     <div className="text-[10px] text-gray-500 mt-1">
                       创建于 {new Date(p.createdAt).toLocaleString('zh-CN')}
@@ -357,49 +338,21 @@ export default function ProfileManagerPage() {
                 />
               </div>
 
+              {/* 算法版本 */}
+              <div className="mb-4">
+                <label className="text-xs text-gray-400 mb-1 block">算法版本</label>
+                <input
+                  value={editingParams?.algorithmVersion ?? 'v2.0'}
+                  onChange={e => setEditingParams(prev => prev ? { ...prev, algorithmVersion: e.target.value } : null)}
+                  className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-cyan-400/50"
+                />
+              </div>
+
               {/* 参数滑块 */}
               <div className="mb-4">
                 <div className="text-xs text-gray-400 mb-2">修复参数</div>
                 <div className="max-h-60 overflow-y-auto pr-2">
-                  {paramSlider('deClipping')}
-                  {paramSlider('noiseReduction')}
-                  {paramSlider('deEssing')}
-                  {paramSlider('deCrackle')}
-                  {paramSlider('dePop')}
-                  {paramSlider('harmonicEnhance')}
-                  {paramSlider('dynamicRange')}
-                  {paramSlider('softness')}
-                  {paramSlider('presenceBoost')}
-                  {paramSlider('bassEnhance')}
-                  {paramSlider('spatialEnhance')}
-                  {paramSlider('transientRepair')}
-                  {paramSlider('warmth')}
-                  {paramSlider('clarity')}
-                </div>
-              </div>
-
-              {/* 导出规格 */}
-              <div className="mb-6">
-                <div className="text-xs text-gray-400 mb-2">导出规格</div>
-                <div className="flex gap-4">
-                  <select
-                    value={editingParams?.sampleRate ?? 48000}
-                    onChange={e => setEditingParams(prev => prev ? { ...prev, sampleRate: parseInt(e.target.value) } : null)}
-                    className="bg-white/5 border border-white/10 rounded px-2 py-1 text-white text-sm"
-                  >
-                    <option value={44100}>44.1kHz</option>
-                    <option value={48000}>48kHz</option>
-                    <option value={96000}>96kHz</option>
-                  </select>
-                  <select
-                    value={editingParams?.bitDepth ?? 24}
-                    onChange={e => setEditingParams(prev => prev ? { ...prev, bitDepth: parseInt(e.target.value) as 16 | 24 | 32 } : null)}
-                    className="bg-white/5 border border-white/10 rounded px-2 py-1 text-white text-sm"
-                  >
-                    <option value={16}>16bit</option>
-                    <option value={24}>24bit</option>
-                    <option value={32}>32bit</option>
-                  </select>
+                  {(Object.keys(PARAM_LABELS) as (keyof AIRepairParams)[]).map(key => paramSlider(key))}
                 </div>
               </div>
 

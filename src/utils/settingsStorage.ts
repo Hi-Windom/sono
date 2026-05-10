@@ -3,11 +3,8 @@ import { AIRepairParams, defaultAIRepairParams } from './advancedAudioProcessing
 export interface ProfileConfig {
   id: string;
   name: string;
+  algorithmVersion: string;
   params: AIRepairParams;
-  exportOptions: {
-    sampleRate: number;
-    bitDepth: 16 | 24 | 32;
-  };
   createdAt: string;
 }
 
@@ -98,13 +95,13 @@ export function getSavedProfiles(): ProfileConfig[] {
   return settings.savedProfiles || [];
 }
 
-export function saveProfileToStorage(name: string, params: AIRepairParams, options: { sampleRate: number; bitDepth: 16 | 24 | 32 }): void {
+export function saveProfileToStorage(name: string, params: AIRepairParams, algorithmVersion: string): void {
   const settings = loadSettings();
   const newProfile: ProfileConfig = {
     id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36),
     name,
+    algorithmVersion,
     params: { ...params },
-    exportOptions: { ...options },
     createdAt: new Date().toISOString(),
   };
   const updated = [...(settings.savedProfiles || []), newProfile];
@@ -117,7 +114,7 @@ export function applyProfileById(id: string): void {
   if (!profile) return;
   saveSettings({
     aiRepairParams: { ...profile.params },
-    exportOptions: { ...profile.exportOptions },
+    algorithmVersion: profile.algorithmVersion,
   });
 }
 
