@@ -184,6 +184,8 @@ export function useAudioProcessor() {
   const [backendError, setBackendError] = useState<string | null>(null);
   const [backendPreviewUrl, setBackendPreviewUrl] = useState<string | null>(null);
   const [enableBrowserRepair, setEnableBrowserRepair] = useState(true);
+  const [renderDownloadUrl, setRenderDownloadUrl] = useState<string | null>(null);
+  const [showDownloadModal, setShowDownloadModal] = useState(false);
 
   const audioContextRef = useRef<AudioContext | null>(null);
   const sourceNodeRef = useRef<AudioBufferSourceNode | null>(null);
@@ -1206,9 +1208,14 @@ export function useAudioProcessor() {
 
             setIsProcessing(false);
 
-            // 使用缓存跳过修复后，自动渲染下载
-            renderAndDownload().catch(err => {
-              writeLog(`[applySettings] 缓存跳过修复后渲染下载失败: ${err}`);
+            renderAndDownload().then(result => {
+              if (result?.downloadUrl) {
+                setRenderDownloadUrl(result.downloadUrl);
+              }
+              setShowDownloadModal(true);
+            }).catch(err => {
+              writeLog(`[applySettings] 缓存跳过修复后渲染失败: ${err}`);
+              setShowDownloadModal(true);
             });
 
             setTimeout(() => {
@@ -1571,11 +1578,15 @@ export function useAudioProcessor() {
         });
       }
 
-      // 修复成功后自动渲染并下载
       if (effectiveBackendResult.status === 'fulfilled' && effectiveBackendResult.value && taskIdRef.current) {
-        // 异步执行，不阻塞主流程
-        renderAndDownload().catch(err => {
-          writeLog(`[applySettings] 自动渲染下载失败: ${err}`);
+        renderAndDownload().then(result => {
+          if (result?.downloadUrl) {
+            setRenderDownloadUrl(result.downloadUrl);
+          }
+          setShowDownloadModal(true);
+        }).catch(err => {
+          writeLog(`[applySettings] 自动渲染失败: ${err}`);
+          setShowDownloadModal(true);
         });
       }
     }
@@ -2266,47 +2277,17 @@ export function useAudioProcessor() {
   /** 渲染交付规格并下载（修复完成后自动调用） */
   const renderAndDownload = useCallback(async () => {
     const baseName = audioFile ? audioFile.name.replace(/\.[^/.]+$/, '') : 'audio';
-    const ts = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 15); // YYYYMMDD_HHMMSS
+    const ts = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 15);
     const fileName = `${baseName}_${algorithmVersion}_${processingOptions.sampleRate / 1000}k_${processingOptions.bitDepth}bit_${ts}.wav`;
 
-    if (!taskIdRef.current) return;
+    if (!taskIdRef.current) return null;
 
-    // 检查当前规格+算法版本是否已有渲染缓存
     try {
       const caches = await fetchRenderCache(taskIdRef.current);
       const hit = caches.find(c => c.sample_rate === processingOptions.sampleRate && c.bit_depth === processingOptions.bitDepth && c.algorithm_version === algorithmVersion);
       if (hit) {
         writeLog(`[renderAndDownload] 渲染缓存命中: ${hit.filename}`);
-        // 用 fetch+blob 下载，从 Content-Disposition 获取正确文件名
-        try {
-          const url = `/api/v1/download-file/${hit.filename}`;
-          const res = await fetch(url);
-          if (res.ok) {
-            const blob = await res.blob();
-            const disposition = res.headers.get('Content-Disposition');
-            const parsedName = parseFilenameFromDisposition(disposition);
-            const saveName = parsedName || fileName;
-            const blobUrl = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = blobUrl;
-            a.download = saveName;
-            a.style.display = 'none';
-            document.body.appendChild(a);
-            a.click();
-            setTimeout(() => { URL.revokeObjectURL(blobUrl); document.body.removeChild(a); }, 5000);
-            setProcessingStep('');
-            setProcessingProgress(0);
-            return;
-          }
-        } catch (fetchErr) {
-          writeLog(`[renderAndDownload] fetch+blob 下载失败，回退到直链: ${fetchErr}`);
-        }
-        // 回退到直链
-        const url = `/api/v1/download-file/${hit.filename}`;
-        downloadUrl(url, fileName);
-        setProcessingStep('');
-        setProcessingProgress(0);
-        return;
+        return { downloadUrl: `/api/v1/download-file/${hit.filename}`, fileName };
       }
     } catch { /* 忽略缓存查询失败，继续渲染 */ }
 
@@ -2332,19 +2313,17 @@ export function useAudioProcessor() {
         output_sample_rate: renderRes.render_result!.output_sample_rate,
         output_bit_depth: renderRes.render_result!.output_bit_depth,
       } : null);
-      const url = `/api/v1/download-file/${renderRes.render_filename}`;
-      downloadUrl(url, fileName);
       setProcessingStep('');
       setProcessingProgress(0);
+      return { downloadUrl: `/api/v1/download-file/${renderRes.render_filename}`, fileName };
     } catch (renderErr) {
       wsControlRef.current?.close();
       wsControlRef.current = null;
       setIsRenderLoading(false);
-      writeLog(`[renderAndDownload] 渲染失败，回退到原始下载: ${renderErr}`);
-      const url = getDownloadUrl(taskIdRef.current);
-      downloadUrl(url, fileName);
+      writeLog(`[renderAndDownload] 渲染失败: ${renderErr}`);
       setProcessingStep('');
       setProcessingProgress(0);
+      return null;
     }
   }, [audioFile, processingOptions, algorithmVersion]);
 
@@ -2482,6 +2461,11 @@ export function useAudioProcessor() {
     taskId,
     // 渲染并下载
     renderAndDownload,
+    // 下载弹窗
+    renderDownloadUrl,
+    setRenderDownloadUrl,
+    showDownloadModal,
+    setShowDownloadModal,
   };
 }
 

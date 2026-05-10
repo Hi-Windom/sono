@@ -172,11 +172,11 @@ export function DownloadModal({
               {!backendDownloadUrl && backendDownloadAction && (
                 <div className="mt-3">
                   <button
-                    onClick={() => { backendDownloadAction(); onClose(); }}
+                    onClick={() => backendDownloadAction()}
                     disabled={downloading || isBackendLoading}
                     className="w-full py-2 bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/30 rounded-lg text-cyan-400 text-xs font-medium transition disabled:opacity-50"
                   >
-                    {isBackendLoading ? '渲染中...' : '⬇ 渲染并下载'}
+                    {isBackendLoading ? '渲染中...' : '⬇ 渲染'}
                   </button>
                 </div>
               )}

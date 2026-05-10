@@ -10,7 +10,6 @@ import { AIDetectionComparison } from '../components/AIDetectionComparison';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import { DownloadModal } from '../components/DownloadModal';
 import { useAudioProcessor } from '../hooks/useAudioProcessor';
-import { fetchRenderCache } from '../services/backendApi';
 
 export default function RepairPage() {
   const navigate = useNavigate();
@@ -86,11 +85,14 @@ export default function RepairPage() {
     taskId,
     // 渲染并下载
     renderAndDownload,
+    // 下载弹窗
+    renderDownloadUrl,
+    setRenderDownloadUrl,
+    showDownloadModal,
+    setShowDownloadModal,
   } = useAudioProcessor();
 
   const [showDiag, setShowDiag] = useState(false);
-  const [showDownloadModal, setShowDownloadModal] = useState(false);
-  const [renderDownloadUrl, setRenderDownloadUrl] = useState<string | null>(null);
 
   // 渲染缓存刷新回调
   const renderCacheRefreshRef = useRef<(() => Promise<void>) | null>(null);
@@ -416,30 +418,6 @@ export default function RepairPage() {
                 onRenderCacheRefresh={handleRegisterCacheRefresh}
                 cacheTriggerKey={cacheTriggerKey}
               />
-
-              {(hasBackendResult || hasBrowserResult) && (
-                <button
-                  onClick={async () => {
-                    setShowDownloadModal(true);
-                    setRenderDownloadUrl(null);
-                    if (hasBackendResult && taskId) {
-                      try {
-                        const caches = await fetchRenderCache(taskId);
-                        const hit = caches.find(c => c.sample_rate === processingOptions.sampleRate && c.bit_depth === processingOptions.bitDepth && c.algorithm_version === algorithmVersion);
-                        if (hit) {
-                          setRenderDownloadUrl(`/api/v1/download-file/${hit.filename}`);
-                        }
-                      } catch {}
-                    }
-                  }}
-                  className="w-full py-3 px-6 rounded-xl font-bold text-base flex items-center justify-center gap-3 transition-all bg-gradient-to-r from-cyan-600 to-cyan-500 text-white hover:scale-[1.02] shadow-lg shadow-cyan-500/30"
-                >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                  </svg>
-                  导出音频
-                </button>
-              )}
             </div>
           </div>
         )}
@@ -500,7 +478,12 @@ export default function RepairPage() {
           completedAt: browserRepairInfo?.completedAt,
         } : null}
         backendDownloadUrl={renderDownloadUrl}
-        backendDownloadAction={hasBackendResult ? () => renderAndDownload() : undefined}
+        backendDownloadAction={hasBackendResult ? async () => {
+          const result = await renderAndDownload();
+          if (result?.downloadUrl) {
+            setRenderDownloadUrl(result.downloadUrl);
+          }
+        } : undefined}
         browserDownloadAction={hasBrowserResult ? () => downloadProcessedAudio('browser') : undefined}
         isBackendLoading={isRenderLoading}
       />

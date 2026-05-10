@@ -8,7 +8,6 @@ import { AIRepairPanel } from '../components/AIRepairPanel';
 import { AIDetectionComparison } from '../components/AIDetectionComparison';
 import { DownloadModal } from '../components/DownloadModal';
 import { useAudioProcessor } from '../hooks/useAudioProcessor';
-import { fetchRenderCache } from '../services/backendApi';
 
 export default function Home() {
   const {
@@ -67,11 +66,13 @@ export default function Home() {
     browserRepairInfo,
     isRenderLoading,
     taskId,
+    renderDownloadUrl,
+    setRenderDownloadUrl,
+    showDownloadModal,
+    setShowDownloadModal,
   } = useAudioProcessor();
 
   const [showDiag, setShowDiag] = useState(false);
-  const [showDownloadModal, setShowDownloadModal] = useState(false);
-  const [renderDownloadUrl, setRenderDownloadUrl] = useState<string | null>(null);
 
   const hasBrowserResult = !!browserProcessedBuffer;
   const hasBackendResult = !!backendProcessedBuffer || !!repairResult;
@@ -266,30 +267,6 @@ export default function Home() {
                 backendAvailable={backendAvailable}
               />
 
-              {(hasBackendResult || hasBrowserResult) && (
-                <button
-                  onClick={async () => {
-                    setShowDownloadModal(true);
-                    setRenderDownloadUrl(null);
-                    if (hasBackendResult && taskId) {
-                      try {
-                        const caches = await fetchRenderCache(taskId);
-                        const hit = caches.find(c => c.sample_rate === processingOptions.sampleRate && c.bit_depth === processingOptions.bitDepth && c.algorithm_version === algorithmVersion);
-                        if (hit) {
-                          setRenderDownloadUrl(`/api/v1/download-file/${hit.filename}`);
-                        }
-                      } catch {}
-                    }
-                  }}
-                  className="w-full py-3 px-6 rounded-xl font-bold text-base flex items-center justify-center gap-3 transition-all bg-gradient-to-r from-cyan-600 to-cyan-500 text-white hover:scale-[1.02] shadow-lg shadow-cyan-500/30"
-                >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                  </svg>
-                  导出音频
-                </button>
-              )}
-
               {/* CacheManager moved to /cache-manager page */}
             </div>
           </div>
@@ -351,7 +328,12 @@ export default function Home() {
           completedAt: browserRepairInfo?.completedAt,
         } : null}
         backendDownloadUrl={renderDownloadUrl}
-        backendDownloadAction={hasBackendResult ? () => renderAndDownload() : undefined}
+        backendDownloadAction={hasBackendResult ? async () => {
+          const result = await renderAndDownload();
+          if (result?.downloadUrl) {
+            setRenderDownloadUrl(result.downloadUrl);
+          }
+        } : undefined}
         browserDownloadAction={hasBrowserResult ? () => downloadProcessedAudio('browser') : undefined}
         isBackendLoading={isRenderLoading}
       />
