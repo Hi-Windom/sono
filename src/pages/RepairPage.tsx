@@ -379,6 +379,18 @@ export default function RepairPage() {
                 browserCompletedAt={browserRepairInfo?.completedAt}
                 isBackendLoading={isRenderLoading}
               />
+
+              <button
+                onClick={() => {
+                  if (!audioFile) return;
+                  saveProfile(audioFile.name.replace(/\.[^.]+$/, ''));
+                  alert('已保存到配置管理页面');
+                }}
+                disabled={!audioFile}
+                className="w-full mt-3 py-2 rounded-lg bg-purple-500/20 hover:bg-purple-500/30 text-purple-400 text-sm font-medium transition disabled:opacity-40"
+              >
+                💾 保存当前参数为配置
+              </button>
             </div>
           </div>
         )}
