@@ -796,6 +796,7 @@ export function useAudioProcessor() {
     const context = getAudioContext();
     let buffer: AudioBuffer;
     const fastDecoded = decodeWavPcm(context, arrayBuf);
+    const isNonWavFile = !fastDecoded;
     if (fastDecoded) {
       buffer = fastDecoded;
       writeLog(`[loadAudioFile] WAV PCM快速解码完成`);
@@ -819,7 +820,6 @@ export function useAudioProcessor() {
       if (!usedDecodedCache) {
         buffer = await context.decodeAudioData(arrayBuf);
         writeLog(`[loadAudioFile] 浏览器解码完成`);
-        fetch(`/api/v1/decoded-wav/${hash}`, { method: 'POST' }).catch(() => {});
       }
     }
     if (seq !== loadAudioSeqRef.current) return;
@@ -897,6 +897,11 @@ export function useAudioProcessor() {
           originalDetectTime: originalDetectTime || '',
           repairedDetectTime: repairedDetectTime || '',
         });
+
+        if (isNonWavFile) {
+          fetch(`/api/v1/decoded-wav/${hash}`, { method: 'POST' }).catch(() => {});
+          writeLog(`[loadAudioFile] 触发后端解码WAV缓存创建`);
+        }
 
         pendingSessionRef.current = null;
         sessionRestoredRef.current = true;

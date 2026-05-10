@@ -831,8 +831,10 @@ async def create_decoded_wav(file_hash: str):
     def _convert_to_wav():
         try:
             import numpy as np
-            from services.audio_loader import load_audio
-            y, sr = load_audio(original_path)
+            from services.audio_loader import load_audio_with_fallback
+            y, sr = load_audio_with_fallback(original_path)
+            if y.ndim == 2:
+                y = y.T
             os.makedirs(DECODED_DIR, exist_ok=True)
             import soundfile as sf
             sf.write(decoded_path, y, sr)
