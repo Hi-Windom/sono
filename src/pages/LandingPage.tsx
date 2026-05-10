@@ -331,21 +331,10 @@ export default function LandingPage() {
                 <div className="flex-shrink-0 w-2 h-2 mt-2 rounded-full bg-cyan-400"></div>
                 <div className="flex-1">
                   <div className="flex items-center justify-between mb-1">
-                    <h4 className="text-white font-semibold">智能缓存系统重构</h4>
-                    <span className="text-gray-500 text-xs">2026-05-07</span>
+                    <h4 className="text-white font-semibold">即时播放 + 频谱优化</h4>
+                    <span className="text-gray-500 text-xs">2026-05-10</span>
                   </div>
-                  <p className="text-gray-400 text-sm">上传缓存与修复结果缓存解耦：上传层仅按文件 hash 去重，修复结果层按文件+算法+参数三重匹配命中。修复默认算法版本硬编码、Session 持久化不完整等问题。</p>
-                </div>
-              </div>
-
-              <div className="flex items-start gap-4 p-4 bg-black/20 rounded-xl border border-white/5">
-                <div className="flex-shrink-0 w-2 h-2 mt-2 rounded-full bg-red-400"></div>
-                <div className="flex-1">
-                  <div className="flex items-center justify-between mb-1">
-                    <h4 className="text-white font-semibold">任务取消 + 移动端导出修复</h4>
-                    <span className="text-gray-500 text-xs">2026-05-07</span>
-                  </div>
-                  <p className="text-gray-400 text-sm">新增全栈任务取消机制（前端按钮 + 后端 cancel_task）；修复移动端音频导出无反应、文件名异常、浏览器崩溃等问题；Worker 编码超时保护。</p>
+                  <p className="text-gray-400 text-sm">修复播放闭包过期导致 streaming 播放失效的根因问题，大文件加载后可立即播放；频谱从128段精简至32段并增加频率/分贝坐标刻度，90fps 流畅渲染。</p>
                 </div>
               </div>
 
@@ -353,10 +342,10 @@ export default function LandingPage() {
                 <div className="flex-shrink-0 w-2 h-2 mt-2 rounded-full bg-purple-400"></div>
                 <div className="flex-1">
                   <div className="flex items-center justify-between mb-1">
-                    <h4 className="text-white font-semibold">Python 强制类型检查</h4>
-                    <span className="text-gray-500 text-xs">2026-05-07</span>
+                    <h4 className="text-white font-semibold">服务器数据独立获取</h4>
+                    <span className="text-gray-500 text-xs">2026-05-10</span>
                   </div>
-                  <p className="text-gray-400 text-sm">引入 pyright strict mode，核心基础设施（database/task_manager/ws_manager/file_cache）全量类型注解，算法模块按需降级。</p>
+                  <p className="text-gray-400 text-sm">修复后端连接后服务器内存/存储信息不显示的问题，移除 duration≤0 阻断，后端连接即获取数据。</p>
                 </div>
               </div>
 
@@ -364,10 +353,21 @@ export default function LandingPage() {
                 <div className="flex-shrink-0 w-2 h-2 mt-2 rounded-full bg-emerald-400"></div>
                 <div className="flex-1">
                   <div className="flex items-center justify-between mb-1">
-                    <h4 className="text-white font-semibold">检测 v1.2 / 修复 v2.1 支持</h4>
-                    <span className="text-gray-500 text-xs">2026-05-07</span>
+                    <h4 className="text-white font-semibold">解析动画 + 替换文件保护</h4>
+                    <span className="text-gray-500 text-xs">2026-05-10</span>
                   </div>
-                  <p className="text-gray-400 text-sm">新增检测 v1.2 和修复 v2.1 算法，整理文件结构（detectors/ 和 repair/ 目录）。</p>
+                  <p className="text-gray-400 text-sm">音频卡片解析时顺时针渐变高亮动画；解析中替换文件增加取消令牌保护，避免旧解码结果覆盖新文件状态。</p>
+                </div>
+              </div>
+
+              <div className="flex items-start gap-4 p-4 bg-black/20 rounded-xl border border-white/5">
+                <div className="flex-shrink-0 w-2 h-2 mt-2 rounded-full bg-red-400"></div>
+                <div className="flex-1">
+                  <div className="flex items-center justify-between mb-1">
+                    <h4 className="text-white font-semibold">Android 性能优化</h4>
+                    <span className="text-gray-500 text-xs">2026-05-10</span>
+                  </div>
+                  <p className="text-gray-400 text-sm">Python 后端延迟导入（scipy/repair 按需加载）、C 原生 DSP 库（STFT/ISTFT/压缩器/限幅器 ARM NEON 优化）、.pyc 预编译加速启动。</p>
                 </div>
               </div>
             </div>
