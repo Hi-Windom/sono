@@ -87,6 +87,30 @@ export default function RepairPage() {
 
   const [showDiag, setShowDiag] = useState(false);
 
+  // 渲染缓存刷新回调
+  const renderCacheRefreshRef = useRef<(() => Promise<void>) | null>(null);
+  const handleRegisterCacheRefresh = useCallback((fn: () => Promise<void>) => {
+    renderCacheRefreshRef.current = fn;
+  }, []);
+  const [cacheTriggerKey, setCacheTriggerKey] = useState(0);
+
+  // 修复完成时刷新缓存
+  useEffect(() => {
+    if (hasBeenProcessed) {
+      setCacheTriggerKey(k => k + 1);
+    }
+  }, [hasBeenProcessed]);
+
+  // 渲染下载完成后刷新缓存
+  const prevRenderLoadingRef = useRef(false);
+  useEffect(() => {
+    if (prevRenderLoadingRef.current && !isRenderLoading) {
+      // isRenderLoading 从 true → false，渲染完成
+      setCacheTriggerKey(k => k + 1);
+    }
+    prevRenderLoadingRef.current = isRenderLoading;
+  }, [isRenderLoading]);
+
   // 实时更新卡住秒数
   const [stuckDuration, setStuckDuration] = useState(0);
   const stuckTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -384,6 +408,8 @@ export default function RepairPage() {
                 backendAvailable={backendAvailable}
                 onSaveProfile={handleSaveProfile}
                 taskId={taskId}
+                onRenderCacheRefresh={handleRegisterCacheRefresh}
+                cacheTriggerKey={cacheTriggerKey}
               />
 
               <DownloadButton

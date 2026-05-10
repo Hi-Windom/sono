@@ -774,6 +774,8 @@ export interface RenderCacheEntry {
   bit_depth: number;
   filename: string;
   size: number;
+  mtime: string;
+  algorithm_version: string;
 }
 
 export async function fetchRenderCache(taskId: string): Promise<RenderCacheEntry[]> {

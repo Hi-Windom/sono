@@ -1,6 +1,6 @@
 import os
 import logging
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
@@ -482,21 +482,23 @@ async def download_audio(task_id: str):
     original_name = task.get("original_filename", "audio")
     base_name = os.path.splitext(original_name)[0]
     download_name = f"{base_name}_repaired.wav"
-    
+
+    file_size = os.path.getsize(output_path)
     return FileResponse(
         output_path,
         media_type="audio/wav",
         filename=download_name,
+        headers={"Accept-Ranges": "bytes", "Content-Length": str(file_size)},
     )
 
 @router.get("/download-file/{filename}")
-async def download_file(filename: str):
+async def download_file(filename: str, request: Request):
     file_path = os.path.join(OUTPUT_DIR, filename)
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="文件不存在")
     # 生成更友好的下载文件名
     download_name = filename
-    if filename.startswith("task_") and "_rendered_" in filename:
+    if "_rendered_" in filename:
         # 格式: {task_id}_rendered_{sr}_{bd}.wav → 尝试从 task 获取原始文件名
         parts = filename.replace(".wav", "").split("_rendered_")
         task_id_prefix = parts[0]
@@ -505,10 +507,53 @@ async def download_file(filename: str):
             original_name = task["filename"].rsplit(".", 1)[0]
             sr_bd = parts[1] if len(parts) > 1 else "48000_24"
             download_name = f"{original_name}_repaired_{sr_bd}.wav"
+    # 使用 StreamingResponse 支持 Range 请求（断点续传 + 多线程下载）
+    file_size = os.path.getsize(file_path)
+    range_header = request.headers.get("range")
+
+    if range_header:
+        # 解析 Range: bytes=start-end
+        range_match = __import__("re").match(r"bytes=(\d+)-(\d*)", range_header)
+        if range_match:
+            start = int(range_match.group(1))
+            end = int(range_match.group(2)) if range_match.group(2) else file_size - 1
+            if start >= file_size:
+                from fastapi.responses import Response
+                return Response(status_code=416, headers={"Content-Range": f"bytes */{file_size}"})
+            end = min(end, file_size - 1)
+            chunk_size = end - start + 1
+
+            def iter_file():
+                with open(file_path, "rb") as f:
+                    f.seek(start)
+                    remaining = chunk_size
+                    while remaining > 0:
+                        read_size = min(8192, remaining)
+                        data = f.read(read_size)
+                        if not data:
+                            break
+                        remaining -= len(data)
+                        yield data
+
+            from fastapi.responses import StreamingResponse
+            return StreamingResponse(
+                iter_file(),
+                status_code=206,
+                media_type="audio/wav",
+                headers={
+                    "Content-Range": f"bytes {start}-{end}/{file_size}",
+                    "Content-Length": str(chunk_size),
+                    "Accept-Ranges": "bytes",
+                    "Content-Disposition": f'attachment; filename="{download_name}"',
+                },
+            )
+
+    # 无 Range 请求，返回完整文件
     return FileResponse(
         file_path,
         media_type="audio/wav",
         filename=download_name,
+        headers={"Accept-Ranges": "bytes", "Content-Length": str(file_size)},
     )
 
 @router.get("/render-cache/{task_id}")
@@ -517,6 +562,9 @@ async def get_render_cache(task_id: str):
     task = get_task(task_id)
     if not task:
         return {"caches": []}
+
+    # 获取修复时使用的算法版本
+    algo_version = task.get("params", {}).get("algorithm_version", "")
 
     caches = []
     # 检查 OUTPUT_DIR 中是否有该 task 的渲染文件
@@ -532,11 +580,16 @@ async def get_render_cache(task_id: str):
                             sr = int(sr_bd[0])
                             bd = int(sr_bd[1])
                             fpath = os.path.join(OUTPUT_DIR, fname)
+                            mtime = os.path.getmtime(fpath)
+                            from datetime import datetime, timezone
+                            mtime_str = datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat()
                             caches.append({
                                 "sample_rate": sr,
                                 "bit_depth": bd,
                                 "filename": fname,
                                 "size": os.path.getsize(fpath),
+                                "mtime": mtime_str,
+                                "algorithm_version": algo_version,
                             })
                         except ValueError:
                             pass

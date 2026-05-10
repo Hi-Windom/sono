@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { AIRepairParams, RepairMode } from '../utils/advancedAudioProcessing';
 import { ProcessingOptions, AlgorithmVersion, fetchMemoryInfo, MemoryInfoResult, fetchStorageEstimate, StorageEstimateResult, fetchRenderCache, RenderCacheEntry } from '../services/backendApi';
 
@@ -31,6 +31,8 @@ interface AIRepairPanelProps {
   backendAvailable?: boolean;
   onSaveProfile?: () => void;
   taskId?: string | null;
+  onRenderCacheRefresh?: (fn: () => Promise<void>) => void;
+  cacheTriggerKey?: number;
 }
 
 const sampleRateOptions = [
@@ -115,6 +117,8 @@ export function AIRepairPanel({
   backendAvailable = false,
   onSaveProfile,
   taskId,
+  onRenderCacheRefresh,
+  cacheTriggerKey,
 }: AIRepairPanelProps) {
   const [showParams, setShowParams] = useState(false);
   const [memoryInfo, setMemoryInfo] = useState<MemoryInfoResult | null>(null);
@@ -154,21 +158,32 @@ export function AIRepairPanel({
     return () => { if (storageFetchRef.current) clearTimeout(storageFetchRef.current); };
   }, [duration, channels, processingOptions.sampleRate, processingOptions.bitDepth, backendAvailable]);
 
-  // 查询渲染交付规格缓存
+  // 查询渲染交付规格缓存（算法版本变化/修复完成时也会刷新）
+  const refreshRenderCache = useCallback(async () => {
+    if (!taskId || !backendAvailable) {
+      setRenderCaches([]);
+      return;
+    }
+    const caches = await fetchRenderCache(taskId);
+    setRenderCaches(caches);
+  }, [taskId, backendAvailable]);
+
   useEffect(() => {
     if (!taskId || !backendAvailable) {
       setRenderCaches([]);
       return;
     }
     if (cacheCheckRef.current) clearTimeout(cacheCheckRef.current);
-    cacheCheckRef.current = setTimeout(async () => {
-      const caches = await fetchRenderCache(taskId);
-      setRenderCaches(caches);
-    }, 500);
+    cacheCheckRef.current = setTimeout(refreshRenderCache, 500);
     return () => {
       if (cacheCheckRef.current) clearTimeout(cacheCheckRef.current);
     };
-  }, [taskId, backendAvailable]);
+  }, [taskId, backendAvailable, algorithmVersion, refreshRenderCache, cacheTriggerKey]);
+
+  // 注册缓存刷新回调给父组件
+  useEffect(() => {
+    if (onRenderCacheRefresh) onRenderCacheRefresh(refreshRenderCache);
+  }, [refreshRenderCache, onRenderCacheRefresh]);
 
   const paramLabels: Record<keyof AIRepairParams, string> = {
     deClipping: '去削波',
@@ -503,8 +518,24 @@ export function AIRepairPanel({
                 </div>
                 <div className="flex justify-between"><span className="text-gray-400">格式</span><span className="text-white">{selectedCache.sample_rate / 1000}kHz / {selectedCache.bit_depth}bit</span></div>
                 <div className="flex justify-between"><span className="text-gray-400">文件大小</span><span className="text-white">{(selectedCache.size / (1024 * 1024)).toFixed(1)} MiB</span></div>
-                <div className="flex justify-between"><span className="text-gray-400">文件名</span><span className="text-white text-[11px] truncate ml-2">{selectedCache.filename}</span></div>
+                <div className="flex justify-between"><span className="text-gray-400">算法版本</span><span className="text-emerald-400">{selectedCache.algorithm_version || '—'}</span></div>
+                <div className="flex justify-between"><span className="text-gray-400">生成时间</span><span className="text-white">{selectedCache.mtime ? new Date(selectedCache.mtime).toLocaleString('zh-CN') : '—'}</span></div>
                 <div className="mt-2 flex gap-2">
+                  <button
+                    onClick={() => {
+                      // 秒下：直接下载渲染缓存文件
+                      const downloadUrl = `/api/v1/download-file/${selectedCache.filename}`;
+                      const a = document.createElement('a');
+                      a.href = downloadUrl;
+                      a.style.display = 'none';
+                      document.body.appendChild(a);
+                      a.click();
+                      setTimeout(() => { document.body.removeChild(a); }, 5000);
+                    }}
+                    className="flex-1 py-1 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 rounded text-[11px] transition font-medium"
+                  >
+                    ⬇ 秒下
+                  </button>
                   <button
                     onClick={() => {
                       onOptionsChange?.({
@@ -513,7 +544,7 @@ export function AIRepairPanel({
                       });
                       setSelectedCache(null);
                     }}
-                    className="flex-1 py-1 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 rounded text-[11px] transition"
+                    className="flex-1 py-1 bg-white/5 hover:bg-white/10 text-gray-400 rounded text-[11px] transition"
                   >
                     应用此规格
                   </button>

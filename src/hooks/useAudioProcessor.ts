@@ -92,33 +92,17 @@ function downloadBlob(blob: Blob, fileName: string) {
   }, 5000);
 }
 
-async function downloadUrl(url: string, fileName: string) {
-  try {
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`下载失败 (HTTP ${res.status})`);
-    const blob = await res.blob();
-    const blobUrl = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = blobUrl;
-    a.download = fileName;
-    a.style.display = 'none';
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(() => {
-      URL.revokeObjectURL(blobUrl);
-      document.body.removeChild(a);
-    }, 5000);
-  } catch (err) {
-    // fallback：直接打开链接
-    console.warn('[downloadUrl] fetch下载失败，回退到直接链接:', err);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = fileName;
-    a.style.display = 'none';
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(() => { document.body.removeChild(a); }, 5000);
-  }
+function downloadUrl(url: string, fileName: string) {
+  // 使用直接链接方式下载，后端已支持：
+  // 1. Content-Disposition 正确文件名
+  // 2. Accept-Ranges: bytes 支持断点续传和多线程下载
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = fileName;
+  a.style.display = 'none';
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { document.body.removeChild(a); }, 5000);
 }
 
 export function useAudioProcessor() {
