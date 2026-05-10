@@ -539,8 +539,8 @@ async def download_file(filename: str, request: Request):
         algo_ver_display = ""
         sr_display = ""
         bd_display = ""
-        if task and task.get("filename"):
-            original_basename = os.path.splitext(task["filename"])[0]
+        if task and task.get("original_filename"):
+            original_basename = os.path.splitext(task["original_filename"])[0]
         suffix = parts[1] if len(parts) > 1 else ""
         segments = suffix.split("_")
         if len(segments) >= 3:

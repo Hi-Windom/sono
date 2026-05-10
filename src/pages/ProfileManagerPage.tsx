@@ -66,7 +66,6 @@ export default function ProfileManagerPage() {
   const [editingName, setEditingName] = useState('');
   const [editingParams, setEditingParams] = useState<{ params: AIRepairParams; algorithmVersion: string } | null>(null);
   const [showNewDialog, setShowNewDialog] = useState(false);
-  const [newName, setNewName] = useState('');
   const [importInputKey, setImportInputKey] = useState(0);
   const [algorithmVersions, setAlgorithmVersions] = useState<AlgorithmVersion[]>([]);
 
@@ -84,14 +83,14 @@ export default function ProfileManagerPage() {
   }, []);
 
   const handleSaveNew = useCallback(() => {
-    const name = newName.trim();
+    const name = editingName.trim();
     if (!name || !editingParams) return;
     saveProfileToStorage(name, editingParams.params, editingParams.algorithmVersion);
-    setNewName('');
     setShowNewDialog(false);
     setEditingParams(null);
+    setEditingName('');
     refresh();
-  }, [newName, editingParams, refresh]);
+  }, [editingName, editingParams, refresh]);
 
   const handleDelete = useCallback((id: string, name: string) => {
     if (!confirm(`确定删除配置「${name}」？`)) return;
