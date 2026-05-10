@@ -21,3 +21,25 @@ body {
   overflow-x: hidden;
   overscroll-behavior: none;
 }
+
+@keyframes border-spin {
+  to {
+    --border-angle: 360deg;
+  }
+}
+
+@property --border-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
+.audio-card-loading {
+  --border-angle: 0deg;
+  border: none !important;
+  background:
+    linear-gradient(#0A1A2F, #0A1A2F) padding-box,
+    conic-gradient(from var(--border-angle), #00D9FF, #0066FF, #7C3AED, #00D9FF) border-box;
+  border: 2px solid transparent !important;
+  animation: border-spin 2s linear infinite;
+}

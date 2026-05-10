@@ -218,7 +218,7 @@ export default function RepairPage() {
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
             <div className="lg:col-span-7 space-y-6">
-              <div className="bg-primary/50 border border-white/10 rounded-xl p-6">
+              <div className={`bg-primary/50 border border-white/10 rounded-xl p-6${isProcessing ? ' audio-card-loading' : ''}`}>
                 <div className="flex items-center justify-between mb-6 gap-3">
                   <div className="flex items-center gap-3 min-w-0 flex-1">
                     <div className="w-12 h-12 bg-gradient-to-br from-cyan-500/20 to-purple-500/20 rounded-lg flex items-center justify-center border border-cyan-400/20 shrink-0">
