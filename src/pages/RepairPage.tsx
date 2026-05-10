@@ -8,7 +8,9 @@ import { SpectrumVisualizer } from '../components/SpectrumVisualizer';
 import { AIRepairPanel } from '../components/AIRepairPanel';
 import { AIDetectionComparison } from '../components/AIDetectionComparison';
 import { ErrorBoundary } from '../components/ErrorBoundary';
+import { DownloadModal } from '../components/DownloadModal';
 import { useAudioProcessor } from '../hooks/useAudioProcessor';
+import { fetchRenderCache } from '../services/backendApi';
 
 export default function RepairPage() {
   const navigate = useNavigate();
@@ -82,9 +84,13 @@ export default function RepairPage() {
     saveProfile,
     // 任务ID
     taskId,
+    // 渲染并下载
+    renderAndDownload,
   } = useAudioProcessor();
 
   const [showDiag, setShowDiag] = useState(false);
+  const [showDownloadModal, setShowDownloadModal] = useState(false);
+  const [renderDownloadUrl, setRenderDownloadUrl] = useState<string | null>(null);
 
   // 渲染缓存刷新回调
   const renderCacheRefreshRef = useRef<(() => Promise<void>) | null>(null);
@@ -411,15 +417,27 @@ export default function RepairPage() {
                 cacheTriggerKey={cacheTriggerKey}
               />
 
-              {hasBrowserResult && (
+              {(hasBackendResult || hasBrowserResult) && (
                 <button
-                  onClick={() => downloadProcessedAudio('browser')}
-                  className="w-full py-3 px-6 rounded-xl font-bold text-base flex items-center justify-center gap-3 transition-all bg-gradient-to-r from-purple-600 to-purple-500 text-white hover:scale-[1.02] shadow-lg shadow-purple-500/30"
+                  onClick={async () => {
+                    setShowDownloadModal(true);
+                    setRenderDownloadUrl(null);
+                    if (hasBackendResult && taskId) {
+                      try {
+                        const caches = await fetchRenderCache(taskId);
+                        const hit = caches.find(c => c.sample_rate === processingOptions.sampleRate && c.bit_depth === processingOptions.bitDepth && c.algorithm_version === algorithmVersion);
+                        if (hit) {
+                          setRenderDownloadUrl(`/api/v1/download-file/${hit.filename}`);
+                        }
+                      } catch {}
+                    }
+                  }}
+                  className="w-full py-3 px-6 rounded-xl font-bold text-base flex items-center justify-center gap-3 transition-all bg-gradient-to-r from-cyan-600 to-cyan-500 text-white hover:scale-[1.02] shadow-lg shadow-cyan-500/30"
                 >
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
                   </svg>
-                  导出浏览器修复音频
+                  导出音频
                 </button>
               )}
             </div>
@@ -455,6 +473,37 @@ export default function RepairPage() {
           >重新检测</button>
         </div>
       )}
+
+      <DownloadModal
+        isOpen={showDownloadModal}
+        onClose={() => setShowDownloadModal(false)}
+        backendInfo={hasBackendResult && repairResult ? {
+          filename: `${(audioFile?.name || 'audio').replace(/\.[^/.]+$/, '')}_backend_repaired.wav`,
+          fileSize: repairResult.duration && repairResult.output_sample_rate && repairResult.channels && repairResult.output_bit_depth
+            ? `${((repairResult.duration * repairResult.output_sample_rate * repairResult.channels * (repairResult.output_bit_depth / 8)) / (1024 * 1024)).toFixed(2)} MB`
+            : '—',
+          sampleRate: repairResult.output_sample_rate ? `${(repairResult.output_sample_rate / 1000).toFixed(1)} kHz` : 'N/A',
+          bitDepth: repairResult.output_bit_depth || 32,
+          channels: repairResult.channels || 2,
+          duration: repairResult.duration || 0,
+          algorithmVersion: algorithmVersion,
+          completedAt: repairResult.completed_at,
+        } : null}
+        browserInfo={hasBrowserResult && browserBufferInfo ? {
+          filename: `${(audioFile?.name || 'audio').replace(/\.[^/.]+$/, '')}_browser_repaired.wav`,
+          fileSize: `${((browserBufferInfo.duration * browserBufferInfo.sampleRate * browserBufferInfo.channels * (processingOptions.bitDepth / 8)) / (1024 * 1024)).toFixed(2)} MB`,
+          sampleRate: `${browserBufferInfo.sampleRate / 1000} kHz`,
+          bitDepth: processingOptions.bitDepth,
+          channels: browserBufferInfo.channels,
+          duration: browserBufferInfo.duration,
+          algorithmVersion: browserRepairInfo?.algorithmVersion,
+          completedAt: browserRepairInfo?.completedAt,
+        } : null}
+        backendDownloadUrl={renderDownloadUrl}
+        backendDownloadAction={hasBackendResult ? () => renderAndDownload() : undefined}
+        browserDownloadAction={hasBrowserResult ? () => downloadProcessedAudio('browser') : undefined}
+        isBackendLoading={isRenderLoading}
+      />
     </div>
     </ErrorBoundary>
   );

@@ -123,13 +123,26 @@ export default function CacheManagerPage() {
   };
 
   const handleClearRepair = async () => {
-    if (!confirm('确定清理修复缓存？将删除修复输出文件和交付渲染文件，保留原始上传。')) return;
+    if (!confirm('确定清理修复缓存？将删除修复输出文件，保留原始上传和交付渲染。')) return;
     setCleaning(true); setCleaningStep('正在清理...');
     try {
       const res = await fetch('/api/v1/cache/clear-output', { method: 'POST' });
       if (res.ok) {
         const result = await res.json();
         setCleaningStep(`已释放 ${formatBytes(result.released_bytes)}`);
+        setTimeout(() => { setCleaning(false); setCleaningStep(''); fetchCacheInfo(); }, 1500);
+      }
+    } catch { setCleaning(false); setCleaningStep(''); }
+  };
+
+  const handleClearRender = async () => {
+    if (!confirm('确定清理所有交付渲染缓存？')) return;
+    setCleaning(true); setCleaningStep('正在清理交付渲染...');
+    try {
+      const res = await fetch('/api/v1/cache/clear-render', { method: 'POST' });
+      if (res.ok) {
+        const result = await res.json();
+        setCleaningStep(`已清理 ${result.cleaned_count} 个渲染文件，释放 ${formatBytes(result.released_bytes)}`);
         setTimeout(() => { setCleaning(false); setCleaningStep(''); fetchCacheInfo(); }, 1500);
       }
     } catch { setCleaning(false); setCleaningStep(''); }
@@ -328,14 +341,35 @@ export default function CacheManagerPage() {
                 <div className="text-emerald-400 text-lg font-bold text-center">{formatBytes(cacheInfo.render_size)}</div>
                 <div className="text-gray-500 text-[10px] text-center mb-2">{cacheInfo.render_count} 个</div>
                 <button
-                  onClick={handleCleanInvalid}
-                  disabled={cleaning}
-                  className="w-full py-1.5 bg-yellow-500/15 hover:bg-yellow-500/25 border border-yellow-500/20 rounded text-yellow-400 text-xs transition disabled:opacity-30"
+                  onClick={handleClearRender}
+                  disabled={cacheInfo.render_size === 0 || cleaning}
+                  className="w-full py-1.5 bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/20 rounded text-emerald-400 text-xs transition disabled:opacity-30"
                 >
-                  清理无效
+                  清理交付
                 </button>
               </div>
             </div>
+
+            {cacheInfo.total_size > 0 && (
+              <div className="p-4 bg-yellow-500/5 border border-yellow-500/20 rounded-lg">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-yellow-400 text-sm">⚠️</span>
+                    <div>
+                      <span className="text-yellow-400 text-sm font-medium">无效缓存</span>
+                      <span className="text-gray-500 text-xs ml-2">损坏、空文件、孤立文件</span>
+                    </div>
+                  </div>
+                  <button
+                    onClick={handleCleanInvalid}
+                    disabled={cleaning}
+                    className="py-1.5 px-4 bg-yellow-500/15 hover:bg-yellow-500/25 border border-yellow-500/20 rounded text-yellow-400 text-xs transition disabled:opacity-30"
+                  >
+                    清理无效
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* 任务列表 */}
             {cacheInfo.tasks?.length > 0 && (
@@ -481,7 +515,7 @@ export default function CacheManagerPage() {
             <div className="flex items-center justify-between">
               <div>
                 <h3 className="text-white font-medium">音频解析缓存</h3>
-                <p className="text-gray-500 text-xs">基于快速哈希的 WAV 头信息 & 音频分析结果缓存</p>
+                <p className="text-gray-500 text-xs">基于文件哈希的 WAV 头信息 & 音频分析结果缓存</p>
               </div>
               <div className="flex items-center gap-3">
                 <span className="text-gray-400 text-sm">{analysisCount} 条缓存</span>
@@ -513,7 +547,7 @@ export default function CacheManagerPage() {
                           <span className="text-gray-500 text-xs">{formatBytes(entry.file_size as number)}</span>
                         </div>
                         <div className="text-gray-500 text-xs">
-                          QuickHash: {(entry.quick_hash as string).slice(0, 16)}...
+                          FileHash: {(entry.quick_hash as string).slice(0, 16)}...
                           {' · '}
                           {entry.created_at ? new Date(entry.created_at as string).toLocaleString() : '—'}
                         </div>
@@ -539,7 +573,7 @@ export default function CacheManagerPage() {
             )}
 
             <div className="p-4 bg-cyan-500/5 border border-cyan-500/20 rounded-lg text-xs text-cyan-400/80">
-              💡 解析缓存基于文件快速哈希（前4KB+后4KB），同一文件重复加载时可跳过解析直接使用缓存结果，加速页面响应。
+              💡 解析缓存基于文件哈希（前1MB+后1MB），同一文件重复加载时可跳过解析直接使用缓存结果，加速页面响应。非WAV文件会自动创建解码WAV缓存，二次加载可跳过慢速解码。
             </div>
           </div>
         )}

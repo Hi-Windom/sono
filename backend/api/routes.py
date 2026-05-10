@@ -4,7 +4,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile, W
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from config import ALLOWED_EXTENSIONS, MAX_UPLOAD_SIZE, MOBILE_MODE, OUTPUT_DIR, UPLOAD_DIR, DEPLOY_TIME_FILE
+from config import ALLOWED_EXTENSIONS, MAX_UPLOAD_SIZE, MOBILE_MODE, OUTPUT_DIR, UPLOAD_DIR, DECODED_DIR, DEPLOY_TIME_FILE
 from database import create_task, find_task_by_hash, get_queue_status, get_task, update_task
 from services.task_manager import generate_task_id, submit_detect_task, submit_repair_task, cancel_task, executor
 from services.audio_repair import get_available_versions
@@ -727,6 +727,122 @@ async def clear_analysis_cache():
     count = clear_all_analysis_cache()
     return {"deleted_count": count}
 
+
+@router.get("/decoded-wav/{file_hash}")
+async def get_decoded_wav(file_hash: str, request: Request):
+    """获取非WAV文件的解码WAV缓存，支持Range断点续传"""
+    decoded_path = os.path.join(DECODED_DIR, f"{file_hash}.wav")
+    if not os.path.exists(decoded_path):
+        raise HTTPException(status_code=404, detail="解码缓存不存在")
+
+    file_size = os.path.getsize(decoded_path)
+    range_header = request.headers.get("range")
+
+    if range_header:
+        range_match = __import__("re").match(r"bytes=(\d+)-(\d*)", range_header)
+        if range_match:
+            start = int(range_match.group(1))
+            end = int(range_match.group(2)) if range_match.group(2) else file_size - 1
+            if start >= file_size:
+                from fastapi.responses import Response
+                return Response(status_code=416, headers={"Content-Range": f"bytes */{file_size}"})
+            end = min(end, file_size - 1)
+            chunk_size = end - start + 1
+
+            def iter_file():
+                with open(decoded_path, "rb") as f:
+                    f.seek(start)
+                    remaining = chunk_size
+                    while remaining > 0:
+                        read_size = min(8192, remaining)
+                        data = f.read(read_size)
+                        if not data:
+                            break
+                        remaining -= len(data)
+                        yield data
+
+            from fastapi.responses import StreamingResponse
+            return StreamingResponse(
+                iter_file(),
+                status_code=206,
+                media_type="audio/wav",
+                headers={
+                    "Content-Range": f"bytes {start}-{end}/{file_size}",
+                    "Content-Length": str(chunk_size),
+                    "Accept-Ranges": "bytes",
+                },
+            )
+
+    def iter_full_file():
+        with open(decoded_path, "rb") as f:
+            while True:
+                data = f.read(65536)
+                if not data:
+                    break
+                yield data
+
+    from fastapi.responses import StreamingResponse
+    return StreamingResponse(
+        iter_full_file(),
+        media_type="audio/wav",
+        headers={
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(file_size),
+        },
+    )
+
+
+@router.head("/decoded-wav/{file_hash}")
+async def head_decoded_wav(file_hash: str):
+    """检查解码WAV缓存是否存在"""
+    decoded_path = os.path.join(DECODED_DIR, f"{file_hash}.wav")
+    if not os.path.exists(decoded_path):
+        raise HTTPException(status_code=404, detail="解码缓存不存在")
+    from fastapi.responses import Response
+    file_size = os.path.getsize(decoded_path)
+    return Response(
+        headers={
+            "Content-Length": str(file_size),
+            "Accept-Ranges": "bytes",
+            "Content-Type": "audio/wav",
+        },
+    )
+
+
+@router.post("/decoded-wav/{file_hash}")
+async def create_decoded_wav(file_hash: str):
+    """为非WAV文件创建解码WAV缓存（后台异步）"""
+    decoded_path = os.path.join(DECODED_DIR, f"{file_hash}.wav")
+    if os.path.exists(decoded_path):
+        return {"status": "ok", "message": "缓存已存在"}
+
+    task = find_task_by_hash(file_hash)
+    if not task:
+        raise HTTPException(status_code=404, detail="未找到对应的上传文件")
+
+    original_path = task.get("original_path", "")
+    if not original_path or not os.path.exists(original_path):
+        raise HTTPException(status_code=404, detail="原始文件不存在")
+
+    ext = os.path.splitext(original_path)[1].lower()
+    if ext == ".wav":
+        return {"status": "ok", "message": "WAV文件无需解码缓存"}
+
+    def _convert_to_wav():
+        try:
+            import numpy as np
+            from services.audio_loader import load_audio
+            y, sr = load_audio(original_path)
+            os.makedirs(DECODED_DIR, exist_ok=True)
+            import soundfile as sf
+            sf.write(decoded_path, y, sr)
+            logger.info(f"解码WAV缓存创建完成: {decoded_path} size={os.path.getsize(decoded_path)}")
+        except Exception as e:
+            logger.warning(f"解码WAV缓存创建失败: {e}")
+
+    executor.submit(_convert_to_wav)
+    return {"status": "ok", "message": "正在后台创建解码缓存"}
+
 @router.post("/cancel/{task_id}")
 async def cancel_task_endpoint(task_id: str):
     task = get_task(task_id)
@@ -1031,6 +1147,26 @@ async def clear_output_cache():
     conn.close()
     
     return {"released_bytes": released}
+
+@router.post("/cache/clear-render")
+async def clear_render_cache():
+    """清理交付渲染缓存（仅删除 _rendered_ 文件）"""
+    released = 0
+    cleaned_count = 0
+
+    if os.path.exists(OUTPUT_DIR):
+        for filename in os.listdir(OUTPUT_DIR):
+            if "_rendered_" in filename and filename.endswith(".wav"):
+                filepath = os.path.join(OUTPUT_DIR, filename)
+                if os.path.isfile(filepath):
+                    try:
+                        released += os.path.getsize(filepath)
+                        os.remove(filepath)
+                        cleaned_count += 1
+                    except Exception as e:
+                        logger.warning(f"删除渲染缓存失败: {filepath}, {e}")
+
+    return {"released_bytes": released, "cleaned_count": cleaned_count}
 
 @router.post("/cache/clear-upload")
 async def clear_upload_cache():

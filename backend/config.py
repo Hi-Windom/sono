@@ -5,6 +5,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_DIR = os.path.join(BASE_DIR, "storage", "uploads")
 OUTPUT_DIR = os.path.join(BASE_DIR, "storage", "outputs")
 TRAINING_DIR = os.path.join(BASE_DIR, "storage", "training")
+DECODED_DIR = os.path.join(BASE_DIR, "storage", "decoded")
 DB_PATH = os.path.join(BASE_DIR, "storage", "tasks.db")
 DEPLOY_TIME_FILE = os.path.join(BASE_DIR, "storage", "deploy_time")
 
@@ -38,4 +39,5 @@ def _init_deploy_time():
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 os.makedirs(TRAINING_DIR, exist_ok=True)
+os.makedirs(DECODED_DIR, exist_ok=True)
 _init_deploy_time()

@@ -4,7 +4,7 @@ import { AISongDetectionResult } from '../utils/aiSongChecker';
 import { loadSettings, saveSettings, resetSettings as resetStoredSettings, saveProfileToStorage } from '../utils/settingsStorage';
 import { parseWavHeader, WavInfo, decodeWavPcm } from '../utils/wavParser';
 import { saveSession, loadSession, clearSession } from '../utils/sessionDB';
-import { computeFileHash, computeQuickHash } from '../utils/fileHash';
+import { computeFileHash } from '../utils/fileHash';
 import {
   uploadAudio,
   detectAudio,
@@ -767,28 +767,26 @@ export function useAudioProcessor() {
     setProcessingStep('');
     setProcessingProgress(0);
 
-    const [arrayBuf, hash, quickHash] = await Promise.all([
+    const [arrayBuf, hash] = await Promise.all([
       file.arrayBuffer(),
       computeFileHash(file),
-      computeQuickHash(file),
     ]);
     if (seq !== loadAudioSeqRef.current) return;
     fileHashRef.current = hash;
     setFileHash(hash);
-    writeLog(`[loadAudioFile] fileHash=${hash} quickHash=${quickHash.slice(0, 16)}`);
+    writeLog(`[loadAudioFile] fileHash=${hash.slice(0, 16)}`);
 
-    // 尝试从后端分析缓存读取 wavInfo + analysis
     let cachedAnalysis: AudioAnalysis | null = null;
     let cachedWavInfo: WavInfo | null = null;
     try {
-      const cacheRes = await fetch(`/api/v1/analysis-cache/${quickHash}`);
+      const cacheRes = await fetch(`/api/v1/analysis-cache/${hash}`);
       if (cacheRes.ok) {
         const cacheData = await cacheRes.json();
         if (cacheData.found && cacheData.data) {
           const d = cacheData.data;
           if (d.wav_info) cachedWavInfo = JSON.parse(d.wav_info);
           if (d.analysis) cachedAnalysis = JSON.parse(d.analysis);
-          writeLog(`[loadAudioFile] 后端分析缓存命中: quickHash=${quickHash.slice(0, 16)}`);
+          writeLog(`[loadAudioFile] 后端分析缓存命中: fileHash=${hash.slice(0, 16)}`);
           if (cachedWavInfo) setWavInfo(cachedWavInfo);
           if (cachedAnalysis) setAudioAnalysis(cachedAnalysis);
         }
@@ -802,8 +800,27 @@ export function useAudioProcessor() {
       buffer = fastDecoded;
       writeLog(`[loadAudioFile] WAV PCM快速解码完成`);
     } else {
-      buffer = await context.decodeAudioData(arrayBuf);
-      writeLog(`[loadAudioFile] 浏览器解码完成`);
+      const decodedWavUrl = `/api/v1/decoded-wav/${hash}`;
+      let usedDecodedCache = false;
+      try {
+        const headRes = await fetch(decodedWavUrl, { method: 'HEAD' });
+        if (headRes.ok && headRes.headers.get('Content-Length')) {
+          writeLog(`[loadAudioFile] 发现后端解码WAV缓存，下载快速解码`);
+          const wavBuf = await downloadWithProgress(decodedWavUrl);
+          const fastBuf = decodeWavPcm(context, wavBuf);
+          if (fastBuf) {
+            buffer = fastBuf;
+            usedDecodedCache = true;
+            writeLog(`[loadAudioFile] 后端解码WAV缓存快速解码完成`);
+          }
+        }
+      } catch { /* 解码缓存不可用，继续正常流程 */ }
+
+      if (!usedDecodedCache) {
+        buffer = await context.decodeAudioData(arrayBuf);
+        writeLog(`[loadAudioFile] 浏览器解码完成`);
+        fetch(`/api/v1/decoded-wav/${hash}`, { method: 'POST' }).catch(() => {});
+      }
     }
     if (seq !== loadAudioSeqRef.current) return;
 
@@ -837,13 +854,12 @@ export function useAudioProcessor() {
     const analysis = cachedAnalysis || detectAudioIssues(buffer);
     setAudioAnalysis(analysis);
 
-    // 如果没有缓存，存入后端分析缓存
     if (!cachedAnalysis) {
       fetch('/api/v1/analysis-cache', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          quick_hash: quickHash,
+          quick_hash: hash,
           file_name: file.name,
           file_size: file.size,
           wav_info: JSON.stringify(wavHeaderInfo || cachedWavInfo),

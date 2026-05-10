@@ -19,11 +19,11 @@ interface SessionData {
 }
 
 export interface AnalysisCacheEntry {
-  quickHash: string;
+  fileHash: string;
   fileName: string;
   fileSize: number;
-  wavInfo: string;      // JSON.stringify(WavInfo)
-  analysis: string;     // JSON.stringify(AudioAnalysis)
+  wavInfo: string;
+  analysis: string;
   timestamp: number;
 }
 
@@ -42,9 +42,8 @@ function openDB(): Promise<IDBDatabase> {
           tx.objectStore(STORE_NAME).clear();
         }
       }
-      // 版本 3: 新增 analysis_cache store
       if (!db.objectStoreNames.contains(ANALYSIS_STORE)) {
-        const store = db.createObjectStore(ANALYSIS_STORE, { keyPath: 'quickHash' });
+        const store = db.createObjectStore(ANALYSIS_STORE, { keyPath: 'fileHash' });
         store.createIndex('timestamp', 'timestamp', { unique: false });
       }
     };
@@ -99,11 +98,11 @@ export async function clearSession(): Promise<void> {
 
 // ===== 音频解析缓存 =====
 
-export async function getAnalysisCache(quickHash: string): Promise<AnalysisCacheEntry | null> {
+export async function getAnalysisCache(fileHash: string): Promise<AnalysisCacheEntry | null> {
   try {
     const db = await openDB();
     const tx = db.transaction(ANALYSIS_STORE, 'readonly');
-    const request = tx.objectStore(ANALYSIS_STORE).get(quickHash);
+    const request = tx.objectStore(ANALYSIS_STORE).get(fileHash);
     return new Promise((resolve, reject) => {
       request.onsuccess = () => resolve(request.result || null);
       request.onerror = () => reject(request.error);
@@ -161,11 +160,11 @@ export async function clearAllAnalysisCache(): Promise<number> {
   }
 }
 
-export async function deleteAnalysisCache(quickHash: string): Promise<void> {
+export async function deleteAnalysisCache(fileHash: string): Promise<void> {
   try {
     const db = await openDB();
     const tx = db.transaction(ANALYSIS_STORE, 'readwrite');
-    tx.objectStore(ANALYSIS_STORE).delete(quickHash);
+    tx.objectStore(ANALYSIS_STORE).delete(fileHash);
     return new Promise((resolve, reject) => {
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
