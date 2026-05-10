@@ -72,7 +72,7 @@ export function SpectrumVisualizer({
     const draw = (timestamp: number) => {
       animationFrameRef.current = requestAnimationFrame(draw);
 
-      if (timestamp - lastFrameTimeRef.current < 33) return;
+      if (timestamp - lastFrameTimeRef.current < 11) return;
       lastFrameTimeRef.current = timestamp;
 
       analyser.getByteFrequencyData(rawData);

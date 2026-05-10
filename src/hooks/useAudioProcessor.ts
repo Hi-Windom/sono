@@ -159,6 +159,7 @@ export function useAudioProcessor() {
   const pendingObjectURLRef = useRef<string | null>(null);
   const pendingPlayRef = useRef(false);
   const durationRef = useRef(0);
+  const loadAudioSeqRef = useRef(0);
   // 任务卡住状态
   const [isTaskStuck, setIsTaskStuck] = useState(false);
   const [stuckInfo, setStuckInfo] = useState<{ taskId: string; lastProgress: number; lastStep: string; duration: number } | null>(null);
@@ -664,6 +665,7 @@ export function useAudioProcessor() {
   }, [getAudioContext, stopPlaying]);
 
   const loadAudioFile = useCallback(async (file: File) => {
+    const seq = ++loadAudioSeqRef.current;
     stopPlaying();
     closeWS();
     setBackendError(null);
@@ -696,6 +698,7 @@ export function useAudioProcessor() {
     setIsDecodingAudio(true);
     setProcessingProgress(0.02);
     const headerBuf = await file.slice(0, 44 + 4096).arrayBuffer();
+    if (seq !== loadAudioSeqRef.current) return;
     const wavHeaderInfo = parseWavHeader(headerBuf);
     setWavInfo(wavHeaderInfo);
 
@@ -717,6 +720,7 @@ export function useAudioProcessor() {
       file.arrayBuffer(),
       computeFileHash(file),
     ]);
+    if (seq !== loadAudioSeqRef.current) return;
     fileHashRef.current = fileHash;
     writeLog(`[loadAudioFile] fileHash=${fileHash}`);
 
@@ -730,6 +734,7 @@ export function useAudioProcessor() {
       buffer = await context.decodeAudioData(arrayBuf);
       writeLog(`[loadAudioFile] 浏览器解码完成`);
     }
+    if (seq !== loadAudioSeqRef.current) return;
 
     audioBufferRef.current = buffer;
     setAudioBuffer(buffer);
@@ -765,6 +770,7 @@ export function useAudioProcessor() {
       try {
         writeLog(`[loadAudioFile] 后台上传开始...`);
         const uploadRes = await uploadAudio(file, undefined, fileHash);
+        if (seq !== loadAudioSeqRef.current) return;
 
         const newTaskId = uploadRes.task_id;
         setTaskId(newTaskId);
