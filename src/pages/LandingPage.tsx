@@ -179,6 +179,30 @@ export default function LandingPage() {
               </svg>
             </div>
           </div>
+
+          {/* 缓存管理 */}
+          <div
+            onClick={() => navigate('/cache-manager')}
+            className="group bg-primary/50 border border-white/10 rounded-2xl p-8 cursor-pointer
+                       hover:border-cyan-400/50 hover:bg-primary/70 transition-all duration-300"
+          >
+            <div className="w-16 h-16 bg-gradient-to-br from-cyan-500/20 to-purple-500/20 rounded-xl
+                            flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
+              <svg className="w-8 h-8 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4" />
+              </svg>
+            </div>
+            <h2 className="text-2xl font-bold text-white mb-3">缓存管理</h2>
+            <p className="text-gray-400 mb-4">
+              管理后端服务、前端存储和音频解析缓存{cacheTaskCount > 0 ? ` · ${cacheTaskCount} 个任务` : ''}
+            </p>
+            <div className="flex items-center text-cyan-400 group-hover:text-cyan-300">
+              <span className="text-sm font-medium">管理缓存</span>
+              <svg className="w-5 h-5 ml-2 group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
+              </svg>
+            </div>
+          </div>
         </div>
 
         {/* Recent Updates Section */}
@@ -240,32 +264,6 @@ export default function LandingPage() {
                   <p className="text-gray-400 text-sm">Python 后端延迟导入（scipy/repair 按需加载）、C 原生 DSP 库（STFT/ISTFT/压缩器/限幅器 ARM NEON 优化）、.pyc 预编译加速启动。</p>
                 </div>
               </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Cache Manager Entry */}
-        <div className="mt-16 max-w-4xl mx-auto">
-          <div
-            onClick={() => navigate('/cache-manager')}
-            className="group bg-primary/50 border border-white/10 rounded-2xl p-8 cursor-pointer
-                       hover:border-cyan-400/50 hover:bg-primary/70 transition-all duration-300"
-          >
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 bg-gradient-to-br from-cyan-500/20 to-purple-500/20 rounded-xl flex items-center justify-center border border-cyan-400/20">
-                  <svg className="w-6 h-6 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4" />
-                  </svg>
-                </div>
-                <div>
-                  <h3 className="text-white font-bold text-xl">缓存管理</h3>
-                  <p className="text-gray-400 text-sm">管理后端服务、前端存储和音频解析缓存{cacheTaskCount > 0 ? ` · ${cacheTaskCount} 个后端任务` : ''}</p>
-                </div>
-              </div>
-              <svg className="w-6 h-6 text-gray-400 group-hover:text-cyan-400 group-hover:translate-x-1 transition-all" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-              </svg>
             </div>
           </div>
         </div>

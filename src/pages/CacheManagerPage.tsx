@@ -1,13 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Header } from '../components/Header';
-import {
-  getAllAnalysisCache,
-  clearAllAnalysisCache,
-  deleteAnalysisCache,
-  getAnalysisCacheCount,
-  AnalysisCacheEntry,
-} from '../utils/sessionDB';
 import { loadSettings } from '../utils/settingsStorage';
 
 interface CacheTask {
@@ -83,7 +76,7 @@ export default function CacheManagerPage() {
   const [settingsCount, setSettingsCount] = useState(0);
 
   // 解析缓存
-  const [analysisEntries, setAnalysisEntries] = useState<AnalysisCacheEntry[]>([]);
+  const [analysisEntries, setAnalysisEntries] = useState<Record<string, string | number>[]>([]);
   const [analysisCount, setAnalysisCount] = useState(0);
 
   // 后端缓存操作
@@ -206,22 +199,26 @@ export default function CacheManagerPage() {
     fetchFrontendCacheInfo();
   };
 
-  // 解析缓存操作
+  // 解析缓存操作（后端 API）
   const fetchAnalysisCache = useCallback(async () => {
-    const entries = await getAllAnalysisCache();
-    setAnalysisEntries(entries);
-    const count = await getAnalysisCacheCount();
-    setAnalysisCount(count);
+    try {
+      const res = await fetch('/api/v1/analysis-cache-list');
+      if (res.ok) {
+        const data = await res.json();
+        setAnalysisEntries(data.entries || []);
+        setAnalysisCount(data.count || 0);
+      }
+    } catch { /* ignore */ }
   }, []);
 
   const handleClearAnalysisCache = async () => {
     if (!confirm('确定清除所有音频解析缓存？')) return;
-    await clearAllAnalysisCache();
+    await fetch('/api/v1/analysis-cache-clear', { method: 'POST' });
     fetchAnalysisCache();
   };
 
   const handleDeleteAnalysisEntry = async (quickHash: string) => {
-    await deleteAnalysisCache(quickHash);
+    await fetch(`/api/v1/analysis-cache/${encodeURIComponent(quickHash)}`, { method: 'DELETE' });
     fetchAnalysisCache();
   };
 
@@ -289,62 +286,55 @@ export default function CacheManagerPage() {
         {/* 后端缓存 Tab */}
         {activeTab === 'backend' && cacheInfo && (
           <div className="space-y-6">
-            {/* 统计概览 */}
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-              <div className="bg-black/20 rounded-lg p-4 text-center">
-                <div className="text-gray-400 text-xs mb-1">总占用</div>
-                <div className="text-white text-lg font-bold">{formatBytes(cacheInfo.total_size)}</div>
-              </div>
-              <div className="bg-black/20 rounded-lg p-4 text-center">
-                <div className="text-gray-400 text-xs mb-1">上传文件</div>
-                <div className="text-cyan-400 text-lg font-bold">{formatBytes(cacheInfo.upload_size)}</div>
-                <div className="text-gray-500 text-[10px]">{cacheInfo.upload_count} 个</div>
-              </div>
-              <div className="bg-black/20 rounded-lg p-4 text-center">
-                <div className="text-gray-400 text-xs mb-1">修复输出</div>
-                <div className="text-purple-400 text-lg font-bold">{formatBytes(cacheInfo.repair_size)}</div>
-              </div>
-              <div className="bg-black/20 rounded-lg p-4 text-center">
-                <div className="text-gray-400 text-xs mb-1">交付渲染</div>
-                <div className="text-emerald-400 text-lg font-bold">{formatBytes(cacheInfo.render_size)}</div>
-                <div className="text-gray-500 text-[10px]">{cacheInfo.render_count} 个</div>
-              </div>
-              <div className="bg-black/20 rounded-lg p-4 text-center">
-                <div className="text-gray-400 text-xs mb-1">任务数</div>
-                <div className="text-white text-lg font-bold">{cacheInfo.task_count}</div>
-              </div>
-            </div>
-
-            {/* 操作按钮 */}
+            {/* 统计概览 + 对应清理按钮 */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              <button
-                onClick={fetchCacheInfo}
-                disabled={loading || cleaning}
-                className="px-4 py-3 bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/30 rounded-lg text-cyan-400 text-sm transition disabled:opacity-50"
-              >
-                🔄 刷新
-              </button>
-              <button
-                onClick={handleCleanInvalid}
-                disabled={cleaning}
-                className="px-4 py-3 bg-yellow-500/20 hover:bg-yellow-500/30 border border-yellow-500/30 rounded-lg text-yellow-400 text-sm transition disabled:opacity-50"
-              >
-                🧹 清理无效
-              </button>
-              <button
-                onClick={handleClearRepair}
-                disabled={cacheInfo.output_size === 0 || cleaning}
-                className="px-4 py-3 bg-purple-500/20 hover:bg-purple-500/30 border border-purple-500/30 rounded-lg text-purple-400 text-sm transition disabled:opacity-50"
-              >
-                🗑️ 清理输出
-              </button>
-              <button
-                onClick={handleClearAll}
-                disabled={cacheInfo.total_size === 0 || cleaning}
-                className="px-4 py-3 bg-red-500/20 hover:bg-red-500/30 border border-red-500/30 rounded-lg text-red-400 text-sm transition disabled:opacity-50"
-              >
-                ⚠️ 清空全部
-              </button>
+              <div className="bg-black/20 rounded-lg p-4">
+                <div className="text-gray-400 text-xs mb-1 text-center">总占用</div>
+                <div className="text-white text-lg font-bold text-center">{formatBytes(cacheInfo.total_size)}</div>
+                <button
+                  onClick={handleClearAll}
+                  disabled={cacheInfo.total_size === 0 || cleaning}
+                  className="w-full mt-2 py-1.5 bg-red-500/15 hover:bg-red-500/25 border border-red-500/20 rounded text-red-400 text-xs transition disabled:opacity-30"
+                >
+                  清空全部
+                </button>
+              </div>
+              <div className="bg-black/20 rounded-lg p-4">
+                <div className="text-gray-400 text-xs mb-1 text-center">上传文件</div>
+                <div className="text-cyan-400 text-lg font-bold text-center">{formatBytes(cacheInfo.upload_size)}</div>
+                <div className="text-gray-500 text-[10px] text-center mb-2">{cacheInfo.upload_count} 个</div>
+                <button
+                  onClick={handleClearUpload}
+                  disabled={cacheInfo.upload_size === 0 || cleaning}
+                  className="w-full py-1.5 bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-500/20 rounded text-cyan-400 text-xs transition disabled:opacity-30"
+                >
+                  清理上传
+                </button>
+              </div>
+              <div className="bg-black/20 rounded-lg p-4">
+                <div className="text-gray-400 text-xs mb-1 text-center">修复输出</div>
+                <div className="text-purple-400 text-lg font-bold text-center">{formatBytes(cacheInfo.repair_size)}</div>
+                <div className="text-gray-500 text-[10px] text-center mb-2">{'\u00A0'}</div>
+                <button
+                  onClick={handleClearRepair}
+                  disabled={cacheInfo.repair_size === 0 || cleaning}
+                  className="w-full py-1.5 bg-purple-500/15 hover:bg-purple-500/25 border border-purple-500/20 rounded text-purple-400 text-xs transition disabled:opacity-30"
+                >
+                  清理修复
+                </button>
+              </div>
+              <div className="bg-black/20 rounded-lg p-4">
+                <div className="text-gray-400 text-xs mb-1 text-center">交付渲染</div>
+                <div className="text-emerald-400 text-lg font-bold text-center">{formatBytes(cacheInfo.render_size)}</div>
+                <div className="text-gray-500 text-[10px] text-center mb-2">{cacheInfo.render_count} 个</div>
+                <button
+                  onClick={handleCleanInvalid}
+                  disabled={cleaning}
+                  className="w-full py-1.5 bg-yellow-500/15 hover:bg-yellow-500/25 border border-yellow-500/20 rounded text-yellow-400 text-xs transition disabled:opacity-30"
+                >
+                  清理无效
+                </button>
+              </div>
             </div>
 
             {/* 任务列表 */}
@@ -515,21 +505,21 @@ export default function CacheManagerPage() {
             {analysisEntries.length > 0 ? (
               <div className="bg-black/20 rounded-lg border border-white/10 divide-y divide-white/5">
                 {analysisEntries.map((entry) => (
-                  <div key={entry.quickHash} className="p-3 hover:bg-white/5">
+                  <div key={entry.quick_hash as string} className="p-3 hover:bg-white/5">
                     <div className="flex items-center justify-between">
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 mb-1">
-                          <span className="text-white text-sm font-medium truncate">{entry.fileName}</span>
-                          <span className="text-gray-500 text-xs">{formatBytes(entry.fileSize)}</span>
+                          <span className="text-white text-sm font-medium truncate">{entry.file_name as string}</span>
+                          <span className="text-gray-500 text-xs">{formatBytes(entry.file_size as number)}</span>
                         </div>
                         <div className="text-gray-500 text-xs">
-                          QuickHash: {entry.quickHash.slice(0, 16)}...
+                          QuickHash: {(entry.quick_hash as string).slice(0, 16)}...
                           {' · '}
-                          {new Date(entry.timestamp).toLocaleString()}
+                          {entry.created_at ? new Date(entry.created_at as string).toLocaleString() : '—'}
                         </div>
                       </div>
                       <button
-                        onClick={() => handleDeleteAnalysisEntry(entry.quickHash)}
+                        onClick={() => handleDeleteAnalysisEntry(entry.quick_hash as string)}
                         className="text-gray-500 hover:text-red-400 transition p-1.5 flex-shrink-0"
                         title="删除"
                       >

@@ -45,6 +45,17 @@ def init_db() -> None:
         conn.execute("ALTER TABLE tasks ADD COLUMN file_size INTEGER NOT NULL DEFAULT 0")
     except Exception:
         pass
+    # 分析缓存表
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS analysis_cache (
+            quick_hash TEXT PRIMARY KEY,
+            file_name TEXT NOT NULL DEFAULT '',
+            file_size INTEGER NOT NULL DEFAULT 0,
+            wav_info TEXT NOT NULL DEFAULT '',
+            analysis TEXT NOT NULL DEFAULT '',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
     conn.commit()
     conn.close()
 
@@ -252,6 +263,44 @@ def mark_stuck_tasks(timeout_seconds: int = 300) -> None:
     )
     conn.commit()
     conn.close()
+
+
+def get_analysis_cache(quick_hash: str) -> dict[str, Any] | None:
+    conn = get_db()
+    row = conn.execute("SELECT * FROM analysis_cache WHERE quick_hash = ?", (quick_hash,)).fetchone()
+    conn.close()
+    if row is None:
+        return None
+    return dict(row)
+
+def save_analysis_cache(quick_hash: str, file_name: str, file_size: int, wav_info: str, analysis: str) -> None:
+    conn = get_db()
+    conn.execute(
+        "INSERT OR REPLACE INTO analysis_cache (quick_hash, file_name, file_size, wav_info, analysis) VALUES (?, ?, ?, ?, ?)",
+        (quick_hash, file_name, file_size, wav_info, analysis),
+    )
+    conn.commit()
+    conn.close()
+
+def get_all_analysis_cache() -> list[dict[str, Any]]:
+    conn = get_db()
+    rows = conn.execute("SELECT * FROM analysis_cache ORDER BY created_at DESC").fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+def delete_analysis_cache(quick_hash: str) -> None:
+    conn = get_db()
+    conn.execute("DELETE FROM analysis_cache WHERE quick_hash = ?", (quick_hash,))
+    conn.commit()
+    conn.close()
+
+def clear_all_analysis_cache() -> int:
+    conn = get_db()
+    count = conn.execute("SELECT COUNT(*) FROM analysis_cache").fetchone()[0]
+    conn.execute("DELETE FROM analysis_cache")
+    conn.commit()
+    conn.close()
+    return count
 
 
 def _parse_json_fields(result: TaskDict) -> None:

@@ -50,29 +50,37 @@ export async function computeFileHash(file: File): Promise<string> {
 
 /**
  * 快速哈希（用于缓存键等不需要强碰撞抵抗的场景）
- * 使用文件大小 + 前4KB + 后4KB的字符串拼接
+ * 使用文件大小 + 前200KB + 后200KB，兼顾准确性和速度
  */
 export async function computeQuickHash(file: File): Promise<string> {
   const startTime = performance.now();
 
-  let prefix: string;
+  const QUICK_CHUNK = 200 * 1024; // 200KB
 
-  if (file.size <= 8192) {
-    const buf = await file.arrayBuffer();
-    prefix = btoa(String.fromCharCode(...new Uint8Array(buf)));
+  let buffer: ArrayBuffer;
+
+  if (file.size <= QUICK_CHUNK * 2) {
+    buffer = await file.arrayBuffer();
   } else {
-    const headChunk = file.slice(0, 4096);
-    const tailChunk = file.slice(file.size - 4096);
+    const headChunk = file.slice(0, QUICK_CHUNK);
+    const tailChunk = file.slice(file.size - QUICK_CHUNK);
 
     const [headBuf, tailBuf] = await Promise.all([
       headChunk.arrayBuffer(),
       tailChunk.arrayBuffer(),
     ]);
 
-    prefix = `${file.size}-${btoa(String.fromCharCode(...new Uint8Array(headBuf)))}-${btoa(String.fromCharCode(...new Uint8Array(tailBuf)))}`;
+    // 合并前200KB + 文件大小(8字节) + 后200KB，与 computeFileHash 同构
+    const combined = new Uint8Array(QUICK_CHUNK * 2 + 8);
+    combined.set(new Uint8Array(headBuf), 0);
+    const sizeView = new DataView(combined.buffer, QUICK_CHUNK, 8);
+    sizeView.setBigUint64(0, BigInt(file.size), false);
+    combined.set(new Uint8Array(tailBuf), QUICK_CHUNK + 8);
+
+    buffer = combined.buffer;
   }
 
-  const hashBuffer = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(prefix));
+  const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
   const hashArray = Array.from(new Uint8Array(hashBuffer));
   const hash = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 

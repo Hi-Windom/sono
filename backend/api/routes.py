@@ -681,6 +681,52 @@ async def delete_render_cache(filename: str):
     os.remove(file_path)
     return {"released_bytes": released, "filename": filename}
 
+# ===== 分析缓存 API =====
+
+class AnalysisCacheRequest(BaseModel):
+    quick_hash: str
+    file_name: str = ""
+    file_size: int = 0
+    wav_info: str = ""
+    analysis: str = ""
+
+@router.get("/analysis-cache/{quick_hash}")
+async def get_analysis_cache_endpoint(quick_hash: str):
+    """获取单条分析缓存"""
+    from database import get_analysis_cache as db_get
+    cached = db_get(quick_hash)
+    if not cached:
+        return {"found": False}
+    return {"found": True, "data": cached}
+
+@router.post("/analysis-cache")
+async def save_analysis_cache_endpoint(request: AnalysisCacheRequest):
+    """保存分析缓存"""
+    from database import save_analysis_cache as db_save
+    db_save(request.quick_hash, request.file_name, request.file_size, request.wav_info, request.analysis)
+    return {"status": "ok"}
+
+@router.get("/analysis-cache-list")
+async def list_analysis_cache():
+    """获取所有分析缓存列表"""
+    from database import get_all_analysis_cache
+    entries = get_all_analysis_cache()
+    return {"entries": entries, "count": len(entries)}
+
+@router.delete("/analysis-cache/{quick_hash}")
+async def delete_analysis_cache_endpoint(quick_hash: str):
+    """删除单条分析缓存"""
+    from database import delete_analysis_cache as db_delete
+    db_delete(quick_hash)
+    return {"status": "ok"}
+
+@router.post("/analysis-cache-clear")
+async def clear_analysis_cache():
+    """清空所有分析缓存"""
+    from database import clear_all_analysis_cache
+    count = clear_all_analysis_cache()
+    return {"deleted_count": count}
+
 @router.post("/cancel/{task_id}")
 async def cancel_task_endpoint(task_id: str):
     task = get_task(task_id)

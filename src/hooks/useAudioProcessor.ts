@@ -3,7 +3,7 @@ import { AIRepairParams, defaultAIRepairParams, detectAudioIssues, RepairMode } 
 import { AISongDetectionResult } from '../utils/aiSongChecker';
 import { loadSettings, saveSettings, resetSettings as resetStoredSettings, saveProfileToStorage } from '../utils/settingsStorage';
 import { parseWavHeader, WavInfo, decodeWavPcm } from '../utils/wavParser';
-import { saveSession, loadSession, clearSession, getAnalysisCache, saveAnalysisCache } from '../utils/sessionDB';
+import { saveSession, loadSession, clearSession } from '../utils/sessionDB';
 import { computeFileHash, computeQuickHash } from '../utils/fileHash';
 import {
   uploadAudio,
@@ -88,23 +88,34 @@ function downloadBlob(blob: Blob, fileName: string) {
   a.style.display = 'none';
   document.body.appendChild(a);
   a.click();
+  // 立即移除 a 元素，避免阻塞页面交互
+  document.body.removeChild(a);
   setTimeout(() => {
-    document.body.removeChild(a);
     URL.revokeObjectURL(blobUrl);
-  }, 5000);
+  }, 30000);
 }
 
 function downloadUrl(url: string, fileName: string) {
-  // 使用直接链接方式下载，后端已支持：
-  // 1. Content-Disposition 正确文件名
-  // 2. Accept-Ranges: bytes 支持断点续传和多线程下载
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = fileName;
-  a.style.display = 'none';
-  document.body.appendChild(a);
-  a.click();
-  setTimeout(() => { document.body.removeChild(a); }, 5000);
+  // 使用 fetch+blob 下载，避免 <a href> 直接触发页面导航（用户取消时可能导致页面卡死）
+  // 后备：如果 fetch 失败，回退到 <a> 方式
+  fetch(url)
+    .then(res => {
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.blob();
+    })
+    .then(blob => {
+      downloadBlob(blob, fileName);
+    })
+    .catch(() => {
+      // 回退到直接链接（支持 Range 请求和下载器）
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      a.style.display = 'none';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => { document.body.removeChild(a); }, 5000);
+    });
 }
 
 export function useAudioProcessor() {
@@ -766,17 +777,21 @@ export function useAudioProcessor() {
     setFileHash(hash);
     writeLog(`[loadAudioFile] fileHash=${hash} quickHash=${quickHash.slice(0, 16)}`);
 
-    // 尝试从解析缓存读取 wavInfo + analysis
+    // 尝试从后端分析缓存读取 wavInfo + analysis
     let cachedAnalysis: AudioAnalysis | null = null;
     let cachedWavInfo: WavInfo | null = null;
     try {
-      const cached = await getAnalysisCache(quickHash);
-      if (cached) {
-        cachedAnalysis = JSON.parse(cached.analysis);
-        cachedWavInfo = JSON.parse(cached.wavInfo);
-        writeLog(`[loadAudioFile] 解析缓存命中: quickHash=${quickHash.slice(0, 16)}`);
-        if (cachedWavInfo) setWavInfo(cachedWavInfo);
-        if (cachedAnalysis) setAudioAnalysis(cachedAnalysis);
+      const cacheRes = await fetch(`/api/v1/analysis-cache/${quickHash}`);
+      if (cacheRes.ok) {
+        const cacheData = await cacheRes.json();
+        if (cacheData.found && cacheData.data) {
+          const d = cacheData.data;
+          if (d.wav_info) cachedWavInfo = JSON.parse(d.wav_info);
+          if (d.analysis) cachedAnalysis = JSON.parse(d.analysis);
+          writeLog(`[loadAudioFile] 后端分析缓存命中: quickHash=${quickHash.slice(0, 16)}`);
+          if (cachedWavInfo) setWavInfo(cachedWavInfo);
+          if (cachedAnalysis) setAudioAnalysis(cachedAnalysis);
+        }
       }
     } catch { /* 缓存读取失败，继续正常流程 */ }
 
@@ -822,14 +837,18 @@ export function useAudioProcessor() {
     const analysis = cachedAnalysis || detectAudioIssues(buffer);
     setAudioAnalysis(analysis);
 
-    // 如果没有缓存，存入解析缓存
+    // 如果没有缓存，存入后端分析缓存
     if (!cachedAnalysis) {
-      saveAnalysisCache({
-        quickHash,
-        fileName: file.name,
-        fileSize: file.size,
-        wavInfo: JSON.stringify(wavHeaderInfo || cachedWavInfo),
-        analysis: JSON.stringify(analysis),
+      fetch('/api/v1/analysis-cache', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          quick_hash: quickHash,
+          file_name: file.name,
+          file_size: file.size,
+          wav_info: JSON.stringify(wavHeaderInfo || cachedWavInfo),
+          analysis: JSON.stringify(analysis),
+        }),
       }).catch(() => { /* 忽略缓存写入失败 */ });
     }
 
