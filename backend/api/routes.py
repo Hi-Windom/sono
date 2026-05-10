@@ -904,6 +904,31 @@ async def get_cache_info():
     upload_count = 0
     output_count = 0
     render_count = 0
+    repair_count = 0
+    invalid_count = 0
+    invalid_size = 0
+
+    conn = get_db()
+    db_files = set()
+    try:
+        all_tasks = conn.execute(
+            "SELECT id, original_filename, original_path, output_path, status, created_at FROM tasks ORDER BY created_at DESC"
+        ).fetchall()
+        for row in all_tasks:
+            if row["original_path"]:
+                db_files.add(row["original_path"])
+            if row["output_path"]:
+                db_files.add(row["output_path"])
+    finally:
+        conn.close()
+
+    def _check_invalid(filepath):
+        nonlocal invalid_count, invalid_size
+        is_valid, _ = _is_valid_audio_file(filepath)
+        is_orphaned = filepath not in db_files
+        if not is_valid or is_orphaned:
+            invalid_count += 1
+            invalid_size += os.path.getsize(filepath) if os.path.exists(filepath) else 0
 
     if os.path.exists(UPLOAD_DIR):
         for f in os.listdir(UPLOAD_DIR):
@@ -911,6 +936,7 @@ async def get_cache_info():
             if os.path.isfile(fp):
                 upload_size += os.path.getsize(fp)
                 upload_count += 1
+                _check_invalid(fp)
 
     if os.path.exists(OUTPUT_DIR):
         for f in os.listdir(OUTPUT_DIR):
@@ -921,17 +947,11 @@ async def get_cache_info():
                 if "_rendered_" in f:
                     render_size += os.path.getsize(fp)
                     render_count += 1
+                else:
+                    repair_count += 1
+                _check_invalid(fp)
 
-    # 修复输出 = OUTPUT_DIR 总大小 - 渲染文件大小
     repair_size = output_size - render_size
-
-    conn = get_db()
-    try:
-        all_tasks = conn.execute(
-            "SELECT id, original_filename, original_path, output_path, status, created_at FROM tasks ORDER BY created_at DESC"
-        ).fetchall()
-    finally:
-        conn.close()
 
     tasks = []
     for row in all_tasks:
@@ -978,8 +998,11 @@ async def get_cache_info():
         "render_size": render_size,
         "upload_count": upload_count,
         "output_count": output_count,
+        "repair_count": repair_count,
         "render_count": render_count,
         "task_count": len(tasks),
+        "invalid_count": invalid_count,
+        "invalid_size": invalid_size,
         "tasks": tasks,
     }
 

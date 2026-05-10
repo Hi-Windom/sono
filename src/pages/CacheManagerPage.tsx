@@ -31,8 +31,11 @@ interface CacheInfo {
   render_size: number;
   upload_count: number;
   output_count: number;
+  repair_count: number;
   render_count: number;
   task_count: number;
+  invalid_count: number;
+  invalid_size: number;
   tasks: CacheTask[];
 }
 
@@ -304,10 +307,11 @@ export default function CacheManagerPage() {
               <div className="bg-black/20 rounded-lg p-4">
                 <div className="text-gray-400 text-xs mb-1 text-center">总占用</div>
                 <div className="text-white text-lg font-bold text-center">{formatBytes(cacheInfo.total_size)}</div>
+                <div className="text-gray-500 text-[10px] text-center mb-2">{cacheInfo.task_count} 个任务</div>
                 <button
                   onClick={handleClearAll}
                   disabled={cacheInfo.total_size === 0 || cleaning}
-                  className="w-full mt-2 py-1.5 bg-red-500/15 hover:bg-red-500/25 border border-red-500/20 rounded text-red-400 text-xs transition disabled:opacity-30"
+                  className="w-full py-1.5 bg-red-500/15 hover:bg-red-500/25 border border-red-500/20 rounded text-red-400 text-xs transition disabled:opacity-30"
                 >
                   清空全部
                 </button>
@@ -327,7 +331,7 @@ export default function CacheManagerPage() {
               <div className="bg-black/20 rounded-lg p-4">
                 <div className="text-gray-400 text-xs mb-1 text-center">修复输出</div>
                 <div className="text-purple-400 text-lg font-bold text-center">{formatBytes(cacheInfo.repair_size)}</div>
-                <div className="text-gray-500 text-[10px] text-center mb-2">{'\u00A0'}</div>
+                <div className="text-gray-500 text-[10px] text-center mb-2">{cacheInfo.repair_count} 个</div>
                 <button
                   onClick={handleClearRepair}
                   disabled={cacheInfo.repair_size === 0 || cleaning}
@@ -350,14 +354,14 @@ export default function CacheManagerPage() {
               </div>
             </div>
 
-            {cacheInfo.total_size > 0 && (
+            {cacheInfo.invalid_count > 0 && (
               <div className="p-4 bg-yellow-500/5 border border-yellow-500/20 rounded-lg">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <span className="text-yellow-400 text-sm">⚠️</span>
                     <div>
                       <span className="text-yellow-400 text-sm font-medium">无效缓存</span>
-                      <span className="text-gray-500 text-xs ml-2">损坏、空文件、孤立文件</span>
+                      <span className="text-yellow-400/70 text-xs ml-2">{cacheInfo.invalid_count} 个 · {formatBytes(cacheInfo.invalid_size)}</span>
                     </div>
                   </div>
                   <button
