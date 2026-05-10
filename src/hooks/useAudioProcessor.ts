@@ -114,6 +114,7 @@ export function useAudioProcessor() {
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isDecodingAudio, setIsDecodingAudio] = useState(false);
   const [processingProgress, setProcessingProgress] = useState(0);
   const [processingStep, setProcessingStep] = useState('');
   const [params, setParams] = useState<AIRepairParams>(savedSettings.aiRepairParams);
@@ -692,6 +693,7 @@ export function useAudioProcessor() {
 
     setProcessingStep('读取音频信息...');
     setIsProcessing(true);
+    setIsDecodingAudio(true);
     setProcessingProgress(0.02);
     const headerBuf = await file.slice(0, 44 + 4096).arrayBuffer();
     const wavHeaderInfo = parseWavHeader(headerBuf);
@@ -733,6 +735,7 @@ export function useAudioProcessor() {
     setAudioBuffer(buffer);
     setDuration(buffer.duration);
     durationRef.current = buffer.duration;
+    setIsDecodingAudio(false);
 
     if (pendingPlayRef.current && streamingAudioRef.current) {
       const resumeTime = streamingAudioRef.current.currentTime;
@@ -2176,6 +2179,7 @@ export function useAudioProcessor() {
     currentTime,
     duration,
     isProcessing,
+    isDecodingAudio,
     processingProgress,
     processingStep,
     params,
