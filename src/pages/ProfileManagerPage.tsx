@@ -38,6 +38,27 @@ function paramsSummary(params: AIRepairParams): string[] {
     .map(k => PARAM_LABELS[k]);
 }
 
+// 后端参数名 → 前端参数名映射
+function backendKeyToParamKey(backendKey: string): keyof AIRepairParams | null {
+  const map: Record<string, keyof AIRepairParams> = {
+    de_clipping: 'deClipping',
+    noise_reduction: 'noiseReduction',
+    de_essing: 'deEssing',
+    de_crackle: 'deCrackle',
+    de_pop: 'dePop',
+    harmonic_enhance: 'harmonicEnhance',
+    dynamic_range: 'dynamicRange',
+    softness: 'softness',
+    presence_boost: 'presenceBoost',
+    bass_enhance: 'bassEnhance',
+    spatial_enhance: 'spatialEnhance',
+    transient_repair: 'transientRepair',
+    warmth: 'warmth',
+    clarity: 'clarity',
+  };
+  return map[backendKey] || null;
+}
+
 export default function ProfileManagerPage() {
   const navigate = useNavigate();
   const [profiles, setProfiles] = useState<ProfileConfig[]>([]);
@@ -86,6 +107,27 @@ export default function ProfileManagerPage() {
     setEditingName('');
     refresh();
   }, [editingName, refresh]);
+
+  // 获取当前编辑版本对应的算法信息
+  const currentAlgoInfo = algorithmVersions.find(v => v.name === editingParams?.algorithmVersion);
+
+  // 切换算法版本时，加载该版本的默认参数
+  const handleAlgorithmVersionChange = useCallback((newVersion: string) => {
+    const algoInfo = algorithmVersions.find(v => v.name === newVersion);
+    if (algoInfo) {
+      // 将后端 defaultParams 映射到 AIRepairParams
+      const newParams: AIRepairParams = { ...defaultAIRepairParams };
+      (Object.keys(algoInfo.defaultParams) as string[]).forEach(backendKey => {
+        const paramKey = backendKeyToParamKey(backendKey);
+        if (paramKey) {
+          (newParams as Record<string, number>)[paramKey] = algoInfo.defaultParams[backendKey];
+        }
+      });
+      setEditingParams(prev => prev ? { ...prev, algorithmVersion: newVersion, params: newParams } : null);
+    } else {
+      setEditingParams(prev => prev ? { ...prev, algorithmVersion: newVersion } : null);
+    }
+  }, [algorithmVersions]);
 
   const handleApply = useCallback((id: string) => {
     applyProfileById(id);
@@ -166,15 +208,34 @@ export default function ProfileManagerPage() {
     refresh();
   }, [editingParams, editingId, editingName, refresh]);
 
+  // 前端参数名 → 后端参数名
+  const paramKeyToBackend: Record<keyof AIRepairParams, string> = {
+    deClipping: 'de_clipping', noiseReduction: 'noise_reduction', deEssing: 'de_essing',
+    deCrackle: 'de_crackle', dePop: 'de_pop', harmonicEnhance: 'harmonic_enhance',
+    dynamicRange: 'dynamic_range', softness: 'softness', presenceBoost: 'presence_boost',
+    bassEnhance: 'bass_enhance', spatialEnhance: 'spatial_enhance',
+    transientRepair: 'transient_repair', warmth: 'warmth', clarity: 'clarity',
+  };
+
+  // 获取某参数在当前算法版本中的默认值
+  const getDefaultForParam = useCallback((key: keyof AIRepairParams): number | undefined => {
+    if (!currentAlgoInfo) return undefined;
+    const backendKey = paramKeyToBackend[key];
+    return backendKey ? currentAlgoInfo.defaultParams[backendKey] : undefined;
+  }, [currentAlgoInfo]);
+
   const paramSlider = (key: keyof AIRepairParams) => {
     const val = editingParams?.params?.[key] ?? 0;
+    const defaultVal = getDefaultForParam(key);
+    // 根据默认值自适应最大值（默认值 > 0.5 时，max = 1；否则 max = 0.5）
+    const maxVal = (defaultVal !== undefined && defaultVal > 0.5) || key === 'warmth' || key === 'clarity' ? 1 : 0.5;
     return (
       <div key={key as string} className="flex items-center gap-2 py-1">
         <span className="text-xs text-gray-400 w-16 shrink-0">{PARAM_LABELS[key]}</span>
         <input
           type="range"
           min={0}
-          max={key === 'warmth' || key === 'clarity' ? 1 : 0.5}
+          max={maxVal}
           step={0.01}
           value={val}
           onChange={e => setEditingParams(prev => prev ? {
@@ -183,7 +244,10 @@ export default function ProfileManagerPage() {
           } : null)}
           className="flex-1 h-1.5 accent-cyan-400"
         />
-        <span className="text-xs text-cyan-400 w-10 text-right tabular-nums">{val.toFixed(2)}</span>
+        <span className="text-xs text-cyan-400 w-10 text-right tabular-nums">
+          {val.toFixed(2)}
+          {defaultVal !== undefined && defaultVal > 0 && <span className="text-gray-600 text-[9px]">/{defaultVal}</span>}
+        </span>
       </div>
     );
   };
@@ -354,7 +418,7 @@ export default function ProfileManagerPage() {
                 {algorithmVersions.length > 0 ? (
                   <select
                     value={editingParams?.algorithmVersion ?? ''}
-                    onChange={e => setEditingParams(prev => prev ? { ...prev, algorithmVersion: e.target.value } : null)}
+                    onChange={e => handleAlgorithmVersionChange(e.target.value)}
                     className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-cyan-400/50"
                   >
                     {algorithmVersions.map(v => (

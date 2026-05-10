@@ -434,13 +434,21 @@ export function useAudioProcessor() {
         return;
       }
 
+      // 验证 File 对象基本有效性
+      if (!(session.file instanceof File) || session.file.size === 0) {
+        writeLog(`[useAudioProcessor] 会话中的 File 对象无效，清除`);
+        await clearSession();
+        sessionRestoredRef.current = true;
+        return;
+      }
+
       writeLog(`[useAudioProcessor] 发现保存的会话: file=${session.fileName} taskId=${session.taskId}`);
 
       // 保存会话数据到 ref，等待后端可用时恢复
       pendingSessionRef.current = {
         file: session.file,
         fileName: session.fileName,
-        fileHash: session.fileHash,
+        fileHash: session.fileHash || '',
         taskId: session.taskId,
         hasBeenProcessed: session.hasBeenProcessed,
         wavInfo: session.wavInfo,
@@ -799,7 +807,7 @@ export function useAudioProcessor() {
     (async () => {
       try {
         writeLog(`[loadAudioFile] 后台上传开始...`);
-        const uploadRes = await uploadAudio(file, undefined, fileHash);
+        const uploadRes = await uploadAudio(file, undefined, hash);
         if (seq !== loadAudioSeqRef.current) return;
 
         const newTaskId = uploadRes.task_id;
@@ -816,7 +824,7 @@ export function useAudioProcessor() {
           file,
           fileName: file.name,
           fileSize: file.size,
-          fileHash,
+          fileHash: hash,
           taskId: newTaskId,
           backendAvailable: true,
           hasBeenProcessed: false,

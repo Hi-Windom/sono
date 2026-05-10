@@ -92,6 +92,7 @@ function formatBytes(bytes: number): string {
 
 export function AIRepairPanel({
   params,
+  fileHash,
   analysis,
   selectedMode,
   modes,

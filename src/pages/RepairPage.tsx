@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Header } from '../components/Header';
 import { AudioUploader } from '../components/AudioUploader';
@@ -111,6 +111,20 @@ export default function RepairPage() {
       }
     };
   }, [isTaskStuck, stuckInfo]);
+
+  const [profileSaveMsg, setProfileSaveMsg] = useState('');
+
+  const handleSaveProfile = useCallback(() => {
+    if (!audioFile) return;
+    try {
+      saveProfile(audioFile.name.replace(/\.[^.]+$/, ''));
+      setProfileSaveMsg('✓ 已保存');
+      setTimeout(() => setProfileSaveMsg(''), 2000);
+    } catch (e) {
+      setProfileSaveMsg('保存失败');
+      setTimeout(() => setProfileSaveMsg(''), 2000);
+    }
+  }, [audioFile, saveProfile]);
 
   const hasBrowserResult = !!browserProcessedBuffer;
   const hasBackendResult = !!backendProcessedBuffer || !!repairResult;
@@ -385,15 +399,11 @@ export default function RepairPage() {
               />
 
               <button
-                onClick={() => {
-                  if (!audioFile) return;
-                  saveProfile(audioFile.name.replace(/\.[^.]+$/, ''));
-                  alert('已保存到配置管理页面');
-                }}
+                onClick={handleSaveProfile}
                 disabled={!audioFile}
                 className="w-full mt-3 py-2 rounded-lg bg-purple-500/20 hover:bg-purple-500/30 text-purple-400 text-sm font-medium transition disabled:opacity-40"
               >
-                💾 保存当前参数为配置
+                {profileSaveMsg || '💾 保存当前参数为配置'}
               </button>
             </div>
           </div>
