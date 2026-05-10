@@ -820,8 +820,18 @@ export function useAudioProcessor() {
   }, []);
 
   const updateParam = useCallback((key: keyof AIRepairParams, value: number) => {
-    setParams(prev => ({ ...prev, [key]: value }));
-  }, []);
+    setParams(prev => {
+      const next = { ...prev, [key]: value };
+      // 联动：检查当前参数是否命中某个预设模式
+      const matched = repairModes.find(m => {
+        return (Object.keys(m.params) as (keyof AIRepairParams)[]).every(
+          k => m.params[k] === next[k]
+        );
+      });
+      setSelectedMode(matched ? matched.name : '');
+      return next;
+    });
+  }, [repairModes]);
 
   const updateProcessingOptions = useCallback((options: Partial<ProcessingOptions>) => {
     setProcessingOptionsState(prev => ({ ...prev, ...options }));
@@ -1676,6 +1686,53 @@ export function useAudioProcessor() {
     resetStoredSettings();
   }, []);
 
+  // ========== 修复参数配置管理 ==========
+
+  const getSavedProfiles = useCallback((): import('../utils/settingsStorage').ProfileConfig[] => {
+    const settings = loadSettings();
+    return settings.savedProfiles || [];
+  }, []);
+
+  const saveProfile = useCallback((name: string) => {
+    const settings = loadSettings();
+    const newProfile: import('../utils/settingsStorage').ProfileConfig = {
+      id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36),
+      name,
+      params: { ...params },
+      exportOptions: { ...processingOptions },
+      createdAt: new Date().toISOString(),
+    };
+    const updated = [...(settings.savedProfiles || []), newProfile];
+    saveSettings({ savedProfiles: updated });
+  }, [params, processingOptions]);
+
+  const applyProfile = useCallback((id: string) => {
+    const settings = loadSettings();
+    const profile = (settings.savedProfiles || []).find(p => p.id === id);
+    if (!profile) return;
+    setParams(profile.params);
+    setProcessingOptionsState(prev => ({
+      ...prev,
+      sampleRate: profile.exportOptions.sampleRate,
+      bitDepth: profile.exportOptions.bitDepth,
+    }));
+    setSelectedMode('');
+  }, []);
+
+  const deleteProfile = useCallback((id: string) => {
+    const settings = loadSettings();
+    const updated = (settings.savedProfiles || []).filter(p => p.id !== id);
+    saveSettings({ savedProfiles: updated });
+  }, []);
+
+  const renameProfile = useCallback((id: string, newName: string) => {
+    const settings = loadSettings();
+    const updated = (settings.savedProfiles || []).map(p =>
+      p.id === id ? { ...p, name: newName } : p
+    );
+    saveSettings({ savedProfiles: updated });
+  }, []);
+
   // 重置卡住状态
   const resetStuckState = useCallback(() => {
     setIsTaskStuck(false);
@@ -2265,6 +2322,12 @@ export function useAudioProcessor() {
     switchPlayMode,
     setProcessingOptions: updateProcessingOptions,
     downloadProcessedAudio,
+    // 修复参数配置管理
+    getSavedProfiles,
+    saveProfile,
+    applyProfile,
+    deleteProfile,
+    renameProfile,
     analyserRef,
     // 浏览器修复信息
     browserRepairInfo,

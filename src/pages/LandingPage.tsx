@@ -285,6 +285,32 @@ export default function LandingPage() {
             </div>
           </div>
 
+          {/* 修复参数配置管理 */}
+          <div
+            onClick={() => navigate('/profile-manager')}
+            className="group bg-primary/50 border border-white/10 rounded-2xl p-8 cursor-pointer
+                       hover:border-amber-400/50 hover:bg-primary/70 transition-all duration-300"
+          >
+            <div className="w-16 h-16 bg-gradient-to-br from-amber-500/20 to-orange-500/20 rounded-xl
+                            flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
+              <svg className="w-8 h-8 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                      d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 001.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+            </div>
+            <h2 className="text-2xl font-bold text-white mb-3">修复参数配置</h2>
+            <p className="text-gray-400 mb-4">
+              保存、管理、导入导出修复参数配置，快速切换预设
+            </p>
+            <div className="flex items-center text-amber-400 group-hover:text-amber-300">
+              <span className="text-sm font-medium">管理配置</span>
+              <svg className="w-5 h-5 ml-2 group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
+              </svg>
+            </div>
+          </div>
+
           {/* 质量测试 */}
           <div
             onClick={() => navigate('/quality-tests')}
@@ -532,6 +558,23 @@ export default function LandingPage() {
             <div className="text-sm text-gray-400">已处理任务</div>
           </div>
         </div>
+
+        {/* Dev: 下载安卓包 */}
+        {import.meta.env.DEV && (
+          <div className="mt-8 text-center">
+            <a
+              href="/release_android.tar.gz"
+              download="sono-android.tar.gz"
+              className="inline-flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-emerald-600 to-cyan-600 text-white rounded-xl font-medium hover:from-emerald-500 hover:to-cyan-500 transition shadow-lg shadow-emerald-500/20"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
+              下载安卓安装包
+            </a>
+            <p className="text-xs text-gray-500 mt-2">仅开发模式显示 · 包内含后端 + 前端 + 部署脚本</p>
+          </div>
+        )}
       </div>
     </div>
   );
