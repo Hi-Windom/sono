@@ -27,7 +27,7 @@ import {
   DetectorVersion,
   QueueStatus,
   renderAudio,
-  pollRenderStatus,
+  waitRenderWithWS,
 } from '../services/backendApi';
 
 function writeLog(message: string) {
@@ -118,6 +118,8 @@ export function useAudioProcessor() {
   const [isDecodingAudio, setIsDecodingAudio] = useState(false);
   const [processingProgress, setProcessingProgress] = useState(0);
   const [processingStep, setProcessingStep] = useState('');
+  const [isRenderLoading, setIsRenderLoading] = useState(false);
+  const [fileHash, setFileHash] = useState<string | null>(null);
   const [params, setParams] = useState<AIRepairParams>(savedSettings.aiRepairParams);
   const [audioAnalysis, setAudioAnalysis] = useState<AudioAnalysis | null>(null);
   const [selectedMode, setSelectedMode] = useState<string>(savedSettings.selectedMode);
@@ -727,6 +729,7 @@ export function useAudioProcessor() {
     ]);
     if (seq !== loadAudioSeqRef.current) return;
     fileHashRef.current = fileHash;
+    setFileHash(fileHash);
     writeLog(`[loadAudioFile] fileHash=${fileHash}`);
 
     const context = getAudioContext();
@@ -2108,18 +2111,23 @@ export function useAudioProcessor() {
       try {
         setProcessingStep('渲染交付规格...');
         setProcessingProgress(0);
+        setIsRenderLoading(true);
         await renderAudio(
           taskIdRef.current,
           processingOptions.sampleRate,
           processingOptions.bitDepth,
         );
-        const renderRes = await pollRenderStatus(
+        const { promise, close } = waitRenderWithWS(
           taskIdRef.current,
           (progress, step) => {
             setProcessingProgress(progress);
             setProcessingStep(step);
           },
         );
+        wsControlRef.current = { close };
+        const renderRes = await promise;
+        wsControlRef.current = null;
+        setIsRenderLoading(false);
         if (!renderRes.render_filename || !renderRes.render_result) {
           throw new Error('渲染结果不完整');
         }
@@ -2135,6 +2143,9 @@ export function useAudioProcessor() {
         setProcessingProgress(0);
         return;
       } catch (renderErr) {
+        wsControlRef.current?.close();
+        wsControlRef.current = null;
+        setIsRenderLoading(false);
         writeLog(`[downloadProcessedAudio] 渲染失败，回退到原始下载: ${renderErr}`);
         const url = getDownloadUrl(taskIdRef.current);
         downloadUrl(url, fileName);
@@ -2197,6 +2208,7 @@ export function useAudioProcessor() {
 
   return {
     audioFile,
+    fileHash,
     audioBuffer,
     browserProcessedBuffer,
     backendProcessedBuffer,
@@ -2258,6 +2270,8 @@ export function useAudioProcessor() {
     browserRepairInfo,
     enableBrowserRepair,
     setEnableBrowserRepair,
+    // 渲染加载状态
+    isRenderLoading,
   };
 }
 

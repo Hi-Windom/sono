@@ -1080,30 +1080,43 @@ export async function renderAudio(
   return await res.json();
 }
 
-export async function pollRenderStatus(
+/** 通过 WebSocket 等待渲染完成，替代轮询 */
+export function waitRenderWithWS(
   taskId: string,
   onProgress?: (progress: number, step: string) => void,
-): Promise<RenderResult> {
-  const MAX_POLL = 600;
-  for (let i = 0; i < MAX_POLL; i++) {
-    const task = await getTaskStatus(taskId);
-    if (task.status === 'render_completed') {
-      return {
-        task_id: taskId,
-        status: 'render_completed',
-        render_filename: task.render_filename,
-        render_result: task.render_result,
-      };
-    }
-    if (task.status === 'error') {
-      throw new Error(task.error || '渲染失败');
-    }
-    if (onProgress && task.progress != null) {
-      onProgress(task.progress, task.step || '');
-    }
-    await new Promise(r => setTimeout(r, 500));
-  }
-  throw new Error('渲染超时');
+): { promise: Promise<RenderResult>; close: () => void } {
+  let closeFn = () => {};
+  const terminals = new Set(['render_completed', 'error', 'completed']);
+
+  const promise = new Promise<RenderResult>((resolve, reject) => {
+    const wsControl = connectProgressWS(
+      taskId,
+      {
+        onProgress: (data) => {
+          if (onProgress) onProgress(data.progress, data.step || '');
+        },
+        onComplete: (data) => {
+          if (data.status === 'render_completed') {
+            resolve({
+              task_id: taskId,
+              status: 'render_completed',
+              render_filename: data.render_filename,
+              render_result: data.render_result,
+            });
+          } else {
+            reject(new Error(data.error || data.step || '渲染失败'));
+          }
+        },
+        onError: (err) => reject(err),
+        onStuck: undefined,
+        onUnstuck: undefined,
+      },
+      terminals,
+    );
+    closeFn = wsControl.close;
+  });
+
+  return { promise, close: closeFn };
 }
 
 export { mapDetectionResult, type BackendDetectionResult, type BackendRepairResult, type ProgressEvent, type TaskStatus };

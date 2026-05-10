@@ -74,6 +74,10 @@ export default function RepairPage() {
     browserRepairInfo,
     enableBrowserRepair,
     setEnableBrowserRepair,
+    // 渲染加载状态
+    isRenderLoading,
+    // 文件哈希
+    fileHash,
   } = useAudioProcessor();
 
   const [showDiag, setShowDiag] = useState(false);
@@ -339,6 +343,7 @@ export default function RepairPage() {
             <div className="lg:col-span-5 space-y-6">
               <AIRepairPanel
                 params={params}
+                fileHash={fileHash}
                 analysis={audioAnalysis}
                 selectedMode={selectedMode}
                 modes={repairModes}
@@ -372,6 +377,7 @@ export default function RepairPage() {
                 browserAlgorithmVersion={browserRepairInfo?.algorithmVersion}
                 backendCompletedAt={repairResult?.completed_at}
                 browserCompletedAt={browserRepairInfo?.completedAt}
+                isBackendLoading={isRenderLoading}
               />
             </div>
           </div>
