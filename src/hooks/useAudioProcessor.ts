@@ -723,14 +723,14 @@ export function useAudioProcessor() {
     setProcessingStep('');
     setProcessingProgress(0);
 
-    const [arrayBuf, fileHash] = await Promise.all([
+    const [arrayBuf, hash] = await Promise.all([
       file.arrayBuffer(),
       computeFileHash(file),
     ]);
     if (seq !== loadAudioSeqRef.current) return;
-    fileHashRef.current = fileHash;
-    setFileHash(fileHash);
-    writeLog(`[loadAudioFile] fileHash=${fileHash}`);
+    fileHashRef.current = hash;
+    setFileHash(hash);
+    writeLog(`[loadAudioFile] fileHash=${hash}`);
 
     const context = getAudioContext();
     let buffer: AudioBuffer;
