@@ -8,6 +8,7 @@ import { SpectrumVisualizer } from '../components/SpectrumVisualizer';
 import { AIRepairPanel } from '../components/AIRepairPanel';
 import { DownloadButton } from '../components/DownloadButton';
 import { AIDetectionComparison } from '../components/AIDetectionComparison';
+import { ErrorBoundary } from '../components/ErrorBoundary';
 import { useAudioProcessor } from '../hooks/useAudioProcessor';
 
 export default function RepairPage() {
@@ -78,6 +79,8 @@ export default function RepairPage() {
     isRenderLoading,
     // 文件哈希
     fileHash,
+    // 修复参数配置管理
+    saveProfile,
   } = useAudioProcessor();
 
   const [showDiag, setShowDiag] = useState(false);
@@ -127,6 +130,7 @@ export default function RepairPage() {
   } : null;
 
   return (
+    <ErrorBoundary>
     <div className="min-h-screen bg-dark py-6">
       <Header />
 
@@ -425,5 +429,6 @@ export default function RepairPage() {
         </div>
       )}
     </div>
+    </ErrorBoundary>
   );
 }

@@ -12,6 +12,7 @@ import {
   saveSettings,
   ProfileConfig,
 } from '../utils/settingsStorage';
+import { fetchAlgorithmVersions, AlgorithmVersion } from '../services/backendApi';
 
 const PARAM_LABELS: Record<keyof AIRepairParams, string> = {
   deClipping: '去削波',
@@ -46,12 +47,20 @@ export default function ProfileManagerPage() {
   const [showNewDialog, setShowNewDialog] = useState(false);
   const [newName, setNewName] = useState('');
   const [importInputKey, setImportInputKey] = useState(0);
+  const [algorithmVersions, setAlgorithmVersions] = useState<AlgorithmVersion[]>([]);
 
   const refresh = useCallback(() => {
     setProfiles(getSavedProfiles());
   }, []);
 
   useEffect(() => { refresh(); }, [refresh]);
+
+  // 从后端获取算法版本列表
+  useEffect(() => {
+    fetchAlgorithmVersions().then(versions => {
+      if (versions.length > 0) setAlgorithmVersions(versions);
+    }).catch(() => {});
+  }, []);
 
   const handleSaveNew = useCallback(() => {
     const name = newName.trim();
@@ -217,7 +226,8 @@ export default function ProfileManagerPage() {
             </label>
             <button
               onClick={() => {
-                setEditingParams({ params: { ...defaultAIRepairParams }, algorithmVersion: 'v2.0' });
+                const defaultAlgoVer = algorithmVersions.length > 0 ? algorithmVersions[0].name : 'v2.0';
+                setEditingParams({ params: { ...defaultAIRepairParams }, algorithmVersion: defaultAlgoVer });
                 setEditingId(null);
                 setEditingName('');
                 setShowNewDialog(true);
@@ -341,11 +351,26 @@ export default function ProfileManagerPage() {
               {/* 算法版本 */}
               <div className="mb-4">
                 <label className="text-xs text-gray-400 mb-1 block">算法版本</label>
-                <input
-                  value={editingParams?.algorithmVersion ?? 'v2.0'}
-                  onChange={e => setEditingParams(prev => prev ? { ...prev, algorithmVersion: e.target.value } : null)}
-                  className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-cyan-400/50"
-                />
+                {algorithmVersions.length > 0 ? (
+                  <select
+                    value={editingParams?.algorithmVersion ?? ''}
+                    onChange={e => setEditingParams(prev => prev ? { ...prev, algorithmVersion: e.target.value } : null)}
+                    className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-cyan-400/50"
+                  >
+                    {algorithmVersions.map(v => (
+                      <option key={v.name} value={v.name} className="bg-gray-900">
+                        {v.label || v.name}{v.description ? ` - ${v.description}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    value={editingParams?.algorithmVersion ?? 'v2.0'}
+                    onChange={e => setEditingParams(prev => prev ? { ...prev, algorithmVersion: e.target.value } : null)}
+                    className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-cyan-400/50"
+                    placeholder="后端不可用，手动输入版本号"
+                  />
+                )}
               </div>
 
               {/* 参数滑块 */}

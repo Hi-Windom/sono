@@ -489,11 +489,33 @@ export function useAudioProcessor() {
         writeLog(`[useAudioProcessor] 恢复会话: taskId=${session.taskId} status=${taskStatus.status}`);
 
         const file = session.file;
+
+        // 验证 File 对象有效性（移动端暂离后 File 可能失效）
+        if (!(file instanceof File) || file.size === 0) {
+          writeLog(`[useAudioProcessor] 会话中的 File 对象无效(size=${file?.size ?? 'N/A'})，清除会话`);
+          await clearSession();
+          pendingSessionRef.current = null;
+          sessionRestoredRef.current = true;
+          return;
+        }
+
+        // 尝试读取文件确认数据可用
+        let arrayBuf: ArrayBuffer;
+        try {
+          arrayBuf = await file.arrayBuffer();
+          if (arrayBuf.byteLength === 0) throw new Error('arrayBuffer 为空');
+        } catch (fileErr) {
+          writeLog(`[useAudioProcessor] File 对象读取失败: ${fileErr instanceof Error ? fileErr.message : String(fileErr)}，清除会话`);
+          await clearSession();
+          pendingSessionRef.current = null;
+          sessionRestoredRef.current = true;
+          return;
+        }
+
         setAudioFile(file);
         fileHashRef.current = session.fileHash;
 
         const context = getAudioContext();
-        const arrayBuf = await file.arrayBuffer();
         const wavHeaderInfo = parseWavHeader(arrayBuf.slice(0, 44 + 4096));
         setWavInfo(wavHeaderInfo);
         const fastDecoded = decodeWavPcm(context, arrayBuf);
@@ -819,19 +841,26 @@ export function useAudioProcessor() {
     setParams(mode.params);
   }, []);
 
+  // 标记：用户手动编辑参数（区别于 applyRepairMode / 初始化设置 params）
+  const userEditingParamRef = useRef(false);
+
   const updateParam = useCallback((key: keyof AIRepairParams, value: number) => {
+    userEditingParamRef.current = true;
     setParams(prev => ({ ...prev, [key]: value }));
-    // 联动：参数变化后检查是否命中预设模式（在 setParams 外部调用，避免嵌套 setState）
-    setParams(current => {
-      const matched = repairModes.find(m => {
-        return (Object.keys(m.params) as (keyof AIRepairParams)[]).every(
-          k => m.params[k] === current[k]
-        );
-      });
-      setSelectedMode(matched ? matched.name : '');
-      return current; // 不修改，只用于读取最新值
+  }, []);
+
+  // 当用户手动修改参数时，检查是否仍命中某个预设模式，自动联动 selectedMode
+  useEffect(() => {
+    if (!userEditingParamRef.current) return;
+    userEditingParamRef.current = false;
+    if (repairModes.length === 0) return;
+    const matched = repairModes.find(m => {
+      return (Object.keys(m.params) as (keyof AIRepairParams)[]).every(
+        k => m.params[k] === params[k]
+      );
     });
-  }, [repairModes]);
+    setSelectedMode(matched ? matched.name : '');
+  }, [params, repairModes]);
 
   const updateProcessingOptions = useCallback((options: Partial<ProcessingOptions>) => {
     setProcessingOptionsState(prev => ({ ...prev, ...options }));
