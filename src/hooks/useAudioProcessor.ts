@@ -169,6 +169,7 @@ export function useAudioProcessor() {
   } | null>(null);
 
   const [backendWaveformPeaks, setBackendWaveformPeaks] = useState<number[][] | null>(null);
+  const [originalWaveformPeaks, setOriginalWaveformPeaks] = useState<number[][] | null>(null);
   const [browserRepairInfo, setBrowserRepairInfo] = useState<{
     completedAt: string;
     algorithmVersion: string;
@@ -542,6 +543,21 @@ export function useAudioProcessor() {
         const context = getAudioContext();
         const wavHeaderInfo = parseWavHeader(arrayBuf.slice(0, 44 + 4096));
         setWavInfo(wavHeaderInfo);
+        if (!wavHeaderInfo && session.fileHash) {
+          try {
+            const infoRes = await fetch(`/api/v1/audio-info/${session.fileHash}`);
+            if (infoRes.ok) {
+              const ai = await infoRes.json();
+              const infoFromApi: WavInfo = {
+                sampleRate: ai.sample_rate,
+                channels: ai.channels,
+                duration: ai.duration,
+                bitDepth: ai.sample_width * 8,
+              };
+              setWavInfo(infoFromApi);
+            }
+          } catch {}
+        }
         const fastDecoded = decodeWavPcm(context, arrayBuf);
         const buffer = fastDecoded || await context.decodeAudioData(arrayBuf);
 
@@ -740,6 +756,7 @@ export function useAudioProcessor() {
     taskIdRef.current = null;
     setRepairResult(null);
     setBackendWaveformPeaks(null);
+    setOriginalWaveformPeaks(null);
     setBackendPreviewUrl(null);
     setAudioAnalysis(null);
     setDuration(0);
@@ -886,6 +903,20 @@ export function useAudioProcessor() {
           writeLog(`[loadAudioFile] 上传成功 taskId=${newTaskId}`);
         }
 
+        if (uploadRes.audio_info && !wavHeaderInfo) {
+          const ai = uploadRes.audio_info;
+          const infoFromApi: WavInfo = {
+            sampleRate: ai.sample_rate,
+            channels: ai.channels,
+            duration: ai.duration,
+            bitDepth: ai.sample_width * 8,
+          };
+          setWavInfo(infoFromApi);
+          setDuration(ai.duration);
+          durationRef.current = ai.duration;
+          writeLog(`[loadAudioFile] 从audio_info获取规格: sr=${ai.sample_rate} ch=${ai.channels} dur=${ai.duration.toFixed(1)}`);
+        }
+
         saveSession({
           file,
           fileName: file.name,
@@ -904,6 +935,16 @@ export function useAudioProcessor() {
           fetch(`/api/v1/decoded-wav/${hash}`, { method: 'POST' }).catch(() => {});
           writeLog(`[loadAudioFile] 触发后端解码WAV缓存创建`);
         }
+
+        fetch(`/api/v1/waveform/${hash}`)
+          .then(res => res.ok ? res.json() : null)
+          .then(data => {
+            if (data?.peaks && seq === loadAudioSeqRef.current) {
+              setOriginalWaveformPeaks(data.peaks);
+              writeLog(`[loadAudioFile] 原始波形缓存已加载`);
+            }
+          })
+          .catch(() => {});
 
         pendingSessionRef.current = null;
         sessionRestoredRef.current = true;
@@ -2466,6 +2507,8 @@ export function useAudioProcessor() {
     setRenderDownloadUrl,
     showDownloadModal,
     setShowDownloadModal,
+    // 波形缓存
+    originalWaveformPeaks,
   };
 }
 

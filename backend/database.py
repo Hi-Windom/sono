@@ -56,6 +56,10 @@ def init_db() -> None:
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    try:
+        conn.execute("ALTER TABLE analysis_cache ADD COLUMN waveform_peaks TEXT")
+    except Exception:
+        pass
     conn.commit()
     conn.close()
 
@@ -273,11 +277,11 @@ def get_analysis_cache(quick_hash: str) -> dict[str, Any] | None:
         return None
     return dict(row)
 
-def save_analysis_cache(quick_hash: str, file_name: str, file_size: int, wav_info: str, analysis: str) -> None:
+def save_analysis_cache(quick_hash: str, file_name: str, file_size: int, wav_info: str, analysis: str, waveform_peaks: str = "") -> None:
     conn = get_db()
     conn.execute(
-        "INSERT OR REPLACE INTO analysis_cache (quick_hash, file_name, file_size, wav_info, analysis) VALUES (?, ?, ?, ?, ?)",
-        (quick_hash, file_name, file_size, wav_info, analysis),
+        "INSERT OR REPLACE INTO analysis_cache (quick_hash, file_name, file_size, wav_info, analysis, waveform_peaks) VALUES (?, ?, ?, ?, ?, ?)",
+        (quick_hash, file_name, file_size, wav_info, analysis, waveform_peaks),
     )
     conn.commit()
     conn.close()

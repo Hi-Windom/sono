@@ -1,6 +1,6 @@
 import React, { useState, useCallback } from 'react';
 
-interface DownloadFileInfo {
+export interface DownloadFileInfo {
   filename: string;
   fileSize: string;
   sampleRate: string;

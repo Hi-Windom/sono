@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { AIRepairParams, RepairMode } from '../utils/advancedAudioProcessing';
-import { ProcessingOptions, AlgorithmVersion, fetchMemoryInfo, MemoryInfoResult, fetchStorageEstimate, StorageEstimateResult, fetchRenderCache, RenderCacheEntry, parseFilenameFromDisposition } from '../services/backendApi';
+import { ProcessingOptions, AlgorithmVersion, fetchMemoryInfo, MemoryInfoResult, fetchStorageEstimate, StorageEstimateResult, fetchRenderCache, RenderCacheEntry } from '../services/backendApi';
 
 interface AIRepairPanelProps {
   params: AIRepairParams;
@@ -33,6 +33,7 @@ interface AIRepairPanelProps {
   taskId?: string | null;
   onRenderCacheRefresh?: (fn: () => Promise<void>) => void;
   cacheTriggerKey?: number;
+  onInstantDownload?: (cacheEntry: RenderCacheEntry) => void;
 }
 
 const sampleRateOptions = [
@@ -119,6 +120,7 @@ export function AIRepairPanel({
   taskId,
   onRenderCacheRefresh,
   cacheTriggerKey,
+  onInstantDownload,
 }: AIRepairPanelProps) {
   const [showParams, setShowParams] = useState(false);
   const [memoryInfo, setMemoryInfo] = useState<MemoryInfoResult | null>(null);
@@ -523,27 +525,9 @@ export function AIRepairPanel({
                 <div className="flex justify-between"><span className="text-gray-400">生成时间</span><span className="text-white">{selectedCache.mtime ? new Date(selectedCache.mtime).toLocaleString('zh-CN') : '—'}</span></div>
                 <div className="mt-2 flex gap-2">
                   <button
-                    onClick={async () => {
-                      // 秒下：fetch+blob 下载，避免页面跳转，文件名正确
-                      try {
-                        const url = `/api/v1/download-file/${selectedCache.filename}`;
-                        const res = await fetch(url);
-                        if (!res.ok) throw new Error('下载失败');
-                        const blob = await res.blob();
-                        // 从 Content-Disposition 解析文件名（支持 RFC 5987 中文编码）
-                        const disposition = res.headers.get('Content-Disposition');
-                        const parsedName = parseFilenameFromDisposition(disposition);
-                        const saveName = parsedName || `audio_${algorithmVersion}_${selectedCache.sample_rate / 1000}k_${selectedCache.bit_depth}bit.wav`;
-                        const blobUrl = URL.createObjectURL(blob);
-                        const a = document.createElement('a');
-                        a.href = blobUrl;
-                        a.download = saveName;
-                        a.style.display = 'none';
-                        document.body.appendChild(a);
-                        a.click();
-                        setTimeout(() => { URL.revokeObjectURL(blobUrl); document.body.removeChild(a); }, 5000);
-                      } catch (e) {
-                        console.warn('秒下失败:', e);
+                    onClick={() => {
+                      if (onInstantDownload) {
+                        onInstantDownload(selectedCache);
                       }
                     }}
                     className="flex-1 py-1 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 rounded text-[11px] transition font-medium"

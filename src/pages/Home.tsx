@@ -6,7 +6,7 @@ import { WaveformVisualizer } from '../components/WaveformVisualizer';
 import { SpectrumVisualizer } from '../components/SpectrumVisualizer';
 import { AIRepairPanel } from '../components/AIRepairPanel';
 import { AIDetectionComparison } from '../components/AIDetectionComparison';
-import { DownloadModal } from '../components/DownloadModal';
+import { DownloadModal, DownloadFileInfo } from '../components/DownloadModal';
 import { useAudioProcessor } from '../hooks/useAudioProcessor';
 
 export default function Home() {
@@ -70,9 +70,11 @@ export default function Home() {
     setRenderDownloadUrl,
     showDownloadModal,
     setShowDownloadModal,
+    originalWaveformPeaks,
   } = useAudioProcessor();
 
   const [showDiag, setShowDiag] = useState(false);
+  const [instantDownloadInfo, setInstantDownloadInfo] = useState<DownloadFileInfo | null>(null);
 
   const hasBrowserResult = !!browserProcessedBuffer;
   const hasBackendResult = !!backendProcessedBuffer || !!repairResult;
@@ -208,6 +210,7 @@ export default function Home() {
                 <div className="mt-6">
                   <WaveformVisualizer
                     audioBuffer={activeBuffer ?? audioBuffer}
+                    waveformPeaks={playMode === 'original' && !(activeBuffer ?? audioBuffer) ? originalWaveformPeaks : null}
                     label={playMode !== 'original' && activeBuffer ? '修复后波形' : '原始波形'}
                     currentTime={currentTime}
                     duration={duration}
@@ -265,6 +268,20 @@ export default function Home() {
                 duration={duration}
                 channels={audioBuffer?.numberOfChannels ?? 2}
                 backendAvailable={backendAvailable}
+                onInstantDownload={(cacheEntry) => {
+                  const downloadUrl = `/api/v1/download-file/${cacheEntry.filename}`;
+                  setRenderDownloadUrl(downloadUrl);
+                  setInstantDownloadInfo({
+                    filename: cacheEntry.filename,
+                    fileSize: `${(cacheEntry.size / (1024 * 1024)).toFixed(2)} MB`,
+                    sampleRate: `${cacheEntry.sample_rate / 1000} kHz`,
+                    bitDepth: cacheEntry.bit_depth,
+                    channels: 2,
+                    duration: duration,
+                    algorithmVersion: cacheEntry.algorithm_version,
+                  });
+                  setShowDownloadModal(true);
+                }}
               />
 
               {/* CacheManager moved to /cache-manager page */}
@@ -304,8 +321,11 @@ export default function Home() {
 
       <DownloadModal
         isOpen={showDownloadModal}
-        onClose={() => setShowDownloadModal(false)}
-        backendInfo={hasBackendResult && repairResult ? {
+        onClose={() => {
+          setShowDownloadModal(false);
+          setInstantDownloadInfo(null);
+        }}
+        backendInfo={instantDownloadInfo || (hasBackendResult && repairResult ? {
           filename: `${(audioFile?.name || 'audio').replace(/\.[^/.]+$/, '')}_backend_repaired.wav`,
           fileSize: repairResult.duration && repairResult.output_sample_rate && repairResult.channels && repairResult.output_bit_depth
             ? `${((repairResult.duration * repairResult.output_sample_rate * repairResult.channels * (repairResult.output_bit_depth / 8)) / (1024 * 1024)).toFixed(2)} MB`
@@ -316,7 +336,7 @@ export default function Home() {
           duration: repairResult.duration || 0,
           algorithmVersion: algorithmVersion,
           completedAt: repairResult.completed_at,
-        } : null}
+        } : null)}
         browserInfo={hasBrowserResult && browserBufferInfo ? {
           filename: `${(audioFile?.name || 'audio').replace(/\.[^/.]+$/, '')}_browser_repaired.wav`,
           fileSize: `${((browserBufferInfo.duration * browserBufferInfo.sampleRate * browserBufferInfo.channels * (processingOptions.bitDepth / 8)) / (1024 * 1024)).toFixed(2)} MB`,

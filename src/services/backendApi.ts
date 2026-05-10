@@ -17,12 +17,22 @@ function log(tag: string, ...args: unknown[]) {
   console.log(msg);
 }
 
+interface AudioInfo {
+  sample_rate: number;
+  channels: number;
+  duration: number;
+  num_frames: number;
+  format: string;
+  sample_width: number;
+}
+
 interface UploadResponse {
   task_id: string;
   filename: string;
   size: number;
   message: string;
   cached?: boolean;
+  audio_info?: AudioInfo | null;
 }
 
 interface TaskStatus {

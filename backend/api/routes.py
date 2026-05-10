@@ -213,10 +213,26 @@ async def upload_audio(file: UploadFile = File(...), file_hash: str = Form("")):
     create_task(task_id, file.filename or "audio", upload_path, {}, file_hash, file_size)
     logger.info(f"[/upload] task_id={task_id} file_hash={file_hash or 'none'}")
 
+    audio_info = None
+    try:
+        import miniaudio
+        info = miniaudio.get_file_info(upload_path)
+        audio_info = {
+            "sample_rate": info.sample_rate,
+            "channels": info.nchannels,
+            "duration": info.duration,
+            "num_frames": info.num_frames,
+            "format": str(info.file_format),
+            "sample_width": info.sample_width,
+        }
+    except Exception:
+        pass
+
     return {
         "task_id": task_id,
         "filename": file.filename,
         "size": file_size,
+        "audio_info": audio_info,
     }
 
 class DetectRequest(BaseModel):
@@ -828,6 +844,8 @@ async def create_decoded_wav(file_hash: str):
     if ext == ".wav":
         return {"status": "ok", "message": "WAV文件无需解码缓存"}
 
+    task_id = task.get("id", "")
+
     def _convert_to_wav():
         try:
             import numpy as np
@@ -839,11 +857,74 @@ async def create_decoded_wav(file_hash: str):
             import soundfile as sf
             sf.write(decoded_path, y, sr)
             logger.info(f"解码WAV缓存创建完成: {decoded_path} size={os.path.getsize(decoded_path)}")
+            from database import update_task
+            update_task(task_id, original_path=decoded_path)
+            if original_path != decoded_path and os.path.exists(original_path):
+                os.remove(original_path)
+                logger.info(f"已删除原始文件: {original_path}")
         except Exception as e:
             logger.warning(f"解码WAV缓存创建失败: {e}")
 
     executor.submit(_convert_to_wav)
     return {"status": "ok", "message": "正在后台创建解码缓存"}
+
+@router.get("/audio-info/{file_hash}")
+async def get_audio_info(file_hash: str):
+    task = find_task_by_hash(file_hash)
+    if not task:
+        raise HTTPException(status_code=404, detail="未找到对应的上传文件")
+
+    original_path = task.get("original_path", "")
+    if not original_path or not os.path.exists(original_path):
+        raise HTTPException(status_code=404, detail="音频文件不存在")
+
+    try:
+        import miniaudio
+        info = miniaudio.get_file_info(original_path)
+        return {
+            "sample_rate": info.sample_rate,
+            "channels": info.nchannels,
+            "duration": info.duration,
+            "num_frames": info.num_frames,
+            "format": str(info.file_format),
+            "sample_width": info.sample_width,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取音频信息失败: {e}")
+
+@router.get("/waveform/{file_hash}")
+async def get_waveform(file_hash: str):
+    task = find_task_by_hash(file_hash)
+    if not task:
+        raise HTTPException(status_code=404, detail="未找到对应的上传文件")
+
+    from database import get_analysis_cache as db_get, save_analysis_cache as db_save
+    cached = db_get(file_hash)
+    if cached and cached.get("waveform_peaks"):
+        try:
+            return {"peaks": json.loads(cached["waveform_peaks"])}
+        except Exception:
+            pass
+
+    original_path = task.get("original_path", "")
+    if not original_path or not os.path.exists(original_path):
+        raise HTTPException(status_code=404, detail="音频文件不存在")
+
+    from services.task_manager import _generate_waveform_peaks
+    peaks = _generate_waveform_peaks(original_path)
+    if not peaks:
+        raise HTTPException(status_code=500, detail="波形生成失败")
+
+    if cached:
+        from database import get_db
+        conn = get_db()
+        conn.execute("UPDATE analysis_cache SET waveform_peaks = ? WHERE quick_hash = ?", (json.dumps(peaks), file_hash))
+        conn.commit()
+        conn.close()
+    else:
+        db_save(file_hash, task.get("original_filename", ""), task.get("file_size", 0), "", "", waveform_peaks=json.dumps(peaks))
+
+    return {"peaks": peaks}
 
 @router.post("/cancel/{task_id}")
 async def cancel_task_endpoint(task_id: str):
