@@ -1,4 +1,5 @@
 import React, { useState, useCallback } from 'react';
+import { parseFilenameFromDisposition } from '../services/backendApi';
 
 export interface DownloadFileInfo {
   filename: string;
@@ -55,19 +56,31 @@ export function DownloadModal({
     }
   }, []);
 
-  const handleMultiThreadDownload = useCallback((url: string, filename: string) => {
+  const handleDownload = useCallback(async (url: string, fallbackFilename: string) => {
     setDownloading(true);
-    const fullUrl = new URL(url, window.location.origin).href;
-    const a = document.createElement('a');
-    a.href = fullUrl;
-    a.download = filename;
-    a.style.display = 'none';
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(() => {
-      document.body.removeChild(a);
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error('下载失败');
+      const disposition = res.headers.get('Content-Disposition');
+      const parsedName = parseFilenameFromDisposition(disposition);
+      const saveName = parsedName || fallbackFilename;
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = saveName;
+      a.style.display = 'none';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        URL.revokeObjectURL(blobUrl);
+        document.body.removeChild(a);
+      }, 5000);
+    } catch (e) {
+      console.warn('下载失败:', e);
+    } finally {
       setDownloading(false);
-    }, 1000);
+    }
   }, []);
 
   const handleBrowserDownload = useCallback(() => {
@@ -155,7 +168,7 @@ export function DownloadModal({
               {backendDownloadUrl && (
                 <div className="mt-3 flex gap-2">
                   <button
-                    onClick={() => handleMultiThreadDownload(backendDownloadUrl, backendInfo.filename)}
+                    onClick={() => handleDownload(backendDownloadUrl, backendInfo.filename)}
                     disabled={downloading || isBackendLoading}
                     className="flex-1 py-2 bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/30 rounded-lg text-cyan-400 text-xs font-medium transition disabled:opacity-50"
                   >
