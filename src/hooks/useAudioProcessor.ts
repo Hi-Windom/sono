@@ -335,13 +335,15 @@ export function useAudioProcessor() {
   // 定期健康检查（每10秒）- 使用 ref 避免依赖项变化导致重新创建定时器
   const backendAvailableRef = useRef(backendAvailable);
   backendAvailableRef.current = backendAvailable;
+  const healthFailCountRef = useRef(0);
 
   useEffect(() => {
     const checkHealth = async () => {
       try {
-        const res = await fetch('/health', { signal: AbortSignal.timeout(5000) });
+        const res = await fetch('/health', { signal: AbortSignal.timeout(15000) });
         const wasAvailable = backendAvailableRef.current;
         const isAvailable = res.ok;
+        healthFailCountRef.current = 0;
         setBackendAvailable(isAvailable);
 
         if (!wasAvailable && isAvailable) {
@@ -369,9 +371,11 @@ export function useAudioProcessor() {
           console.warn('[useAudioProcessor] 后端变为不可用');
         }
       } catch {
-        if (backendAvailableRef.current) {
-          console.warn('[useAudioProcessor] 后端健康检查失败，标记为不可用');
+        healthFailCountRef.current++;
+        if (backendAvailableRef.current && healthFailCountRef.current >= 3) {
+          console.warn('[useAudioProcessor] 后端健康检查连续3次失败，标记为不可用');
           setBackendAvailable(false);
+          healthFailCountRef.current = 0;
         }
       }
     };
@@ -2109,6 +2113,11 @@ export function useAudioProcessor() {
           processingOptions.bitDepth,
         );
         writeLog(`[downloadProcessedAudio] 渲染完成: sr=${renderRes.render_result.output_sample_rate} bd=${renderRes.render_result.output_bit_depth}`);
+        setRepairResult(prev => prev ? {
+          ...prev,
+          output_sample_rate: renderRes.render_result.output_sample_rate,
+          output_bit_depth: renderRes.render_result.output_bit_depth,
+        } : null);
         const url = `/api/v1/download-file/${renderRes.render_filename}`;
         downloadUrl(url, fileName);
         setProcessingStep('');
