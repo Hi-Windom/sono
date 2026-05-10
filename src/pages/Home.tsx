@@ -6,7 +6,6 @@ import { WaveformVisualizer } from '../components/WaveformVisualizer';
 import { SpectrumVisualizer } from '../components/SpectrumVisualizer';
 import { AIRepairPanel } from '../components/AIRepairPanel';
 import { AIDetectionComparison } from '../components/AIDetectionComparison';
-import { CacheManager } from '../components/CacheManager';
 import { useAudioProcessor } from '../hooks/useAudioProcessor';
 
 export default function Home() {
@@ -118,7 +117,7 @@ export default function Home() {
               </div>
               <AudioUploader onFileSelect={loadAudioFile} />
             </div>
-            <CacheManager />
+            {/* CacheManager moved to /cache-manager page */}
           </div>
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -271,7 +270,7 @@ export default function Home() {
                 </button>
               )}
 
-              <CacheManager />
+              {/* CacheManager moved to /cache-manager page */}
             </div>
           </div>
         )}

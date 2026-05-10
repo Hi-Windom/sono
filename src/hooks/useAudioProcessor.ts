@@ -3,8 +3,8 @@ import { AIRepairParams, defaultAIRepairParams, detectAudioIssues, RepairMode } 
 import { AISongDetectionResult } from '../utils/aiSongChecker';
 import { loadSettings, saveSettings, resetSettings as resetStoredSettings, saveProfileToStorage } from '../utils/settingsStorage';
 import { parseWavHeader, WavInfo, decodeWavPcm } from '../utils/wavParser';
-import { saveSession, loadSession, clearSession } from '../utils/sessionDB';
-import { computeFileHash } from '../utils/fileHash';
+import { saveSession, loadSession, clearSession, getAnalysisCache, saveAnalysisCache } from '../utils/sessionDB';
+import { computeFileHash, computeQuickHash } from '../utils/fileHash';
 import {
   uploadAudio,
   detectAudio,
@@ -29,6 +29,7 @@ import {
   renderAudio,
   waitRenderWithWS,
   fetchRenderCache,
+  parseFilenameFromDisposition,
 } from '../services/backendApi';
 
 function writeLog(message: string) {
@@ -755,14 +756,29 @@ export function useAudioProcessor() {
     setProcessingStep('');
     setProcessingProgress(0);
 
-    const [arrayBuf, hash] = await Promise.all([
+    const [arrayBuf, hash, quickHash] = await Promise.all([
       file.arrayBuffer(),
       computeFileHash(file),
+      computeQuickHash(file),
     ]);
     if (seq !== loadAudioSeqRef.current) return;
     fileHashRef.current = hash;
     setFileHash(hash);
-    writeLog(`[loadAudioFile] fileHash=${hash}`);
+    writeLog(`[loadAudioFile] fileHash=${hash} quickHash=${quickHash.slice(0, 16)}`);
+
+    // 尝试从解析缓存读取 wavInfo + analysis
+    let cachedAnalysis: AudioAnalysis | null = null;
+    let cachedWavInfo: WavInfo | null = null;
+    try {
+      const cached = await getAnalysisCache(quickHash);
+      if (cached) {
+        cachedAnalysis = JSON.parse(cached.analysis);
+        cachedWavInfo = JSON.parse(cached.wavInfo);
+        writeLog(`[loadAudioFile] 解析缓存命中: quickHash=${quickHash.slice(0, 16)}`);
+        if (cachedWavInfo) setWavInfo(cachedWavInfo);
+        if (cachedAnalysis) setAudioAnalysis(cachedAnalysis);
+      }
+    } catch { /* 缓存读取失败，继续正常流程 */ }
 
     const context = getAudioContext();
     let buffer: AudioBuffer;
@@ -803,8 +819,19 @@ export function useAudioProcessor() {
       play();
     }
 
-    const analysis = detectAudioIssues(buffer);
+    const analysis = cachedAnalysis || detectAudioIssues(buffer);
     setAudioAnalysis(analysis);
+
+    // 如果没有缓存，存入解析缓存
+    if (!cachedAnalysis) {
+      saveAnalysisCache({
+        quickHash,
+        fileName: file.name,
+        fileSize: file.size,
+        wavInfo: JSON.stringify(wavHeaderInfo || cachedWavInfo),
+        analysis: JSON.stringify(analysis),
+      }).catch(() => { /* 忽略缓存写入失败 */ });
+    }
 
     (async () => {
       try {
@@ -2217,11 +2244,8 @@ export function useAudioProcessor() {
           if (res.ok) {
             const blob = await res.blob();
             const disposition = res.headers.get('Content-Disposition');
-            let saveName = fileName;
-            if (disposition) {
-              const match = disposition.match(/filename\*?=(?:UTF-8''|["']?)([^"';\n]+)/);
-              if (match?.[1]) saveName = decodeURIComponent(match[1].replace(/["']/g, ''));
-            }
+            const parsedName = parseFilenameFromDisposition(disposition);
+            const saveName = parsedName || fileName;
             const blobUrl = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = blobUrl;

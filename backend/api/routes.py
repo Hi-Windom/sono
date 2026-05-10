@@ -485,11 +485,27 @@ async def download_audio(task_id: str):
     download_name = f"{base_name}_repaired.wav"
 
     file_size = os.path.getsize(output_path)
-    return FileResponse(
-        output_path,
+    from urllib.parse import quote
+    encoded_name = quote(download_name)
+    disposition = f"attachment; filename*=UTF-8''{encoded_name}"
+
+    def iter_full_file():
+        with open(output_path, "rb") as f:
+            while True:
+                data = f.read(65536)
+                if not data:
+                    break
+                yield data
+
+    from fastapi.responses import StreamingResponse
+    return StreamingResponse(
+        iter_full_file(),
         media_type="audio/wav",
-        filename=download_name,
-        headers={"Accept-Ranges": "bytes", "Content-Length": str(file_size)},
+        headers={
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(file_size),
+            "Content-Disposition": disposition,
+        },
     )
 
 @router.get("/download-file/{filename}")
@@ -538,6 +554,10 @@ async def download_file(filename: str, request: Request):
     # 使用 StreamingResponse 支持 Range 请求（断点续传 + 多线程下载）
     file_size = os.path.getsize(file_path)
     range_header = request.headers.get("range")
+    # 统一使用 RFC 5987 编码 Content-Disposition，确保中文文件名正确
+    from urllib.parse import quote
+    encoded_name = quote(download_name)
+    disposition = f"attachment; filename*=UTF-8''{encoded_name}"
 
     if range_header:
         # 解析 Range: bytes=start-end
@@ -572,16 +592,28 @@ async def download_file(filename: str, request: Request):
                     "Content-Range": f"bytes {start}-{end}/{file_size}",
                     "Content-Length": str(chunk_size),
                     "Accept-Ranges": "bytes",
-                    "Content-Disposition": f'attachment; filename="{download_name}"',
+                    "Content-Disposition": disposition,
                 },
             )
 
-    # 无 Range 请求，返回完整文件
-    return FileResponse(
-        file_path,
+    # 无 Range 请求，返回完整文件（使用 StreamingResponse 统一 Content-Disposition 格式）
+    def iter_full_file():
+        with open(file_path, "rb") as f:
+            while True:
+                data = f.read(65536)
+                if not data:
+                    break
+                yield data
+
+    from fastapi.responses import StreamingResponse
+    return StreamingResponse(
+        iter_full_file(),
         media_type="audio/wav",
-        filename=download_name,
-        headers={"Accept-Ranges": "bytes", "Content-Length": str(file_size)},
+        headers={
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(file_size),
+            "Content-Disposition": disposition,
+        },
     )
 
 @router.get("/render-cache/{task_id}")
@@ -637,6 +669,18 @@ async def get_render_cache(task_id: str):
                 pass
     return {"caches": caches}
 
+@router.delete("/render-cache/{filename}")
+async def delete_render_cache(filename: str):
+    """删除单个渲染缓存文件"""
+    file_path = os.path.join(OUTPUT_DIR, filename)
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="文件不存在")
+    if "_rendered_" not in filename:
+        raise HTTPException(status_code=400, detail="不是渲染缓存文件")
+    released = os.path.getsize(file_path)
+    os.remove(file_path)
+    return {"released_bytes": released, "filename": filename}
+
 @router.post("/cancel/{task_id}")
 async def cancel_task_endpoint(task_id: str):
     task = get_task(task_id)
@@ -690,26 +734,35 @@ async def training_upload(
 @router.get("/cache/info")
 async def get_cache_info():
     from database import get_db
-    
+
     upload_size = 0
     output_size = 0
+    render_size = 0
+    repair_size = 0
     upload_count = 0
     output_count = 0
-    
+    render_count = 0
+
     if os.path.exists(UPLOAD_DIR):
         for f in os.listdir(UPLOAD_DIR):
             fp = os.path.join(UPLOAD_DIR, f)
             if os.path.isfile(fp):
                 upload_size += os.path.getsize(fp)
                 upload_count += 1
-    
+
     if os.path.exists(OUTPUT_DIR):
         for f in os.listdir(OUTPUT_DIR):
             fp = os.path.join(OUTPUT_DIR, f)
             if os.path.isfile(fp):
                 output_size += os.path.getsize(fp)
                 output_count += 1
-    
+                if "_rendered_" in f:
+                    render_size += os.path.getsize(fp)
+                    render_count += 1
+
+    # 修复输出 = OUTPUT_DIR 总大小 - 渲染文件大小
+    repair_size = output_size - render_size
+
     conn = get_db()
     try:
         all_tasks = conn.execute(
@@ -717,18 +770,30 @@ async def get_cache_info():
         ).fetchall()
     finally:
         conn.close()
-    
+
     tasks = []
     for row in all_tasks:
         orig_path = row["original_path"] if row["original_path"] else ""
         out_path = row["output_path"] if row["output_path"] else ""
-        
+
         orig_exists = bool(orig_path) and os.path.exists(orig_path)
         out_exists = bool(out_path) and os.path.exists(out_path)
-        
+
         orig_size = os.path.getsize(orig_path) if orig_exists else 0
         out_size = os.path.getsize(out_path) if out_exists else 0
-        
+
+        # 收集该任务的渲染缓存
+        task_render_caches = []
+        if os.path.isdir(OUTPUT_DIR):
+            task_id_prefix = row["id"]
+            for fname in os.listdir(OUTPUT_DIR):
+                if fname.startswith(f"{task_id_prefix}_rendered_") and fname.endswith(".wav"):
+                    fp = os.path.join(OUTPUT_DIR, fname)
+                    task_render_caches.append({
+                        "filename": fname,
+                        "size": os.path.getsize(fp),
+                    })
+
         task_info = {
             "id": row["id"],
             "filename": row["original_filename"] or "unknown",
@@ -739,15 +804,19 @@ async def get_cache_info():
             "original_size": orig_size,
             "output_size": out_size,
             "total_size": orig_size + out_size,
+            "render_caches": task_render_caches,
         }
         tasks.append(task_info)
-    
+
     return {
         "total_size": upload_size + output_size,
         "upload_size": upload_size,
         "output_size": output_size,
+        "repair_size": repair_size,
+        "render_size": render_size,
         "upload_count": upload_count,
         "output_count": output_count,
+        "render_count": render_count,
         "task_count": len(tasks),
         "tasks": tasks,
     }

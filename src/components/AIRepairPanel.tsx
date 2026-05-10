@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { AIRepairParams, RepairMode } from '../utils/advancedAudioProcessing';
-import { ProcessingOptions, AlgorithmVersion, fetchMemoryInfo, MemoryInfoResult, fetchStorageEstimate, StorageEstimateResult, fetchRenderCache, RenderCacheEntry } from '../services/backendApi';
+import { ProcessingOptions, AlgorithmVersion, fetchMemoryInfo, MemoryInfoResult, fetchStorageEstimate, StorageEstimateResult, fetchRenderCache, RenderCacheEntry, parseFilenameFromDisposition } from '../services/backendApi';
 
 interface AIRepairPanelProps {
   params: AIRepairParams;
@@ -530,13 +530,10 @@ export function AIRepairPanel({
                         const res = await fetch(url);
                         if (!res.ok) throw new Error('下载失败');
                         const blob = await res.blob();
-                        // 从 Content-Disposition 解析文件名，或构造友好名
+                        // 从 Content-Disposition 解析文件名（支持 RFC 5987 中文编码）
                         const disposition = res.headers.get('Content-Disposition');
-                        let saveName = `audio_${algorithmVersion}_${selectedCache.sample_rate / 1000}k_${selectedCache.bit_depth}bit.wav`;
-                        if (disposition) {
-                          const match = disposition.match(/filename\*?=(?:UTF-8''|["']?)([^"';\n]+)/);
-                          if (match?.[1]) saveName = decodeURIComponent(match[1].replace(/["']/g, ''));
-                        }
+                        const parsedName = parseFilenameFromDisposition(disposition);
+                        const saveName = parsedName || `audio_${algorithmVersion}_${selectedCache.sample_rate / 1000}k_${selectedCache.bit_depth}bit.wav`;
                         const blobUrl = URL.createObjectURL(blob);
                         const a = document.createElement('a');
                         a.href = blobUrl;

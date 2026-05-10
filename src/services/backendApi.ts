@@ -1155,3 +1155,18 @@ export function waitRenderWithWS(
 }
 
 export { mapDetectionResult, type BackendDetectionResult, type BackendRepairResult, type ProgressEvent, type TaskStatus };
+
+/**
+ * 从 Content-Disposition 头解析文件名
+ * 支持 RFC 5987 (filename*=UTF-8''xxx) 和普通格式 (filename="xxx")
+ */
+export function parseFilenameFromDisposition(disposition: string | null): string | null {
+  if (!disposition) return null;
+  // 优先匹配 RFC 5987: filename*=UTF-8''xxx（URL编码，支持中文）
+  const utf8 = disposition.match(/filename\*=UTF-8''(.+?)(?:;|$)/i);
+  if (utf8?.[1]) return decodeURIComponent(utf8[1]);
+  // 其次匹配 filename="xxx" 或 filename=xxx
+  const plain = disposition.match(/filename=["']?([^"';\n]+)["']?/i);
+  if (plain?.[1]) return plain[1].trim();
+  return null;
+}
