@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { parseFilenameFromDisposition } from '../services/backendApi';
 
 export interface DownloadFileInfo {
@@ -10,6 +10,19 @@ export interface DownloadFileInfo {
   duration: number;
   algorithmVersion?: string;
   completedAt?: string;
+}
+
+function formatSpeed(bytesPerSec: number): string {
+  if (!bytesPerSec || bytesPerSec <= 0) return '';
+  if (bytesPerSec < 1024) return `${bytesPerSec.toFixed(0)} B/s`;
+  if (bytesPerSec < 1024 * 1024) return `${(bytesPerSec / 1024).toFixed(1)} KB/s`;
+  return `${(bytesPerSec / 1024 / 1024).toFixed(1)} MB/s`;
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
 interface DownloadModalProps {
@@ -35,10 +48,15 @@ export function DownloadModal({
 }: DownloadModalProps) {
   const [copySuccess, setCopySuccess] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const [dlProgress, setDlProgress] = useState(0);
+  const [dlLoaded, setDlLoaded] = useState(0);
+  const [dlTotal, setDlTotal] = useState(0);
+  const [dlSpeed, setDlSpeed] = useState(0);
   const [editingBackendName, setEditingBackendName] = useState(false);
   const [backendFilename, setBackendFilename] = useState('');
   const [editingBrowserName, setEditingBrowserName] = useState(false);
   const [browserFilename, setBrowserFilename] = useState('');
+  const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     if (backendInfo?.filename) setBackendFilename(backendInfo.filename);
@@ -47,6 +65,20 @@ export function DownloadModal({
   useEffect(() => {
     if (browserInfo?.filename) setBrowserFilename(browserInfo.filename);
   }, [browserInfo?.filename]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      if (abortRef.current) {
+        abortRef.current.abort();
+        abortRef.current = null;
+      }
+      setDownloading(false);
+      setDlProgress(0);
+      setDlLoaded(0);
+      setDlTotal(0);
+      setDlSpeed(0);
+    }
+  }, [isOpen]);
 
   const handleCopyLink = useCallback(async (url: string) => {
     try {
@@ -69,24 +101,73 @@ export function DownloadModal({
   }, []);
 
   const handleDownload = useCallback(async (url: string, fallbackFilename: string) => {
-    console.log('[DOWNLOAD] Starting download:', { url, fallbackFilename });
+    if (abortRef.current) {
+      abortRef.current.abort();
+    }
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     setDownloading(true);
+    setDlProgress(0);
+    setDlLoaded(0);
+    setDlTotal(0);
+    setDlSpeed(0);
+
     try {
-      console.log('[DOWNLOAD] Fetching URL:', url);
-      const res = await fetch(url);
-      console.log('[DOWNLOAD] Response status:', res.status, res.statusText);
-      console.log('[DOWNLOAD] Response headers:', Object.fromEntries(res.headers.entries()));
+      const res = await fetch(url, { signal: controller.signal });
       if (!res.ok) {
-        console.error('[DOWNLOAD] Response not OK:', res.status, res.statusText);
         throw new Error(`下载失败: HTTP ${res.status}`);
       }
+
+      const contentLength = parseInt(res.headers.get('Content-Length') || '0', 10);
+      setDlTotal(contentLength);
+
       const disposition = res.headers.get('Content-Disposition');
-      console.log('[DOWNLOAD] Content-Disposition:', disposition);
       const parsedName = parseFilenameFromDisposition(disposition);
       const saveName = fallbackFilename || parsedName || 'audio.wav';
-      console.log('[DOWNLOAD] Save name:', saveName);
-      const blob = await res.blob();
-      console.log('[DOWNLOAD] Blob size:', blob.size);
+
+      const reader = res.body?.getReader();
+      if (!reader) {
+        throw new Error('ReadableStream not supported');
+      }
+
+      const chunks: Uint8Array[] = [];
+      let loaded = 0;
+      const startTime = performance.now();
+      let lastUpdate = startTime;
+      let lastLoaded = 0;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        chunks.push(value);
+        loaded += value.length;
+        setDlLoaded(loaded);
+
+        const now = performance.now();
+        const elapsed = (now - lastUpdate) / 1000;
+        if (elapsed >= 0.3) {
+          const speed = (loaded - lastLoaded) / elapsed;
+          setDlSpeed(speed);
+          lastLoaded = loaded;
+          lastUpdate = now;
+        }
+
+        if (contentLength > 0) {
+          setDlProgress(loaded / contentLength);
+        } else {
+          setDlProgress(Math.min(0.95, 0.5 + loaded / (50 * 1024 * 1024) * 0.45));
+        }
+      }
+
+      const totalElapsed = (performance.now() - startTime) / 1000;
+      if (totalElapsed > 0) {
+        setDlSpeed(loaded / totalElapsed);
+      }
+      setDlProgress(1);
+
+      const blob = new Blob(chunks, { type: 'audio/wav' });
       const blobUrl = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = blobUrl;
@@ -98,10 +179,8 @@ export function DownloadModal({
         URL.revokeObjectURL(blobUrl);
         document.body.removeChild(a);
       }, 5000);
-      console.log('[DOWNLOAD] Download triggered successfully');
     } catch (e) {
-      console.error('[DOWNLOAD] Download failed, trying fallback method:', e);
-      // 备选方案：直接使用 window.open 或 a 标签
+      if ((e as Error).name === 'AbortError') return;
       try {
         const a = document.createElement('a');
         a.href = url;
@@ -110,13 +189,12 @@ export function DownloadModal({
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
-        console.log('[DOWNLOAD] Fallback download triggered');
       } catch (fallbackErr) {
-        console.error('[DOWNLOAD] Fallback also failed:', fallbackErr);
-        alert('下载失败，请尝试刷新页面后重试');
+        alert('下载失败，请尝试复制链接使用下载器下载');
       }
     } finally {
       setDownloading(false);
+      abortRef.current = null;
     }
   }, []);
 
@@ -131,6 +209,8 @@ export function DownloadModal({
   }, [browserDownloadAction]);
 
   if (!isOpen) return null;
+
+  const showProgress = downloading && dlLoaded > 0;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={onClose}>
@@ -232,6 +312,22 @@ export function DownloadModal({
                   </div>
                 )}
               </div>
+
+              {showProgress && (
+                <div className="mt-3 space-y-1.5">
+                  <div className="w-full h-1.5 bg-gray-700 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-gradient-to-r from-cyan-500 to-cyan-400 transition-all duration-200 rounded-full"
+                      style={{ width: `${Math.round(dlProgress * 100)}%` }}
+                    />
+                  </div>
+                  <div className="flex justify-between text-[10px] text-gray-400">
+                    <span>{formatBytes(dlLoaded)}{dlTotal > 0 ? ` / ${formatBytes(dlTotal)}` : ''}</span>
+                    <span>{formatSpeed(dlSpeed)}</span>
+                  </div>
+                </div>
+              )}
+
               {backendDownloadUrl && (
                 <div className="mt-3 flex gap-2">
                   <button
@@ -239,7 +335,7 @@ export function DownloadModal({
                     disabled={downloading || isBackendLoading}
                     className="flex-1 py-2 bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/30 rounded-lg text-cyan-400 text-xs font-medium transition disabled:opacity-50"
                   >
-                    {downloading ? '下载中...' : '⬇ 下载'}
+                    {downloading ? `下载中 ${Math.round(dlProgress * 100)}%` : '⬇ 下载'}
                   </button>
                   <button
                     onClick={() => handleCopyLink(backendDownloadUrl)}
