@@ -53,6 +53,7 @@ PARAM_DEFINITIONS = {
     "harmonic_richness": {"key": "harmonicRichness", "label": "谐波丰富度", "min": 0, "max": 1, "step": 0.01},
     "warmth": {"key": "warmth", "label": "温暖度", "min": 0, "max": 1, "step": 0.01},
     "clarity": {"key": "clarity", "label": "清晰度", "min": 0, "max": 1, "step": 0.01},
+    "detail_enhance": {"key": "detailEnhance", "label": "细节增强", "min": 0, "max": 1, "step": 0.01},
 }
 
 ALGORITHM_VERSIONS = {
