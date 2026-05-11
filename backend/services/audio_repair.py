@@ -838,18 +838,28 @@ def get_available_versions(mobile_mode: bool = False) -> list[dict[str, Any]]:
                 "step": pdef["step"],
                 "label": pdef["label"],
             }
+
+        # 健壮性处理：过滤掉未在 PARAM_DEFINITIONS 中定义的参数
+        def _filter_params(params_dict: dict) -> dict:
+            filtered = {}
+            for k, val in params_dict.items():
+                if k in PARAM_DEFINITIONS:
+                    filtered[PARAM_DEFINITIONS[k]["key"]] = val
+                # 如果参数未定义，静默跳过（健壮性）
+            return filtered
+
         version_data = {
             "name": v["name"],
             "label": v["label"],
             "description": v["description"],
-            "defaultParams": {PARAM_DEFINITIONS[k]["key"]: val for k, val in v["default_params"].items()},
+            "defaultParams": _filter_params(v["default_params"]),
             "paramRanges": param_ranges,
             "modes": [
                 {
                     "name": m["name"],
                     "description": m["description"],
                     "icon": m["icon"],
-                    "params": {PARAM_DEFINITIONS[k]["key"]: val for k, val in m["params"].items()},
+                    "params": _filter_params(m["params"]),
                 }
                 for m in v["modes"]
             ],
