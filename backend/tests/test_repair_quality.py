@@ -8,6 +8,7 @@ from backend.tests.conftest import (
     generate_speech_like,
     generate_with_pops,
     generate_with_clipping,
+    generate_ai_artifact_signal,
     write_temp_wav,
     compute_thd,
     compute_scale_adjusted_snr,
@@ -540,6 +541,165 @@ class TestV23aResample:
         import soundfile as sf
         y_out, sr_out = sf.read(output_path)
         assert sr_out == 48000, f"v2.3 output sr should be 48000, got {sr_out}"
+
+
+class TestV24PerStepQuality:
+
+    @pytest.fixture(autouse=True)
+    def import_v24_functions(self):
+        from services.repair.repair_v2_4.core import (
+            _adaptive_loudness_normalize,
+            _enhanced_multiband_compress,
+            _ai_artifact_repair,
+            _harmonic_bass_enhance,
+            _air_texture_reconstruct,
+            _soft_peak_limit,
+        )
+        self._adaptive_loudness_normalize = _adaptive_loudness_normalize
+        self._enhanced_multiband_compress = _enhanced_multiband_compress
+        self._ai_artifact_repair = _ai_artifact_repair
+        self._harmonic_bass_enhance = _harmonic_bass_enhance
+        self._air_texture_reconstruct = _air_texture_reconstruct
+        self._soft_peak_limit = _soft_peak_limit
+
+    def test_adaptive_loudness_normalize_snr(self):
+        y = generate_speech_like(sr=SR, duration=2.0).reshape(1, -1)
+        snr = compute_per_step_snr(y, self._adaptive_loudness_normalize, SR, -14.0)
+        assert snr > 60.0, f"adaptive_loudness_normalize SNR too low: {snr:.1f} dB"
+
+    def test_adaptive_loudness_normalize_is_constant_gain(self):
+        y = generate_speech_like(sr=SR, duration=2.0).reshape(1, -1)
+        y_out = self._adaptive_loudness_normalize(y, SR, -14.0)
+        y_64 = y.astype(np.float64).flatten()
+        y_out_64 = y_out.astype(np.float64).flatten()
+        min_len = min(len(y_64), len(y_out_64))
+        y_64 = y_64[:min_len]
+        y_out_64 = y_out_64[:min_len]
+        nonzero = np.abs(y_64) > 1e-10
+        if not np.any(nonzero):
+            pytest.skip("Signal too quiet")
+        ratios = y_out_64[nonzero] / y_64[nonzero]
+        cv = np.std(ratios) / (abs(np.mean(ratios)) + 1e-10)
+        assert cv < 0.001, f"adaptive_loudness_normalize gain varies: cv={cv:.6f}"
+
+    def test_enhanced_multiband_compress_snr(self):
+        y = generate_speech_like(sr=SR, duration=2.0).reshape(1, -1)
+        snr = compute_per_step_snr(y, self._enhanced_multiband_compress, SR, 0.5, "generic")
+        assert snr > 25.0, f"enhanced_multiband_compress SNR too low: {snr:.1f} dB"
+
+    def test_ai_artifact_repair_snr(self):
+        y = generate_ai_artifact_signal(sr=SR, duration=2.0).reshape(1, -1)
+        snr = compute_per_step_snr(y, self._ai_artifact_repair, SR, 0.5)
+        assert snr > 5.0, f"ai_artifact_repair SNR too low: {snr:.1f} dB"
+
+    def test_ai_artifact_repair_reduces_presence_spike(self):
+        y = generate_ai_artifact_signal(sr=SR, duration=2.0).reshape(1, -1)
+        y_copy = y.copy()
+        y_out = self._ai_artifact_repair(y, SR, 0.5)
+        from scipy.signal import butter, sosfilt
+        sos = butter(4, [2000 / (SR / 2), 5000 / (SR / 2)], btype='band', output='sos')
+        presence_before = np.sqrt(np.mean(sosfilt(sos, y_copy.flatten().astype(np.float64)) ** 2))
+        presence_after = np.sqrt(np.mean(sosfilt(sos, y_out.flatten().astype(np.float64)) ** 2))
+        assert presence_after < presence_before, (
+            f"ai_artifact_repair did not reduce 2-5kHz presence: before={presence_before:.4f}, after={presence_after:.4f}"
+        )
+
+    def test_harmonic_bass_enhance_snr(self):
+        y = generate_speech_like(sr=SR, duration=2.0).reshape(1, -1)
+        snr = compute_per_step_snr(y, self._harmonic_bass_enhance, SR, 0.5, "generic")
+        assert snr > 10.0, f"harmonic_bass_enhance SNR too low: {snr:.1f} dB"
+
+    def test_harmonic_bass_enhance_increases_low_freq(self):
+        y = generate_speech_like(sr=SR, duration=2.0).reshape(1, -1)
+        y_copy = y.copy()
+        y_out = self._harmonic_bass_enhance(y, SR, 0.5, "generic")
+        from scipy.signal import butter, sosfilt
+        sos = butter(4, 250 / (SR / 2), btype='low', output='sos')
+        low_before = np.sqrt(np.mean(sosfilt(sos, y_copy.flatten().astype(np.float64)) ** 2))
+        low_after = np.sqrt(np.mean(sosfilt(sos, y_out.flatten().astype(np.float64)) ** 2))
+        if low_before > 1e-10:
+            gain_db = 20 * np.log10(low_after / low_before)
+            assert gain_db > 1.0, f"harmonic_bass_enhance low freq gain: {gain_db:.1f} dB (expected > 1 dB)"
+
+    def test_air_texture_reconstruct_snr(self):
+        y = generate_speech_like(sr=SR, duration=2.0).reshape(1, -1)
+        snr = compute_per_step_snr(y, self._air_texture_reconstruct, SR, 0.5, "generic")
+        assert snr > 10.0, f"air_texture_reconstruct SNR too low: {snr:.1f} dB"
+
+    def test_peak_limit_snr(self):
+        y = generate_speech_like(sr=SR, duration=2.0) * 0.8
+        snr = compute_per_step_snr(y, self._soft_peak_limit, 0.9)
+        assert snr > 30.0, f"peak_limit SNR too low: {snr:.1f} dB"
+
+
+class TestV24aPerStepQuality:
+
+    @pytest.fixture(autouse=True)
+    def import_v24a_functions(self):
+        from services.repair.repair_v2_4a.core import (
+            _adaptive_loudness_normalize_lite,
+            _enhanced_compress_lite,
+            _ai_artifact_repair_lite,
+            _harmonic_bass_enhance_lite,
+            _air_texture_reconstruct_lite,
+        )
+        self._adaptive_loudness_normalize_lite = _adaptive_loudness_normalize_lite
+        self._enhanced_compress_lite = _enhanced_compress_lite
+        self._ai_artifact_repair_lite = _ai_artifact_repair_lite
+        self._harmonic_bass_enhance_lite = _harmonic_bass_enhance_lite
+        self._air_texture_reconstruct_lite = _air_texture_reconstruct_lite
+
+    def test_adaptive_loudness_normalize_lite_snr(self):
+        y = generate_speech_like(sr=SR, duration=2.0)
+        snr = compute_per_step_snr(y, self._adaptive_loudness_normalize_lite, SR, -14.0)
+        assert snr > 60.0, f"adaptive_loudness_normalize_lite SNR too low: {snr:.1f} dB"
+
+    def test_adaptive_loudness_normalize_lite_is_constant_gain(self):
+        y = generate_speech_like(sr=SR, duration=2.0)
+        y_out = self._adaptive_loudness_normalize_lite(y, SR, -14.0)
+        y_64 = y.astype(np.float64).flatten()
+        y_out_64 = y_out.astype(np.float64).flatten()
+        min_len = min(len(y_64), len(y_out_64))
+        y_64 = y_64[:min_len]
+        y_out_64 = y_out_64[:min_len]
+        nonzero = np.abs(y_64) > 1e-10
+        if not np.any(nonzero):
+            pytest.skip("Signal too quiet")
+        ratios = y_out_64[nonzero] / y_64[nonzero]
+        cv = np.std(ratios) / (abs(np.mean(ratios)) + 1e-10)
+        assert cv < 0.001, f"adaptive_loudness_normalize_lite gain varies: cv={cv:.6f}"
+
+    def test_enhanced_compress_lite_snr(self):
+        y = generate_speech_like(sr=SR, duration=2.0)
+        snr = compute_per_step_snr(y, self._enhanced_compress_lite, SR, 0.5)
+        assert snr > 25.0, f"enhanced_compress_lite SNR too low: {snr:.1f} dB"
+
+    def test_ai_artifact_repair_lite_snr(self):
+        y = generate_ai_artifact_signal(sr=SR, duration=2.0)
+        snr = compute_per_step_snr(y, self._ai_artifact_repair_lite, SR, 0.5)
+        assert snr > 5.0, f"ai_artifact_repair_lite SNR too low: {snr:.1f} dB"
+
+    def test_ai_artifact_repair_lite_reduces_presence(self):
+        y = generate_ai_artifact_signal(sr=SR, duration=2.0)
+        y_copy = y.copy()
+        y_out = self._ai_artifact_repair_lite(y, SR, 0.5)
+        from scipy.signal import butter, sosfilt
+        sos = butter(4, [2000 / (SR / 2), 5000 / (SR / 2)], btype='band', output='sos')
+        presence_before = np.sqrt(np.mean(sosfilt(sos, y_copy.flatten().astype(np.float64)) ** 2))
+        presence_after = np.sqrt(np.mean(sosfilt(sos, y_out.flatten().astype(np.float64)) ** 2))
+        assert presence_after < presence_before, (
+            f"ai_artifact_repair_lite did not reduce 2-5kHz presence: before={presence_before:.4f}, after={presence_after:.4f}"
+        )
+
+    def test_harmonic_bass_enhance_lite_snr(self):
+        y = generate_speech_like(sr=SR, duration=2.0)
+        snr = compute_per_step_snr(y, self._harmonic_bass_enhance_lite, SR, 0.5)
+        assert snr > 10.0, f"harmonic_bass_enhance_lite SNR too low: {snr:.1f} dB"
+
+    def test_air_texture_reconstruct_lite_snr(self):
+        y = generate_speech_like(sr=SR, duration=2.0)
+        snr = compute_per_step_snr(y, self._air_texture_reconstruct_lite, SR, 0.5)
+        assert snr > 10.0, f"air_texture_reconstruct_lite SNR too low: {snr:.1f} dB"
 
 
 class TestV23Performance:

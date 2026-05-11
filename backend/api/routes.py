@@ -1412,6 +1412,19 @@ def _parse_pytest_output(output: str) -> dict:
             "test_spectral_denoise_snr": ("per_step", "SNR", "频谱降噪 SNR > 10 dB"),
             "test_de_ess_snr": ("per_step", "SNR", "齿音抑制 SNR > 15 dB"),
             "test_de_ess_is_constant": ("iron_rule", "Gain CV", "齿音抑制使用全局常量衰减"),
+            "test_adaptive_loudness_normalize_snr": ("per_step", "SNR", "自适应响度归一化 SNR > 60 dB"),
+            "test_adaptive_loudness_normalize_is_constant": ("iron_rule", "Gain CV", "自适应响度归一化是纯常量增益"),
+            "test_enhanced_multiband_compress_snr": ("per_step", "SNR", "增强多段压缩 SNR > 25 dB"),
+            "test_ai_artifact_repair_snr": ("per_step", "SNR", "AI频谱修复 SNR > 5 dB"),
+            "test_ai_artifact_repair_reduces": ("per_step", "Presence", "AI频谱修复降低2-5kHz突刺"),
+            "test_harmonic_bass_enhance_snr": ("per_step", "SNR", "次谐波低频增强 SNR > 10 dB"),
+            "test_harmonic_bass_enhance_increases": ("per_step", "Bass", "次谐波低频增强增加低频能量"),
+            "test_air_texture_reconstruct_snr": ("per_step", "SNR", "空气质感重建 SNR > 10 dB"),
+            "test_adaptive_loudness_normalize_lite": ("per_step", "SNR", "移动端自适应响度归一化 SNR > 60 dB"),
+            "test_enhanced_compress_lite": ("per_step", "SNR", "移动端增强压缩 SNR > 25 dB"),
+            "test_ai_artifact_repair_lite": ("per_step", "SNR", "移动端AI频谱修复 SNR > 5 dB"),
+            "test_harmonic_bass_enhance_lite": ("per_step", "SNR", "移动端次谐波低频增强 SNR > 10 dB"),
+            "test_air_texture_reconstruct_lite": ("per_step", "SNR", "移动端空气质感重建 SNR > 10 dB"),
         }
         matched = False
         for key, val in category_map.items():
