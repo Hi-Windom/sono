@@ -118,6 +118,21 @@ function downloadUrl(url: string, fileName: string) {
     });
 }
 
+export function generateExportFilename(
+  audioFileName: string | undefined,
+  algorithmVersion: string,
+  sampleRate: number,
+  bitDepth: number,
+  suffix?: string,
+): string {
+  const baseName = audioFileName ? audioFileName.replace(/\.[^/.]+$/, '') : 'audio';
+  const ts = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 15);
+  const parts = [baseName];
+  if (suffix) parts.push(suffix);
+  parts.push(algorithmVersion, `${sampleRate / 1000}k`, `${bitDepth}bit`, ts);
+  return `${parts.join('_')}.wav`;
+}
+
 export function useAudioProcessor() {
   const savedSettings = loadSettings();
 
@@ -213,6 +228,11 @@ export function useAudioProcessor() {
   const browserProcessedBufferRef = useRef<AudioBuffer | null>(null);
   const backendProcessedBufferRef = useRef<AudioBuffer | null>(null);
   const seekInProgressRef = useRef(false);
+  const processingOptionsRef = useRef<ProcessingOptions>(processingOptions);
+  const algorithmVersionRef = useRef(algorithmVersion);
+
+  useEffect(() => { processingOptionsRef.current = processingOptions; }, [processingOptions]);
+  useEffect(() => { algorithmVersionRef.current = algorithmVersion; }, [algorithmVersion]);
   // 静音策略：为每种播放模式维护独立的 source + gain，通过 gain 切换实现无缝 A/B 对比
   const modeNodesRef = useRef<Record<PlayMode, { source: AudioBufferSourceNode; gain: GainNode } | null>>({
     original: null,
@@ -2336,15 +2356,15 @@ export function useAudioProcessor() {
 
   /** 渲染交付规格并下载（修复完成后自动调用） */
   const renderAndDownload = useCallback(async () => {
-    const baseName = audioFile ? audioFile.name.replace(/\.[^/.]+$/, '') : 'audio';
-    const ts = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 15);
-    const fileName = `${baseName}_${algorithmVersion}_${processingOptions.sampleRate / 1000}k_${processingOptions.bitDepth}bit_${ts}.wav`;
+    const opts = processingOptionsRef.current;
+    const algoVer = algorithmVersionRef.current;
+    const fileName = generateExportFilename(audioFile?.name, algoVer, opts.sampleRate, opts.bitDepth);
 
     if (!taskIdRef.current) return null;
 
     try {
       const caches = await fetchRenderCache(taskIdRef.current);
-      const hit = caches.find(c => c.sample_rate === processingOptions.sampleRate && c.bit_depth === processingOptions.bitDepth && c.algorithm_version === algorithmVersion);
+      const hit = caches.find(c => c.sample_rate === opts.sampleRate && c.bit_depth === opts.bitDepth && c.algorithm_version === algoVer);
       if (hit) {
         writeLog(`[renderAndDownload] 渲染缓存命中: ${hit.filename}`);
         return {
@@ -2364,7 +2384,7 @@ export function useAudioProcessor() {
       setProcessingStep('渲染交付规格...');
       setProcessingProgress(0);
       setIsRenderLoading(true);
-      await renderAudio(taskIdRef.current, processingOptions.sampleRate, processingOptions.bitDepth);
+      await renderAudio(taskIdRef.current, opts.sampleRate, opts.bitDepth);
       const { promise, close } = waitRenderWithWS(taskIdRef.current, (progress, step) => {
         setProcessingProgress(progress);
         setProcessingStep(step);
@@ -2403,14 +2423,10 @@ export function useAudioProcessor() {
       setProcessingProgress(0);
       return null;
     }
-  }, [audioFile, processingOptions, algorithmVersion]);
+  }, [audioFile]);
 
   const downloadProcessedAudio = useCallback(async (source: 'browser') => {
-    const baseName = audioFile
-      ? audioFile.name.replace(/\.[^/.]+$/, '')
-      : 'audio';
-    const ts = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 15);
-    const fileName = `${baseName}_browser_${algorithmVersion}_${processingOptions.sampleRate / 1000}k_${processingOptions.bitDepth}bit_${ts}.wav`;
+    const fileName = generateExportFilename(audioFile?.name, algorithmVersion, processingOptions.sampleRate, processingOptions.bitDepth, 'browser');
 
     const targetBuffer = browserProcessedBuffer;
 

@@ -7,7 +7,7 @@ import { SpectrumVisualizer } from '../components/SpectrumVisualizer';
 import { AIRepairPanel } from '../components/AIRepairPanel';
 import { AIDetectionComparison } from '../components/AIDetectionComparison';
 import { DownloadModal, DownloadFileInfo } from '../components/DownloadModal';
-import { useAudioProcessor } from '../hooks/useAudioProcessor';
+import { useAudioProcessor, generateExportFilename } from '../hooks/useAudioProcessor';
 
 export default function Home() {
   const {
@@ -272,7 +272,7 @@ export default function Home() {
                   const downloadUrl = `/api/v1/download-file/${cacheEntry.filename}`;
                   setRenderDownloadUrl(downloadUrl);
                   setInstantDownloadInfo({
-                    filename: cacheEntry.filename,
+                    filename: generateExportFilename(audioFile?.name, cacheEntry.algorithm_version, cacheEntry.sample_rate, cacheEntry.bit_depth),
                     fileSize: `${(cacheEntry.size / (1024 * 1024)).toFixed(2)} MB`,
                     sampleRate: `${cacheEntry.sample_rate / 1000} kHz`,
                     bitDepth: cacheEntry.bit_depth,
@@ -326,7 +326,7 @@ export default function Home() {
           setInstantDownloadInfo(null);
         }}
         backendInfo={instantDownloadInfo || (hasBackendResult && repairResult ? {
-          filename: `${(audioFile?.name || 'audio').replace(/\.[^/.]+$/, '')}_backend_repaired.wav`,
+          filename: generateExportFilename(audioFile?.name, algorithmVersion, repairResult.output_sample_rate || processingOptions.sampleRate, repairResult.output_bit_depth || processingOptions.bitDepth),
           fileSize: repairResult.duration && repairResult.output_sample_rate && repairResult.channels && repairResult.output_bit_depth
             ? `${((repairResult.duration * repairResult.output_sample_rate * repairResult.channels * (repairResult.output_bit_depth / 8)) / (1024 * 1024)).toFixed(2)} MB`
             : '—',
@@ -338,7 +338,7 @@ export default function Home() {
           completedAt: repairResult.completed_at,
         } : null)}
         browserInfo={hasBrowserResult && browserBufferInfo ? {
-          filename: `${(audioFile?.name || 'audio').replace(/\.[^/.]+$/, '')}_browser_repaired.wav`,
+          filename: generateExportFilename(audioFile?.name, browserRepairInfo?.algorithmVersion || algorithmVersion, browserBufferInfo.sampleRate, processingOptions.bitDepth, 'browser'),
           fileSize: `${((browserBufferInfo.duration * browserBufferInfo.sampleRate * browserBufferInfo.channels * (processingOptions.bitDepth / 8)) / (1024 * 1024)).toFixed(2)} MB`,
           sampleRate: `${browserBufferInfo.sampleRate / 1000} kHz`,
           bitDepth: processingOptions.bitDepth,
