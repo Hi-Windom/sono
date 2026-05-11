@@ -69,14 +69,24 @@ export function DownloadModal({
   }, []);
 
   const handleDownload = useCallback(async (url: string, fallbackFilename: string) => {
+    console.log('[DOWNLOAD] Starting download:', { url, fallbackFilename });
     setDownloading(true);
     try {
+      console.log('[DOWNLOAD] Fetching URL:', url);
       const res = await fetch(url);
-      if (!res.ok) throw new Error('下载失败');
+      console.log('[DOWNLOAD] Response status:', res.status, res.statusText);
+      console.log('[DOWNLOAD] Response headers:', Object.fromEntries(res.headers.entries()));
+      if (!res.ok) {
+        console.error('[DOWNLOAD] Response not OK:', res.status, res.statusText);
+        throw new Error(`下载失败: HTTP ${res.status}`);
+      }
       const disposition = res.headers.get('Content-Disposition');
+      console.log('[DOWNLOAD] Content-Disposition:', disposition);
       const parsedName = parseFilenameFromDisposition(disposition);
       const saveName = fallbackFilename || parsedName || 'audio.wav';
+      console.log('[DOWNLOAD] Save name:', saveName);
       const blob = await res.blob();
+      console.log('[DOWNLOAD] Blob size:', blob.size);
       const blobUrl = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = blobUrl;
@@ -88,8 +98,9 @@ export function DownloadModal({
         URL.revokeObjectURL(blobUrl);
         document.body.removeChild(a);
       }, 5000);
+      console.log('[DOWNLOAD] Download triggered successfully');
     } catch (e) {
-      console.warn('下载失败:', e);
+      console.error('[DOWNLOAD] Download failed:', e);
     } finally {
       setDownloading(false);
     }
