@@ -13,7 +13,6 @@ export default function RepairPage() {
   const {
     audioFile,
     audioBuffer,
-    browserProcessedBuffer,
     backendProcessedBuffer,
     isProcessing,
     isDecodingAudio,
@@ -39,7 +38,6 @@ export default function RepairPage() {
     algorithmVersion,
     availableAlgorithms,
     applyAlgorithmVersion,
-    // 任务卡住相关
     isTaskStuck,
     stuckInfo,
     queueStatus,
@@ -53,28 +51,16 @@ export default function RepairPage() {
     applyRepairMode,
     applySettings,
     setProcessingOptions,
-    downloadProcessedAudio,
-    // 浏览器修复信息
-    browserRepairInfo,
-    enableBrowserRepair,
-    setEnableBrowserRepair,
-    // 渲染加载状态
     isRenderLoading,
-    // 文件哈希
     fileHash,
-    // 修复参数配置管理
     saveProfile,
-    // 任务ID
     taskId,
-    // 渲染并下载
     renderAndDownload,
-    // 下载弹窗
     renderDownloadUrl,
     setRenderDownloadUrl,
     showDownloadModal,
     setShowDownloadModal,
     autoRenderInfo,
-    // 修复缓存弹窗
     showRepairCacheModal,
     setShowRepairCacheModal,
     cacheHitInfo,
@@ -167,14 +153,7 @@ export default function RepairPage() {
     }
   }, [audioFile, saveProfile]);
 
-  const hasBrowserResult = !!browserProcessedBuffer;
   const hasBackendResult = !!backendProcessedBuffer || !!repairResult;
-
-  const browserBufferInfo = browserProcessedBuffer ? {
-    sampleRate: browserProcessedBuffer.sampleRate,
-    channels: browserProcessedBuffer.numberOfChannels,
-    duration: browserProcessedBuffer.duration,
-  } : null;
 
   return (
     <ErrorBoundary>
@@ -377,14 +356,12 @@ export default function RepairPage() {
                 processingOptions={processingOptions}
                 algorithmVersion={algorithmVersion}
                 availableAlgorithms={availableAlgorithms}
-                enableBrowserRepair={enableBrowserRepair}
                 onAlgorithmChange={applyAlgorithmVersion}
                 onParamChange={updateParam}
                 onReset={resetParams}
                 onModeSelect={applyRepairMode}
                 onApply={applySettings}
                 onOptionsChange={setProcessingOptions}
-                onEnableBrowserRepairChange={setEnableBrowserRepair}
                 disabled={isProcessing}
                 duration={duration}
                 channels={audioBuffer?.numberOfChannels ?? 2}
@@ -460,16 +437,6 @@ export default function RepairPage() {
           algorithmVersion: algorithmVersion,
           completedAt: repairResult?.completed_at,
         } : null)}
-        browserInfo={hasBrowserResult && browserBufferInfo ? {
-          filename: generateExportFilename(audioFile?.name, browserRepairInfo?.algorithmVersion || algorithmVersion, browserBufferInfo.sampleRate, processingOptions.bitDepth, 'browser'),
-          fileSize: `${((browserBufferInfo.duration * browserBufferInfo.sampleRate * browserBufferInfo.channels * (processingOptions.bitDepth / 8)) / (1024 * 1024)).toFixed(2)} MB`,
-          sampleRate: `${browserBufferInfo.sampleRate / 1000} kHz`,
-          bitDepth: processingOptions.bitDepth,
-          channels: browserBufferInfo.channels,
-          duration: browserBufferInfo.duration,
-          algorithmVersion: browserRepairInfo?.algorithmVersion,
-          completedAt: browserRepairInfo?.completedAt,
-        } : null}
         backendDownloadUrl={renderDownloadUrl}
         backendDownloadAction={hasBackendResult ? async () => {
           const result = await renderAndDownload(processingOptions);
@@ -477,7 +444,6 @@ export default function RepairPage() {
             setRenderDownloadUrl(result.downloadUrl);
           }
         } : undefined}
-        browserDownloadAction={hasBrowserResult ? () => downloadProcessedAudio('browser') : undefined}
         isBackendLoading={isRenderLoading}
       />
 

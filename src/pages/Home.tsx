@@ -12,7 +12,6 @@ export default function Home() {
   const {
     audioFile,
     audioBuffer,
-    browserProcessedBuffer,
     backendProcessedBuffer,
     isPlaying,
     currentTime,
@@ -49,14 +48,10 @@ export default function Home() {
     applySettings,
     switchPlayMode,
     setProcessingOptions,
-    downloadProcessedAudio,
     analyserRef,
-    enableBrowserRepair,
-    setEnableBrowserRepair,
     backendError,
     clearBackendError,
     renderAndDownload,
-    browserRepairInfo,
     isRenderLoading,
     taskId,
     renderDownloadUrl,
@@ -69,18 +64,10 @@ export default function Home() {
   const [showDiag, setShowDiag] = useState(false);
   const [instantDownloadInfo, setInstantDownloadInfo] = useState<DownloadFileInfo | null>(null);
 
-  const hasBrowserResult = !!browserProcessedBuffer;
   const hasBackendResult = !!backendProcessedBuffer || !!repairResult;
 
-  const activeBuffer = playMode === 'browser' ? browserProcessedBuffer
-    : playMode === 'backend' ? backendProcessedBuffer
+  const activeBuffer = playMode === 'backend' ? backendProcessedBuffer
     : audioBuffer;
-
-  const browserBufferInfo = browserProcessedBuffer ? {
-    sampleRate: browserProcessedBuffer.sampleRate,
-    channels: browserProcessedBuffer.numberOfChannels,
-    duration: browserProcessedBuffer.duration,
-  } : null;
 
   return (
     <div className="min-h-screen bg-dark py-6">
@@ -193,7 +180,6 @@ export default function Home() {
                   currentTime={currentTime}
                   duration={duration}
                   playMode={playMode}
-                  hasBrowserResult={hasBrowserResult}
                   hasBackendResult={hasBackendResult}
                   onPlay={play}
                   onPause={pause}
@@ -248,14 +234,12 @@ export default function Home() {
                 processingOptions={processingOptions}
                 algorithmVersion={algorithmVersion}
                 availableAlgorithms={availableAlgorithms}
-                enableBrowserRepair={enableBrowserRepair}
                 onAlgorithmChange={applyAlgorithmVersion}
                 onParamChange={updateParam}
                 onReset={resetParams}
                 onModeSelect={applyRepairMode}
                 onApply={applySettings}
                 onOptionsChange={setProcessingOptions}
-                onEnableBrowserRepairChange={setEnableBrowserRepair}
                 disabled={isProcessing}
                 duration={duration}
                 channels={audioBuffer?.numberOfChannels ?? 2}
@@ -329,16 +313,6 @@ export default function Home() {
           algorithmVersion: algorithmVersion,
           completedAt: repairResult?.completed_at,
         } : null)}
-        browserInfo={hasBrowserResult && browserBufferInfo ? {
-          filename: generateExportFilename(audioFile?.name, browserRepairInfo?.algorithmVersion || algorithmVersion, browserBufferInfo.sampleRate, processingOptions.bitDepth, 'browser'),
-          fileSize: `${((browserBufferInfo.duration * browserBufferInfo.sampleRate * browserBufferInfo.channels * (processingOptions.bitDepth / 8)) / (1024 * 1024)).toFixed(2)} MB`,
-          sampleRate: `${browserBufferInfo.sampleRate / 1000} kHz`,
-          bitDepth: processingOptions.bitDepth,
-          channels: browserBufferInfo.channels,
-          duration: browserBufferInfo.duration,
-          algorithmVersion: browserRepairInfo?.algorithmVersion,
-          completedAt: browserRepairInfo?.completedAt,
-        } : null}
         backendDownloadUrl={renderDownloadUrl}
         backendDownloadAction={hasBackendResult ? async () => {
           const result = await renderAndDownload(processingOptions);
@@ -346,7 +320,6 @@ export default function Home() {
             setRenderDownloadUrl(result.downloadUrl);
           }
         } : undefined}
-        browserDownloadAction={hasBrowserResult ? () => downloadProcessedAudio('browser') : undefined}
         isBackendLoading={isRenderLoading}
       />
     </div>

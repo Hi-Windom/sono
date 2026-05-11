@@ -6,7 +6,6 @@ interface AudioPlayerProps {
   currentTime: number;
   duration: number;
   playMode: PlayMode;
-  hasBrowserResult: boolean;
   hasBackendResult: boolean;
   onPlay: () => void;
   onPause: () => void;
@@ -17,17 +16,15 @@ interface AudioPlayerProps {
 export function AudioPlayer({
   isPlaying,
   playMode,
-  hasBrowserResult,
   hasBackendResult,
   onPlay,
   onPause,
   onSwitchPlayMode,
 }: AudioPlayerProps) {
-  const hasAnyResult = hasBrowserResult || hasBackendResult;
+  const hasAnyResult = hasBackendResult;
 
   const modeLabel: Record<PlayMode, string> = {
     original: '原始',
-    browser: '浏览器修复',
     backend: '后端修复',
   };
 
@@ -35,11 +32,6 @@ export function AudioPlayer({
     original: (
       <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
-      </svg>
-    ),
-    browser: (
-      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" />
       </svg>
     ),
     backend: (
@@ -72,8 +64,8 @@ export function AudioPlayer({
         {/* 模式切换按钮 */}
         {onSwitchPlayMode && hasAnyResult && (
           <div className="flex items-center gap-1.5">
-            {(['original', 'browser', 'backend'] as PlayMode[]).map((mode) => {
-              const disabled = mode === 'browser' ? !hasBrowserResult : mode === 'backend' ? !hasBackendResult : false;
+            {(['original', 'backend'] as PlayMode[]).map((mode) => {
+              const disabled = mode === 'backend' ? !hasBackendResult : false;
               const active = playMode === mode;
               return (
                 <button
