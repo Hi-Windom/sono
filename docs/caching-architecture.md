@@ -152,7 +152,6 @@ sessionRestoredRef.current = true;
 ```typescript
 audioBuffer: AudioBuffer | null;        // 原始音频
 backendProcessedBuffer: AudioBuffer | null;  // 修复后音频
-browserProcessedBuffer: AudioBuffer | null;  // 浏览器修复音频
 ```
 
 **生命周期**：

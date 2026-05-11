@@ -272,6 +272,17 @@ export default function LandingPage() {
             
             <div className="space-y-4">
               <div className="flex items-start gap-4 p-4 bg-black/20 rounded-xl border border-white/5">
+                <div className="flex-shrink-0 w-2 h-2 mt-2 rounded-full bg-pink-400"></div>
+                <div className="flex-1">
+                  <div className="flex items-center justify-between mb-1">
+                    <h4 className="text-white font-semibold">AI 检测独立页面 + 浏览器修复移除</h4>
+                    <span className="text-gray-500 text-xs">2026-05-11</span>
+                  </div>
+                  <p className="text-gray-400 text-sm">AI 检测功能独立为专属页面，支持本地文件与服务端音频 A/B 对比分析，检测时间可追溯；后端修复速度和质量已全面超越浏览器，移除浏览器修复通道及 Worker，简化架构。</p>
+                </div>
+              </div>
+
+              <div className="flex items-start gap-4 p-4 bg-black/20 rounded-xl border border-white/5">
                 <div className="flex-shrink-0 w-2 h-2 mt-2 rounded-full bg-cyan-400"></div>
                 <div className="flex-1">
                   <div className="flex items-center justify-between mb-1">
@@ -301,17 +312,6 @@ export default function LandingPage() {
                     <span className="text-gray-500 text-xs">2026-05-10</span>
                   </div>
                   <p className="text-gray-400 text-sm">音频卡片解析时顺时针渐变高亮动画；解析中替换文件增加取消令牌保护，避免旧解码结果覆盖新文件状态。</p>
-                </div>
-              </div>
-
-              <div className="flex items-start gap-4 p-4 bg-black/20 rounded-xl border border-white/5">
-                <div className="flex-shrink-0 w-2 h-2 mt-2 rounded-full bg-red-400"></div>
-                <div className="flex-1">
-                  <div className="flex items-center justify-between mb-1">
-                    <h4 className="text-white font-semibold">Android 性能优化</h4>
-                    <span className="text-gray-500 text-xs">2026-05-10</span>
-                  </div>
-                  <p className="text-gray-400 text-sm">Python 后端延迟导入（scipy/repair 按需加载）、C 原生 DSP 库（STFT/ISTFT/压缩器/限幅器 ARM NEON 优化）、.pyc 预编译加速启动。</p>
                 </div>
               </div>
             </div>

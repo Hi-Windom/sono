@@ -1,68 +1,59 @@
 ## 1. Product Overview
-下一代AI音乐修复工具是一个革命性的音频处理应用，采用最先进的算法实现前所未有的音质提升和AI生成内容的检测与修复。
-- 主要功能包括高级瑕疵检测、智能修复引擎、AI生成内容检测器、专业级音频导出、实时预览
-- 目标用户为音乐制作人、内容创作者、音乐爱好者、音频工程师
-- 产品价值在于提供专业级音频处理能力，让任何人都能获得录音棚级别的音质
+
+Sono 是一个 AI 音频检测与修复工具，帮助用户识别 AI 生成音频并进行音质修复。
+
+- **核心功能**: AI 音频检测、音频修复、AB 对比、参数配置管理
+- **目标用户**: 音乐制作人、内容创作者、音频工程师
+- **部署方式**: 桌面端（Vite dev server + FastAPI）和 Android（Termux + FastAPI）
 
 ## 2. Core Features
 
-### 2.1 Feature Module
-1. **主界面**: 音乐探索区、可视化分析、智能修复中心、导出与分享
-2. **音频分析引擎**: 深度学习检测、多维度分析、实时频谱监控
-3. **智能修复模块**: AI瑕疵修复、高级去噪、失真补偿、音质增强
-4. **AI检测器**: 高准确率AI生成检测、修复前后对比、可视化评分系统
-5. **专业导出**: 多种格式、采样率选择、位深支持、元数据保留
+### 2.1 AI 音频检测
+- 独立检测页面（`/detect`），支持本地文件上传和服务端缓存音频
+- A/B 对比分析：两个检测槽位，不同颜色标识（红/青）
+- 检测时间记录，可追溯
+- 支持多版本检测算法（v1.0/v1.1/v1.2）
 
-### 2.3 Page Details
-| Page Name | Module Name | Feature description |
-|-----------|-------------|---------------------|
-| 主界面 | 智能上传区 | 拖拽上传、批量处理、格式自动识别 |
-| 主界面 | 音频分析 | 深度分析、问题定位、频谱展示 |
-| 主界面 | 修复中心 | AI自动修复、手动精细调整、实时预览 |
-| 主界面 | AI检测 | AI生成概率、可信度评分、修复对比 |
-| 主界面 | 导出设置 | 格式选择、采样率、位深、音质优化 |
-| 主界面 | 视觉设计 | 霓虹渐变美学、动态视觉效果、流畅动画 |
+### 2.2 音频修复
+- 后端修复为主力（numpy+scipy 自研 DSP），无浏览器端修复
+- 多版本算法支持（v1.0~v2.4a），轻量版（a-suffix）适配低内存环境
+- 智能缓存：上传层按文件 hash 去重，修复结果按文件+算法+参数三重匹配
+- 全栈任务取消机制
+- WebSocket 实时进度推送
 
-## 3. Core Process
-用户上传音频文件 → AI深度分析 → 智能瑕疵定位 → 一键修复 + AI检测 → 导出处理音频
+### 2.3 AB 对比
+- 独立对比页面（`/compare`），播放服务器缓存的原始与修复后音频
+- 实时切换对比，波形可视化
 
-```mermaid
-flowchart LR
-  A["智能上传"] --> B["深度分析"]
-  B --> C["瑕疵检测"]
-  C --> D["智能修复"]
-  D --> E["AI检测对比"]
-  E --> F["专业导出"]
-```
+### 2.4 导出系统
+- 采样率: 44.1kHz, 48kHz, 96kHz, 192kHz
+- 位深: 16-bit, 24-bit, 32-bit float
+- 格式: WAV
+- 后端渲染管线：上采样（频谱超分+谐波增强）/ 下采样（低通+重采样）
 
-## 4. User Interface Design
+### 2.5 参数配置管理
+- 保存/加载/导入/导出修复参数预设
+- 多预设快速切换
 
-### 4.1 Design Style
-- 主色调: 深邃紫 (#6B46C1) + 霓虹蓝 (#00D9FF) + 金色 (#F59E0B)
-- 背景: 渐变网格 + 霓虹光效 + 动态粒子
-- 按钮风格: 未来感圆角矩形，带光晕和脉冲动画效果
-- 字体: 现代无衬线 + 等宽数字显示
-- 布局风格: 卡片叠层 + 霓虹边框 + 动态悬浮效果
-- 图标风格: 发光的线性图标，有科技感
+## 3. Page Structure
 
-### 4.2 Page Design Overview
-| Page Name | Module Name | UI Elements |
-|-----------|-------------|-------------|
-| 主界面 | 智能上传区 | 大型拖放区，霓虹边框，动态提示 |
-| 主界面 | 音频可视化 | Canvas频谱图，波形图，色彩渐变 |
-| 主界面 | 修复控制面板 | 精致的滑块控件，预设卡片，实时反馈 |
-| 主界面 | AI检测面板 | 环形进度条，置信度显示，对比图表 |
-| 主界面 | 导出设置 | 下拉选择器，进度指示器，文件预览 |
+| Route | Page | Purpose |
+|-------|------|---------|
+| `/` | LandingPage | 功能概览、最近更新、统计信息 |
+| `/repair` | RepairPage | 完整修复工作流 |
+| `/home` | Home | 带播放器的修复界面 |
+| `/detect` | DetectPage | 独立 AI 检测 |
+| `/compare` | ComparePage | 服务端音频 AB 对比 |
+| `/profile-manager` | ProfileManagerPage | 参数预设管理 |
+| `/quality-tests` | QualityTestPage | 自动化质量测试 |
+| `/cache-manager` | CacheManagerPage | 缓存管理 |
+| `/training-upload` | TrainingUploadPage | 训练素材上传 |
 
-### 4.3 Responsiveness
-- 桌面优先，全面支持平板和移动设备
-- 响应式网格布局，自适应各种屏幕尺寸
-- 触摸优化，手势支持，大触控区域
-- 移动端简化界面，保持核心功能
+## 4. Technical Architecture
 
-### 4.4 Animation & Micro-interactions
-- 页面加载: 霓虹光效淡入 + 卡片顺序出现
-- 按钮交互: 光晕放大 + 脉冲动画
-- 滑块交互: 渐变光效跟随 + 数值动态变化
-- 处理进度: 环形进度 + 粒子动画效果
-- AI检测完成: 光效爆炸 + 成功提示动画
+- **Frontend**: React 18 + TypeScript + Vite + Tailwind CSS
+- **Backend**: FastAPI (Python 3.10+) + SQLite + WebSocket
+- **Audio Processing**: NumPy + SciPy (custom dsp_utils.py, no librosa in production)
+- **Audio Loading**: miniaudio only
+- **Memory Optimization**: Streaming spectral processing, 60min audio @ 4GB RAM
+- **Type Checking**: pyright strict mode (backend core)

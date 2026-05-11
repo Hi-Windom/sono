@@ -85,7 +85,7 @@ export default function Home() {
                       ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
                       : 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
                   }`}>
-                    {processingSource === 'backend' ? '后端' : '浏览器'}
+                    {processingSource === 'backend' ? '后端' : ''}
                   </span>
                 )}
                 {processingStep || '正在处理音频...'}
