@@ -9,6 +9,7 @@ import { AIRepairPanel } from '../components/AIRepairPanel';
 import { AIDetectionComparison } from '../components/AIDetectionComparison';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import { DownloadModal, DownloadFileInfo } from '../components/DownloadModal';
+import { RepairCacheModal } from '../components/RepairCacheModal';
 import { useAudioProcessor, generateExportFilename } from '../hooks/useAudioProcessor';
 
 export default function RepairPage() {
@@ -92,6 +93,14 @@ export default function RepairPage() {
     showDownloadModal,
     setShowDownloadModal,
     autoRenderInfo,
+    // 修复缓存弹窗
+    showRepairCacheModal,
+    setShowRepairCacheModal,
+    cacheHitInfo,
+    handleUseRepairCache,
+    handleRenderCacheDownload,
+    handleReRepair,
+    handleCloseRepairCacheModal,
   } = useAudioProcessor();
 
   const [showDiag, setShowDiag] = useState(false);
@@ -538,6 +547,17 @@ export default function RepairPage() {
         } : undefined}
         browserDownloadAction={hasBrowserResult ? () => downloadProcessedAudio('browser') : undefined}
         isBackendLoading={isRenderLoading}
+      />
+
+      <RepairCacheModal
+        isOpen={showRepairCacheModal}
+        cacheHit={cacheHitInfo}
+        audioFileName={audioFile?.name}
+        algorithmVersion={algorithmVersion}
+        onUseRepairCache={handleUseRepairCache}
+        onRenderCacheDownload={handleRenderCacheDownload}
+        onReRepair={handleReRepair}
+        onClose={handleCloseRepairCacheModal}
       />
     </div>
     </ErrorBoundary>
