@@ -7,6 +7,15 @@ import { ErrorBoundary } from '../components/ErrorBoundary';
 
 type CompareMode = 'original' | 'repaired';
 
+interface CacheTask {
+  id: string;
+  filename: string;
+  status: string;
+  output_exists: boolean;
+  original_exists: boolean;
+  created_at: string;
+}
+
 const API_BASE = '/api/v1';
 
 function formatTime(seconds: number): string {
@@ -17,13 +26,15 @@ function formatTime(seconds: number): string {
 }
 
 export default function ComparePage() {
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const taskId = searchParams.get('taskId') || '';
 
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [taskInfo, setTaskInfo] = useState<Record<string, unknown> | null>(null);
+  const [tasks, setTasks] = useState<CacheTask[]>([]);
+  const [tasksLoading, setTasksLoading] = useState(false);
 
   const [originalBuffer, setOriginalBuffer] = useState<AudioBuffer | null>(null);
   const [repairedBuffer, setRepairedBuffer] = useState<AudioBuffer | null>(null);
@@ -43,9 +54,28 @@ export default function ComparePage() {
   const activeBuffer = compareMode === 'original' ? originalBuffer : repairedBuffer;
 
   useEffect(() => {
+    if (taskId) return;
+    let cancelled = false;
+    setTasksLoading(true);
+    fetch(`${API_BASE}/cache/info`)
+      .then(res => res.ok ? res.json() : Promise.reject(new Error('获取缓存信息失败')))
+      .then(data => {
+        if (!cancelled) {
+          const completed = (data.tasks || []).filter((t: CacheTask) => t.output_exists);
+          setTasks(completed);
+        }
+      })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setTasksLoading(false); });
+    return () => { cancelled = true; };
+  }, [taskId]);
+
+  useEffect(() => {
     if (!taskId) {
-      setError('缺少 taskId 参数');
-      setLoading(false);
+      setTaskInfo(null);
+      setOriginalBuffer(null);
+      setRepairedBuffer(null);
+      setError(null);
       return;
     }
 
@@ -64,8 +94,7 @@ export default function ComparePage() {
 
     async function loadAudio(type: 'original' | 'repaired', setter: (b: AudioBuffer | null) => void) {
       try {
-        const res = fetch(`${API_BASE}/preview/${taskId}?type=${type}`);
-        const response = await res;
+        const response = await fetch(`${API_BASE}/preview/${taskId}?type=${type}`);
         if (!response.ok) {
           if (type === 'repaired') throw new Error(`修复后音频不可用 (HTTP ${response.status})`);
           throw new Error(`原始音频不可用 (HTTP ${response.status})`);
@@ -83,6 +112,8 @@ export default function ComparePage() {
     async function init() {
       setLoading(true);
       setError(null);
+      setOriginalBuffer(null);
+      setRepairedBuffer(null);
       await loadTaskInfo();
       await Promise.all([
         loadAudio('original', setOriginalBuffer),
@@ -193,6 +224,10 @@ export default function ComparePage() {
     }
   }, [compareMode, isPlaying, pause, play]);
 
+  const selectTask = useCallback((id: string) => {
+    setSearchParams({ taskId: id });
+  }, [setSearchParams]);
+
   useEffect(() => {
     return () => {
       stopPlayback();
@@ -205,48 +240,216 @@ export default function ComparePage() {
   const modeLabel: Record<CompareMode, string> = { original: '原始音频', repaired: '修复后' };
   const modeColor: Record<CompareMode, string> = { original: '#6B7280', repaired: '#00D9FF' };
 
-  if (loading) {
-    return (
-      <ErrorBoundary>
-        <div className="min-h-screen bg-dark">
-          <Header />
-          <div className="container mx-auto px-4 max-w-5xl pt-20">
-            <div className="flex flex-col items-center gap-4">
-              <div className="w-10 h-10 rounded-full animate-spin border-2 border-cyan-500/30 border-t-cyan-500" />
-              <p className="text-gray-400 text-sm">正在加载音频数据...</p>
-              <p className="text-gray-600 text-xs">Task ID: {taskId}</p>
-            </div>
-          </div>
+  const renderTaskList = () => (
+    <div className="space-y-3">
+      {tasksLoading ? (
+        <div className="flex items-center justify-center py-12 gap-3">
+          <div className="w-6 h-6 rounded-full animate-spin border-2 border-cyan-500/30 border-t-cyan-500" />
+          <span className="text-gray-400 text-sm">加载任务列表...</span>
         </div>
-      </ErrorBoundary>
-    );
-  }
+      ) : tasks.length === 0 ? (
+        <div className="text-center py-12">
+          <div className="w-16 h-16 rounded-full bg-white/5 flex items-center justify-center mx-auto mb-4">
+            <svg className="w-8 h-8 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
+            </svg>
+          </div>
+          <p className="text-gray-400 text-sm mb-2">暂无可对比的修复任务</p>
+          <p className="text-gray-600 text-xs">请先在修复页完成音频修复</p>
+          <button
+            onClick={() => navigate('/repair')}
+            className="mt-4 px-4 py-2 bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-400/30 rounded-lg text-cyan-400 text-sm transition-colors"
+          >
+            前往修复
+          </button>
+        </div>
+      ) : (
+        tasks.map(task => (
+          <button
+            key={task.id}
+            onClick={() => selectTask(task.id)}
+            className="w-full flex items-center gap-4 p-4 bg-white/5 hover:bg-white/10 border border-white/10 hover:border-cyan-400/30 rounded-xl transition-all text-left"
+          >
+            <div className="w-10 h-10 bg-gradient-to-br from-cyan-500/20 to-purple-500/20 rounded-lg flex items-center justify-center border border-cyan-400/20 shrink-0">
+              <svg className="w-5 h-5 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
+              </svg>
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-white text-sm font-medium truncate">{task.filename}</p>
+              <p className="text-gray-500 text-xs mt-0.5">
+                {task.created_at ? new Date(task.created_at).toLocaleString('zh-CN') : ''}
+                {' • '}
+                <span className="text-green-400">已修复</span>
+              </p>
+            </div>
+            <svg className="w-4 h-4 text-gray-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+            </svg>
+          </button>
+        ))
+      )}
+    </div>
+  );
 
-  if (error || !taskInfo) {
+  const renderPlayer = () => {
+    if (loading) {
+      return (
+        <div className="flex flex-col items-center gap-4 py-12">
+          <div className="w-10 h-10 rounded-full animate-spin border-2 border-cyan-500/30 border-t-cyan-500" />
+          <p className="text-gray-400 text-sm">正在加载音频数据...</p>
+        </div>
+      );
+    }
+
+    if (error || !taskInfo) {
+      return (
+        <div className="flex flex-col items-center gap-4 py-12">
+          <div className="w-16 h-16 rounded-full bg-red-500/10 flex items-center justify-center">
+            <svg className="w-8 h-8 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+          </div>
+          <p className="text-red-400 text-sm font-medium">{error || '任务不存在'}</p>
+          <button
+            onClick={() => setSearchParams({})}
+            className="mt-2 px-4 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-gray-400 hover:text-white text-sm transition-colors"
+          >
+            选择其他任务
+          </button>
+        </div>
+      );
+    }
+
     return (
-      <ErrorBoundary>
-        <div className="min-h-screen bg-dark">
-          <Header />
-          <div className="container mx-auto px-4 max-w-5xl pt-20">
-            <div className="flex flex-col items-center gap-4">
-              <div className="w-16 h-16 rounded-full bg-red-500/10 flex items-center justify-center">
-                <svg className="w-8 h-8 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+      <>
+        <div className="flex items-center justify-between mb-6 gap-3">
+          <div className="flex items-center gap-3 min-w-0 flex-1">
+            <div className="w-12 h-12 bg-gradient-to-br from-cyan-500/20 to-purple-500/20 rounded-lg flex items-center justify-center border border-cyan-400/20 shrink-0">
+              <svg className="w-6 h-6 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
+              </svg>
+            </div>
+            <div className="min-w-0">
+              <h3 className="text-white font-semibold text-lg truncate">
+                {(taskInfo.original_filename as string) || 'audio'}
+              </h3>
+              <p className="text-gray-400 text-sm">
+                {originalBuffer ? `${(originalBuffer.sampleRate / 1000).toFixed(0)} kHz • ${originalBuffer.numberOfChannels === 1 ? '单声道' : '立体声'}` : '—'}
+                {' • '}
+                <span className="text-green-400">AB 对比模式</span>
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            {(['original', 'repaired'] as CompareMode[]).map((mode) => {
+              const buf = mode === 'original' ? originalBuffer : repairedBuffer;
+              const available = !!buf;
+              const active = compareMode === mode;
+              return (
+                <button
+                  key={mode}
+                  onClick={() => available && switchMode(mode)}
+                  disabled={!available}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 ${
+                    active
+                      ? 'bg-secondary/30 text-secondary border border-secondary/50 shadow-md shadow-secondary/10'
+                      : !available
+                        ? 'bg-gray-800/30 text-gray-500 cursor-not-allowed border border-gray-700/30 opacity-50'
+                        : 'bg-gray-800/50 text-gray-400 hover:bg-gray-700/50 hover:text-gray-200 border border-transparent hover:border-gray-600/50'
+                  }`}
+                  style={active ? { borderColor: modeColor[mode], color: modeColor[mode], backgroundColor: modeColor[mode] + '15' } : undefined}
+                >
+                  <span className={`w-2 h-2 rounded-full ${available ? (active ? '' : 'bg-gray-500') : 'bg-red-500/50'}`}
+                    style={available && active ? { backgroundColor: modeColor[mode] } : undefined}
+                  />
+                  {modeLabel[mode]}
+                  {!available && (
+                    <svg className="w-3 h-3 ml-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                    </svg>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="bg-gradient-to-br from-primary/90 to-dark/90 rounded-2xl p-4 border border-secondary/30 shadow-xl shadow-black/20">
+          <div className="flex items-center justify-center gap-4">
+            <button
+              onClick={isPlaying ? pause : play}
+              disabled={!activeBuffer}
+              className="w-14 h-14 rounded-full flex items-center justify-center transition-all duration-200 bg-gradient-to-r from-secondary to-accent hover:scale-110 hover:shadow-lg hover:shadow-secondary/40 active:scale-95 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:scale-100"
+            >
+              {isPlaying ? (
+                <svg className="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" />
                 </svg>
+              ) : (
+                <svg className="w-6 h-6 text-white ml-0.5" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M8 5v14l11-7z" />
+                </svg>
+              )}
+            </button>
+
+            <div className="flex-1 min-w-[120px] max-w-xs">
+              <div className="text-xs text-gray-400 mb-1 text-center">
+                {formatTime(currentTime)} / {formatTime(duration)}
               </div>
-              <p className="text-red-400 text-sm font-medium">{error || '任务不存在'}</p>
-              <button
-                onClick={() => navigate('/repair')}
-                className="mt-2 px-4 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-gray-400 hover:text-white text-sm transition-colors"
-              >
-                返回修复页
-              </button>
+              <input
+                type="range"
+                min={0}
+                max={duration || 0}
+                step={0.01}
+                value={currentTime}
+                onChange={(e) => seek(parseFloat(e.target.value))}
+                disabled={!activeBuffer}
+                className="w-full h-1.5 bg-gray-700 rounded-full appearance-none cursor-pointer disabled:opacity-30 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:shadow-md [&::-webkit-slider-runnable-track]:rounded-full"
+                style={{
+                  background: activeBuffer
+                    ? `linear-gradient(to right, ${modeColor[compareMode]} ${(currentTime / (duration || 1)) * 100}%, #374151 ${(currentTime / (duration || 1)) * 100}%)`
+                    : undefined,
+                }}
+              />
             </div>
           </div>
         </div>
-      </ErrorBoundary>
+
+        {analyserRef.current && (
+          <div className="mt-6">
+            <SpectrumVisualizer
+              analyser={analyserRef.current}
+              color={modeColor[compareMode]}
+              label={`${modeLabel[compareMode]} 频谱`}
+            />
+          </div>
+        )}
+
+        <div className="mt-6">
+          <WaveformVisualizer
+            key={`waveform-${compareMode}-${!!activeBuffer}`}
+            audioBuffer={activeBuffer}
+            color={modeColor[compareMode]}
+            label={`${modeLabel[compareMode]} 波形`}
+            currentTime={currentTime}
+            duration={duration}
+            onSeek={seek}
+          />
+        </div>
+
+        <div className="mt-4 flex items-center justify-between text-xs text-gray-500">
+          <span>Task ID: {taskId}</span>
+          <span>
+            {!originalBuffer && <span className="text-yellow-500/70 mr-3">原始音频未就绪</span>}
+            {!repairedBuffer && <span className="text-yellow-500/70">修复后音频未就绪</span>}
+            {originalBuffer && repairedBuffer && <span className="text-green-400">双轨已就绪</span>}
+          </span>
+        </div>
+      </>
     );
-  }
+  };
 
   return (
     <ErrorBoundary>
@@ -254,141 +457,31 @@ export default function ComparePage() {
         <Header />
 
         <div className="container mx-auto px-4 max-w-5xl mt-4">
-          <button
-            onClick={() => navigate('/repair')}
-            className="flex items-center gap-2 text-gray-400 hover:text-white transition-colors mb-6"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-            </svg>
-            <span>返回修复页</span>
-          </button>
-
-          <div className={`bg-primary/50 border border-white/10 rounded-xl p-6${loading ? ' audio-card-loading' : ''}`}>
-            <div className="flex items-center justify-between mb-6 gap-3">
-              <div className="flex items-center gap-3 min-w-0 flex-1">
-                <div className="w-12 h-12 bg-gradient-to-br from-cyan-500/20 to-purple-500/20 rounded-lg flex items-center justify-center border border-cyan-400/20 shrink-0">
-                  <svg className="w-6 h-6 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
-                  </svg>
-                </div>
-                <div className="min-w-0">
-                  <h3 className="text-white font-semibold text-lg truncate">
-                    {(taskInfo.original_filename as string) || 'audio'}
-                  </h3>
-                  <p className="text-gray-400 text-sm">
-                    {originalBuffer ? `${(originalBuffer.sampleRate / 1000).toFixed(0)} kHz • ${originalBuffer.numberOfChannels === 1 ? '单声道' : '立体声'}` : '—'}
-                    {' • '}
-                    <span className="text-green-400">AB 对比模式</span>
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2 shrink-0">
-                {(['original', 'repaired'] as CompareMode[]).map((mode) => {
-                  const buf = mode === 'original' ? originalBuffer : repairedBuffer;
-                  const available = !!buf;
-                  const active = compareMode === mode;
-                  return (
-                    <button
-                      key={mode}
-                      onClick={() => available && switchMode(mode)}
-                      disabled={!available}
-                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 ${
-                        active
-                          ? 'bg-secondary/30 text-secondary border border-secondary/50 shadow-md shadow-secondary/10'
-                          : !available
-                            ? 'bg-gray-800/30 text-gray-500 cursor-not-allowed border border-gray-700/30 opacity-50'
-                            : 'bg-gray-800/50 text-gray-400 hover:bg-gray-700/50 hover:text-gray-200 border border-transparent hover:border-gray-600/50'
-                      }`}
-                      style={active ? { borderColor: modeColor[mode], color: modeColor[mode], backgroundColor: modeColor[mode] + '15' } : undefined}
-                    >
-                      <span className={`w-2 h-2 rounded-full ${available ? (active ? '' : 'bg-gray-500') : 'bg-red-500/50'}`}
-                        style={available && active ? { backgroundColor: modeColor[mode] } : undefined}
-                      />
-                      {modeLabel[mode]}
-                      {!available && (
-                        <svg className="w-3 h-3 ml-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                        </svg>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div className="bg-gradient-to-br from-primary/90 to-dark/90 rounded-2xl p-4 border border-secondary/30 shadow-xl shadow-black/20">
-              <div className="flex items-center justify-center gap-4">
-                <button
-                  onClick={isPlaying ? pause : play}
-                  disabled={!activeBuffer}
-                  className="w-14 h-14 rounded-full flex items-center justify-center transition-all duration-200 bg-gradient-to-r from-secondary to-accent hover:scale-110 hover:shadow-lg hover:shadow-secondary/40 active:scale-95 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:scale-100"
-                >
-                  {isPlaying ? (
-                    <svg className="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 24 24">
-                      <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" />
-                    </svg>
-                  ) : (
-                    <svg className="w-6 h-6 text-white ml-0.5" fill="currentColor" viewBox="0 0 24 24">
-                      <path d="M8 5v14l11-7z" />
-                    </svg>
-                  )}
-                </button>
-
-                <div className="flex-1 min-w-[120px] max-w-xs">
-                  <div className="text-xs text-gray-400 mb-1 text-center">
-                    {formatTime(currentTime)} / {formatTime(duration)}
-                  </div>
-                  <input
-                    type="range"
-                    min={0}
-                    max={duration || 0}
-                    step={0.01}
-                    value={currentTime}
-                    onChange={(e) => seek(parseFloat(e.target.value))}
-                    disabled={!activeBuffer}
-                    className="w-full h-1.5 bg-gray-700 rounded-full appearance-none cursor-pointer disabled:opacity-30 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:shadow-md [&::-webkit-slider-runnable-track]:rounded-full"
-                    style={{
-                      background: activeBuffer
-                        ? `linear-gradient(to right, ${modeColor[compareMode]} ${(currentTime / (duration || 1)) * 100}%, #374151 ${(currentTime / (duration || 1)) * 100}%)`
-                        : undefined,
-                    }}
-                  />
-                </div>
-              </div>
-            </div>
-
-            {analyserRef.current && (
-              <div className="mt-6">
-                <SpectrumVisualizer
-                  analyser={analyserRef.current}
-                  color={modeColor[compareMode]}
-                  label={`${modeLabel[compareMode]} 频谱`}
-                />
-              </div>
+          <div className="flex items-center gap-3 mb-6">
+            <button
+              onClick={() => navigate('/')}
+              className="flex items-center gap-2 text-gray-400 hover:text-white transition-colors"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+              </svg>
+              <span>返回首页</span>
+            </button>
+            {taskId && (
+              <button
+                onClick={() => setSearchParams({})}
+                className="flex items-center gap-2 text-gray-500 hover:text-gray-300 transition-colors text-sm"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 10h16M4 14h16M4 18h16" />
+                </svg>
+                <span>选择任务</span>
+              </button>
             )}
-
-            <div className="mt-6">
-              <WaveformVisualizer
-                key={`waveform-${compareMode}-${!!activeBuffer}`}
-                audioBuffer={activeBuffer}
-                color={modeColor[compareMode]}
-                label={`${modeLabel[compareMode]} 波形`}
-                currentTime={currentTime}
-                duration={duration}
-                onSeek={seek}
-              />
-            </div>
           </div>
 
-          <div className="mt-6 flex items-center justify-between text-xs text-gray-500">
-            <span>Task ID: {taskId}</span>
-            <span>
-              {!originalBuffer && <span className="text-yellow-500/70 mr-3">原始音频未就绪</span>}
-              {!repairedBuffer && <span className="text-yellow-500/70">修复后音频未就绪</span>}
-              {originalBuffer && repairedBuffer && <span className="text-green-400">双轨已就绪</span>}
-            </span>
+          <div className="bg-primary/50 border border-white/10 rounded-xl p-6">
+            {!taskId ? renderTaskList() : renderPlayer()}
           </div>
         </div>
       </div>

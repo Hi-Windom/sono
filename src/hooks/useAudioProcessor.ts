@@ -1485,73 +1485,15 @@ export function useAudioProcessor() {
 
       const previewUrl = effectiveBackendResult.value.previewUrl;
       if (previewUrl) {
-        startStreamingPlayback(previewUrl);
+        writeLog(`[applySettings] 修复完成，预览URL已就绪: ${previewUrl}`);
       }
 
-      // 后台加载修复后的音频 buffer（startStreamingPlayback 已经设置了播放状态和模式）
+      // 后台加载修复后的音频 buffer
       if (audioFile && taskIdRef.current) {
         loadAudioFromUrl(previewUrl, processingOptions.sampleRate).then(repairedBuffer => {
           writeLog(`[applySettings] buffer加载完成: duration=${repairedBuffer.duration.toFixed(3)}`);
           backendProcessedBufferRef.current = repairedBuffer;
           setBackendProcessedBuffer(repairedBuffer);
-
-          // 如果当前正在播放streaming，无缝切换到buffer播放
-          if (isPlayingRef.current && streamingAudioRef.current) {
-            writeLog(`[applySettings] 正在播放streaming，切换到buffer播放`);
-            const currentPos = streamingAudioRef.current.currentTime;
-
-            // 停止streaming
-            streamingAudioRef.current.pause();
-            streamingAudioRef.current = null;
-            if (mediaSourceRef.current) {
-              try { mediaSourceRef.current.disconnect(); } catch {}
-              mediaSourceRef.current = null;
-            }
-
-            // 用新buffer创建节点继续播放
-            const context = getAudioContext();
-            const newSource = context.createBufferSource();
-            const newGain = context.createGain();
-            newSource.buffer = repairedBuffer;
-            newSource.connect(newGain);
-            newGain.connect(analyserRef.current!);
-            newGain.gain.setValueAtTime(0, context.currentTime);
-            newGain.gain.linearRampToValueAtTime(1.0, context.currentTime + 0.015);
-
-            newSource.onended = () => {
-              if (isPlayingRef.current) {
-                stopPlaying();
-                setCurrentTime(0);
-                pausedAtRef.current = 0;
-              }
-            };
-
-            modeNodesRef.current['backend'] = { source: newSource, gain: newGain };
-            sourceNodeRef.current = newSource;
-            gainNodeRef.current = newGain;
-            activeModeRef.current = 'backend';
-
-            startTimeRef.current = context.currentTime - currentPos;
-            newSource.start(0, currentPos);
-            playStartTimeRef.current = performance.now();
-            pausedAtRef.current = currentPos;
-
-            const updateTime = () => {
-              if (isPlayingRef.current) {
-                const elapsed = (performance.now() - playStartTimeRef.current) / 1000;
-                const current = currentPos + elapsed;
-                if (current >= repairedBuffer.duration) {
-                  stopPlaying();
-                  setCurrentTime(0);
-                  pausedAtRef.current = 0;
-                } else {
-                  setCurrentTime(current);
-                  animationFrameRef.current = requestAnimationFrame(updateTime);
-                }
-              }
-            };
-            updateTime();
-          }
         }).catch(err => {
           console.warn('[applySettings] 后台下载修复后音频失败:', err);
         });
@@ -1566,9 +1508,6 @@ export function useAudioProcessor() {
 
     if (anySuccess) {
       setHasBeenProcessed(true);
-      if (!(effectiveBackendResult.status === 'fulfilled' && effectiveBackendResult.value)) {
-        setPlayMode('browser');
-      }
 
       if (effectiveBackendResult.status === 'fulfilled' && effectiveBackendResult.value && taskIdRef.current) {
         const trySetBackendDetection = (result: unknown) => {

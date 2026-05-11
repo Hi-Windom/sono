@@ -203,6 +203,31 @@ export default function LandingPage() {
               </svg>
             </div>
           </div>
+
+          {/* 音频 AB 对比 */}
+          <div
+            onClick={() => navigate('/compare')}
+            className="group bg-primary/50 border border-white/10 rounded-2xl p-8 cursor-pointer
+                       hover:border-indigo-400/50 hover:bg-primary/70 transition-all duration-300"
+          >
+            <div className="w-16 h-16 bg-gradient-to-br from-indigo-500/20 to-cyan-500/20 rounded-xl
+                            flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
+              <svg className="w-8 h-8 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                      d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
+              </svg>
+            </div>
+            <h2 className="text-2xl font-bold text-white mb-3">音频 AB 对比</h2>
+            <p className="text-gray-400 mb-4">
+              播放服务器缓存的原始与修复后音频，实时切换对比音质差异
+            </p>
+            <div className="flex items-center text-indigo-400 group-hover:text-indigo-300">
+              <span className="text-sm font-medium">开始对比</span>
+              <svg className="w-5 h-5 ml-2 group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
+              </svg>
+            </div>
+          </div>
         </div>
 
         {/* Recent Updates Section */}
