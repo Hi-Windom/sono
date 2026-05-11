@@ -337,17 +337,17 @@ export default function Home() {
           setShowDownloadModal(false);
           setInstantDownloadInfo(null);
         }}
-        backendInfo={instantDownloadInfo || (hasBackendResult && repairResult ? {
-          filename: generateExportFilename(audioFile?.name, algorithmVersion, repairResult.output_sample_rate || processingOptions.sampleRate, repairResult.output_bit_depth || processingOptions.bitDepth),
-          fileSize: repairResult.duration && repairResult.output_sample_rate && repairResult.channels && repairResult.output_bit_depth
-            ? `${((repairResult.duration * repairResult.output_sample_rate * repairResult.channels * (repairResult.output_bit_depth / 8)) / (1024 * 1024)).toFixed(2)} MB`
+        backendInfo={instantDownloadInfo || (hasBackendResult ? {
+          filename: generateExportFilename(audioFile?.name, algorithmVersion, processingOptions.sampleRate, processingOptions.bitDepth),
+          fileSize: repairResult?.duration && repairResult?.channels
+            ? `${((repairResult.duration * processingOptions.sampleRate * repairResult.channels * (processingOptions.bitDepth / 8)) / (1024 * 1024)).toFixed(2)} MB`
             : '—',
-          sampleRate: repairResult.output_sample_rate ? `${(repairResult.output_sample_rate / 1000).toFixed(1)} kHz` : 'N/A',
-          bitDepth: repairResult.output_bit_depth || 32,
-          channels: repairResult.channels || 2,
-          duration: repairResult.duration || 0,
+          sampleRate: `${processingOptions.sampleRate / 1000} kHz`,
+          bitDepth: processingOptions.bitDepth,
+          channels: repairResult?.channels || 2,
+          duration: repairResult?.duration || 0,
           algorithmVersion: algorithmVersion,
-          completedAt: repairResult.completed_at,
+          completedAt: repairResult?.completed_at,
         } : null)}
         browserInfo={hasBrowserResult && browserBufferInfo ? {
           filename: generateExportFilename(audioFile?.name, browserRepairInfo?.algorithmVersion || algorithmVersion, browserBufferInfo.sampleRate, processingOptions.bitDepth, 'browser'),

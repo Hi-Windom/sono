@@ -258,3 +258,241 @@ class TestWebSocketEndpoint:
             data = ws.receive_json()
             assert data["status"] == "completed"
             assert data["progress"] == 100
+
+
+class TestPreviewEndpoint:
+    @pytest.fixture()
+    def preview_client(self, fresh_db):
+        from fastapi.testclient import TestClient
+        from app import create_app
+
+        tid = f"test-preview-{os.getpid()}-{id(self)}"
+        out_dir = Path(f"/tmp/sono_test_preview_{tid}")
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_file = out_dir / f"{tid}_repaired.wav"
+        out_file.write_bytes(b"RIFF" + b"\x00" * 200)
+        orig_file = out_dir / f"{tid}_original.wav"
+        orig_file.write_bytes(b"RIFF" + b"\x00" * 300)
+
+        fresh_db["create_task"](tid, "audio.wav", str(orig_file),
+                               {"algorithm_version": "v2.4a"}, "h123")
+        fresh_db["update_task"](tid, status="completed", output_path=str(out_file))
+        app = create_app()
+        client = TestClient(app)
+        return {"client": client, "task_id": tid, "out_dir": out_dir,
+                "orig_file": orig_file, "out_file": out_file}
+
+    def test_preview_default_returns_repaired(self, preview_client):
+        res = preview_client["client"].get(f"/api/v1/preview/{preview_client['task_id']}")
+        assert res.status_code == 200
+
+    def test_preview_type_repaired(self, preview_client):
+        res = preview_client["client"].get(f"/api/v1/preview/{preview_client['task_id']}?type=repaired")
+        assert res.status_code == 200
+
+    def test_preview_type_original(self, preview_client):
+        res = preview_client["client"].get(f"/api/v1/preview/{preview_client['task_id']}?type=original")
+        assert res.status_code == 200
+
+    def test_preview_original_missing_returns_404(self, fresh_db):
+        from fastapi.testclient import TestClient
+        from app import create_app
+
+        tid = f"test-preview-noorig-{os.getpid()}"
+        out_dir = Path(f"/tmp/sono_test_preview_noorig_{tid}")
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_file = out_dir / f"{tid}_repaired.wav"
+        out_file.write_bytes(b"RIFF" + b"\x00" * 200)
+
+        fresh_db["create_task"](tid, "audio.wav", "/nonexistent/original.wav",
+                               {"algorithm_version": "v2.4a"}, "h123")
+        fresh_db["update_task"](tid, status="completed", output_path=str(out_file))
+        app = create_app()
+        client = TestClient(app)
+
+        res = client.get(f"/api/v1/preview/{tid}?type=original")
+        assert res.status_code == 404
+
+    def test_preview_nonexistent_task_returns_404(self, fresh_db):
+        from fastapi.testclient import TestClient
+        from app import create_app
+        client = TestClient(create_app())
+        res = client.get("/api/v1/preview/no-such-task?type=repaired")
+        assert res.status_code == 404
+
+
+class TestRenderSpecPropagation:
+    @pytest.fixture()
+    def rendered_task(self, fresh_db):
+        tid = f"test-rcache-{os.getpid()}-{id(self)}"
+        fresh_db["create_task"](tid, "test.mp3", "/tmp/uploads/test.mp3",
+                               {"algorithm_version": "v2.4a"}, "hash123")
+        output_dir = Path(f"/tmp/sono_test_output_{tid}")
+        output_dir.mkdir(parents=True, exist_ok=True)
+        fresh_db["update_task"](tid, output_path=str(output_dir / f"{tid}_repaired.wav"))
+        return {"task_id": tid, "output_dir": output_dir}
+
+    @pytest.fixture()
+    def render_spec_client(self, fresh_db):
+        from fastapi.testclient import TestClient
+        from app import create_app
+
+        tid = f"test-rspec-{os.getpid()}-{id(self)}"
+        out_dir = Path(f"/tmp/sono_test_rspec_{tid}")
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_file = out_dir / f"{tid}_repaired.wav"
+        out_file.write_bytes(b"RIFF" + b"\x00" * 200)
+
+        fresh_db["create_task"](tid, "audio.wav", str(out_file),
+                               {"algorithm_version": "v2.4a"}, "h123")
+        fresh_db["update_task"](tid, status="completed", output_path=str(out_file))
+        app = create_app()
+        client = TestClient(app)
+        return {"client": client, "task_id": tid, "out_dir": out_dir}
+
+    def test_render_96khz_24bit_accepted(self, render_spec_client):
+        res = render_spec_client["client"].post(
+            "/api/v1/render",
+            json={"task_id": render_spec_client["task_id"], "sample_rate": 96000, "bit_depth": 24},
+        )
+        assert res.status_code == 200
+        data = res.json()
+        assert data["status"] == "rendering"
+
+    def test_render_192khz_32bit_accepted(self, render_spec_client):
+        res = render_spec_client["client"].post(
+            "/api/v1/render",
+            json={"task_id": render_spec_client["task_id"], "sample_rate": 192000, "bit_depth": 32},
+        )
+        assert res.status_code == 200
+
+    def test_render_filename_includes_spec(self, render_spec_client, fresh_db):
+        tid = render_spec_client["task_id"]
+        res = render_spec_client["client"].post(
+            "/api/v1/render",
+            json={"task_id": tid, "sample_rate": 96000, "bit_depth": 24},
+        )
+        assert res.status_code == 200
+
+        import time
+        time.sleep(2)
+
+        task = fresh_db["get_task"](tid)
+        if task and task.get("render_filename"):
+            assert "96000" in task["render_filename"]
+            assert "24" in task["render_filename"]
+
+    def test_render_cache_distinguishes_different_specs(self, rendered_task):
+        from api.routes import get_render_cache
+        from config import OUTPUT_DIR
+        os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+        tid = rendered_task["task_id"]
+
+        (Path(OUTPUT_DIR) / f"{tid}_rendered_v2.4a_48000_24.wav").write_bytes(b"RIFF" + b"\x00" * 100)
+        (Path(OUTPUT_DIR) / f"{tid}_rendered_v2.4a_96000_24.wav").write_bytes(b"RIFF" + b"\x00" * 200)
+        (Path(OUTPUT_DIR) / f"{tid}_rendered_v2.4a_96000_32.wav").write_bytes(b"RIFF" + b"\x00" * 300)
+
+        caches = asyncio.run(get_render_cache(tid))
+        cache_list = caches["caches"]
+
+        sr_48 = [c for c in cache_list if c["sample_rate"] == 48000 and c["bit_depth"] == 24]
+        sr_96_24 = [c for c in cache_list if c["sample_rate"] == 96000 and c["bit_depth"] == 24]
+        sr_96_32 = [c for c in cache_list if c["sample_rate"] == 96000 and c["bit_depth"] == 32]
+
+        assert len(sr_48) >= 1, f"Should find 48kHz/24bit cache, got: {cache_list}"
+        assert len(sr_96_24) >= 1, f"Should find 96kHz/24bit cache, got: {cache_list}"
+        assert len(sr_96_32) >= 1, f"Should find 96kHz/32bit cache, got: {cache_list}"
+
+
+class TestRenderOutputSpecMatchesRequest:
+    @pytest.fixture()
+    def render_verify_client(self, fresh_db):
+        from fastapi.testclient import TestClient
+        from app import create_app
+
+        tid = f"test-rverify-{os.getpid()}-{id(self)}"
+        out_dir = Path(f"/tmp/sono_test_rverify_{tid}")
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_file = out_dir / f"{tid}_repaired.wav"
+        out_file.write_bytes(b"RIFF" + b"\x00" * 200)
+
+        fresh_db["create_task"](tid, "audio.wav", str(out_file),
+                               {"algorithm_version": "v2.4a"}, "h123")
+        fresh_db["update_task"](tid, status="completed", output_path=str(out_file))
+        app = create_app()
+        client = TestClient(app)
+        return {"client": client, "task_id": tid, "out_dir": out_dir}
+
+    def test_render_result_sample_rate_equals_request(self, render_verify_client, fresh_db):
+        tid = render_verify_client["task_id"]
+        res = render_verify_client["client"].post(
+            "/api/v1/render",
+            json={"task_id": tid, "sample_rate": 96000, "bit_depth": 24},
+        )
+        assert res.status_code == 200
+
+        import time
+        time.sleep(2)
+
+        task = fresh_db["get_task"](tid)
+        assert task is not None, "Task should exist after render"
+        if task.get("render_result"):
+            result = json.loads(task["render_result"]) if isinstance(task["render_result"], str) else task["render_result"]
+            assert result["output_sample_rate"] == 96000, \
+                f"Render output_sample_rate must equal requested 96000, got {result['output_sample_rate']}"
+            assert result["output_bit_depth"] == 24, \
+                f"Render output_bit_depth must equal requested 24, got {result['output_bit_depth']}"
+
+    def test_render_result_48khz_not_default_for_96khz_request(self, render_verify_client, fresh_db):
+        tid = render_verify_client["task_id"]
+        res = render_verify_client["client"].post(
+            "/api/v1/render",
+            json={"task_id": tid, "sample_rate": 96000, "bit_depth": 24},
+        )
+        assert res.status_code == 200
+
+        import time
+        time.sleep(2)
+
+        task = fresh_db["get_task"](tid)
+        if task and task.get("render_result"):
+            result = json.loads(task["render_result"]) if isinstance(task["render_result"], str) else task["render_result"]
+            assert result["output_sample_rate"] != 48000, \
+                "Render output_sample_rate must NOT be 48000 when 96000 was requested (48kHz bug regression)"
+
+    def test_render_result_32bit_for_32bit_request(self, render_verify_client, fresh_db):
+        tid = render_verify_client["task_id"]
+        res = render_verify_client["client"].post(
+            "/api/v1/render",
+            json={"task_id": tid, "sample_rate": 48000, "bit_depth": 32},
+        )
+        assert res.status_code == 200
+
+        import time
+        time.sleep(2)
+
+        task = fresh_db["get_task"](tid)
+        if task and task.get("render_result"):
+            result = json.loads(task["render_result"]) if isinstance(task["render_result"], str) else task["render_result"]
+            assert result["output_bit_depth"] == 32, \
+                f"Render output_bit_depth must equal requested 32, got {result['output_bit_depth']}"
+
+    def test_repair_result_output_sr_is_working_sr_not_delivery(self, fresh_db):
+        from services.repair.repair_v2_4a.core import MOBILE_WORKING_SR
+        tid = f"test-repair-sr-{os.getpid()}"
+        fresh_db["create_task"](tid, "audio.wav", "/tmp/test.wav",
+                               {"algorithm_version": "v2.4a"}, "h123")
+        fresh_db["update_task"](tid, status="completed",
+                                repair_result=json.dumps({
+                                    "output_sample_rate": MOBILE_WORKING_SR,
+                                    "output_bit_depth": 24,
+                                }))
+        task = fresh_db["get_task"](tid)
+        result = task["repair_result"]
+        if isinstance(result, str):
+            result = json.loads(result)
+        assert result["output_sample_rate"] == MOBILE_WORKING_SR, \
+            "repair_result.output_sample_rate is the working SR (48000), NOT the delivery spec"
+        assert result["output_sample_rate"] != 96000, \
+            "repair_result must never be confused with delivery spec sample rate"

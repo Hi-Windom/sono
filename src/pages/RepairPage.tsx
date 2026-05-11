@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Header } from '../components/Header';
 import { AudioUploader } from '../components/AudioUploader';
@@ -95,22 +95,20 @@ export default function RepairPage() {
 
   const [showDiag, setShowDiag] = useState(false);
   const [instantDownloadInfo, setInstantDownloadInfo] = useState<DownloadFileInfo | null>(null);
-  const [renderResultInfo, setRenderResultInfo] = useState<DownloadFileInfo | null>(null);
 
-  useEffect(() => {
-    if (autoRenderInfo) {
-      setRenderResultInfo({
-        filename: `${(audioFile?.name || 'audio').replace(/\.[^/.]+$/, '')}_repaired.wav`,
-        fileSize: autoRenderInfo.duration && autoRenderInfo.output_sample_rate && autoRenderInfo.channels && autoRenderInfo.output_bit_depth
-          ? `${((autoRenderInfo.duration * autoRenderInfo.output_sample_rate * autoRenderInfo.channels * (autoRenderInfo.output_bit_depth / 8)) / (1024 * 1024)).toFixed(2)} MB`
-          : '—',
-        sampleRate: autoRenderInfo.output_sample_rate ? `${autoRenderInfo.output_sample_rate / 1000} kHz` : 'N/A',
-        bitDepth: autoRenderInfo.output_bit_depth || 24,
-        channels: autoRenderInfo.channels || 2,
-        duration: autoRenderInfo.duration || 0,
-        algorithmVersion: algorithmVersion,
-      });
-    }
+  const renderResultInfo = useMemo(() => {
+    if (!autoRenderInfo) return null;
+    return {
+      filename: `${(audioFile?.name || 'audio').replace(/\.[^/.]+$/, '')}_repaired.wav`,
+      fileSize: autoRenderInfo.duration && autoRenderInfo.output_sample_rate && autoRenderInfo.channels && autoRenderInfo.output_bit_depth
+        ? `${((autoRenderInfo.duration * autoRenderInfo.output_sample_rate * autoRenderInfo.channels * (autoRenderInfo.output_bit_depth / 8)) / (1024 * 1024)).toFixed(2)} MB`
+        : '—',
+      sampleRate: autoRenderInfo.output_sample_rate ? `${autoRenderInfo.output_sample_rate / 1000} kHz` : 'N/A',
+      bitDepth: autoRenderInfo.output_bit_depth || 24,
+      channels: autoRenderInfo.channels || 2,
+      duration: autoRenderInfo.duration || 0,
+      algorithmVersion: algorithmVersion,
+    };
   }, [autoRenderInfo, audioFile, algorithmVersion]);
 
   // 渲染缓存刷新回调
@@ -470,19 +468,18 @@ export default function RepairPage() {
         onClose={() => {
           setShowDownloadModal(false);
           setInstantDownloadInfo(null);
-          setRenderResultInfo(null);
         }}
-        backendInfo={instantDownloadInfo || renderResultInfo || (hasBackendResult && repairResult ? {
-          filename: generateExportFilename(audioFile?.name, algorithmVersion, repairResult.output_sample_rate || processingOptions.sampleRate, repairResult.output_bit_depth || processingOptions.bitDepth),
-          fileSize: repairResult.duration && repairResult.output_sample_rate && repairResult.channels && repairResult.output_bit_depth
-            ? `${((repairResult.duration * repairResult.output_sample_rate * repairResult.channels * (repairResult.output_bit_depth / 8)) / (1024 * 1024)).toFixed(2)} MB`
+        backendInfo={instantDownloadInfo || renderResultInfo || (hasBackendResult ? {
+          filename: generateExportFilename(audioFile?.name, algorithmVersion, processingOptions.sampleRate, processingOptions.bitDepth),
+          fileSize: repairResult?.duration && repairResult?.channels
+            ? `${((repairResult.duration * processingOptions.sampleRate * repairResult.channels * (processingOptions.bitDepth / 8)) / (1024 * 1024)).toFixed(2)} MB`
             : '—',
-          sampleRate: repairResult.output_sample_rate ? `${(repairResult.output_sample_rate / 1000).toFixed(1)} kHz` : 'N/A',
-          bitDepth: repairResult.output_bit_depth || 32,
-          channels: repairResult.channels || 2,
-          duration: repairResult.duration || 0,
+          sampleRate: `${processingOptions.sampleRate / 1000} kHz`,
+          bitDepth: processingOptions.bitDepth,
+          channels: repairResult?.channels || 2,
+          duration: repairResult?.duration || 0,
           algorithmVersion: algorithmVersion,
-          completedAt: repairResult.completed_at,
+          completedAt: repairResult?.completed_at,
         } : null)}
         browserInfo={hasBrowserResult && browserBufferInfo ? {
           filename: generateExportFilename(audioFile?.name, browserRepairInfo?.algorithmVersion || algorithmVersion, browserBufferInfo.sampleRate, processingOptions.bitDepth, 'browser'),
@@ -499,20 +496,6 @@ export default function RepairPage() {
           const result = await renderAndDownload();
           if (result?.downloadUrl) {
             setRenderDownloadUrl(result.downloadUrl);
-          }
-          if (result?.renderInfo) {
-            const ri = result.renderInfo;
-            setRenderResultInfo({
-              filename: result.fileName || generateExportFilename(audioFile?.name, algorithmVersion, ri.output_sample_rate || processingOptions.sampleRate, ri.output_bit_depth || processingOptions.bitDepth),
-              fileSize: ri.duration && ri.output_sample_rate && ri.channels && ri.output_bit_depth
-                ? `${((ri.duration * ri.output_sample_rate * ri.channels * (ri.output_bit_depth / 8)) / (1024 * 1024)).toFixed(2)} MB`
-                : '—',
-              sampleRate: ri.output_sample_rate ? `${ri.output_sample_rate / 1000} kHz` : 'N/A',
-              bitDepth: ri.output_bit_depth || 24,
-              channels: ri.channels || 2,
-              duration: ri.duration || 0,
-              algorithmVersion: algorithmVersion,
-            });
           }
         } : undefined}
         browserDownloadAction={hasBrowserResult ? () => downloadProcessedAudio('browser') : undefined}

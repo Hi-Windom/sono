@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { Header } from '../components/Header';
 import { SpectrumVisualizer } from '../components/SpectrumVisualizer';
@@ -45,6 +45,10 @@ function formatTime(seconds: number): string {
 
 export { audioBufferCache, getCachedBuffer, setCachedBuffer };
 
+function getPreviewUrl(taskId: string, type: 'original' | 'repaired'): string {
+  return `${API_BASE}/preview/${taskId}?type=${type}`;
+}
+
 export default function ComparePage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -66,14 +70,15 @@ export default function ComparePage() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [audioReady, setAudioReady] = useState(false);
 
+  const audioElRef = useRef<HTMLAudioElement | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
-  const sourceNodeRef = useRef<AudioBufferSourceNode | null>(null);
+  const sourceNodeRef = useRef<MediaElementAudioSourceNode | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const gainNodeRef = useRef<GainNode | null>(null);
-  const startTimeRef = useRef(0);
-  const pauseOffsetRef = useRef(0);
   const animFrameRef = useRef<number>();
+  const modeSwitchingRef = useRef(false);
 
   const activeBuffer = compareMode === 'original' ? originalBuffer : repairedBuffer;
   const activeLoading = compareMode === 'original' ? originalLoading : repairedLoading;
@@ -138,6 +143,82 @@ export default function ComparePage() {
   useEffect(() => {
     if (!taskId) return;
 
+    if (!audioElRef.current) {
+      audioElRef.current = new Audio();
+      audioElRef.current.preload = 'auto';
+      audioElRef.current.crossOrigin = 'anonymous';
+    }
+
+    const audio = audioElRef.current;
+    const url = getPreviewUrl(taskId, compareMode);
+    audio.src = url;
+    audio.load();
+    setAudioReady(false);
+    setDuration(0);
+    setCurrentTime(0);
+
+    const onCanPlay = () => {
+      setAudioReady(true);
+      setDuration(audio.duration || 0);
+    };
+    const onDurationChange = () => {
+      if (audio.duration && isFinite(audio.duration)) {
+        setDuration(audio.duration);
+      }
+    };
+    const onEnded = () => {
+      setIsPlaying(false);
+      setCurrentTime(audio.duration || 0);
+    };
+    const onError = () => {
+      setAudioReady(false);
+      if (compareMode === 'original') {
+        setOriginalError('原始音频不可用');
+      } else {
+        setRepairedError('修复后音频不可用');
+      }
+    };
+
+    audio.addEventListener('canplay', onCanPlay);
+    audio.addEventListener('durationchange', onDurationChange);
+    audio.addEventListener('ended', onEnded);
+    audio.addEventListener('error', onError);
+
+    return () => {
+      audio.removeEventListener('canplay', onCanPlay);
+      audio.removeEventListener('durationchange', onDurationChange);
+      audio.removeEventListener('ended', onEnded);
+      audio.removeEventListener('error', onError);
+    };
+  }, [taskId, compareMode]);
+
+  useEffect(() => {
+    if (!audioElRef.current) return;
+    const audio = audioElRef.current;
+    const updateProgress = () => {
+      if (!audio.paused) {
+        setCurrentTime(audio.currentTime);
+        animFrameRef.current = requestAnimationFrame(updateProgress);
+      }
+    };
+    const onPlay = () => {
+      animFrameRef.current = requestAnimationFrame(updateProgress);
+    };
+    const onPause = () => {
+      if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+    };
+    audio.addEventListener('play', onPlay);
+    audio.addEventListener('pause', onPause);
+    return () => {
+      audio.removeEventListener('play', onPlay);
+      audio.removeEventListener('pause', onPause);
+      if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!taskId) return;
+
     const cached = getCachedBuffer(taskId, 'original');
     if (cached) {
       setOriginalBuffer(cached);
@@ -149,7 +230,7 @@ export default function ComparePage() {
     setOriginalLoading(true);
     setOriginalError(null);
 
-    fetch(`${API_BASE}/preview/${taskId}?type=original`)
+    fetch(getPreviewUrl(taskId, 'original'))
       .then(res => {
         if (!res.ok) throw new Error(`原始音频不可用 (HTTP ${res.status})`);
         return res.arrayBuffer();
@@ -188,7 +269,7 @@ export default function ComparePage() {
     setRepairedLoading(true);
     setRepairedError(null);
 
-    fetch(`${API_BASE}/preview/${taskId}?type=repaired`)
+    fetch(getPreviewUrl(taskId, 'repaired'))
       .then(res => {
         if (!res.ok) throw new Error(`修复后音频不可用 (HTTP ${res.status})`);
         return res.arrayBuffer();
@@ -214,113 +295,109 @@ export default function ComparePage() {
   }, [taskId, getAudioContext]);
 
   useEffect(() => {
-    if (!audioContextRef.current) return;
-    if (analyserRef.current) return;
-    const analyser = audioContextRef.current.createAnalyser();
+    if (!audioElRef.current || !audioContextRef.current) return;
+    if (sourceNodeRef.current) return;
+
+    const ctx = audioContextRef.current;
+    const analyser = ctx.createAnalyser();
     analyser.fftSize = 256;
     analyserRef.current = analyser;
 
-    const gain = audioContextRef.current.createGain();
+    const gain = ctx.createGain();
     gain.gain.value = 1;
     gainNodeRef.current = gain;
 
-    analyser.connect(gain);
-    gain.connect(audioContextRef.current.destination);
+    try {
+      const source = ctx.createMediaElementSource(audioElRef.current);
+      sourceNodeRef.current = source;
+      source.connect(analyser);
+      analyser.connect(gain);
+      gain.connect(ctx.destination);
+    } catch {
+      // already connected
+    }
 
     return () => {
-      analyser.disconnect();
-      gain.disconnect();
+      try {
+        sourceNodeRef.current?.disconnect();
+        analyser.disconnect();
+        gain.disconnect();
+      } catch { /* ignore */ }
+      sourceNodeRef.current = null;
       analyserRef.current = null;
       gainNodeRef.current = null;
     };
   }, []);
 
-  useEffect(() => {
-    if (activeBuffer) setDuration(activeBuffer.duration);
-  }, [activeBuffer]);
-
-  const stopPlayback = useCallback(() => {
-    if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
-    if (sourceNodeRef.current) {
-      try { sourceNodeRef.current.stop(); } catch { /* already stopped */ }
-      sourceNodeRef.current = null;
-    }
-    setIsPlaying(false);
-  }, []);
-
   const play = useCallback(() => {
-    if (!activeBuffer || !audioContextRef.current) return;
+    const audio = audioElRef.current;
+    if (!audio || !audioReady) return;
 
-    stopPlayback();
-
-    const ctx = audioContextRef.current;
+    const ctx = getAudioContext();
     if (ctx.state === 'suspended') ctx.resume();
 
-    if (!analyserRef.current) {
+    if (!sourceNodeRef.current) {
       const analyser = ctx.createAnalyser();
       analyser.fftSize = 256;
       analyserRef.current = analyser;
       const gain = ctx.createGain();
       gain.gain.value = 1;
       gainNodeRef.current = gain;
-      analyser.connect(gain);
-      gain.connect(ctx.destination);
+      try {
+        const source = ctx.createMediaElementSource(audio);
+        sourceNodeRef.current = source;
+        source.connect(analyser);
+        analyser.connect(gain);
+        gain.connect(ctx.destination);
+      } catch {
+        // already connected
+      }
     }
 
-    const source = ctx.createBufferSource();
-    source.buffer = activeBuffer;
-    source.connect(analyserRef.current);
-
-    const offset = pauseOffsetRef.current;
-    source.start(0, offset);
-    startTimeRef.current = ctx.currentTime - offset;
-    sourceNodeRef.current = source;
-    setIsPlaying(true);
-
-    const updateProgress = () => {
-      if (!sourceNodeRef.current) return;
-      const elapsed = ctx.currentTime - startTimeRef.current;
-      setCurrentTime(elapsed);
-      if (elapsed < activeBuffer.duration) {
-        animFrameRef.current = requestAnimationFrame(updateProgress);
-      } else {
-        setCurrentTime(activeBuffer.duration);
-        pauseOffsetRef.current = 0;
-        setIsPlaying(false);
-        sourceNodeRef.current = null;
-      }
-    };
-    animFrameRef.current = requestAnimationFrame(updateProgress);
-  }, [activeBuffer, stopPlayback]);
+    audio.play().then(() => {
+      setIsPlaying(true);
+    }).catch(() => {});
+  }, [audioReady, getAudioContext]);
 
   const pause = useCallback(() => {
-    if (!audioContextRef.current) return;
-    pauseOffsetRef.current = audioContextRef.current.currentTime - startTimeRef.current;
-    stopPlayback();
-  }, [stopPlayback]);
+    const audio = audioElRef.current;
+    if (!audio) return;
+    audio.pause();
+    setIsPlaying(false);
+  }, []);
 
   const seek = useCallback((time: number) => {
-    if (!activeBuffer) return;
-    const t = Math.max(0, Math.min(time, activeBuffer.duration));
-    pauseOffsetRef.current = t;
+    const audio = audioElRef.current;
+    if (!audio || !isFinite(time)) return;
+    const t = Math.max(0, Math.min(time, audio.duration || 0));
+    audio.currentTime = t;
     setCurrentTime(t);
-    if (isPlaying) {
-      stopPlayback();
-      setTimeout(play, 0);
-    }
-  }, [activeBuffer, isPlaying, stopPlayback, play]);
+  }, []);
 
   const switchMode = useCallback((mode: CompareMode) => {
     if (mode === compareMode) return;
     const wasPlaying = isPlaying;
-    pause();
-    setCompareMode(mode);
-    pauseOffsetRef.current = 0;
-    setCurrentTime(0);
-    if (wasPlaying) {
-      setTimeout(play, 100);
+    const audio = audioElRef.current;
+    if (audio) {
+      audio.pause();
     }
-  }, [compareMode, isPlaying, pause, play]);
+    setIsPlaying(false);
+    setCompareMode(mode);
+    setCurrentTime(0);
+    modeSwitchingRef.current = true;
+    if (wasPlaying) {
+      setTimeout(() => {
+        const a = audioElRef.current;
+        if (a && a.readyState >= 3) {
+          a.currentTime = 0;
+          a.play().then(() => setIsPlaying(true)).catch(() => {});
+        }
+        modeSwitchingRef.current = false;
+      }, 300);
+    } else {
+      setTimeout(() => { modeSwitchingRef.current = false; }, 300);
+    }
+  }, [compareMode, isPlaying]);
 
   const selectTask = useCallback((id: string) => {
     setSearchParams({ taskId: id });
@@ -328,12 +405,16 @@ export default function ComparePage() {
 
   useEffect(() => {
     return () => {
-      stopPlayback();
+      const audio = audioElRef.current;
+      if (audio) {
+        audio.pause();
+        audio.src = '';
+      }
       if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
         audioContextRef.current.close();
       }
     };
-  }, [stopPlayback]);
+  }, []);
 
   const modeLabel: Record<CompareMode, string> = { original: '原始音频', repaired: '修复后' };
   const modeColor: Record<CompareMode, string> = { original: '#6B7280', repaired: '#00D9FF' };
@@ -442,22 +523,17 @@ export default function ComparePage() {
 
           <div className="flex items-center gap-2 shrink-0">
             {(['original', 'repaired'] as CompareMode[]).map((mode) => {
-              const buf = mode === 'original' ? originalBuffer : repairedBuffer;
               const isLoading = mode === 'original' ? originalLoading : repairedLoading;
               const loadError = mode === 'original' ? originalError : repairedError;
-              const available = !!buf;
               const active = compareMode === mode;
               return (
                 <button
                   key={mode}
-                  onClick={() => available && switchMode(mode)}
-                  disabled={!available}
+                  onClick={() => switchMode(mode)}
                   className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 ${
                     active
                       ? 'bg-secondary/30 text-secondary border border-secondary/50 shadow-md shadow-secondary/10'
-                      : !available
-                        ? 'bg-gray-800/30 text-gray-500 cursor-not-allowed border border-gray-700/30 opacity-50'
-                        : 'bg-gray-800/50 text-gray-400 hover:bg-gray-700/50 hover:text-gray-200 border border-transparent hover:border-gray-600/50'
+                      : 'bg-gray-800/50 text-gray-400 hover:bg-gray-700/50 hover:text-gray-200 border border-transparent hover:border-gray-600/50'
                   }`}
                   style={active ? { borderColor: modeColor[mode], color: modeColor[mode], backgroundColor: modeColor[mode] + '15' } : undefined}
                 >
@@ -466,12 +542,12 @@ export default function ComparePage() {
                   ) : loadError ? (
                     <span className="w-2 h-2 rounded-full bg-red-500/50" />
                   ) : (
-                    <span className={`w-2 h-2 rounded-full ${available ? (active ? '' : 'bg-gray-500') : 'bg-gray-600'}`}
-                      style={available && active ? { backgroundColor: modeColor[mode] } : undefined}
+                    <span className={`w-2 h-2 rounded-full ${active ? '' : 'bg-gray-500'}`}
+                      style={active ? { backgroundColor: modeColor[mode] } : undefined}
                     />
                   )}
                   {modeLabel[mode]}
-                  {isLoading && <span className="text-[10px] opacity-60 ml-0.5">加载中</span>}
+                  {isLoading && <span className="text-[10px] opacity-60 ml-0.5">波形</span>}
                   {loadError && !isLoading && (
                     <svg className="w-3 h-3 ml-0.5 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01" />
@@ -487,7 +563,7 @@ export default function ComparePage() {
           <div className="flex items-center justify-center gap-4">
             <button
               onClick={isPlaying ? pause : play}
-              disabled={!activeBuffer || activeLoading}
+              disabled={!audioReady}
               className="w-14 h-14 rounded-full flex items-center justify-center transition-all duration-200 bg-gradient-to-r from-secondary to-accent hover:scale-110 hover:shadow-lg hover:shadow-secondary/40 active:scale-95 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:scale-100"
             >
               {isPlaying ? (
@@ -503,7 +579,7 @@ export default function ComparePage() {
 
             <div className="flex-1 min-w-[120px] max-w-xs">
               <div className="text-xs text-gray-400 mb-1 text-center">
-                {activeLoading ? '加载中...' : `${formatTime(currentTime)} / ${formatTime(duration)}`}
+                {!audioReady ? '缓冲中...' : `${formatTime(currentTime)} / ${formatTime(duration)}`}
               </div>
               <input
                 type="range"
@@ -512,10 +588,10 @@ export default function ComparePage() {
                 step={0.01}
                 value={currentTime}
                 onChange={(e) => seek(parseFloat(e.target.value))}
-                disabled={!activeBuffer || activeLoading}
+                disabled={!audioReady}
                 className="w-full h-1.5 bg-gray-700 rounded-full appearance-none cursor-pointer disabled:opacity-30 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:shadow-md [&::-webkit-slider-runnable-track]:rounded-full"
                 style={{
-                  background: activeBuffer
+                  background: audioReady
                     ? `linear-gradient(to right, ${modeColor[compareMode]} ${(currentTime / (duration || 1)) * 100}%, #374151 ${(currentTime / (duration || 1)) * 100}%)`
                     : undefined,
                 }}
@@ -524,7 +600,7 @@ export default function ComparePage() {
           </div>
         </div>
 
-        {analyserRef.current && activeBuffer && (
+        {analyserRef.current && audioReady && (
           <div className="mt-6">
             <SpectrumVisualizer
               analyser={analyserRef.current}
@@ -539,7 +615,7 @@ export default function ComparePage() {
             key={`waveform-${compareMode}-${!!activeBuffer}`}
             audioBuffer={activeBuffer}
             color={modeColor[compareMode]}
-            label={activeLoading ? `${modeLabel[compareMode]} 加载中...` : `${modeLabel[compareMode]} 波形`}
+            label={activeLoading ? `${modeLabel[compareMode]} 波形加载中...` : activeBuffer ? `${modeLabel[compareMode]} 波形` : `${modeLabel[compareMode]} 等待波形...`}
             currentTime={currentTime}
             duration={duration}
             onSeek={seek}
@@ -549,12 +625,12 @@ export default function ComparePage() {
         <div className="mt-4 flex items-center justify-between text-xs text-gray-500">
           <span>Task ID: {taskId}</span>
           <span>
-            {originalLoading && <span className="text-yellow-500/70 mr-3">原始音频加载中</span>}
-            {repairedLoading && <span className="text-yellow-500/70 mr-3">修复后音频加载中</span>}
+            {!audioReady && <span className="text-yellow-500/70 mr-3">音频缓冲中</span>}
+            {originalLoading && <span className="text-yellow-500/70 mr-3">原始波形加载中</span>}
+            {repairedLoading && <span className="text-yellow-500/70 mr-3">修复后波形加载中</span>}
             {originalError && <span className="text-red-400/70 mr-3">原始: {originalError}</span>}
             {repairedError && <span className="text-red-400/70 mr-3">修复: {repairedError}</span>}
-            {originalBuffer && repairedBuffer && <span className="text-green-400">双轨已就绪</span>}
-            {originalBuffer && !repairedBuffer && !repairedLoading && !repairedError && <span className="text-yellow-500/70">修复后音频未就绪</span>}
+            {audioReady && !originalLoading && !repairedLoading && originalBuffer && repairedBuffer && <span className="text-green-400">双轨已就绪</span>}
           </span>
         </div>
       </>

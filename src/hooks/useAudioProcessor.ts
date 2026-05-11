@@ -1027,8 +1027,9 @@ export function useAudioProcessor() {
     setProcessingOptionsState(prev => ({ ...prev, ...options }));
   }, []);
 
-  const loadAudioFromUrl = useCallback(async (url: string, targetSampleRate?: number): Promise<AudioBuffer> => {
+  const loadAudioFromUrl = useCallback(async (url: string, targetSampleRate?: number, silent?: boolean): Promise<AudioBuffer> => {
     const arrayBuffer = await downloadWithProgress(url, (loaded, total, speed) => {
+      if (silent) return;
       const pct = total > 0 ? loaded / total : 0;
       setProcessingStep(`下载中 ${formatBytes(loaded)}/${formatBytes(total)} ${formatSpeed(speed)}`);
       setProcessingProgress(0.96 + pct * 0.03);
@@ -1490,7 +1491,7 @@ export function useAudioProcessor() {
 
       // 后台加载修复后的音频 buffer
       if (audioFile && taskIdRef.current) {
-        loadAudioFromUrl(previewUrl, processingOptions.sampleRate).then(repairedBuffer => {
+        loadAudioFromUrl(previewUrl, processingOptionsRef.current.sampleRate, true).then(repairedBuffer => {
           writeLog(`[applySettings] buffer加载完成: duration=${repairedBuffer.duration.toFixed(3)}`);
           backendProcessedBufferRef.current = repairedBuffer;
           setBackendProcessedBuffer(repairedBuffer);
@@ -1550,9 +1551,6 @@ export function useAudioProcessor() {
           if (result?.downloadUrl) {
             setRenderDownloadUrl(result.downloadUrl);
           }
-          if (result?.renderInfo) {
-            setAutoRenderInfo(result.renderInfo);
-          }
           setShowDownloadModal(true);
         }).catch(err => {
           writeLog(`[applySettings] 自动渲染失败: ${err}`);
@@ -1566,13 +1564,17 @@ export function useAudioProcessor() {
       setProcessingStep('完成!');
     }
     setProcessingProgress(1);
-    setIsProcessing(false);
-    setTimeout(() => {
-      setProcessingStep('');
-      setProcessingSource(null);
-      setProcessingProgress(0);
-    }, 2000);
-  }, [audioBuffer, audioFile, params, processingOptions, originalAIDetection, loadAudioFromUrl, repairWithWorker, wavInfo, startStreamingPlayback, detectorVersion, enableBrowserRepair]);
+
+    const hasPendingRender = effectiveBackendResult.status === 'fulfilled' && effectiveBackendResult.value && taskIdRef.current;
+    if (!hasPendingRender) {
+      setIsProcessing(false);
+      setTimeout(() => {
+        setProcessingStep('');
+        setProcessingSource(null);
+        setProcessingProgress(0);
+      }, 2000);
+    }
+  }, [audioBuffer, audioFile, params, processingOptions, originalAIDetection, loadAudioFromUrl, repairWithWorker, wavInfo, detectorVersion, enableBrowserRepair]);
 
   const runAIDetection = useCallback(async () => {
     if (!audioBuffer) return;
@@ -2259,15 +2261,17 @@ export function useAudioProcessor() {
         const hit = caches.find(c => c.sample_rate === opts.sampleRate && c.bit_depth === opts.bitDepth && c.algorithm_version === algoVer);
         if (hit) {
           writeLog(`[renderAndDownload] 渲染缓存命中: ${hit.filename}`);
+          const renderInfo = {
+            output_sample_rate: hit.sample_rate,
+            output_bit_depth: hit.bit_depth,
+            duration: durationRef.current,
+            channels: 2,
+          };
+          setAutoRenderInfo(renderInfo);
           return {
             downloadUrl: `/api/v1/download-file/${hit.filename}`,
             fileName,
-            renderInfo: {
-              output_sample_rate: hit.sample_rate,
-              output_bit_depth: hit.bit_depth,
-              duration: durationRef.current,
-              channels: 2,
-            },
+            renderInfo,
           };
         }
       }
@@ -2294,10 +2298,17 @@ export function useAudioProcessor() {
         throw new Error('渲染结果不完整');
       }
       writeLog(`[renderAndDownload] 渲染完成: sr=${renderRes.render_result.output_sample_rate} bd=${renderRes.render_result.output_bit_depth}`);
-      setRepairResult(prev => prev ? {
-        ...prev,
+      const renderInfo = {
         output_sample_rate: renderRes.render_result!.output_sample_rate,
         output_bit_depth: renderRes.render_result!.output_bit_depth,
+        duration: renderRes.render_result!.duration,
+        channels: renderRes.render_result!.channels,
+      };
+      setAutoRenderInfo(renderInfo);
+      setRepairResult(prev => prev ? {
+        ...prev,
+        output_sample_rate: renderInfo.output_sample_rate,
+        output_bit_depth: renderInfo.output_bit_depth,
       } : null);
       setProcessingStep('');
       setProcessingSource(null);
@@ -2306,12 +2317,7 @@ export function useAudioProcessor() {
       return {
         downloadUrl: `/api/v1/download-file/${renderRes.render_filename}`,
         fileName,
-        renderInfo: {
-          output_sample_rate: renderRes.render_result!.output_sample_rate,
-          output_bit_depth: renderRes.render_result!.output_bit_depth,
-          duration: renderRes.render_result!.duration,
-          channels: renderRes.render_result!.channels,
-        },
+        renderInfo,
       };
     } catch (renderErr) {
       wsControlRef.current?.close();
@@ -2413,11 +2419,10 @@ export function useAudioProcessor() {
 
     const previewUrl = getPreviewUrl(taskId, 'repaired');
     setBackendPreviewUrl(previewUrl);
-    startStreamingPlayback(previewUrl);
     setHasBeenProcessed(true);
 
     if (audioFile && taskId) {
-      loadAudioFromUrl(previewUrl, processingOptionsRef.current.sampleRate).then(repairedBuffer => {
+      loadAudioFromUrl(previewUrl, processingOptionsRef.current.sampleRate, true).then(repairedBuffer => {
         backendProcessedBufferRef.current = repairedBuffer;
         setBackendProcessedBuffer(repairedBuffer);
       }).catch(err => {
@@ -2447,15 +2452,12 @@ export function useAudioProcessor() {
       if (result?.downloadUrl) {
         setRenderDownloadUrl(result.downloadUrl);
       }
-      if (result?.renderInfo) {
-        setAutoRenderInfo(result.renderInfo);
-      }
       setShowDownloadModal(true);
     }).catch((err) => {
       writeLog(`[handleUseRepairCache] renderAndDownload 失败: ${err}`);
       setShowDownloadModal(true);
     });
-  }, [cacheHitInfo, startStreamingPlayback, loadAudioFromUrl, wavInfo, originalDetectTime, renderAndDownload]);
+  }, [cacheHitInfo, loadAudioFromUrl, wavInfo, originalDetectTime, renderAndDownload]);
 
   const handleRenderCacheDownload = useCallback((cache: RenderCacheEntry, downloadUrl: string, filename: string) => {
     writeLog(`[handleRenderCacheDownload] 秒下: ${cache.filename}`);
