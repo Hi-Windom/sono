@@ -896,7 +896,19 @@ export function connectProgressWS(
 ): WSProgressControl {
   const terminals = terminalStates || DEFAULT_TERMINAL_STATES;
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const wsUrl = `${protocol}//${window.location.host}/api/v1/ws/progress/${taskId}`;
+  let wsHost: string;
+  const viteApiUrl = import.meta.env.VITE_API_URL;
+  if (viteApiUrl && import.meta.env.DEV) {
+    try {
+      const backendUrl = new URL(viteApiUrl);
+      wsHost = backendUrl.host;
+    } catch {
+      wsHost = window.location.host;
+    }
+  } else {
+    wsHost = window.location.host;
+  }
+  const wsUrl = `${protocol}//${wsHost}/api/v1/ws/progress/${taskId}`;
 
   let ws: WebSocket | null = null;
   let reconnectAttempts = 0;
@@ -1141,10 +1153,10 @@ export function waitRenderWithWS(
           if (onProgress) onProgress(data.progress, data.step || '');
         },
         onComplete: (data) => {
-          if (data.status === 'render_completed') {
+          if (data.status === 'render_completed' || data.status === 'completed') {
             resolve({
               task_id: taskId,
-              status: 'render_completed',
+              status: data.status,
               render_filename: data.render_filename,
               render_result: data.render_result,
             });

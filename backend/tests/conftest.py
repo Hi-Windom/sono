@@ -53,6 +53,28 @@ def generate_with_clipping(sr=SR, duration=DURATION):
     return np.clip(y, -0.85, 0.85)
 
 
+def generate_ai_artifact_signal(sr=SR, duration=DURATION):
+    t = np.arange(int(sr * duration), dtype=np.float64) / sr
+    y = 0.3 * np.sin(2 * np.pi * 200 * t) + 0.2 * np.sin(2 * np.pi * 600 * t)
+    envelope = 0.5 * (1 + np.sin(2 * np.pi * 3 * t)) * 0.5
+    y *= envelope
+    from services.dsp_utils import stft, istft
+    n_fft = 2048
+    hop_length = 512
+    S = stft(y, n_fft=n_fft, hop_length=hop_length)
+    freqs = np.arange(S.shape[0]) * sr / n_fft
+    presence_mask = (freqs >= 2000) & (freqs <= 5000)
+    S[presence_mask, :] *= 3.0
+    chirp_bins = (freqs >= 6000) & (freqs <= 10000)
+    for j in range(S.shape[1]):
+        chirp_phase = 2 * np.pi * 50 * j / sr
+        S[chirp_bins, j] *= (1 + 0.5 * np.sin(chirp_phase))
+    y_out = istft(S, hop_length=hop_length, length=len(y))
+    if len(y_out) < len(y):
+        y_out = np.pad(y_out, (0, len(y) - len(y_out)))
+    return y_out[:len(y)]
+
+
 def write_temp_wav(y, sr, tmp_path):
     if y.ndim == 1:
         y_out = y
@@ -172,7 +194,7 @@ def benchmark_step(step_fn, *args, repeat=3):
     return min(times)
 
 
-ACTIVE_VERSIONS = ["v2.0", "v2.1", "v2.2", "v2.2a", "v2.3", "v2.3a"]
+ACTIVE_VERSIONS = ["v2.0", "v2.1", "v2.2", "v2.2a", "v2.3", "v2.3a", "v2.4", "v2.4a"]
 
 
 @pytest.fixture(params=ACTIVE_VERSIONS)
@@ -198,6 +220,10 @@ def repair_fn(repair_version):
                 from services.repair.repair_v2_3 import repair_audio as fn
             elif repair_version == "v2.3a":
                 from services.repair.repair_v2_3a import repair_audio as fn
+            elif repair_version == "v2.4":
+                from services.repair.repair_v2_4 import repair_audio as fn
+            elif repair_version == "v2.4a":
+                from services.repair.repair_v2_4a import repair_audio as fn
             else:
                 pytest.skip(f"Unknown version: {repair_version}")
             yield fn
@@ -238,3 +264,8 @@ def signal_with_pops():
 @pytest.fixture
 def signal_with_clipping():
     return generate_with_clipping()
+
+
+@pytest.fixture
+def ai_artifact_signal():
+    return generate_ai_artifact_signal()

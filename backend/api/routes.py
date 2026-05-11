@@ -526,8 +526,11 @@ async def download_audio(task_id: str):
 
 @router.get("/download-file/{filename}")
 async def download_file(filename: str, request: Request):
+    logger.info(f"[DOWNLOAD] Request received: filename={filename}, client={request.client.host if request.client else 'unknown'}")
     file_path = os.path.join(OUTPUT_DIR, filename)
+    logger.info(f"[DOWNLOAD] File path: {file_path}, exists={os.path.exists(file_path)}")
     if not os.path.exists(file_path):
+        logger.warning(f"[DOWNLOAD] File not found: {file_path}")
         raise HTTPException(status_code=404, detail="文件不存在")
     # 生成友好下载文件名: 原始文件名_算法版本_交付规格_时间戳.wav
     download_name = filename
@@ -570,6 +573,7 @@ async def download_file(filename: str, request: Request):
     # 使用 StreamingResponse 支持 Range 请求（断点续传 + 多线程下载）
     file_size = os.path.getsize(file_path)
     range_header = request.headers.get("range")
+    logger.info(f"[DOWNLOAD] File size: {file_size}, Range header: {range_header}")
     # 统一使用 RFC 5987 编码 Content-Disposition，确保中文文件名正确
     from urllib.parse import quote
     encoded_name = quote(download_name)
@@ -578,10 +582,13 @@ async def download_file(filename: str, request: Request):
     if range_header:
         # 解析 Range: bytes=start-end
         range_match = __import__("re").match(r"bytes=(\d+)-(\d*)", range_header)
+        logger.info(f"[DOWNLOAD] Range matched: {range_match is not None}")
         if range_match:
             start = int(range_match.group(1))
             end = int(range_match.group(2)) if range_match.group(2) else file_size - 1
+            logger.info(f"[DOWNLOAD] Range: start={start}, end={end}")
             if start >= file_size:
+                logger.warning(f"[DOWNLOAD] Invalid range: start={start} >= file_size={file_size}")
                 from fastapi.responses import Response
                 return Response(status_code=416, headers={"Content-Range": f"bytes */{file_size}"})
             end = min(end, file_size - 1)
@@ -600,6 +607,7 @@ async def download_file(filename: str, request: Request):
                         yield data
 
             from fastapi.responses import StreamingResponse
+            logger.info(f"[DOWNLOAD] Returning 206 Partial Content: bytes {start}-{end}/{file_size}")
             return StreamingResponse(
                 iter_file(),
                 status_code=206,
@@ -613,6 +621,7 @@ async def download_file(filename: str, request: Request):
             )
 
     # 无 Range 请求，返回完整文件（使用 StreamingResponse 统一 Content-Disposition 格式）
+    logger.info(f"[DOWNLOAD] Returning 200 OK with full file, disposition={disposition}")
     def iter_full_file():
         with open(file_path, "rb") as f:
             while True:
@@ -1412,6 +1421,19 @@ def _parse_pytest_output(output: str) -> dict:
             "test_spectral_denoise_snr": ("per_step", "SNR", "频谱降噪 SNR > 10 dB"),
             "test_de_ess_snr": ("per_step", "SNR", "齿音抑制 SNR > 15 dB"),
             "test_de_ess_is_constant": ("iron_rule", "Gain CV", "齿音抑制使用全局常量衰减"),
+            "test_adaptive_loudness_normalize_snr": ("per_step", "SNR", "自适应响度归一化 SNR > 60 dB"),
+            "test_adaptive_loudness_normalize_is_constant": ("iron_rule", "Gain CV", "自适应响度归一化是纯常量增益"),
+            "test_enhanced_multiband_compress_snr": ("per_step", "SNR", "增强多段压缩 SNR > 25 dB"),
+            "test_ai_artifact_repair_snr": ("per_step", "SNR", "AI频谱修复 SNR > 5 dB"),
+            "test_ai_artifact_repair_reduces": ("per_step", "Presence", "AI频谱修复降低2-5kHz突刺"),
+            "test_harmonic_bass_enhance_snr": ("per_step", "SNR", "次谐波低频增强 SNR > 10 dB"),
+            "test_harmonic_bass_enhance_increases": ("per_step", "Bass", "次谐波低频增强增加低频能量"),
+            "test_air_texture_reconstruct_snr": ("per_step", "SNR", "空气质感重建 SNR > 10 dB"),
+            "test_adaptive_loudness_normalize_lite": ("per_step", "SNR", "移动端自适应响度归一化 SNR > 60 dB"),
+            "test_enhanced_compress_lite": ("per_step", "SNR", "移动端增强压缩 SNR > 25 dB"),
+            "test_ai_artifact_repair_lite": ("per_step", "SNR", "移动端AI频谱修复 SNR > 5 dB"),
+            "test_harmonic_bass_enhance_lite": ("per_step", "SNR", "移动端次谐波低频增强 SNR > 10 dB"),
+            "test_air_texture_reconstruct_lite": ("per_step", "SNR", "移动端空气质感重建 SNR > 10 dB"),
         }
         matched = False
         for key, val in category_map.items():

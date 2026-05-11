@@ -1,0 +1,772 @@
+import numpy as np
+import gc
+from functools import lru_cache
+
+from scipy.signal import butter, sosfiltfilt, resample_poly, medfilt
+
+from services.audio_loader import load_audio_with_fallback
+from services.dsp_utils import stft, istft, stft_chunked, istft_chunked, streaming_spectral_process
+
+MOBILE_WORKING_SR = 48000
+
+
+def _detect_music_type_fast(y, sr):
+    if y.ndim > 1:
+        y_mono = y.mean(axis=0)
+    else:
+        y_mono = y
+
+    frame_len = int(sr * 0.05)
+    hop_len = int(sr * 0.025)
+    frames = np.lib.stride_tricks.sliding_window_view(y_mono, frame_len)[::hop_len]
+    if frames.shape[0] == 0:
+        return "unknown", 0.5
+
+    frame_energy = np.mean(frames ** 2, axis=1)
+    frame_energy = np.maximum(frame_energy, 1e-10)
+
+    low_cut = int(len(y_mono) * 0.1)
+    high_start = int(len(y_mono) * 0.5)
+    low_energy = np.mean(y_mono[:low_cut] ** 2) if low_cut > 0 else 1e-10
+    high_energy = np.mean(y_mono[high_start:] ** 2) if high_start < len(y_mono) else 1e-10
+
+    db_energy = 10 * np.log10(frame_energy)
+    dynamic_range = np.max(db_energy) - np.min(db_energy)
+
+    zcr = np.mean(np.abs(np.diff(np.sign(y_mono))) > 0)
+    transient_density = zcr / len(y_mono) * sr
+
+    if dynamic_range < 8 and transient_density < 5:
+        music_type = "electronic"
+        confidence = 0.75
+    elif low_energy > high_energy * 3 and dynamic_range > 12:
+        music_type = "bass_heavy"
+        confidence = 0.7
+    elif transient_density > 15 and dynamic_range > 10:
+        music_type = "acoustic"
+        confidence = 0.7
+    elif high_energy > low_energy * 1.5 and dynamic_range > 10:
+        music_type = "vocal"
+        confidence = 0.65
+    else:
+        music_type = "general"
+        confidence = 0.6
+
+    return music_type, confidence
+
+
+def _simple_declip(y, amount):
+    if amount <= 0:
+        return y
+    threshold = 0.90
+    mask = np.abs(y) > threshold
+    if not np.any(mask):
+        return y
+
+    masked_vals = y[mask].astype(np.float64)
+    abs_masked = np.abs(masked_vals)
+    over = abs_masked - threshold
+    headroom = 1.0 - threshold
+    y[mask] = (np.sign(masked_vals) * (threshold + headroom * np.tanh(over / headroom))).astype(y.dtype)
+    return y
+
+
+def _simple_depop(y, sr, amount):
+    if amount <= 0:
+        return y
+    is_stereo = y.ndim > 1 and y.shape[0] == 2
+    if is_stereo:
+        for ch in range(y.shape[0]):
+            _simple_depop_1d(y[ch], sr, amount)
+        return y
+
+    data = y.flatten() if y.ndim > 1 else y
+    _simple_depop_1d(data, sr, amount)
+    if y.ndim > 1:
+        y[:] = data.reshape(y.shape)
+    return y
+
+
+def _simple_depop_1d(data, sr, amount):
+    diff = np.diff(data)
+    abs_diff = np.abs(diff)
+    median_diff = np.median(abs_diff)
+    if median_diff < 1e-10:
+        return data
+    threshold = median_diff * (80 + 120 * amount)
+    pop_mask = np.concatenate(([False], abs_diff > threshold))
+    if not np.any(pop_mask):
+        return data
+
+    indices = np.where(pop_mask)[0]
+    valid = (indices > 0) & (indices < len(data) - 1)
+    indices = indices[valid]
+    if len(indices) == 0:
+        return data
+
+    prev_vals = data[indices - 1].astype(np.float64)
+    next_vals = data[indices + 1].astype(np.float64)
+    actual_diffs = data[indices].astype(np.float64) - prev_vals
+    over_mask = np.abs(actual_diffs) > threshold
+    indices = indices[over_mask]
+    if len(indices) == 0:
+        return data
+
+    prev_vals = data[indices - 1].astype(np.float64)
+    next_vals = data[indices + 1].astype(np.float64)
+    actual_diffs = data[indices].astype(np.float64) - prev_vals
+    clamped = prev_vals + np.sign(actual_diffs) * threshold
+    data[indices] = (0.5 * (clamped + next_vals)).astype(data.dtype)
+    return data
+
+
+def _remove_dc(y, sr):
+    is_stereo = y.ndim > 1 and y.shape[0] == 2
+    if is_stereo:
+        for ch in range(y.shape[0]):
+            y[ch] -= np.mean(y[ch])
+        return y
+    y -= np.mean(y)
+    return y
+
+
+def _soft_peak_limit(y, threshold=0.9):
+    abs_max = np.max(np.abs(y))
+    if abs_max <= threshold:
+        return y
+
+    is_stereo = y.ndim > 1 and y.shape[0] == 2
+    if is_stereo:
+        for ch in range(y.shape[0]):
+            _soft_peak_limit_1d_inplace(y[ch], threshold)
+    else:
+        data = y.flatten() if y.ndim > 1 else y
+        _soft_peak_limit_1d_inplace(data, threshold)
+        if y.ndim > 1:
+            y[:] = data.reshape(y.shape)
+
+    return y
+
+
+def _soft_peak_limit_1d_inplace(data, threshold):
+    abs_data = np.abs(data)
+    mask = abs_data > threshold
+    if not np.any(mask):
+        return
+
+    headroom = 1.0 - threshold
+    masked_vals = data[mask].astype(np.float64)
+    over = np.abs(masked_vals) - threshold
+    scale = headroom * 0.98
+    data[mask] = (np.sign(masked_vals) * (threshold + scale * np.tanh(over / scale))).astype(data.dtype)
+
+
+def _spectral_denoise(y, sr, amount):
+    if amount <= 0:
+        return y
+
+    is_stereo = y.ndim > 1 and y.shape[0] == 2
+    if is_stereo:
+        for ch in range(y.shape[0]):
+            result = _spectral_denoise_1d(y[ch], sr, amount)
+            if result.dtype != y.dtype:
+                result = result.astype(y.dtype)
+            y[ch] = result
+        return y
+
+    if y.ndim > 1:
+        result = _spectral_denoise_1d(y[0], sr, amount)
+        if result.dtype != y.dtype:
+            result = result.astype(y.dtype)
+        y[0] = result
+    else:
+        result = _spectral_denoise_1d(y, sr, amount)
+        if result.dtype != y.dtype:
+            result = result.astype(y.dtype)
+        y[:] = result
+    return y
+
+
+def _spectral_denoise_1d(data, sr, amount):
+    n_fft = 2048
+    hop_length = 512
+    n_samples = len(data)
+    n_frames_est = n_samples // hop_length + 1
+    use_streaming = n_samples > 5 * 60 * sr
+    use_chunked = n_frames_est > 8192
+
+    if use_streaming:
+        def _analyze_fn(y_ch, sr_ch):
+            chunk_dur = 1.0
+            chunk_len = int(sr_ch * chunk_dur)
+            n_positions = min(20, max(5, len(y_ch) // chunk_len))
+            positions = np.linspace(0, max(0, len(y_ch) - chunk_len), n_positions, dtype=int)
+            all_mag = []
+            for pos in positions:
+                segment = y_ch[pos:pos + chunk_len].astype(np.float64)
+                if len(segment) < n_fft:
+                    continue
+                S_seg = stft(segment, n_fft=n_fft, hop_length=hop_length)
+                all_mag.append(np.abs(S_seg))
+            if not all_mag:
+                return 0.0
+            combined_mag = np.concatenate([m.flatten() for m in all_mag])
+            return np.median(combined_mag)
+
+        def _process_fn(S, sr_p, n_fft_p, hop_length_p, global_median):
+            magnitude = np.abs(S)
+            threshold = global_median * (1 + amount * 3)
+            mask = np.ones_like(magnitude)
+            below = magnitude < threshold
+            mask[below] = magnitude[below] / (threshold + 1e-10)
+            denoised_magnitude = magnitude * mask
+            return denoised_magnitude * np.exp(1j * np.angle(S))
+
+        y_out = streaming_spectral_process(
+            data, sr, _process_fn,
+            n_fft=n_fft, hop_length=hop_length,
+            analyze_fn=_analyze_fn
+        )
+        if len(y_out) > n_samples:
+            y_out = y_out[:n_samples]
+        elif len(y_out) < n_samples:
+            y_out = np.pad(y_out, (0, n_samples - len(y_out)))
+        return y_out
+
+    if use_chunked:
+        S = stft_chunked(data, n_fft=n_fft, hop_length=hop_length, chunk_frames=4096)
+    else:
+        S = stft(data, n_fft=n_fft, hop_length=hop_length)
+    magnitude = np.abs(S)
+    phase = np.angle(S)
+
+    global_median = np.median(magnitude)
+    threshold = global_median * (1 + amount * 3)
+
+    mask = np.ones_like(magnitude)
+    below = magnitude < threshold
+    mask[below] = magnitude[below] / (threshold + 1e-10)
+
+    denoised_magnitude = magnitude * mask
+    S_denoised = denoised_magnitude * np.exp(1j * phase)
+
+    del magnitude, phase, mask, denoised_magnitude
+
+    if use_chunked:
+        y_out = istft_chunked(S_denoised, hop_length=hop_length, length=n_samples, chunk_frames=4096)
+    else:
+        y_out = istft(S_denoised, hop_length=hop_length, length=n_samples)
+
+    del S_denoised
+
+    if len(y_out) > n_samples:
+        y_out = y_out[:n_samples]
+    elif len(y_out) < n_samples:
+        y_out = np.pad(y_out, (0, n_samples - len(y_out)))
+
+    return y_out
+
+
+def _de_ess(y, sr, amount):
+    if amount <= 0:
+        return y
+
+    is_stereo = y.ndim > 1 and y.shape[0] == 2
+    if is_stereo:
+        for ch in range(y.shape[0]):
+            _de_ess_1d_inplace(y[ch], sr, amount)
+        return y
+
+    data = y.flatten() if y.ndim > 1 else y
+    _de_ess_1d_inplace(data, sr, amount)
+    if y.ndim > 1:
+        y[:] = data.reshape(y.shape)
+    return y
+
+
+@lru_cache(maxsize=32)
+def _de_ess_bandpass_sos(sr, low_hz, high_hz):
+    nyq = sr / 2
+    norm_low = low_hz / nyq
+    norm_high = min(high_hz, nyq * 0.95) / nyq
+    if norm_low >= norm_high or norm_high >= 1.0:
+        return None
+    return butter(4, [norm_low, norm_high], btype='band', output='sos')
+
+
+def _de_ess_1d_inplace(data, sr, amount):
+    nyq = sr / 2
+    low_hz = 4000
+    high_hz = 8000
+
+    if high_hz >= nyq:
+        high_hz = nyq * 0.95
+    if low_hz >= high_hz:
+        return
+
+    sos = _de_ess_bandpass_sos(sr, low_hz, high_hz)
+    if sos is None:
+        return
+    high_band = sosfiltfilt(sos, data)
+    low_band = data.astype(np.float64) - high_band.astype(np.float64)
+
+    full_rms = np.sqrt(np.mean(data.astype(np.float64) ** 2))
+    high_rms = np.sqrt(np.mean(high_band.astype(np.float64) ** 2))
+
+    if full_rms < 1e-10:
+        return
+
+    ratio = high_rms / full_rms
+    threshold_ratio = 1 + amount * 0.5
+
+    if ratio <= threshold_ratio:
+        return
+
+    gain = 1 - amount * 0.3
+    gain = max(gain, 0.1)
+
+    result = low_band + high_band.astype(np.float64) * gain
+    data[:] = result.astype(data.dtype)
+
+
+def _adaptive_loudness_normalize_lite(y, sr, target_lufs=-14.0):
+    is_stereo = y.ndim > 1 and y.shape[0] == 2
+    if is_stereo:
+        y_mono = y.mean(axis=0)
+    else:
+        y_mono = y
+
+    rms_val = np.sqrt(np.mean(y_mono ** 2))
+    if rms_val < 1e-10:
+        return y
+
+    current_lufs = -0.691 + 20 * np.log10(rms_val)
+    gain_db = np.clip(target_lufs - current_lufs, -15, 9)
+    gain = 10 ** (gain_db / 20.0)
+
+    y *= gain
+    return y
+
+
+def _enhanced_compress_lite(y, sr, amount, threshold_db=-18.0, ratio=2.0):
+    if amount <= 0:
+        return y
+
+    is_stereo = y.ndim > 1 and y.shape[0] == 2
+    if is_stereo:
+        for ch in range(y.shape[0]):
+            _enhanced_compress_lite_1d_inplace(y[ch], sr, amount, threshold_db, ratio)
+        return y
+
+    _enhanced_compress_lite_1d_inplace(y, sr, amount, threshold_db, ratio)
+    return y
+
+
+def _enhanced_compress_lite_1d_inplace(y, sr, amount, threshold_db, ratio):
+    n = len(y)
+    if n < 1024:
+        return
+
+    y_64 = y.astype(np.float64)
+    input_rms = np.sqrt(np.mean(y_64 ** 2))
+    if input_rms < 1e-10:
+        return
+
+    threshold_lin = 10 ** (threshold_db / 20.0)
+    effective_ratio = 1.0 + (ratio - 1.0) * min(amount, 1.0)
+
+    global_rms = np.sqrt(np.mean(y_64 ** 2))
+    if global_rms <= threshold_lin:
+        return
+
+    target_rms = threshold_lin + (global_rms - threshold_lin) / effective_ratio
+    global_gain = target_rms / global_rms
+    global_gain *= 10 ** (1.2 * amount / 20.0)
+
+    y_64 *= global_gain
+    y[:] = y_64.astype(y.dtype)
+
+
+def _ai_artifact_repair_lite(y, sr, amount):
+    if amount <= 0:
+        return y
+
+    is_stereo = y.ndim > 1 and y.shape[0] == 2
+    if is_stereo:
+        for ch in range(y.shape[0]):
+            result = _ai_artifact_repair_lite_1d(y[ch], sr, amount)
+            if result.dtype != y.dtype:
+                result = result.astype(y.dtype)
+            y[ch] = result
+        return y
+
+    if y.ndim > 1:
+        result = _ai_artifact_repair_lite_1d(y[0], sr, amount)
+        if result.dtype != y.dtype:
+            result = result.astype(y.dtype)
+        y[0] = result
+    else:
+        result = _ai_artifact_repair_lite_1d(y, sr, amount)
+        if result.dtype != y.dtype:
+            result = result.astype(y.dtype)
+        y[:] = result
+    return y
+
+
+def _ai_artifact_repair_lite_1d(data, sr, amount):
+    n_fft = 2048
+    hop_length = 512
+    n_samples = len(data)
+
+    if n_samples < n_fft:
+        return data
+
+    use_streaming = n_samples > 5 * 60 * sr
+    use_chunked = n_samples // hop_length + 1 > 8192
+
+    if use_streaming:
+        def _process_fn(S, sr_p, n_fft_p, hop_length_p):
+            return _ai_artifact_repair_lite_spectral(S, sr_p, n_fft_p, hop_length_p, amount)
+
+        y_out = streaming_spectral_process(
+            data, sr, _process_fn,
+            n_fft=n_fft, hop_length=hop_length
+        )
+        if len(y_out) > n_samples:
+            y_out = y_out[:n_samples]
+        elif len(y_out) < n_samples:
+            y_out = np.pad(y_out, (0, n_samples - len(y_out)))
+        return y_out
+
+    if use_chunked:
+        S = stft_chunked(data, n_fft=n_fft, hop_length=hop_length, chunk_frames=4096)
+    else:
+        S = stft(data, n_fft=n_fft, hop_length=hop_length)
+
+    S = _ai_artifact_repair_lite_spectral(S, sr, n_fft, hop_length, amount)
+
+    if use_chunked:
+        y_out = istft_chunked(S, hop_length=hop_length, length=n_samples, chunk_frames=4096)
+    else:
+        y_out = istft(S, hop_length=hop_length, length=n_samples)
+
+    del S
+
+    if len(y_out) > n_samples:
+        y_out = y_out[:n_samples]
+    elif len(y_out) < n_samples:
+        y_out = np.pad(y_out, (0, n_samples - len(y_out)))
+
+    return y_out
+
+
+def _ai_artifact_repair_lite_spectral(S, sr, n_fft, hop_length, amount):
+    magnitude = np.abs(S).copy()
+    phase = np.angle(S)
+
+    freqs = np.arange(S.shape[0]) * sr / n_fft
+    low_2k = np.searchsorted(freqs, 2000)
+    high_5k = np.searchsorted(freqs, 5000)
+    high_8k = np.searchsorted(freqs, 8000)
+    high_12k = min(np.searchsorted(freqs, 12000), S.shape[0])
+
+    if low_2k >= high_12k:
+        return S
+
+    target_mag = magnitude[low_2k:high_12k].copy()
+    if target_mag.shape[1] >= 5:
+        for i in range(target_mag.shape[0]):
+            target_mag[i] = medfilt(target_mag[i], kernel_size=5)
+
+    frame_energy = np.sum(magnitude ** 2, axis=0)
+    energy_change = np.abs(np.diff(frame_energy))
+    if len(energy_change) > 0:
+        mean_change = np.mean(energy_change)
+        std_change = np.std(energy_change)
+        transient_threshold = mean_change + 2 * std_change
+        transient_frames = np.concatenate(([False], energy_change > transient_threshold))
+    else:
+        transient_frames = np.zeros(S.shape[1], dtype=bool)
+
+    blend = amount * 0.5
+    non_transient = (~transient_frames).astype(np.float64)
+    blend_weights = non_transient * blend
+    magnitude[low_2k:high_12k] = (
+        (1 - blend_weights[np.newaxis, :]) * magnitude[low_2k:high_12k]
+        + blend_weights[np.newaxis, :] * target_mag
+    )
+
+    del target_mag
+
+    rng = np.random.RandomState(42)
+    jitter_range = 0.5 + 0.5 * amount
+    jitter_db = rng.uniform(-jitter_range, jitter_range, magnitude[low_2k:high_12k].shape)
+    magnitude[low_2k:high_12k] *= 10 ** (jitter_db / 20.0)
+
+    if high_5k > low_2k:
+        band_2_5k_rms = np.sqrt(np.mean(magnitude[low_2k:high_5k] ** 2))
+        global_rms = np.sqrt(np.mean(magnitude ** 2))
+        if global_rms > 1e-10 and band_2_5k_rms > global_rms * (1 + amount * 0.5):
+            attenuation = 1.0 - amount * 0.2
+            magnitude[low_2k:high_5k] *= attenuation
+
+    if high_8k < high_12k and high_8k > low_2k:
+        mid_energy = np.sqrt(np.mean(magnitude[low_2k:high_8k] ** 2, axis=0) + 1e-10)
+        noise_level = 0.0005 * amount
+        noise = rng.randn(high_12k - high_8k, S.shape[1]) * mid_energy[np.newaxis, :] * noise_level
+        magnitude[high_8k:high_12k] += np.abs(noise)
+
+    S_out = magnitude * np.exp(1j * phase)
+    return S_out
+
+
+def _harmonic_bass_enhance_lite(y, sr, amount):
+    if amount <= 0:
+        return y
+
+    is_stereo = y.ndim > 1 and y.shape[0] == 2
+    if is_stereo:
+        for ch in range(y.shape[0]):
+            _harmonic_bass_enhance_lite_1d_inplace(y[ch], sr, amount)
+        return y
+
+    data = y.flatten() if y.ndim > 1 else y
+    _harmonic_bass_enhance_lite_1d_inplace(data, sr, amount)
+    if y.ndim > 1:
+        y[:] = data.reshape(y.shape)
+    return y
+
+
+def _harmonic_bass_enhance_lite_1d_inplace(data, sr, amount):
+    n_samples = len(data)
+    if n_samples < 256:
+        return
+
+    nyq = sr / 2
+    cutoff = min(200.0, nyq * 0.9)
+    if cutoff >= nyq:
+        return
+
+    sos = butter(4, cutoff / nyq, btype='low', output='sos')
+    low_band = sosfiltfilt(sos, data)
+
+    even_samples = low_band[::2]
+    odd_samples = low_band[1::2]
+    min_len = min(len(even_samples), len(odd_samples))
+    sub_harmonic = (even_samples[:min_len] + odd_samples[:min_len]) / 2.0
+
+    x_old = np.linspace(0, 1, len(sub_harmonic))
+    x_new = np.linspace(0, 1, n_samples)
+    sub_harmonic_interp = np.interp(x_new, x_old, sub_harmonic)
+
+    data[:] = data + sub_harmonic_interp * amount * 0.12
+
+
+def _air_texture_reconstruct_lite(y, sr, amount):
+    if amount <= 0:
+        return y
+
+    is_stereo = y.ndim > 1 and y.shape[0] == 2
+    if is_stereo:
+        for ch in range(y.shape[0]):
+            result = _air_texture_reconstruct_lite_1d(y[ch], sr, amount)
+            if result.dtype != y.dtype:
+                result = result.astype(y.dtype)
+            y[ch] = result
+        return y
+
+    if y.ndim > 1:
+        result = _air_texture_reconstruct_lite_1d(y[0], sr, amount)
+        if result.dtype != y.dtype:
+            result = result.astype(y.dtype)
+        y[0] = result
+    else:
+        result = _air_texture_reconstruct_lite_1d(y, sr, amount)
+        if result.dtype != y.dtype:
+            result = result.astype(y.dtype)
+        y[:] = result
+    return y
+
+
+def _air_texture_reconstruct_lite_1d(data, sr, amount):
+    n_fft = 2048
+    hop_length = 512
+    n_samples = len(data)
+
+    if n_samples < n_fft:
+        return data
+
+    S = stft(data, n_fft=n_fft, hop_length=hop_length)
+    magnitude = np.abs(S)
+
+    freqs = np.arange(S.shape[0]) * sr / n_fft
+    low_2k = np.searchsorted(freqs, 2000)
+    high_8k = np.searchsorted(freqs, 8000)
+    high_16k = min(np.searchsorted(freqs, 16000), S.shape[0])
+
+    noise_S = np.zeros_like(S)
+
+    if high_8k < high_16k and high_8k > low_2k:
+        mid_energy = np.sqrt(np.mean(magnitude[low_2k:high_8k] ** 2, axis=0) + 1e-10)
+        rng = np.random.RandomState(42)
+        noise_mag = rng.randn(high_16k - high_8k, S.shape[1]) * mid_energy[np.newaxis, :] * 0.001
+        noise_phase = rng.uniform(-np.pi, np.pi, (high_16k - high_8k, S.shape[1]))
+        noise_S[high_8k:high_16k] = noise_mag * np.exp(1j * noise_phase)
+
+    del S, magnitude
+
+    reconstructed = istft(noise_S, hop_length=hop_length, length=n_samples)
+    del noise_S
+
+    if len(reconstructed) > n_samples:
+        reconstructed = reconstructed[:n_samples]
+    elif len(reconstructed) < n_samples:
+        reconstructed = np.pad(reconstructed, (0, n_samples - len(reconstructed)))
+
+    y_out = data.astype(np.float64) + reconstructed * amount * 0.15
+    return y_out
+
+
+def repair_audio(input_path: str, output_path: str, params: dict, progress_callback=None) -> dict:
+    y, sr = load_audio_with_fallback(input_path, sr=None, mono=False)
+    was_mono = False
+    if y.ndim == 1:
+        y = y.reshape(1, -1)
+        was_mono = True
+
+    original_sr = sr
+    original_duration = round(y.shape[1] / sr, 2)
+
+    working_sr = MOBILE_WORKING_SR
+
+    from services.memory_guard import check_memory_before_repair, should_use_float32
+    working_sr = check_memory_before_repair(
+        n_samples=y.shape[1],
+        n_channels=y.shape[0],
+        sr=original_sr,
+        working_sr=working_sr,
+        algorithm_version="v2.4a",
+    )
+
+    use_f32 = should_use_float32(y.shape[1], y.shape[0])
+    if use_f32:
+        y = y.astype(np.float32)
+
+    if sr != working_sr:
+        if progress_callback:
+            progress_callback(0.02, f"v2.4a 重采样到 {working_sr//1000}kHz...")
+        target_len = int(y.shape[1] * working_sr / sr)
+        y_new = np.zeros((y.shape[0], target_len))
+        for ch in range(y.shape[0]):
+            resampled = resample_poly(y[ch], working_sr, sr)
+            y_new[ch, :len(resampled)] = resampled[:target_len]
+        y = y_new
+        sr = working_sr
+        gc.collect()
+
+    if progress_callback:
+        progress_callback(0.05, "v2.4a 快速分析...")
+
+    music_type, confidence = _detect_music_type_fast(y, sr)
+    issues_found = [f"类型检测: {music_type} ({confidence:.0%})"]
+
+    if progress_callback:
+        progress_callback(0.15, f"v2.4a {music_type} 处理中...")
+
+    if params.get("de_clipping", 0) > 0:
+        y = _simple_declip(y, params["de_clipping"])
+        issues_found.append("削波修复")
+
+    if params.get("de_pop", 0) > 0:
+        y = _simple_depop(y, sr, params["de_pop"])
+        issues_found.append("爆音修复")
+
+    if params.get("noise_reduction", 0) > 0:
+        if progress_callback:
+            progress_callback(0.25, "v2.4a 频谱降噪...")
+        y = _spectral_denoise(y, sr, params["noise_reduction"])
+        issues_found.append("频谱降噪")
+        gc.collect()
+
+    if params.get("de_essing", 0) > 0:
+        if progress_callback:
+            progress_callback(0.35, "v2.4a 齿音抑制...")
+        y = _de_ess(y, sr, params["de_essing"])
+        issues_found.append("齿音抑制")
+
+    if params.get("ai_repair", 0) > 0:
+        if progress_callback:
+            progress_callback(0.45, "v2.4a AI频谱修复...")
+        y = _ai_artifact_repair_lite(y, sr, params["ai_repair"])
+        issues_found.append("AI频谱修复")
+        gc.collect()
+
+    y = _adaptive_loudness_normalize_lite(y, sr, -14.0)
+    issues_found.append("响度归一化")
+
+    if params.get("dynamic_range", 0) > 0:
+        if progress_callback:
+            progress_callback(0.60, "v2.4a 动态压缩...")
+        y = _enhanced_compress_lite(y, sr, params["dynamic_range"])
+        issues_found.append("动态压缩")
+
+    if params.get("bass_enhance", 0) > 0:
+        if progress_callback:
+            progress_callback(0.70, "v2.4a 低频增强...")
+        y = _harmonic_bass_enhance_lite(y, sr, params["bass_enhance"])
+        issues_found.append("低频增强")
+
+    if params.get("air_texture", 0) > 0:
+        if progress_callback:
+            progress_callback(0.75, "v2.4a 空气质感重建...")
+        y = _air_texture_reconstruct_lite(y, sr, params["air_texture"])
+        issues_found.append("空气质感重建")
+
+    y = _remove_dc(y, sr)
+    issues_found.append("直流移除")
+
+    if progress_callback:
+        progress_callback(0.85, "v2.4a 峰值限制...")
+    y = _soft_peak_limit(y, threshold=0.9)
+    issues_found.append("峰值限制")
+
+    if was_mono:
+        y = y[0]
+
+    if y.dtype == np.float32:
+        y = y.astype(np.float64)
+
+    if progress_callback:
+        progress_callback(0.95, "v2.4a 导出...")
+
+    try:
+        import soundfile as sf
+        bit_depth = params.get("bit_depth", 24)
+        subtype_map = {16: "PCM_16", 24: "PCM_24", 32: "PCM_32"}
+        subtype = subtype_map.get(bit_depth, "PCM_24")
+        sf.write(output_path, y.T if y.ndim > 1 else y, sr, subtype=subtype)
+    except Exception:
+        from scipy.io import wavfile
+        if y.ndim > 1:
+            y_out = y.T
+        else:
+            y_out = y
+        if y_out.dtype != np.int16:
+            y_out = np.clip(y_out * 32767, -32768, 32767).astype(np.int16)
+        wavfile.write(output_path, sr, y_out)
+
+    if progress_callback:
+        progress_callback(1.0, "v2.4a 修复完成")
+
+    return {
+        "issues_found": issues_found,
+        "original_sample_rate": original_sr,
+        "output_sample_rate": working_sr,
+        "output_bit_depth": params.get("bit_depth", 24),
+        "duration": original_duration,
+        "channels": y.shape[0] if y.ndim > 1 else 1,
+        "music_type": music_type,
+        "confidence": confidence,
+        "quality_mode": params.get("quality", "standard"),
+        "algorithm_version": "v2.4a",
+    }
