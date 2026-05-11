@@ -5,13 +5,13 @@ import os
 import sqlite3
 from typing import Any
 
-from config import DB_PATH
+import config
 
 TaskDict = dict[str, Any]
 
 
 def get_db() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(config.DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -58,6 +58,14 @@ def init_db() -> None:
     """)
     try:
         conn.execute("ALTER TABLE analysis_cache ADD COLUMN waveform_peaks TEXT")
+    except Exception:
+        pass
+    try:
+        conn.execute("ALTER TABLE tasks ADD COLUMN render_filename TEXT")
+    except Exception:
+        pass
+    try:
+        conn.execute("ALTER TABLE tasks ADD COLUMN render_result TEXT")
     except Exception:
         pass
     conn.commit()
@@ -327,7 +335,7 @@ def _parse_json_fields(result: TaskDict) -> None:
 
 
 # 训练素材相关数据库操作
-TRAINING_DB_PATH = os.path.join(os.path.dirname(DB_PATH), "training.db")
+TRAINING_DB_PATH = os.path.join(os.path.dirname(config.DB_PATH), "training.db")
 
 def get_training_db() -> sqlite3.Connection:
     conn = sqlite3.connect(TRAINING_DB_PATH)
