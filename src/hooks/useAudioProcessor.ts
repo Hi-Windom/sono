@@ -226,6 +226,7 @@ export function useAudioProcessor() {
   const workerRef = useRef<Worker | null>(null);
   const fileHashRef = useRef<string | null>(null);
   const sessionRestoredRef = useRef(false);
+  const forceReRepairRef = useRef(false);
   const streamingAudioRef = useRef<HTMLAudioElement | null>(null);
   const mediaSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
   const playRef = useRef<(() => void) | null>(null);
@@ -1210,17 +1211,25 @@ export function useAudioProcessor() {
     const currentParamsForCache = mapParamsToBackend(params, processingOptions, effectiveAlgorithmVersion);
 
     // ===== 路径A：纯数据驱动缓存查询（不依赖任务状态）=====
-    if (fileHashRef.current) {
+    if (fileHashRef.current && !forceReRepairRef.current) {
       writeLog(`[applySettings] 查询缓存: hash=${fileHashRef.current}`);
       try {
         const cacheResult = await lookupRepairCache(fileHashRef.current, currentParamsForCache);
         if (cacheResult.found) {
           writeLog(`[applySettings] ✅ 修复缓存命中 taskId=${cacheResult.task_id}`);
-          setProcessingStep('检测到已有修复记录...');
-          setProcessingProgress(0.01);
-
-          const cachedTaskId = cacheResult.task_id || currentTaskId;
+          setIsProcessing(false);
+          setCacheHitInfo({
+            repair: {
+              task_id: cacheResult.task_id || '',
+              output_size: cacheResult.output_size || 0,
+              repair_result: cacheResult.repair_result || undefined,
+              detection_result: cacheResult.detection_result,
+              repaired_detection_result: cacheResult.repaired_detection_result,
+            },
+            renderCaches: [],
+          });
           let renderCaches: RenderCacheEntry[] = [];
+          const cachedTaskId = cacheResult.task_id;
           if (cachedTaskId) {
             try {
               renderCaches = await fetchRenderCache(cachedTaskId);
@@ -1229,24 +1238,18 @@ export function useAudioProcessor() {
               writeLog(`[applySettings] 渲染缓存查询失败`);
             }
           }
-
-          setCacheHitInfo({
-            repair: {
-              task_id: cachedTaskId || '',
-              output_size: cacheResult.output_size || 0,
-              repair_result: cacheResult.repair_result || undefined,
-              detection_result: cacheResult.detection_result,
-              repaired_detection_result: cacheResult.repaired_detection_result,
-            },
-            renderCaches,
-          });
+          setCacheHitInfo(prev => prev ? { ...prev, renderCaches } : null);
           setShowRepairCacheModal(true);
+          return;
         } else {
           writeLog(`[applySettings] 缓存未命中`);
         }
       } catch (cacheErr) {
         writeLog(`[applySettings] 缓存查询失败: ${cacheErr instanceof Error ? cacheErr.message : String(cacheErr)}`);
       }
+    }
+    if (forceReRepairRef.current) {
+      forceReRepairRef.current = false;
     }
 
     // ===== 路径B：正常修复流程（上传 + Promise链）=====
@@ -2511,7 +2514,9 @@ export function useAudioProcessor() {
   const handleReRepair = useCallback(() => {
     writeLog(`[handleReRepair] 用户选择重新修复`);
     setShowRepairCacheModal(false);
-    setIsProcessing(false);
+    setCacheHitInfo(null);
+    setIsProcessing(true);
+    forceReRepairRef.current = true;
     applySettings();
   }, [applySettings]);
 
