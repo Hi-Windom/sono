@@ -1547,7 +1547,8 @@ export function useAudioProcessor() {
 
       if (effectiveBackendResult.status === 'fulfilled' && effectiveBackendResult.value && taskIdRef.current) {
         forceRenderRef.current = true;
-        renderAndDownload().then(result => {
+        const currentOpts = { ...processingOptions };
+        renderAndDownload(currentOpts).then(result => {
           if (result?.downloadUrl) {
             setRenderDownloadUrl(result.downloadUrl);
           }
@@ -2247,9 +2248,8 @@ export function useAudioProcessor() {
     updateTime();
   }, [stopPlaying, getAudioContext]);
 
-  /** 渲染交付规格并下载（修复完成后自动调用） */
-  const renderAndDownload = useCallback(async () => {
-    const opts = processingOptionsRef.current;
+  const renderAndDownload = useCallback(async (overrideOptions?: ProcessingOptions) => {
+    const opts = overrideOptions || processingOptionsRef.current;
     const algoVer = algorithmVersionRef.current;
     const fileName = generateExportFilename(audioFile?.name, algoVer, opts.sampleRate, opts.bitDepth);
 
@@ -2279,7 +2279,7 @@ export function useAudioProcessor() {
 
     try {
       writeLog(`[renderAndDownload] 开始渲染: sr=${opts.sampleRate} bd=${opts.bitDepth}`);
-      setIsProcessing(true); // 确保进度条显示
+      setIsProcessing(true);
       setProcessingSource('backend');
       setProcessingStep('渲染交付规格...');
       setProcessingProgress(0);
@@ -2447,7 +2447,8 @@ export function useAudioProcessor() {
     // 直接开始渲染下载，确保进度条显示
     writeLog(`[handleUseRepairCache] 开始调用 renderAndDownload`);
     forceRenderRef.current = false;
-    renderAndDownload().then(result => {
+    const currentOpts = { ...processingOptions };
+    renderAndDownload(currentOpts).then(result => {
       writeLog(`[handleUseRepairCache] renderAndDownload 完成: ${!!result}`);
       if (result?.downloadUrl) {
         setRenderDownloadUrl(result.downloadUrl);

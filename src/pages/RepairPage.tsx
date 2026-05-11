@@ -493,7 +493,7 @@ export default function RepairPage() {
         } : null}
         backendDownloadUrl={renderDownloadUrl}
         backendDownloadAction={hasBackendResult ? async () => {
-          const result = await renderAndDownload();
+          const result = await renderAndDownload(processingOptions);
           if (result?.downloadUrl) {
             setRenderDownloadUrl(result.downloadUrl);
           }
