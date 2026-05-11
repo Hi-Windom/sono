@@ -106,10 +106,8 @@ export default function ComparePage() {
   const audioContextRef = useRef<AudioContext | null>(null);
   const sourceNodeRef = useRef<MediaElementAudioSourceNode | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
-  const gainNodeRef = useRef<GainNode | null>(null);
   const animFrameRef = useRef<number>();
   const abLoopRef = useRef(false);
-  const isFadingRef = useRef(false);
   const vinylAngleRef = useRef(0);
   const vinylAnimRef = useRef<number>();
 
@@ -129,7 +127,7 @@ export default function ComparePage() {
       })
       .catch(() => {})
       .finally(() => { if (!cancelled) setTasksLoading(false); });
-    return () => { cancelled = true; };
+    return () => { cancelled = true };
   }, [taskId]);
 
   useEffect(() => {
@@ -169,31 +167,6 @@ export default function ComparePage() {
       audioContextRef.current = new AudioContext();
     }
     return audioContextRef.current;
-  }, []);
-
-  const fadeOut = useCallback((durationMs: number): Promise<void> => {
-    return new Promise(resolve => {
-      const gain = gainNodeRef.current;
-      if (!gain || isFadingRef.current) { resolve(); return; }
-      isFadingRef.current = true;
-      const ctx = gain.context;
-      const now = ctx.currentTime;
-      gain.gain.cancelScheduledValues(now);
-      gain.gain.setValueAtTime(gain.gain.value, now);
-      gain.gain.linearRampToValueAtTime(0.001, now + durationMs / 1000);
-      setTimeout(() => { resolve(); }, durationMs);
-    });
-  }, []);
-
-  const fadeIn = useCallback((durationMs: number) => {
-    const gain = gainNodeRef.current;
-    if (!gain) return;
-    const ctx = gain.context;
-    const now = ctx.currentTime;
-    gain.gain.cancelScheduledValues(now);
-    gain.gain.setValueAtTime(0.001, now);
-    gain.gain.linearRampToValueAtTime(1, now + durationMs / 1000);
-    setTimeout(() => { isFadingRef.current = false; }, durationMs);
   }, []);
 
   useEffect(() => {
@@ -262,11 +235,7 @@ export default function ComparePage() {
         const t = audio.currentTime;
         setCurrentTime(t);
         if (abLoopRef.current && pointB !== null && t >= pointB) {
-          const a = pointA ?? 0;
-          fadeOut(30).then(() => {
-            audio.currentTime = a;
-            fadeIn(30);
-          });
+          audio.currentTime = pointA ?? 0;
         }
         animFrameRef.current = requestAnimationFrame(updateProgress);
       }
@@ -286,7 +255,7 @@ export default function ComparePage() {
       audio.removeEventListener('pause', onPause);
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
     };
-  }, [pointA, pointB, fadeOut, fadeIn]);
+  }, [pointA, pointB]);
 
   useEffect(() => {
     const handleVisibility = () => {
@@ -386,16 +355,11 @@ export default function ComparePage() {
     analyser.fftSize = 256;
     analyserRef.current = analyser;
 
-    const gain = ctx.createGain();
-    gain.gain.value = 1;
-    gainNodeRef.current = gain;
-
     try {
       const source = ctx.createMediaElementSource(audio);
       sourceNodeRef.current = source;
       source.connect(analyser);
-      analyser.connect(gain);
-      gain.connect(ctx.destination);
+      analyser.connect(ctx.destination);
     } catch {
       // already connected
     }
@@ -418,18 +382,14 @@ export default function ComparePage() {
       connectAudioGraph(audio);
     }
 
-    audio.play().then(() => {
-      fadeIn(50);
-    }).catch(() => {});
-  }, [audioReady, getAudioContext, connectAudioGraph, fadeIn]);
+    audio.play().catch(() => {});
+  }, [audioReady, getAudioContext, connectAudioGraph]);
 
   const pause = useCallback(() => {
     const audio = audioElRef.current;
     if (!audio) return;
-    fadeOut(50).then(() => {
-      audio.pause();
-    });
-  }, [fadeOut]);
+    audio.pause();
+  }, []);
 
   const seek = useCallback((time: number) => {
     const audio = audioElRef.current;
@@ -456,20 +416,14 @@ export default function ComparePage() {
         if (a && a.readyState >= 3) {
           a.currentTime = startPos;
           if (wasPlaying) {
-            a.play().then(() => {
-              fadeIn(50);
-            }).catch(() => {});
+            a.play().catch(() => {});
           }
         }
       }, 200);
     };
 
-    if (wasPlaying && gainNodeRef.current) {
-      fadeOut(40).then(doSwitch);
-    } else {
-      doSwitch();
-    }
-  }, [compareMode, isPlaying, pointA, fadeOut, fadeIn]);
+    doSwitch();
+  }, [compareMode, isPlaying, pointA]);
 
   const setMarkA = useCallback(() => {
     setPointA(currentTime);
@@ -616,13 +570,9 @@ export default function ComparePage() {
           <button
             onClick={isPlaying ? pause : play}
             disabled={!audioReady}
-            className="absolute inset-0 flex items-center justify-center group"
+            className="absolute inset-0 flex items-center justify-center"
           >
-            <div className={`w-14 h-14 rounded-full flex items-center justify-center transition-all duration-300 ${
-              isPlaying
-                ? 'bg-black/60 backdrop-blur-sm opacity-0 group-hover:opacity-100'
-                : 'bg-black/50 backdrop-blur-sm'
-            }`}>
+            <div className="w-14 h-14 rounded-full flex items-center justify-center bg-black/50 backdrop-blur-sm">
               {isPlaying ? (
                 <svg className="w-6 h-6 text-white/90" fill="currentColor" viewBox="0 0 24 24">
                   <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" />
@@ -643,7 +593,7 @@ export default function ComparePage() {
               width: 4,
               height: vinylSize * 0.55,
               transformOrigin: `2px ${vinylSize * 0.55}px`,
-              transform: isPlaying ? 'rotate(25deg)' : 'rotate(55deg)',
+              transform: isPlaying ? 'rotate(15deg)' : 'rotate(55deg)',
               transition: 'transform 0.4s ease-out',
             }}
           >
@@ -681,7 +631,7 @@ export default function ComparePage() {
           <p className="text-gray-600 text-xs">请先在修复页完成音频修复</p>
           <button
             onClick={() => navigate('/repair')}
-            className="mt-4 px-4 py-2 bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-400/30 rounded-lg text-cyan-400 text-sm transition-colors"
+            className="mt-4 px-4 py-2 bg-cyan-500/20 border border-cyan-400/30 rounded-lg text-cyan-400 text-sm"
           >
             前往修复
           </button>
@@ -691,7 +641,7 @@ export default function ComparePage() {
           <button
             key={task.id}
             onClick={() => selectTask(task.id)}
-            className="w-full flex items-center gap-4 p-4 bg-white/5 hover:bg-white/10 border border-white/10 hover:border-cyan-400/30 rounded-xl transition-all text-left"
+            className="w-full flex items-center gap-4 p-4 bg-white/5 border border-white/10 rounded-xl text-left"
           >
             <div className="w-10 h-10 bg-gradient-to-br from-cyan-500/20 to-purple-500/20 rounded-lg flex items-center justify-center border border-cyan-400/20 shrink-0">
               <svg className="w-5 h-5 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -736,7 +686,7 @@ export default function ComparePage() {
           <p className="text-red-400 text-sm font-medium">{taskInfoError}</p>
           <button
             onClick={() => setSearchParams({})}
-            className="mt-2 px-4 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-gray-400 hover:text-white text-sm transition-colors"
+            className="mt-2 px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-gray-400 text-sm"
           >
             选择其他任务
           </button>
@@ -765,10 +715,10 @@ export default function ComparePage() {
               <button
                 key={mode}
                 onClick={() => switchMode(mode)}
-                className={`relative text-left p-4 rounded-xl border transition-all duration-200 ${
+                className={`relative text-left p-4 rounded-xl border ${
                   active
                     ? 'bg-white/8 shadow-lg'
-                    : 'bg-white/3 hover:bg-white/6'
+                    : 'bg-white/3'
                 }`}
                 style={active ? {
                   borderColor: color + '60',
@@ -890,7 +840,7 @@ export default function ComparePage() {
                       onBlur={confirmEditA}
                       onKeyDown={(e) => { if (e.key === 'Enter') confirmEditA(); if (e.key === 'Escape') setEditingA(false); }}
                       placeholder="0:00.0"
-                      className="w-16 px-1.5 py-0.5 text-xs bg-black/40 border border-green-500/30 rounded text-green-400 font-mono text-center focus:outline-none focus:border-green-400/60"
+                      className="w-16 px-1.5 py-0.5 text-xs bg-black/40 border border-green-500/30 rounded text-green-400 font-mono text-center"
                       autoFocus
                     />
                   ) : (
@@ -904,10 +854,10 @@ export default function ComparePage() {
                         }
                       }}
                       disabled={!audioReady}
-                      className={`px-2 py-0.5 rounded text-xs font-mono transition-colors ${
+                      className={`px-2 py-0.5 rounded text-xs font-mono ${
                         pointA !== null
-                          ? 'bg-green-500/15 text-green-400 border border-green-500/25 hover:bg-green-500/25'
-                          : 'bg-white/5 text-gray-400 border border-white/10 hover:bg-white/10'
+                          ? 'bg-green-500/15 text-green-400 border border-green-500/25'
+                          : 'bg-white/5 text-gray-400 border border-white/10'
                       } disabled:opacity-30 disabled:cursor-not-allowed`}
                     >
                       {pointA !== null ? formatTimePrecise(pointA) : '设置'}
@@ -925,7 +875,7 @@ export default function ComparePage() {
                       onBlur={confirmEditB}
                       onKeyDown={(e) => { if (e.key === 'Enter') confirmEditB(); if (e.key === 'Escape') setEditingB(false); }}
                       placeholder="0:00.0"
-                      className="w-16 px-1.5 py-0.5 text-xs bg-black/40 border border-red-500/30 rounded text-red-400 font-mono text-center focus:outline-none focus:border-red-400/60"
+                      className="w-16 px-1.5 py-0.5 text-xs bg-black/40 border border-red-500/30 rounded text-red-400 font-mono text-center"
                       autoFocus
                     />
                   ) : (
@@ -940,10 +890,10 @@ export default function ComparePage() {
                         }
                       }}
                       disabled={!audioReady || pointA === null}
-                      className={`px-2 py-0.5 rounded text-xs font-mono transition-colors ${
+                      className={`px-2 py-0.5 rounded text-xs font-mono ${
                         pointB !== null
-                          ? 'bg-red-500/15 text-red-400 border border-red-500/25 hover:bg-red-500/25'
-                          : 'bg-white/5 text-gray-400 border border-white/10 hover:bg-white/10'
+                          ? 'bg-red-500/15 text-red-400 border border-red-500/25'
+                          : 'bg-white/5 text-gray-400 border border-white/10'
                       } disabled:opacity-30 disabled:cursor-not-allowed`}
                     >
                       {pointB !== null ? formatTimePrecise(pointB) : '设置'}
@@ -962,7 +912,7 @@ export default function ComparePage() {
                 {(pointA !== null || pointB !== null) && (
                   <button
                     onClick={clearAB}
-                    className="px-2 py-0.5 rounded text-xs bg-white/5 text-gray-500 border border-white/10 hover:bg-white/10 hover:text-gray-300 transition-colors"
+                    className="px-2 py-0.5 rounded text-xs bg-white/5 text-gray-500 border border-white/10"
                   >
                     清除
                   </button>
@@ -1016,7 +966,7 @@ export default function ComparePage() {
           <div className="flex items-center gap-3 mb-6">
             <button
               onClick={() => navigate('/')}
-              className="flex items-center gap-2 text-gray-400 hover:text-white transition-colors"
+              className="flex items-center gap-2 text-gray-400"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
@@ -1026,7 +976,7 @@ export default function ComparePage() {
             {taskId && (
               <button
                 onClick={() => setSearchParams({})}
-                className="flex items-center gap-2 text-gray-500 hover:text-gray-300 transition-colors text-sm"
+                className="flex items-center gap-2 text-gray-500 text-sm"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 10h16M4 14h16M4 18h16" />
