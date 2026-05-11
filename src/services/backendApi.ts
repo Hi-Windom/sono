@@ -908,7 +908,7 @@ export function connectProgressWS(
   } else {
     wsHost = window.location.host;
   }
-  const wsUrl = `${protocol}//${wsHost}/api/v1/ws/progress/${taskId}`;
+  const wsUrl = `${protocol}//${wsHost}/api/v1/ws/${taskId}`;
 
   let ws: WebSocket | null = null;
   let reconnectAttempts = 0;
