@@ -356,7 +356,7 @@ async def render_audio_endpoint(request: RenderRequest):
 
 def _run_render(task_id, input_path, output_path, target_sr, bit_depth, render_filename):
     from services.render import render_output
-    from services.task_manager import _ws_send_progress
+    from services.task_manager import _ws_send_progress, _ws_send_final
 
     source_bit_depth = None
     try:
@@ -980,15 +980,24 @@ async def cancel_task_endpoint(task_id: str):
         return {"task_id": task_id, "status": "cancelling", "message": "任务正在取消中"}
 
 @router.get("/preview/{task_id}")
-async def preview_audio(task_id: str):
+async def preview_audio(task_id: str, type: str = 'repaired'):
     task = get_task(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
-    
+
+    if type == 'original':
+        original_path = task.get("original_path", "")
+        if not original_path or not os.path.exists(original_path):
+            raise HTTPException(status_code=404, detail="原始音频不存在")
+        return FileResponse(
+            original_path,
+            media_type="audio/wav",
+        )
+
     output_path = task.get("output_path")
     if not output_path or not os.path.exists(output_path):
         raise HTTPException(status_code=404, detail="修复后的音频不存在")
-    
+
     return FileResponse(
         output_path,
         media_type="audio/wav",

@@ -228,6 +228,7 @@ export function useAudioProcessor() {
   const fileHashRef = useRef<string | null>(null);
   const sessionRestoredRef = useRef(false);
   const forceReRepairRef = useRef(false);
+  const forceRenderRef = useRef(false); // 全新修复后强制重新渲染，跳过旧渲染缓存
   const streamingAudioRef = useRef<HTMLAudioElement | null>(null);
   const mediaSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
   const playRef = useRef<(() => void) | null>(null);
@@ -1605,6 +1606,7 @@ export function useAudioProcessor() {
       }
 
       if (effectiveBackendResult.status === 'fulfilled' && effectiveBackendResult.value && taskIdRef.current) {
+        forceRenderRef.current = true;
         renderAndDownload().then(result => {
           if (result?.downloadUrl) {
             setRenderDownloadUrl(result.downloadUrl);
@@ -2313,20 +2315,22 @@ export function useAudioProcessor() {
     if (!taskIdRef.current) return null;
 
     try {
-      const caches = await fetchRenderCache(taskIdRef.current);
-      const hit = caches.find(c => c.sample_rate === opts.sampleRate && c.bit_depth === opts.bitDepth && c.algorithm_version === algoVer);
-      if (hit) {
-        writeLog(`[renderAndDownload] 渲染缓存命中: ${hit.filename}`);
-        return {
-          downloadUrl: `/api/v1/download-file/${hit.filename}`,
-          fileName,
-          renderInfo: {
-            output_sample_rate: hit.sample_rate,
-            output_bit_depth: hit.bit_depth,
-            duration: durationRef.current,
-            channels: 2,
-          },
-        };
+      if (!forceRenderRef.current) {
+        const caches = await fetchRenderCache(taskIdRef.current);
+        const hit = caches.find(c => c.sample_rate === opts.sampleRate && c.bit_depth === opts.bitDepth && c.algorithm_version === algoVer);
+        if (hit) {
+          writeLog(`[renderAndDownload] 渲染缓存命中: ${hit.filename}`);
+          return {
+            downloadUrl: `/api/v1/download-file/${hit.filename}`,
+            fileName,
+            renderInfo: {
+              output_sample_rate: hit.sample_rate,
+              output_bit_depth: hit.bit_depth,
+              duration: durationRef.current,
+              channels: 2,
+            },
+          };
+        }
       }
     } catch { /* 忽略缓存查询失败，继续渲染 */ }
 
@@ -2498,6 +2502,7 @@ export function useAudioProcessor() {
 
     // 直接开始渲染下载，确保进度条显示
     writeLog(`[handleUseRepairCache] 开始调用 renderAndDownload`);
+    forceRenderRef.current = false;
     renderAndDownload().then(result => {
       writeLog(`[handleUseRepairCache] renderAndDownload 完成: ${!!result}`);
       if (result?.downloadUrl) {

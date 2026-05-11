@@ -2,9 +2,6 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Header } from '../components/Header';
 import { AudioUploader } from '../components/AudioUploader';
-import { AudioPlayer } from '../components/AudioPlayer';
-import { WaveformVisualizer } from '../components/WaveformVisualizer';
-import { SpectrumVisualizer } from '../components/SpectrumVisualizer';
 import { AIRepairPanel } from '../components/AIRepairPanel';
 import { AIDetectionComparison } from '../components/AIDetectionComparison';
 import { ErrorBoundary } from '../components/ErrorBoundary';
@@ -19,9 +16,6 @@ export default function RepairPage() {
     audioBuffer,
     browserProcessedBuffer,
     backendProcessedBuffer,
-    isPlaying,
-    currentTime,
-    duration,
     isProcessing,
     isDecodingAudio,
     processingProgress,
@@ -30,8 +24,8 @@ export default function RepairPage() {
     params,
     audioAnalysis,
     selectedMode,
-    playMode,
     repairModes,
+    duration,
     processingOptions,
     originalAIDetection,
     backendAIDetection,
@@ -62,18 +56,13 @@ export default function RepairPage() {
     backendError,
     clearBackendError,
     loadAudioFile,
-    play,
-    pause,
-    seek,
     updateParam,
     resetParams,
     applyRepairMode,
     applySettings,
     runAIDetection,
-    switchPlayMode,
     setProcessingOptions,
     downloadProcessedAudio,
-    analyserRef,
     // 浏览器修复信息
     browserRepairInfo,
     enableBrowserRepair,
@@ -191,14 +180,6 @@ export default function RepairPage() {
 
   const hasBrowserResult = !!browserProcessedBuffer;
   const hasBackendResult = !!backendProcessedBuffer || !!repairResult;
-
-  const activeBuffer = playMode === 'browser' ? (browserProcessedBuffer ?? audioBuffer)
-    : playMode === 'backend' ? (backendProcessedBuffer ?? audioBuffer)
-    : audioBuffer;
-
-  const isBufferReady = playMode === 'browser' ? !!browserProcessedBuffer
-    : playMode === 'backend' ? !!backendProcessedBuffer
-    : true;
 
   const browserBufferInfo = browserProcessedBuffer ? {
     sampleRate: browserProcessedBuffer.sampleRate,
@@ -364,41 +345,20 @@ export default function RepairPage() {
                   </label>
                 </div>
 
-                <AudioPlayer
-                  isPlaying={isPlaying}
-                  currentTime={currentTime}
-                  duration={duration}
-                  playMode={playMode}
-                  hasBrowserResult={hasBrowserResult}
-                  hasBackendResult={hasBackendResult}
-                  onPlay={play}
-                  onPause={pause}
-                  onSeek={seek}
-                  onSwitchPlayMode={switchPlayMode}
-                />
-
-                {analyserRef.current && (
-                  <div className="mt-6">
-                    <SpectrumVisualizer
-                      analyser={analyserRef.current}
-                      color={playMode === 'original' ? '#6B7280' : '#00D9FF'}
-                      label={playMode === 'original' ? '原始频谱' : '修复后频谱'}
-                    />
+                {taskId && hasBeenProcessed && (
+                  <div className="mt-4">
+                    <button
+                      onClick={() => navigate(`/compare?taskId=${taskId}`)}
+                      className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-cyan-500/20 to-purple-500/20 hover:from-cyan-500/30 hover:to-purple-500/30 border border-cyan-400/30 hover:border-cyan-400/50 rounded-lg text-cyan-400 text-sm font-medium transition-all w-full justify-center"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
+                      </svg>
+                      <span>前往 AB 对比</span>
+                      <span className="text-xs opacity-60 ml-1">原始 / 修复后</span>
+                    </button>
                   </div>
                 )}
-
-                <div className="mt-6">
-                  <WaveformVisualizer
-                    key={`waveform-${playMode}-${isBufferReady}`}
-                    audioBuffer={activeBuffer}
-                    waveformPeaks={playMode === 'backend' && !activeBuffer ? backendWaveformPeaks : playMode === 'original' && !activeBuffer ? originalWaveformPeaks : null}
-                    color={playMode === 'original' ? '#6B7280' : playMode === 'browser' ? '#A855F7' : '#00D9FF'}
-                    label={playMode === 'original' ? '原始波形' : playMode === 'browser' ? (isBufferReady ? '浏览器修复波形' : '浏览器修复波形 (加载中...)') : (isBufferReady ? '后端修复波形' : '后端修复波形 (预览中...)')}
-                    currentTime={currentTime}
-                    duration={duration}
-                    onSeek={seek}
-                  />
-                </div>
               </div>
 
               {backendError && (
