@@ -2322,11 +2322,14 @@ export function useAudioProcessor() {
     } catch { /* 忽略缓存查询失败，继续渲染 */ }
 
     try {
+      writeLog(`[renderAndDownload] 开始渲染: sr=${opts.sampleRate} bd=${opts.bitDepth}`);
+      setIsProcessing(true); // 确保进度条显示
       setProcessingStep('渲染交付规格...');
       setProcessingProgress(0);
       setIsRenderLoading(true);
       await renderAudio(taskIdRef.current, opts.sampleRate, opts.bitDepth);
       const { promise, close } = waitRenderWithWS(taskIdRef.current, (progress, step) => {
+        writeLog(`[renderAndDownload] 渲染进度: ${progress} step=${step}`);
         setProcessingProgress(progress);
         setProcessingStep(step);
       });
@@ -2345,6 +2348,7 @@ export function useAudioProcessor() {
       } : null);
       setProcessingStep('');
       setProcessingProgress(0);
+      setIsProcessing(false);
       return {
         downloadUrl: `/api/v1/download-file/${renderRes.render_filename}`,
         fileName,
@@ -2359,6 +2363,7 @@ export function useAudioProcessor() {
       wsControlRef.current?.close();
       wsControlRef.current = null;
       setIsRenderLoading(false);
+      setIsProcessing(false);
       writeLog(`[renderAndDownload] 渲染失败: ${renderErr}`);
       setProcessingStep('');
       setProcessingProgress(0);
@@ -2432,8 +2437,6 @@ export function useAudioProcessor() {
       taskIdRef.current = taskId;
     }
 
-    setProcessingStep('使用缓存的修复结果');
-    setProcessingProgress(1);
     setBackendAvailable(true);
 
     if (cache.repair_result) {
@@ -2481,7 +2484,10 @@ export function useAudioProcessor() {
       repairedDetectTime: repairedDetectTime || '',
     });
 
+    // 直接开始渲染下载，确保进度条显示
+    writeLog(`[handleUseRepairCache] 开始调用 renderAndDownload`);
     renderAndDownload().then(result => {
+      writeLog(`[handleUseRepairCache] renderAndDownload 完成: ${!!result}`);
       if (result?.downloadUrl) {
         setRenderDownloadUrl(result.downloadUrl);
       }
@@ -2489,14 +2495,10 @@ export function useAudioProcessor() {
         setAutoRenderInfo(result.renderInfo);
       }
       setShowDownloadModal(true);
-    }).catch(() => {
+    }).catch((err) => {
+      writeLog(`[handleUseRepairCache] renderAndDownload 失败: ${err}`);
       setShowDownloadModal(true);
     });
-
-    setTimeout(() => {
-      setProcessingStep('');
-      setProcessingProgress(0);
-    }, 2000);
   }, [cacheHitInfo, startStreamingPlayback, loadAudioFromUrl, wavInfo, originalDetectTime, renderAndDownload]);
 
   const handleRenderCacheDownload = useCallback((cache: RenderCacheEntry, downloadUrl: string, filename: string) => {
