@@ -411,8 +411,7 @@ def _harmonic_bass_enhance(y, sr, amount, music_type):
         x_short = np.linspace(0, 1, len(averaged))
         x_long = np.linspace(0, 1, len(low_band))
         sub_harmonic = np.interp(x_long, x_short, averaged)
-        sos_smooth = butter(4, low_cut / nyq, btype='low', output='sos')
-        sub_harmonic = sosfiltfilt(sos_smooth, sub_harmonic)
+        sub_harmonic = sosfiltfilt(sos_low, sub_harmonic)
         excited = np.tanh(low_band * 2.0) * np.max(np.abs(low_band)) / (np.max(np.abs(np.tanh(low_band * 2.0))) + 1e-10)
         body = np.zeros_like(y[ch])
         if sos_body is not None:

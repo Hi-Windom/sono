@@ -548,7 +548,7 @@ def _harmonic_bass_enhance_lite_1d_inplace(data, sr, amount):
         return
 
     sos = butter(4, cutoff / nyq, btype='low', output='sos')
-    low_band = sosfiltfilt(sos, data).astype(np.float64)
+    low_band = sosfiltfilt(sos, data)
 
     even_samples = low_band[::2]
     odd_samples = low_band[1::2]
@@ -559,8 +559,7 @@ def _harmonic_bass_enhance_lite_1d_inplace(data, sr, amount):
     x_new = np.linspace(0, 1, n_samples)
     sub_harmonic_interp = np.interp(x_new, x_old, sub_harmonic)
 
-    result = data.astype(np.float64) + sub_harmonic_interp * amount * 0.12
-    data[:] = result.astype(data.dtype)
+    data[:] = data + sub_harmonic_interp * amount * 0.12
 
 
 def _air_texture_reconstruct_lite(y, sr, amount):

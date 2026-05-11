@@ -363,32 +363,39 @@ export function useAudioProcessor() {
         const res = await fetch('/health', { signal: AbortSignal.timeout(15000) });
         const wasAvailable = backendAvailableRef.current;
         const isAvailable = res.ok;
-        healthFailCountRef.current = 0;
-        setBackendAvailable(isAvailable);
 
-        if (!wasAvailable && isAvailable) {
-          writeLog('[useAudioProcessor] 后端恢复可用');
-          fetchAlgorithmVersions().then(versions => {
-            if (versions.length > 0) {
-              setAvailableAlgorithms(versions);
-              const current = versions.find(v => v.name === algorithmVersion) || versions[0];
-              if (current.modes && current.modes.length > 0) {
-                const modes: RepairMode[] = current.modes.map(m => ({
-                  name: m.name,
-                  description: m.description,
-                  icon: m.icon,
-                  params: { ...defaultAIRepairParams, ...m.params } as AIRepairParams,
-                }));
-                setRepairModes(modes);
-                setSelectedMode(modes[0].name);
+        if (isAvailable) {
+          healthFailCountRef.current = 0;
+          setBackendAvailable(true);
+          if (!wasAvailable) {
+            writeLog('[useAudioProcessor] 后端恢复可用');
+            fetchAlgorithmVersions().then(versions => {
+              if (versions.length > 0) {
+                setAvailableAlgorithms(versions);
+                const current = versions.find(v => v.name === algorithmVersion) || versions[0];
+                if (current.modes && current.modes.length > 0) {
+                  const modes: RepairMode[] = current.modes.map(m => ({
+                    name: m.name,
+                    description: m.description,
+                    icon: m.icon,
+                    params: { ...defaultAIRepairParams, ...m.params } as AIRepairParams,
+                  }));
+                  setRepairModes(modes);
+                  setSelectedMode(modes[0].name);
+                }
               }
-            }
-          });
-          fetchDetectorVersions().then(detectors => {
-            setAvailableDetectors(detectors);
-          });
-        } else if (wasAvailable && !isAvailable) {
-          console.warn('[useAudioProcessor] 后端变为不可用');
+            });
+            fetchDetectorVersions().then(detectors => {
+              setAvailableDetectors(detectors);
+            });
+          }
+        } else {
+          healthFailCountRef.current++;
+          if (backendAvailableRef.current && healthFailCountRef.current >= 3) {
+            console.warn('[useAudioProcessor] 后端健康检查连续3次失败，标记为不可用');
+            setBackendAvailable(false);
+            healthFailCountRef.current = 0;
+          }
         }
       } catch {
         healthFailCountRef.current++;

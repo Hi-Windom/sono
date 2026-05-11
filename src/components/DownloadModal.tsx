@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { parseFilenameFromDisposition } from '../services/backendApi';
 
 export interface DownloadFileInfo {
@@ -35,6 +35,18 @@ export function DownloadModal({
 }: DownloadModalProps) {
   const [copySuccess, setCopySuccess] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const [editingBackendName, setEditingBackendName] = useState(false);
+  const [backendFilename, setBackendFilename] = useState('');
+  const [editingBrowserName, setEditingBrowserName] = useState(false);
+  const [browserFilename, setBrowserFilename] = useState('');
+
+  useEffect(() => {
+    if (backendInfo?.filename) setBackendFilename(backendInfo.filename);
+  }, [backendInfo?.filename]);
+
+  useEffect(() => {
+    if (browserInfo?.filename) setBrowserFilename(browserInfo.filename);
+  }, [browserInfo?.filename]);
 
   const handleCopyLink = useCallback(async (url: string) => {
     try {
@@ -63,7 +75,7 @@ export function DownloadModal({
       if (!res.ok) throw new Error('下载失败');
       const disposition = res.headers.get('Content-Disposition');
       const parsedName = parseFilenameFromDisposition(disposition);
-      const saveName = parsedName || fallbackFilename;
+      const saveName = fallbackFilename || parsedName || 'audio.wav';
       const blob = await res.blob();
       const blobUrl = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -132,9 +144,39 @@ export function DownloadModal({
                 <span className="text-cyan-400 font-medium text-sm">后端修复</span>
               </div>
               <div className="space-y-1.5 text-xs">
-                <div className="flex justify-between">
-                  <span className="text-gray-400">文件名</span>
-                  <span className="text-white truncate ml-4 max-w-[220px]" title={backendInfo.filename}>{backendInfo.filename}</span>
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-gray-400">文件名</span>
+                    {!editingBackendName && (
+                      <button
+                        onClick={() => setEditingBackendName(true)}
+                        className="text-gray-500 hover:text-cyan-400 transition text-[10px]"
+                      >
+                        ✏️ 修改
+                      </button>
+                    )}
+                  </div>
+                  {editingBackendName ? (
+                    <input
+                      type="text"
+                      value={backendFilename}
+                      onChange={(e) => setBackendFilename(e.target.value)}
+                      onBlur={() => {
+                        if (!backendFilename.trim()) setBackendFilename(backendInfo.filename);
+                        setEditingBackendName(false);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          if (!backendFilename.trim()) setBackendFilename(backendInfo.filename);
+                          setEditingBackendName(false);
+                        }
+                      }}
+                      autoFocus
+                      className="w-full px-2 py-1 bg-black/30 border border-cyan-500/30 rounded text-white text-xs focus:outline-none focus:border-cyan-400"
+                    />
+                  ) : (
+                    <span className="text-white truncate block max-w-[280px]" title={backendFilename}>{backendFilename}</span>
+                  )}
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-400">文件大小</span>
@@ -168,7 +210,7 @@ export function DownloadModal({
               {backendDownloadUrl && (
                 <div className="mt-3 flex gap-2">
                   <button
-                    onClick={() => handleDownload(backendDownloadUrl, backendInfo.filename)}
+                    onClick={() => handleDownload(backendDownloadUrl, backendFilename)}
                     disabled={downloading || isBackendLoading}
                     className="flex-1 py-2 bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/30 rounded-lg text-cyan-400 text-xs font-medium transition disabled:opacity-50"
                   >
@@ -203,9 +245,39 @@ export function DownloadModal({
                 <span className="text-purple-400 font-medium text-sm">浏览器修复</span>
               </div>
               <div className="space-y-1.5 text-xs">
-                <div className="flex justify-between">
-                  <span className="text-gray-400">文件名</span>
-                  <span className="text-white truncate ml-4 max-w-[220px]" title={browserInfo.filename}>{browserInfo.filename}</span>
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-gray-400">文件名</span>
+                    {!editingBrowserName && (
+                      <button
+                        onClick={() => setEditingBrowserName(true)}
+                        className="text-gray-500 hover:text-purple-400 transition text-[10px]"
+                      >
+                        ✏️ 修改
+                      </button>
+                    )}
+                  </div>
+                  {editingBrowserName ? (
+                    <input
+                      type="text"
+                      value={browserFilename}
+                      onChange={(e) => setBrowserFilename(e.target.value)}
+                      onBlur={() => {
+                        if (!browserFilename.trim()) setBrowserFilename(browserInfo.filename);
+                        setEditingBrowserName(false);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          if (!browserFilename.trim()) setBrowserFilename(browserInfo.filename);
+                          setEditingBrowserName(false);
+                        }
+                      }}
+                      autoFocus
+                      className="w-full px-2 py-1 bg-black/30 border border-purple-500/30 rounded text-white text-xs focus:outline-none focus:border-purple-400"
+                    />
+                  ) : (
+                    <span className="text-white truncate block max-w-[280px]" title={browserFilename}>{browserFilename}</span>
+                  )}
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-400">文件大小</span>
