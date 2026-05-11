@@ -18,6 +18,24 @@ interface CacheTask {
 
 const API_BASE = '/api/v1';
 
+const audioBufferCache = new Map<string, { buffer: AudioBuffer; timestamp: number }>();
+const CACHE_TTL = 30 * 60 * 1000;
+
+function getCachedBuffer(taskId: string, type: 'original' | 'repaired'): AudioBuffer | null {
+  const key = `${taskId}:${type}`;
+  const entry = audioBufferCache.get(key);
+  if (!entry) return null;
+  if (Date.now() - entry.timestamp > CACHE_TTL) {
+    audioBufferCache.delete(key);
+    return null;
+  }
+  return entry.buffer;
+}
+
+function setCachedBuffer(taskId: string, type: 'original' | 'repaired', buffer: AudioBuffer) {
+  audioBufferCache.set(`${taskId}:${type}`, { buffer, timestamp: Date.now() });
+}
+
 function formatTime(seconds: number): string {
   if (!isFinite(seconds) || seconds < 0) return '0:00';
   const mins = Math.floor(seconds / 60);
@@ -25,19 +43,25 @@ function formatTime(seconds: number): string {
   return `${mins}:${secs.toString().padStart(2, '0')}`;
 }
 
+export { audioBufferCache, getCachedBuffer, setCachedBuffer };
+
 export default function ComparePage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const taskId = searchParams.get('taskId') || '';
 
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [taskInfoLoading, setTaskInfoLoading] = useState(false);
   const [taskInfo, setTaskInfo] = useState<Record<string, unknown> | null>(null);
+  const [taskInfoError, setTaskInfoError] = useState<string | null>(null);
   const [tasks, setTasks] = useState<CacheTask[]>([]);
   const [tasksLoading, setTasksLoading] = useState(false);
 
   const [originalBuffer, setOriginalBuffer] = useState<AudioBuffer | null>(null);
   const [repairedBuffer, setRepairedBuffer] = useState<AudioBuffer | null>(null);
+  const [originalLoading, setOriginalLoading] = useState(false);
+  const [repairedLoading, setRepairedLoading] = useState(false);
+  const [originalError, setOriginalError] = useState<string | null>(null);
+  const [repairedError, setRepairedError] = useState<string | null>(null);
   const [compareMode, setCompareMode] = useState<CompareMode>('original');
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -52,6 +76,7 @@ export default function ComparePage() {
   const animFrameRef = useRef<number>();
 
   const activeBuffer = compareMode === 'original' ? originalBuffer : repairedBuffer;
+  const activeLoading = compareMode === 'original' ? originalLoading : repairedLoading;
 
   useEffect(() => {
     if (taskId) return;
@@ -75,62 +100,122 @@ export default function ComparePage() {
       setTaskInfo(null);
       setOriginalBuffer(null);
       setRepairedBuffer(null);
-      setError(null);
+      setTaskInfoError(null);
+      setOriginalError(null);
+      setRepairedError(null);
       return;
     }
 
     let cancelled = false;
 
-    async function loadTaskInfo() {
-      try {
-        const res = await fetch(`${API_BASE}/status/${taskId}`);
+    setTaskInfoLoading(true);
+    setTaskInfoError(null);
+    fetch(`${API_BASE}/status/${taskId}`)
+      .then(res => {
         if (!res.ok) throw new Error(`任务不存在 (HTTP ${res.status})`);
-        const data = await res.json();
+        return res.json();
+      })
+      .then(data => {
         if (!cancelled) setTaskInfo(data);
-      } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : '获取任务信息失败');
-      }
-    }
+      })
+      .catch(e => {
+        if (!cancelled) setTaskInfoError(e instanceof Error ? e.message : '获取任务信息失败');
+      })
+      .finally(() => {
+        if (!cancelled) setTaskInfoLoading(false);
+      });
 
-    async function loadAudio(type: 'original' | 'repaired', setter: (b: AudioBuffer | null) => void) {
-      try {
-        const response = await fetch(`${API_BASE}/preview/${taskId}?type=${type}`);
-        if (!response.ok) {
-          if (type === 'repaired') throw new Error(`修复后音频不可用 (HTTP ${response.status})`);
-          throw new Error(`原始音频不可用 (HTTP ${response.status})`);
-        }
-        const arrayBuffer = await response.arrayBuffer();
-        const ctx = audioContextRef.current || new AudioContext();
-        audioContextRef.current = ctx;
-        const buffer = await ctx.decodeAudioData(arrayBuffer);
-        if (!cancelled) setter(buffer);
-      } catch (e) {
-        console.error(`[ComparePage] 加载${type === 'original' ? '原始' : '修复后'}音频失败:`, e);
-      }
-    }
-
-    async function init() {
-      setLoading(true);
-      setError(null);
-      setOriginalBuffer(null);
-      setRepairedBuffer(null);
-      await loadTaskInfo();
-      await Promise.all([
-        loadAudio('original', setOriginalBuffer),
-        loadAudio('repaired', setRepairedBuffer),
-      ]);
-      if (!cancelled) setLoading(false);
-    }
-
-    init();
-
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [taskId]);
+
+  const getAudioContext = useCallback(() => {
+    if (!audioContextRef.current) {
+      audioContextRef.current = new AudioContext();
+    }
+    return audioContextRef.current;
+  }, []);
+
+  useEffect(() => {
+    if (!taskId) return;
+
+    const cached = getCachedBuffer(taskId, 'original');
+    if (cached) {
+      setOriginalBuffer(cached);
+      setOriginalLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setOriginalLoading(true);
+    setOriginalError(null);
+
+    fetch(`${API_BASE}/preview/${taskId}?type=original`)
+      .then(res => {
+        if (!res.ok) throw new Error(`原始音频不可用 (HTTP ${res.status})`);
+        return res.arrayBuffer();
+      })
+      .then(ab => {
+        const ctx = getAudioContext();
+        return ctx.decodeAudioData(ab);
+      })
+      .then(buffer => {
+        if (!cancelled) {
+          setCachedBuffer(taskId, 'original', buffer);
+          setOriginalBuffer(buffer);
+        }
+      })
+      .catch(e => {
+        if (!cancelled) setOriginalError(e instanceof Error ? e.message : '原始音频加载失败');
+      })
+      .finally(() => {
+        if (!cancelled) setOriginalLoading(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [taskId, getAudioContext]);
+
+  useEffect(() => {
+    if (!taskId) return;
+
+    const cached = getCachedBuffer(taskId, 'repaired');
+    if (cached) {
+      setRepairedBuffer(cached);
+      setRepairedLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setRepairedLoading(true);
+    setRepairedError(null);
+
+    fetch(`${API_BASE}/preview/${taskId}?type=repaired`)
+      .then(res => {
+        if (!res.ok) throw new Error(`修复后音频不可用 (HTTP ${res.status})`);
+        return res.arrayBuffer();
+      })
+      .then(ab => {
+        const ctx = getAudioContext();
+        return ctx.decodeAudioData(ab);
+      })
+      .then(buffer => {
+        if (!cancelled) {
+          setCachedBuffer(taskId, 'repaired', buffer);
+          setRepairedBuffer(buffer);
+        }
+      })
+      .catch(e => {
+        if (!cancelled) setRepairedError(e instanceof Error ? e.message : '修复后音频加载失败');
+      })
+      .finally(() => {
+        if (!cancelled) setRepairedLoading(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [taskId, getAudioContext]);
 
   useEffect(() => {
     if (!audioContextRef.current) return;
+    if (analyserRef.current) return;
     const analyser = audioContextRef.current.createAnalyser();
     analyser.fftSize = 256;
     analyserRef.current = analyser;
@@ -145,6 +230,8 @@ export default function ComparePage() {
     return () => {
       analyser.disconnect();
       gain.disconnect();
+      analyserRef.current = null;
+      gainNodeRef.current = null;
     };
   }, []);
 
@@ -169,9 +256,20 @@ export default function ComparePage() {
     const ctx = audioContextRef.current;
     if (ctx.state === 'suspended') ctx.resume();
 
+    if (!analyserRef.current) {
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 256;
+      analyserRef.current = analyser;
+      const gain = ctx.createGain();
+      gain.gain.value = 1;
+      gainNodeRef.current = gain;
+      analyser.connect(gain);
+      gain.connect(ctx.destination);
+    }
+
     const source = ctx.createBufferSource();
     source.buffer = activeBuffer;
-    source.connect(analyserRef.current!);
+    source.connect(analyserRef.current);
 
     const offset = pauseOffsetRef.current;
     source.start(0, offset);
@@ -293,16 +391,16 @@ export default function ComparePage() {
   );
 
   const renderPlayer = () => {
-    if (loading) {
+    if (taskInfoLoading && !taskInfo) {
       return (
         <div className="flex flex-col items-center gap-4 py-12">
           <div className="w-10 h-10 rounded-full animate-spin border-2 border-cyan-500/30 border-t-cyan-500" />
-          <p className="text-gray-400 text-sm">正在加载音频数据...</p>
+          <p className="text-gray-400 text-sm">加载任务信息...</p>
         </div>
       );
     }
 
-    if (error || !taskInfo) {
+    if (taskInfoError && !taskInfo) {
       return (
         <div className="flex flex-col items-center gap-4 py-12">
           <div className="w-16 h-16 rounded-full bg-red-500/10 flex items-center justify-center">
@@ -310,7 +408,7 @@ export default function ComparePage() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
             </svg>
           </div>
-          <p className="text-red-400 text-sm font-medium">{error || '任务不存在'}</p>
+          <p className="text-red-400 text-sm font-medium">{taskInfoError}</p>
           <button
             onClick={() => setSearchParams({})}
             className="mt-2 px-4 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-gray-400 hover:text-white text-sm transition-colors"
@@ -332,7 +430,7 @@ export default function ComparePage() {
             </div>
             <div className="min-w-0">
               <h3 className="text-white font-semibold text-lg truncate">
-                {(taskInfo.original_filename as string) || 'audio'}
+                {(taskInfo?.original_filename as string) || 'audio'}
               </h3>
               <p className="text-gray-400 text-sm">
                 {originalBuffer ? `${(originalBuffer.sampleRate / 1000).toFixed(0)} kHz • ${originalBuffer.numberOfChannels === 1 ? '单声道' : '立体声'}` : '—'}
@@ -345,6 +443,8 @@ export default function ComparePage() {
           <div className="flex items-center gap-2 shrink-0">
             {(['original', 'repaired'] as CompareMode[]).map((mode) => {
               const buf = mode === 'original' ? originalBuffer : repairedBuffer;
+              const isLoading = mode === 'original' ? originalLoading : repairedLoading;
+              const loadError = mode === 'original' ? originalError : repairedError;
               const available = !!buf;
               const active = compareMode === mode;
               return (
@@ -361,13 +461,20 @@ export default function ComparePage() {
                   }`}
                   style={active ? { borderColor: modeColor[mode], color: modeColor[mode], backgroundColor: modeColor[mode] + '15' } : undefined}
                 >
-                  <span className={`w-2 h-2 rounded-full ${available ? (active ? '' : 'bg-gray-500') : 'bg-red-500/50'}`}
-                    style={available && active ? { backgroundColor: modeColor[mode] } : undefined}
-                  />
+                  {isLoading ? (
+                    <span className="w-2 h-2 rounded-full border border-gray-400 border-t-transparent animate-spin" />
+                  ) : loadError ? (
+                    <span className="w-2 h-2 rounded-full bg-red-500/50" />
+                  ) : (
+                    <span className={`w-2 h-2 rounded-full ${available ? (active ? '' : 'bg-gray-500') : 'bg-gray-600'}`}
+                      style={available && active ? { backgroundColor: modeColor[mode] } : undefined}
+                    />
+                  )}
                   {modeLabel[mode]}
-                  {!available && (
-                    <svg className="w-3 h-3 ml-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                  {isLoading && <span className="text-[10px] opacity-60 ml-0.5">加载中</span>}
+                  {loadError && !isLoading && (
+                    <svg className="w-3 h-3 ml-0.5 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01" />
                     </svg>
                   )}
                 </button>
@@ -380,7 +487,7 @@ export default function ComparePage() {
           <div className="flex items-center justify-center gap-4">
             <button
               onClick={isPlaying ? pause : play}
-              disabled={!activeBuffer}
+              disabled={!activeBuffer || activeLoading}
               className="w-14 h-14 rounded-full flex items-center justify-center transition-all duration-200 bg-gradient-to-r from-secondary to-accent hover:scale-110 hover:shadow-lg hover:shadow-secondary/40 active:scale-95 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:scale-100"
             >
               {isPlaying ? (
@@ -396,7 +503,7 @@ export default function ComparePage() {
 
             <div className="flex-1 min-w-[120px] max-w-xs">
               <div className="text-xs text-gray-400 mb-1 text-center">
-                {formatTime(currentTime)} / {formatTime(duration)}
+                {activeLoading ? '加载中...' : `${formatTime(currentTime)} / ${formatTime(duration)}`}
               </div>
               <input
                 type="range"
@@ -405,7 +512,7 @@ export default function ComparePage() {
                 step={0.01}
                 value={currentTime}
                 onChange={(e) => seek(parseFloat(e.target.value))}
-                disabled={!activeBuffer}
+                disabled={!activeBuffer || activeLoading}
                 className="w-full h-1.5 bg-gray-700 rounded-full appearance-none cursor-pointer disabled:opacity-30 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:shadow-md [&::-webkit-slider-runnable-track]:rounded-full"
                 style={{
                   background: activeBuffer
@@ -417,7 +524,7 @@ export default function ComparePage() {
           </div>
         </div>
 
-        {analyserRef.current && (
+        {analyserRef.current && activeBuffer && (
           <div className="mt-6">
             <SpectrumVisualizer
               analyser={analyserRef.current}
@@ -432,7 +539,7 @@ export default function ComparePage() {
             key={`waveform-${compareMode}-${!!activeBuffer}`}
             audioBuffer={activeBuffer}
             color={modeColor[compareMode]}
-            label={`${modeLabel[compareMode]} 波形`}
+            label={activeLoading ? `${modeLabel[compareMode]} 加载中...` : `${modeLabel[compareMode]} 波形`}
             currentTime={currentTime}
             duration={duration}
             onSeek={seek}
@@ -442,9 +549,12 @@ export default function ComparePage() {
         <div className="mt-4 flex items-center justify-between text-xs text-gray-500">
           <span>Task ID: {taskId}</span>
           <span>
-            {!originalBuffer && <span className="text-yellow-500/70 mr-3">原始音频未就绪</span>}
-            {!repairedBuffer && <span className="text-yellow-500/70">修复后音频未就绪</span>}
+            {originalLoading && <span className="text-yellow-500/70 mr-3">原始音频加载中</span>}
+            {repairedLoading && <span className="text-yellow-500/70 mr-3">修复后音频加载中</span>}
+            {originalError && <span className="text-red-400/70 mr-3">原始: {originalError}</span>}
+            {repairedError && <span className="text-red-400/70 mr-3">修复: {repairedError}</span>}
             {originalBuffer && repairedBuffer && <span className="text-green-400">双轨已就绪</span>}
+            {originalBuffer && !repairedBuffer && !repairedLoading && !repairedError && <span className="text-yellow-500/70">修复后音频未就绪</span>}
           </span>
         </div>
       </>
