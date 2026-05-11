@@ -6,6 +6,7 @@ import QualityTestPage from "@/pages/QualityTestPage";
 import ProfileManagerPage from "@/pages/ProfileManagerPage";
 import CacheManagerPage from "@/pages/CacheManagerPage";
 import ComparePage from "@/pages/ComparePage";
+import DetectPage from "@/pages/DetectPage";
 import { BuildInfo } from "@/components/BuildInfo";
 import { useEffect } from "react";
 
@@ -43,6 +44,7 @@ export default function App() {
         <Route path="/profile-manager" element={<ProfileManagerPage />} />
         <Route path="/cache-manager" element={<CacheManagerPage />} />
         <Route path="/compare" element={<ComparePage />} />
+        <Route path="/detect" element={<DetectPage />} />
       </Routes>
       <BuildInfo />
     </Router>

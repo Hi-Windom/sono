@@ -1178,6 +1178,53 @@ export function waitRenderWithWS(
 
 export { mapDetectionResult, type BackendDetectionResult, type BackendRepairResult, type ProgressEvent, type TaskStatus };
 
+export interface AudioFileInfo {
+  file_id: string;
+  filename: string;
+  size: number;
+  type: string;
+  modified_at: number;
+}
+
+export async function detectFile(file: File, detectorVersion: string = 'v1.1'): Promise<{ task_id: string; status: string }> {
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('detector_version', detectorVersion);
+
+  const res = await fetch(`${API_BASE}/detect-file`, {
+    method: 'POST',
+    body: formData,
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: '检测请求失败' }));
+    throw new Error(err.detail || '检测请求失败');
+  }
+
+  return res.json();
+}
+
+export async function getAudioFiles(): Promise<{ files: AudioFileInfo[]; count: number }> {
+  const res = await fetch(`${API_BASE}/audio-files`);
+  if (!res.ok) throw new Error('获取音频文件列表失败');
+  return res.json();
+}
+
+export async function detectByPath(fileId: string, detectorVersion: string = 'v1.1'): Promise<{ task_id: string; status: string }> {
+  const res = await fetch(`${API_BASE}/detect-path`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ file_id: fileId, detector_version: detectorVersion }),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: '检测请求失败' }));
+    throw new Error(err.detail || '检测请求失败');
+  }
+
+  return res.json();
+}
+
 /**
  * 从 Content-Disposition 头解析文件名
  * 支持 RFC 5987 (filename*=UTF-8''xxx) 和普通格式 (filename="xxx")
