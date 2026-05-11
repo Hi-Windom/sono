@@ -21,7 +21,6 @@ export interface AppSettings {
   };
   selectedMode: string;
   algorithmVersion: string;
-  detectorVersion: string;
   savedProfiles: ProfileConfig[];
 }
 
@@ -40,7 +39,6 @@ export const defaultSettings: AppSettings = {
   },
   selectedMode: '全面修复',
   algorithmVersion: '',
-  detectorVersion: 'v1.0',
   savedProfiles: [],
 };
 
@@ -61,9 +59,7 @@ export function loadSettings(): AppSettings {
           ...parsed.exportOptions,
         },
         savedProfiles: Array.isArray(parsed.savedProfiles) ? parsed.savedProfiles : [],
-        // 确保版本字段有默认值
         algorithmVersion: parsed.algorithmVersion || defaultSettings.algorithmVersion,
-        detectorVersion: parsed.detectorVersion || defaultSettings.detectorVersion,
       };
     }
   } catch (error) {

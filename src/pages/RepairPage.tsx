@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import { Header } from '../components/Header';
 import { AudioUploader } from '../components/AudioUploader';
 import { AIRepairPanel } from '../components/AIRepairPanel';
-import { AIDetectionComparison } from '../components/AIDetectionComparison';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import { DownloadModal, DownloadFileInfo } from '../components/DownloadModal';
 import { RepairCacheModal } from '../components/RepairCacheModal';
@@ -27,10 +26,6 @@ export default function RepairPage() {
     repairModes,
     duration,
     processingOptions,
-    originalAIDetection,
-    backendAIDetection,
-    originalDetectTime,
-    repairedDetectTime,
     hasBeenProcessed,
     originalSampleRate,
     currentSampleRate,
@@ -44,9 +39,6 @@ export default function RepairPage() {
     algorithmVersion,
     availableAlgorithms,
     applyAlgorithmVersion,
-    detectorVersion,
-    availableDetectors,
-    setDetectorVersion,
     // 任务卡住相关
     isTaskStuck,
     stuckInfo,
@@ -60,7 +52,6 @@ export default function RepairPage() {
     resetParams,
     applyRepairMode,
     applySettings,
-    runAIDetection,
     setProcessingOptions,
     downloadProcessedAudio,
     // 浏览器修复信息
@@ -239,7 +230,7 @@ export default function RepairPage() {
                     <p className="text-yellow-400 text-xs">任务执行似乎卡住了 - "{stuckInfo?.lastStep}" 已超过 {Math.round(stuckInfo?.duration || 0)} 秒</p>
                     <div className="flex gap-2 mt-1.5">
                       <button onClick={cancelCurrentTask} className="px-2.5 py-1 bg-red-500/20 hover:bg-red-500/30 text-red-400 text-xs rounded transition-colors">取消任务</button>
-                      <button onClick={() => { resetStuckState(); if (processingStep.includes('检测')) runAIDetection(); else if (processingStep.includes('修复')) applySettings(); }} className="px-2.5 py-1 bg-yellow-500/20 hover:bg-yellow-500/30 text-yellow-400 text-xs rounded transition-colors">重试</button>
+                      <button onClick={() => { resetStuckState(); if (processingStep.includes('修复')) applySettings(); }} className="px-2.5 py-1 bg-yellow-500/20 hover:bg-yellow-500/30 text-yellow-400 text-xs rounded transition-colors">重试</button>
                       <button onClick={resetStuckState} className="px-2.5 py-1 bg-white/5 hover:bg-white/10 text-gray-400 text-xs rounded transition-colors">继续等待</button>
                     </div>
                   </div>
@@ -374,18 +365,6 @@ export default function RepairPage() {
                 </div>
               )}
 
-              <AIDetectionComparison
-                before={originalAIDetection}
-                backendAfter={backendAIDetection}
-                onDetect={runAIDetection}
-                isProcessing={isProcessing}
-                detectorVersion={detectorVersion}
-                onDetectorVersionChange={setDetectorVersion}
-                availableDetectors={availableDetectors}
-                algorithmVersion={algorithmVersion}
-                originalDetectTime={originalDetectTime || undefined}
-                repairedDetectTime={repairedDetectTime || undefined}
-              />
             </div>
 
             <div className="lg:col-span-5 space-y-6">

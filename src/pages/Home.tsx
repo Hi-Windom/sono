@@ -5,7 +5,6 @@ import { AudioPlayer } from '../components/AudioPlayer';
 import { WaveformVisualizer } from '../components/WaveformVisualizer';
 import { SpectrumVisualizer } from '../components/SpectrumVisualizer';
 import { AIRepairPanel } from '../components/AIRepairPanel';
-import { AIDetectionComparison } from '../components/AIDetectionComparison';
 import { DownloadModal, DownloadFileInfo } from '../components/DownloadModal';
 import { useAudioProcessor, generateExportFilename } from '../hooks/useAudioProcessor';
 
@@ -29,10 +28,6 @@ export default function Home() {
     playMode,
     repairModes,
     processingOptions,
-    originalAIDetection,
-    backendAIDetection,
-    originalDetectTime,
-    repairedDetectTime,
     hasBeenProcessed,
     originalSampleRate,
     currentSampleRate,
@@ -44,8 +39,6 @@ export default function Home() {
     algorithmVersion,
     availableAlgorithms,
     applyAlgorithmVersion,
-    detectorVersion,
-    setDetectorVersion,
     loadAudioFile,
     play,
     pause,
@@ -54,7 +47,6 @@ export default function Home() {
     resetParams,
     applyRepairMode,
     applySettings,
-    runAIDetection,
     switchPlayMode,
     setProcessingOptions,
     downloadProcessedAudio,
@@ -245,18 +237,6 @@ export default function Home() {
                   </div>
                 </div>
               )}
-
-              <AIDetectionComparison
-                before={originalAIDetection}
-                backendAfter={backendAIDetection}
-                onDetect={runAIDetection}
-                isProcessing={isProcessing}
-                detectorVersion={detectorVersion}
-                onDetectorVersionChange={setDetectorVersion}
-                algorithmVersion={algorithmVersion}
-                originalDetectTime={originalDetectTime || undefined}
-                repairedDetectTime={repairedDetectTime || undefined}
-              />
             </div>
 
             <div className="lg:col-span-5 space-y-6">

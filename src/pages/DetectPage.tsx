@@ -30,6 +30,7 @@ interface DetectSlotState {
   progress: number;
   step: string;
   result: AISongDetectionResult | null;
+  detectTime: string;
   error: string;
 }
 
@@ -45,6 +46,7 @@ function createEmptySlot(): DetectSlotState {
     progress: 0,
     step: '',
     result: null,
+    detectTime: '',
     error: '',
   };
 }
@@ -102,7 +104,7 @@ export default function DetectPage() {
     wsControlRef.current[slotId]?.close();
     wsControlRef.current[slotId] = null;
 
-    setSlot(prev => ({ ...prev, status: 'uploading', progress: 0, step: '提交检测...', error: '', result: null }));
+    setSlot(prev => ({ ...prev, status: 'uploading', progress: 0, step: '提交检测...', error: '', result: null, detectTime: '' }));
 
     try {
       let res: { task_id: string; status: string };
@@ -126,11 +128,13 @@ export default function DetectPage() {
         },
         onComplete: (event) => {
           const detectionResult = event.detection_result as BackendDetectionResult | undefined;
+          const now = new Date();
+          const timeStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
           if (detectionResult) {
             const mapped = mapDetectionResult(detectionResult);
-            setSlot(prev => ({ ...prev, status: 'done', progress: 1, step: '', result: mapped }));
+            setSlot(prev => ({ ...prev, status: 'done', progress: 1, step: '', result: mapped, detectTime: timeStr }));
           } else {
-            setSlot(prev => ({ ...prev, status: 'done', progress: 1, step: '' }));
+            setSlot(prev => ({ ...prev, status: 'done', progress: 1, step: '', detectTime: timeStr }));
           }
           wsControlRef.current[slotId] = null;
         },
@@ -188,7 +192,7 @@ export default function DetectPage() {
     setSlot(createEmptySlot());
   }, []);
 
-  const renderSlot = (slotId: 'a' | 'b', slot: DetectSlotState, label: string, color: string) => {
+  const renderSlot = (slotId: 'a' | 'b', slot: DetectSlotState, label: string, color: string, cardColor: string) => {
     const setSlot = slotId === 'a' ? setSlotA : setSlotB;
     const hasFile = slot.source !== 'none';
     const isBusy = slot.status === 'uploading' || slot.status === 'detecting';
@@ -290,8 +294,9 @@ export default function DetectPage() {
                 <AIDetectionCard
                   title={label}
                   result={slot.result}
-                  color="from-purple-900/30 to-primary/30"
+                  color={cardColor}
                   algorithmVersion={detectorVersion}
+                  detectTime={slot.detectTime || undefined}
                 />
               )}
 
@@ -457,8 +462,8 @@ export default function DetectPage() {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {renderSlot('a', slotA, '音频 A', '#9CA3AF')}
-            {renderSlot('b', slotB, '音频 B', '#00D9FF')}
+            {renderSlot('a', slotA, '音频 A', '#9CA3AF', 'from-red-900/30 to-primary/30')}
+            {renderSlot('b', slotB, '音频 B', '#00D9FF', 'from-cyan-900/30 to-primary/30')}
           </div>
 
           {renderComparison()}
