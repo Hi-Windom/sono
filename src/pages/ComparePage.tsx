@@ -108,8 +108,8 @@ export default function ComparePage() {
   const analyserRef = useRef<AnalyserNode | null>(null);
   const animFrameRef = useRef<number>();
   const abLoopRef = useRef(false);
-  const vinylAngleRef = useRef(0);
-  const vinylAnimRef = useRef<number>();
+  const pendingSeekRef = useRef<number | null>(null);
+  const pendingPlayRef = useRef(false);
 
   const activeBuffer = compareMode === 'original' ? originalBuffer : repairedBuffer;
 
@@ -183,13 +183,21 @@ export default function ComparePage() {
     audio.src = url;
     audio.load();
     setAudioReady(false);
-    setDuration(0);
-    setCurrentTime(0);
-    setIsPlaying(false);
 
     const onCanPlay = () => {
       setAudioReady(true);
       setDuration(audio.duration || 0);
+
+      if (pendingSeekRef.current !== null) {
+        const seekTo = pendingSeekRef.current;
+        pendingSeekRef.current = null;
+        audio.currentTime = seekTo;
+        setCurrentTime(seekTo);
+      }
+      if (pendingPlayRef.current) {
+        pendingPlayRef.current = false;
+        audio.play().catch(() => {});
+      }
     };
     const onDurationChange = () => {
       if (audio.duration && isFinite(audio.duration)) {
@@ -402,28 +410,13 @@ export default function ComparePage() {
   const switchMode = useCallback((mode: CompareMode) => {
     if (mode === compareMode) return;
     const wasPlaying = isPlaying;
-    const audio = audioElRef.current;
+    const savedTime = currentTime;
 
-    const doSwitch = () => {
-      if (audio) audio.pause();
-      setCompareMode(mode);
+    setCompareMode(mode);
 
-      const startPos = pointA ?? 0;
-      setCurrentTime(startPos);
-
-      setTimeout(() => {
-        const a = audioElRef.current;
-        if (a && a.readyState >= 3) {
-          a.currentTime = startPos;
-          if (wasPlaying) {
-            a.play().catch(() => {});
-          }
-        }
-      }, 200);
-    };
-
-    doSwitch();
-  }, [compareMode, isPlaying, pointA]);
+    pendingSeekRef.current = savedTime;
+    pendingPlayRef.current = wasPlaying;
+  }, [compareMode, isPlaying, currentTime]);
 
   const setMarkA = useCallback(() => {
     setPointA(currentTime);
@@ -483,22 +476,6 @@ export default function ComparePage() {
     };
   }, []);
 
-  useEffect(() => {
-    if (isPlaying) {
-      let lastTs = performance.now();
-      const spin = (now: number) => {
-        const dt = (now - lastTs) / 1000;
-        lastTs = now;
-        vinylAngleRef.current = (vinylAngleRef.current + dt * 33.3) % 360;
-        vinylAnimRef.current = requestAnimationFrame(spin);
-      };
-      vinylAnimRef.current = requestAnimationFrame(spin);
-      return () => {
-        if (vinylAnimRef.current) cancelAnimationFrame(vinylAnimRef.current);
-      };
-    }
-  }, [isPlaying]);
-
   const modeLabel: Record<CompareMode, string> = { original: '原始音频', repaired: '修复后' };
   const modeColor: Record<CompareMode, string> = { original: '#9CA3AF', repaired: '#00D9FF' };
   const modeIcon: Record<CompareMode, string> = {
@@ -515,102 +492,6 @@ export default function ComparePage() {
     const bitDepth = mode === 'repaired' ? 24 : (taskInfo?.original_bit_depth as number || 16);
     const sizeMB = (dur * sr * ch * (bitDepth / 8)) / (1024 * 1024);
     return { sampleRate: sr, channels: ch, duration: dur, bitDepth, sizeMB };
-  };
-
-  const vinylSize = 140;
-
-  const renderVinyl = () => {
-    const color = modeColor[compareMode];
-    return (
-      <div className="flex flex-col items-center">
-        <div className="relative" style={{ width: vinylSize, height: vinylSize }}>
-          <svg
-            width={vinylSize}
-            height={vinylSize}
-            viewBox={`0 0 ${vinylSize} ${vinylSize}`}
-            style={{
-              transform: `rotate(${vinylAngleRef.current}deg)`,
-              transition: isPlaying ? 'none' : 'transform 0.5s ease-out',
-            }}
-          >
-            <defs>
-              <radialGradient id="vinylGrad" cx="50%" cy="50%" r="50%">
-                <stop offset="0%" stopColor="#1a1a1a" />
-                <stop offset="15%" stopColor="#111" />
-                <stop offset="30%" stopColor="#1a1a1a" />
-                <stop offset="45%" stopColor="#111" />
-                <stop offset="55%" stopColor="#1a1a1a" />
-                <stop offset="70%" stopColor="#111" />
-                <stop offset="85%" stopColor="#1a1a1a" />
-                <stop offset="100%" stopColor="#0a0a0a" />
-              </radialGradient>
-              <radialGradient id="labelGrad" cx="50%" cy="50%" r="50%">
-                <stop offset="0%" stopColor={color} stopOpacity="0.3" />
-                <stop offset="100%" stopColor={color} stopOpacity="0.1" />
-              </radialGradient>
-            </defs>
-            <circle cx={vinylSize / 2} cy={vinylSize / 2} r={vinylSize / 2} fill="url(#vinylGrad)" />
-            {[0.35, 0.42, 0.50, 0.58, 0.66, 0.74, 0.82, 0.90].map((r, i) => (
-              <circle
-                key={i}
-                cx={vinylSize / 2}
-                cy={vinylSize / 2}
-                r={vinylSize * r / 2}
-                fill="none"
-                stroke="rgba(255,255,255,0.04)"
-                strokeWidth="0.5"
-              />
-            ))}
-            <circle cx={vinylSize / 2} cy={vinylSize / 2} r={vinylSize * 0.22} fill="url(#labelGrad)" />
-            <circle cx={vinylSize / 2} cy={vinylSize / 2} r={vinylSize * 0.22} fill="none" stroke={color} strokeOpacity="0.3" strokeWidth="0.5" />
-            <circle cx={vinylSize / 2} cy={vinylSize / 2} r={3} fill="#333" />
-            <circle cx={vinylSize / 2} cy={vinylSize / 2} r={1.5} fill="#555" />
-          </svg>
-
-          <button
-            onClick={isPlaying ? pause : play}
-            disabled={!audioReady}
-            className="absolute inset-0 flex items-center justify-center"
-          >
-            <div className="w-14 h-14 rounded-full flex items-center justify-center bg-black/50 backdrop-blur-sm">
-              {isPlaying ? (
-                <svg className="w-6 h-6 text-white/90" fill="currentColor" viewBox="0 0 24 24">
-                  <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" />
-                </svg>
-              ) : (
-                <svg className="w-6 h-6 text-white/90 ml-0.5" fill="currentColor" viewBox="0 0 24 24">
-                  <path d="M8 5v14l11-7z" />
-                </svg>
-              )}
-            </div>
-          </button>
-
-          <div
-            className="absolute pointer-events-none"
-            style={{
-              top: -8,
-              right: -12,
-              width: 4,
-              height: vinylSize * 0.55,
-              transformOrigin: `2px ${vinylSize * 0.55}px`,
-              transform: isPlaying ? 'rotate(15deg)' : 'rotate(55deg)',
-              transition: 'transform 0.4s ease-out',
-            }}
-          >
-            <div className="w-1 h-full bg-gradient-to-b from-gray-400 via-gray-500 to-gray-600 rounded-full shadow-md"
-              style={{ marginLeft: 2 }}
-            />
-            <div className="w-3 h-3 rounded-full bg-gray-400 absolute -top-1 left-1/2 -translate-x-1/2 shadow" />
-          </div>
-        </div>
-
-        <div className="mt-2 text-center">
-          <span className="text-xs font-medium" style={{ color }}>
-            {modeLabel[compareMode]}
-          </span>
-        </div>
-      </div>
-    );
   };
 
   const renderTaskList = () => (
@@ -694,6 +575,8 @@ export default function ComparePage() {
       );
     }
 
+    const color = modeColor[compareMode];
+
     return (
       <>
         <div className="mb-4">
@@ -709,20 +592,18 @@ export default function ComparePage() {
             const loadError = mode === 'original' ? originalError : repairedError;
             const info = getBufferInfo(mode);
             const active = compareMode === mode;
-            const color = modeColor[mode];
+            const c = modeColor[mode];
 
             return (
               <button
                 key={mode}
                 onClick={() => switchMode(mode)}
                 className={`relative text-left p-4 rounded-xl border ${
-                  active
-                    ? 'bg-white/8 shadow-lg'
-                    : 'bg-white/3'
+                  active ? 'bg-white/8 shadow-lg' : 'bg-white/3'
                 }`}
                 style={active ? {
-                  borderColor: color + '60',
-                  boxShadow: `0 0 20px ${color}15, inset 0 1px 0 ${color}20`,
+                  borderColor: c + '60',
+                  boxShadow: `0 0 20px ${c}15, inset 0 1px 0 ${c}20`,
                 } : {
                   borderColor: 'rgba(255,255,255,0.06)',
                 }}
@@ -730,19 +611,19 @@ export default function ComparePage() {
                 {active && (
                   <div
                     className="absolute top-2 right-2 w-2 h-2 rounded-full"
-                    style={{ backgroundColor: color, boxShadow: `0 0 6px ${color}` }}
+                    style={{ backgroundColor: c, boxShadow: `0 0 6px ${c}` }}
                   />
                 )}
 
                 <div className="flex items-center gap-2 mb-2">
-                  <svg className="w-4 h-4" style={{ color }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg className="w-4 h-4" style={{ color: c }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={modeIcon[mode]} />
                   </svg>
-                  <span className="text-sm font-medium" style={{ color }}>
+                  <span className="text-sm font-medium" style={{ color: c }}>
                     {modeLabel[mode]}
                   </span>
                   {isLoading && (
-                    <span className="w-3 h-3 rounded-full border-2 border-t-transparent animate-spin" style={{ borderColor: color + '40', borderTopColor: 'transparent' }} />
+                    <span className="w-3 h-3 rounded-full border-2 border-t-transparent animate-spin" style={{ borderColor: c + '40', borderTopColor: 'transparent' }} />
                   )}
                   {loadError && !isLoading && (
                     <span className="text-red-400 text-xs">不可用</span>
@@ -781,13 +662,49 @@ export default function ComparePage() {
         </div>
 
         <div className="bg-gradient-to-br from-[#0d0d12] to-[#08080c] rounded-2xl p-4 sm:p-6 border border-white/5 shadow-2xl shadow-black/40">
-          <div className="flex flex-col sm:flex-row items-center gap-6">
-            {renderVinyl()}
+          <div className="flex flex-col items-center gap-5">
+            <div className="flex items-center gap-5 w-full">
+              <button
+                onClick={isPlaying ? pause : play}
+                disabled={!audioReady}
+                className="shrink-0 relative"
+              >
+                <div
+                  className="w-16 h-16 rounded-full flex items-center justify-center transition-transform active:scale-95"
+                  style={{
+                    background: `linear-gradient(135deg, ${color}40, ${color}20)`,
+                    border: `2px solid ${color}50`,
+                    boxShadow: isPlaying ? `0 0 24px ${color}30` : 'none',
+                  }}
+                >
+                  {isPlaying ? (
+                    <svg className="w-7 h-7 text-white/90" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" />
+                    </svg>
+                  ) : (
+                    <svg className="w-7 h-7 text-white/90 ml-1" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M8 5v14l11-7z" />
+                    </svg>
+                  )}
+                </div>
+                {isPlaying && (
+                  <>
+                    <div
+                      className="absolute inset-0 rounded-full animate-ping"
+                      style={{ border: `1px solid ${color}20` }}
+                    />
+                    <div
+                      className="absolute -inset-2 rounded-full animate-pulse"
+                      style={{ border: `1px solid ${color}15` }}
+                    />
+                  </>
+                )}
+              </button>
 
-            <div className="flex-1 w-full min-w-0 space-y-4">
-              <div>
-                <div className="text-xs text-gray-400 mb-1.5 text-center font-mono tracking-wider">
-                  {!audioReady ? '缓冲中...' : `${formatTime(currentTime)} / ${formatTime(duration)}`}
+              <div className="flex-1 min-w-0 space-y-2">
+                <div className="flex items-center justify-between text-xs font-mono">
+                  <span style={{ color }}>{formatTime(currentTime)}</span>
+                  <span className="text-gray-500">{formatTime(duration)}</span>
                 </div>
                 <div className="relative">
                   <input
@@ -798,28 +715,28 @@ export default function ComparePage() {
                     value={currentTime}
                     onChange={(e) => seek(parseFloat(e.target.value))}
                     disabled={!audioReady}
-                    className="w-full h-1.5 bg-gray-800 rounded-full appearance-none cursor-pointer disabled:opacity-30 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:shadow-md [&::-webkit-slider-runnable-track]:rounded-full"
+                    className="w-full h-2 bg-gray-800 rounded-full appearance-none cursor-pointer disabled:opacity-30 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:shadow-md [&::-webkit-slider-runnable-track]:rounded-full"
                     style={{
                       background: audioReady
-                        ? `linear-gradient(to right, ${modeColor[compareMode]} ${(currentTime / (duration || 1)) * 100}%, #1f2937 ${(currentTime / (duration || 1)) * 100}%)`
+                        ? `linear-gradient(to right, ${color} ${(currentTime / (duration || 1)) * 100}%, #1f2937 ${(currentTime / (duration || 1)) * 100}%)`
                         : undefined,
                     }}
                   />
                   {pointA !== null && (
                     <div
-                      className="absolute top-0 w-0.5 h-1.5 bg-green-400 rounded-full pointer-events-none"
+                      className="absolute top-0 w-0.5 h-2 bg-green-400 rounded-full pointer-events-none"
                       style={{ left: `${(pointA / (duration || 1)) * 100}%` }}
                     />
                   )}
                   {pointB !== null && (
                     <div
-                      className="absolute top-0 w-0.5 h-1.5 bg-red-400 rounded-full pointer-events-none"
+                      className="absolute top-0 w-0.5 h-2 bg-red-400 rounded-full pointer-events-none"
                       style={{ left: `${(pointB / (duration || 1)) * 100}%` }}
                     />
                   )}
                   {pointA !== null && pointB !== null && (
                     <div
-                      className="absolute top-0 h-1.5 bg-yellow-400/10 pointer-events-none rounded"
+                      className="absolute top-0 h-2 bg-yellow-400/10 pointer-events-none rounded"
                       style={{
                         left: `${(pointA / (duration || 1)) * 100}%`,
                         width: `${((pointB - pointA) / (duration || 1)) * 100}%`,
@@ -828,96 +745,96 @@ export default function ComparePage() {
                   )}
                 </div>
               </div>
+            </div>
 
-              <div className="flex flex-wrap items-center justify-center gap-2">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-green-400 text-xs font-bold w-3">A</span>
-                  {editingA ? (
-                    <input
-                      type="text"
-                      value={editAVal}
-                      onChange={(e) => setEditAVal(e.target.value)}
-                      onBlur={confirmEditA}
-                      onKeyDown={(e) => { if (e.key === 'Enter') confirmEditA(); if (e.key === 'Escape') setEditingA(false); }}
-                      placeholder="0:00.0"
-                      className="w-16 px-1.5 py-0.5 text-xs bg-black/40 border border-green-500/30 rounded text-green-400 font-mono text-center"
-                      autoFocus
-                    />
-                  ) : (
-                    <button
-                      onClick={() => {
-                        if (pointA === null) {
-                          setMarkA();
-                        } else {
-                          setEditingA(true);
-                          setEditAVal(formatTimePrecise(pointA));
-                        }
-                      }}
-                      disabled={!audioReady}
-                      className={`px-2 py-0.5 rounded text-xs font-mono ${
-                        pointA !== null
-                          ? 'bg-green-500/15 text-green-400 border border-green-500/25'
-                          : 'bg-white/5 text-gray-400 border border-white/10'
-                      } disabled:opacity-30 disabled:cursor-not-allowed`}
-                    >
-                      {pointA !== null ? formatTimePrecise(pointA) : '设置'}
-                    </button>
-                  )}
-                </div>
-
-                <div className="flex items-center gap-1.5">
-                  <span className="text-red-400 text-xs font-bold w-3">B</span>
-                  {editingB ? (
-                    <input
-                      type="text"
-                      value={editBVal}
-                      onChange={(e) => setEditBVal(e.target.value)}
-                      onBlur={confirmEditB}
-                      onKeyDown={(e) => { if (e.key === 'Enter') confirmEditB(); if (e.key === 'Escape') setEditingB(false); }}
-                      placeholder="0:00.0"
-                      className="w-16 px-1.5 py-0.5 text-xs bg-black/40 border border-red-500/30 rounded text-red-400 font-mono text-center"
-                      autoFocus
-                    />
-                  ) : (
-                    <button
-                      onClick={() => {
-                        if (pointA === null) return;
-                        if (pointB === null) {
-                          setMarkB();
-                        } else {
-                          setEditingB(true);
-                          setEditBVal(formatTimePrecise(pointB));
-                        }
-                      }}
-                      disabled={!audioReady || pointA === null}
-                      className={`px-2 py-0.5 rounded text-xs font-mono ${
-                        pointB !== null
-                          ? 'bg-red-500/15 text-red-400 border border-red-500/25'
-                          : 'bg-white/5 text-gray-400 border border-white/10'
-                      } disabled:opacity-30 disabled:cursor-not-allowed`}
-                    >
-                      {pointB !== null ? formatTimePrecise(pointB) : '设置'}
-                    </button>
-                  )}
-                </div>
-
-                {abLoopRef.current && (
-                  <span className="text-yellow-400 text-xs flex items-center gap-1">
-                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                    </svg>
-                    循环
-                  </span>
-                )}
-                {(pointA !== null || pointB !== null) && (
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              <div className="flex items-center gap-1.5">
+                <span className="text-green-400 text-xs font-bold w-3">A</span>
+                {editingA ? (
+                  <input
+                    type="text"
+                    value={editAVal}
+                    onChange={(e) => setEditAVal(e.target.value)}
+                    onBlur={confirmEditA}
+                    onKeyDown={(e) => { if (e.key === 'Enter') confirmEditA(); if (e.key === 'Escape') setEditingA(false); }}
+                    placeholder="0:00.0"
+                    className="w-16 px-1.5 py-0.5 text-xs bg-black/40 border border-green-500/30 rounded text-green-400 font-mono text-center"
+                    autoFocus
+                  />
+                ) : (
                   <button
-                    onClick={clearAB}
-                    className="px-2 py-0.5 rounded text-xs bg-white/5 text-gray-500 border border-white/10"
+                    onClick={() => {
+                      if (pointA === null) {
+                        setMarkA();
+                      } else {
+                        setEditingA(true);
+                        setEditAVal(formatTimePrecise(pointA));
+                      }
+                    }}
+                    disabled={!audioReady}
+                    className={`px-2 py-0.5 rounded text-xs font-mono ${
+                      pointA !== null
+                        ? 'bg-green-500/15 text-green-400 border border-green-500/25'
+                        : 'bg-white/5 text-gray-400 border border-white/10'
+                    } disabled:opacity-30 disabled:cursor-not-allowed`}
                   >
-                    清除
+                    {pointA !== null ? formatTimePrecise(pointA) : '设置'}
                   </button>
                 )}
               </div>
+
+              <div className="flex items-center gap-1.5">
+                <span className="text-red-400 text-xs font-bold w-3">B</span>
+                {editingB ? (
+                  <input
+                    type="text"
+                    value={editBVal}
+                    onChange={(e) => setEditBVal(e.target.value)}
+                    onBlur={confirmEditB}
+                    onKeyDown={(e) => { if (e.key === 'Enter') confirmEditB(); if (e.key === 'Escape') setEditingB(false); }}
+                    placeholder="0:00.0"
+                    className="w-16 px-1.5 py-0.5 text-xs bg-black/40 border border-red-500/30 rounded text-red-400 font-mono text-center"
+                    autoFocus
+                  />
+                ) : (
+                  <button
+                    onClick={() => {
+                      if (pointA === null) return;
+                      if (pointB === null) {
+                        setMarkB();
+                      } else {
+                        setEditingB(true);
+                        setEditBVal(formatTimePrecise(pointB));
+                      }
+                    }}
+                    disabled={!audioReady || pointA === null}
+                    className={`px-2 py-0.5 rounded text-xs font-mono ${
+                      pointB !== null
+                        ? 'bg-red-500/15 text-red-400 border border-red-500/25'
+                        : 'bg-white/5 text-gray-400 border border-white/10'
+                    } disabled:opacity-30 disabled:cursor-not-allowed`}
+                  >
+                    {pointB !== null ? formatTimePrecise(pointB) : '设置'}
+                  </button>
+                )}
+              </div>
+
+              {abLoopRef.current && (
+                <span className="text-yellow-400 text-xs flex items-center gap-1">
+                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                  循环
+                </span>
+              )}
+              {(pointA !== null || pointB !== null) && (
+                <button
+                  onClick={clearAB}
+                  className="px-2 py-0.5 rounded text-xs bg-white/5 text-gray-500 border border-white/10"
+                >
+                  清除
+                </button>
+              )}
             </div>
           </div>
         </div>
