@@ -161,7 +161,7 @@ export default function ComparePage() {
         if (!cancelled) setTaskInfoLoading(false);
       });
 
-    return () => { cancelled = true; };
+    return () => { cancelled = true };
   }, [taskId]);
 
   const getAudioContext = useCallback(() => {
@@ -178,9 +178,8 @@ export default function ComparePage() {
       isFadingRef.current = true;
       const ctx = gain.context;
       const now = ctx.currentTime;
-      const currentVal = gain.gain.value;
       gain.gain.cancelScheduledValues(now);
-      gain.gain.setValueAtTime(currentVal, now);
+      gain.gain.setValueAtTime(gain.gain.value, now);
       gain.gain.linearRampToValueAtTime(0.001, now + durationMs / 1000);
       setTimeout(() => { resolve(); }, durationMs);
     });
@@ -213,6 +212,7 @@ export default function ComparePage() {
     setAudioReady(false);
     setDuration(0);
     setCurrentTime(0);
+    setIsPlaying(false);
 
     const onCanPlay = () => {
       setAudioReady(true);
@@ -272,9 +272,11 @@ export default function ComparePage() {
       }
     };
     const onPlay = () => {
+      setIsPlaying(true);
       animFrameRef.current = requestAnimationFrame(updateProgress);
     };
     const onPause = () => {
+      setIsPlaying(false);
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
     };
     audio.addEventListener('play', onPlay);
@@ -334,7 +336,7 @@ export default function ComparePage() {
         if (!cancelled) setOriginalLoading(false);
       });
 
-    return () => { cancelled = true; };
+    return () => { cancelled = true };
   }, [taskId, getAudioContext]);
 
   useEffect(() => {
@@ -373,7 +375,7 @@ export default function ComparePage() {
         if (!cancelled) setRepairedLoading(false);
       });
 
-    return () => { cancelled = true; };
+    return () => { cancelled = true };
   }, [taskId, getAudioContext]);
 
   const connectAudioGraph = useCallback((audio: HTMLAudioElement) => {
@@ -417,7 +419,6 @@ export default function ComparePage() {
     }
 
     audio.play().then(() => {
-      setIsPlaying(true);
       fadeIn(50);
     }).catch(() => {});
   }, [audioReady, getAudioContext, connectAudioGraph, fadeIn]);
@@ -427,7 +428,6 @@ export default function ComparePage() {
     if (!audio) return;
     fadeOut(50).then(() => {
       audio.pause();
-      setIsPlaying(false);
     });
   }, [fadeOut]);
 
@@ -446,7 +446,6 @@ export default function ComparePage() {
 
     const doSwitch = () => {
       if (audio) audio.pause();
-      setIsPlaying(false);
       setCompareMode(mode);
 
       const startPos = pointA ?? 0;
@@ -458,7 +457,6 @@ export default function ComparePage() {
           a.currentTime = startPos;
           if (wasPlaying) {
             a.play().then(() => {
-              setIsPlaying(true);
               fadeIn(50);
             }).catch(() => {});
           }
@@ -645,7 +643,7 @@ export default function ComparePage() {
               width: 4,
               height: vinylSize * 0.55,
               transformOrigin: `2px ${vinylSize * 0.55}px`,
-              transform: isPlaying ? 'rotate(-25deg)' : 'rotate(-55deg)',
+              transform: isPlaying ? 'rotate(25deg)' : 'rotate(55deg)',
               transition: 'transform 0.4s ease-out',
             }}
           >
@@ -832,11 +830,11 @@ export default function ComparePage() {
           })}
         </div>
 
-        <div className="bg-gradient-to-br from-[#0d0d12] to-[#08080c] rounded-2xl p-6 border border-white/5 shadow-2xl shadow-black/40">
-          <div className="flex items-center gap-6">
+        <div className="bg-gradient-to-br from-[#0d0d12] to-[#08080c] rounded-2xl p-4 sm:p-6 border border-white/5 shadow-2xl shadow-black/40">
+          <div className="flex flex-col sm:flex-row items-center gap-6">
             {renderVinyl()}
 
-            <div className="flex-1 min-w-0 space-y-4">
+            <div className="flex-1 w-full min-w-0 space-y-4">
               <div>
                 <div className="text-xs text-gray-400 mb-1.5 text-center font-mono tracking-wider">
                   {!audioReady ? '缓冲中...' : `${formatTime(currentTime)} / ${formatTime(duration)}`}
@@ -881,7 +879,7 @@ export default function ComparePage() {
                 </div>
               </div>
 
-              <div className="flex items-center justify-center gap-2">
+              <div className="flex flex-wrap items-center justify-center gap-2">
                 <div className="flex items-center gap-1.5">
                   <span className="text-green-400 text-xs font-bold w-3">A</span>
                   {editingA ? (
@@ -1038,7 +1036,7 @@ export default function ComparePage() {
             )}
           </div>
 
-          <div className="bg-primary/50 border border-white/10 rounded-xl p-6">
+          <div className="bg-primary/50 border border-white/10 rounded-xl p-4 sm:p-6">
             {!taskId ? renderTaskList() : renderPlayer()}
           </div>
         </div>
