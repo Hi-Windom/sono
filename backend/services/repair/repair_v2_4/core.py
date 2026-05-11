@@ -21,6 +21,7 @@ from .tempo_analyzer import TempoAnalyzer, get_tempo_params
 from .hifi_multiband import apply_hifi_multiband_compress
 from .hifi_ai_repair import apply_hifi_ai_repair
 from .detail_enhance import apply_adaptive_detail_enhance, apply_stereo_enhance
+from .spectral_superres import apply_hifi_superres
 
 DESKTOP_WORKING_SR = 48000
 N_FFT = 2048
@@ -98,17 +99,13 @@ def _soft_peak_limit_1d(data, threshold):
     if not np.any(mask):
         return data.copy()
     headroom = 1.0 - threshold
-    over = abs_data[mask] - threshold
-    scale = headroom * 0.98
-    out = data.copy().astype(np.float64)
-    out[mask] = np.sign(out[mask]) * (threshold + scale * np.tanh(over / scale))
-    return out.astype(data.dtype)
+    scaled = (abs_data - threshold) / headroom
+    smooth = np.tanh(scaled)
+    y_out = np.sign(data) * (threshold + headroom * smooth)
+    return y_out
 
 
 def _soft_peak_limit(y, threshold=0.9):
-    abs_max = np.max(np.abs(y))
-    if abs_max <= threshold:
-        return y
     if y.ndim == 1:
         return _soft_peak_limit_1d(y, threshold)
     for ch in range(y.shape[0]):
@@ -116,281 +113,43 @@ def _soft_peak_limit(y, threshold=0.9):
     return y
 
 
-def _soft_transient_limit(y, sr, amount):
-    if amount < 0.05:
-        return y
+def _adaptive_loudness_normalize(y, sr, target_loudness_lu=-14.0):
     if y.ndim == 1:
         y_2d = y.reshape(1, -1)
-        _soft_transient_limit(y_2d, sr, amount)
+        _adaptive_loudness_normalize(y_2d, sr, target_loudness_lu)
         return y
-    frame_size = int(sr * 0.1)
-    for ch in range(y.shape[0]):
-        data = y[ch]
-        n_frames = len(data) // frame_size
-        if n_frames < 4:
-            continue
-        frames = data[:n_frames * frame_size].reshape(n_frames, frame_size)
-        frame_rms = np.sqrt(np.mean(frames ** 2, axis=1))
-        window = 3
-        kernel = np.ones(window) / window
-        smooth_rms = np.convolve(frame_rms, kernel, mode='same')
-        diff = np.abs(np.diff(frame_rms, prepend=frame_rms[0]))
-        threshold = np.mean(diff) + np.std(diff) * (1.5 - amount)
-        anomaly = diff > threshold
-        if not np.any(anomaly):
-            continue
-        anomaly_indices = np.where(anomaly)[0]
-        left_rms = smooth_rms[np.maximum(anomaly_indices - 1, 0)]
-        right_rms = smooth_rms[np.minimum(anomaly_indices + 1, n_frames - 1)]
-        target_rms_arr = (left_rms + right_rms) / 2
-        current_rms_arr = frame_rms[anomaly_indices]
-        valid = (current_rms_arr > 0) & (target_rms_arr > 0)
-        if not np.any(valid):
-            continue
-        ratios = target_rms_arr[valid] / current_rms_arr[valid]
-        max_ratio = float(np.min(ratios)) if len(ratios) > 0 else 1.0
-        global_gain = max_ratio * amount * 0.3 + 1.0 * (1 - amount * 0.3)
-        for idx in anomaly_indices:
-            start = idx * frame_size
-            end = min(len(data), (idx + 1) * frame_size)
-            region = y[ch, start:end]
-            peak = np.max(np.abs(region))
-            if peak > 0:
-                target_peak = peak * global_gain
-                if target_peak < peak:
-                    y[ch, start:end] = _soft_peak_limit_1d(region, target_peak / peak * 0.98)
-    return y
-
-
-@lru_cache(maxsize=32)
-def _multiband_sos_cache(sr, low_cross, high_cross):
-    nyq = sr / 2
-    w_low = low_cross / nyq
-    w_high = high_cross / nyq
-    if w_low >= 1.0 or w_high >= 1.0 or w_low <= 0 or w_high <= 0:
-        return None
-    sos_low = butter(4, w_low, btype='low', output='sos')
-    sos_mid_low = butter(4, w_low, btype='high', output='sos')
-    sos_mid_high = butter(4, w_high, btype='low', output='sos')
-    sos_high = butter(4, w_high, btype='high', output='sos')
-    return sos_low, sos_mid_low, sos_mid_high, sos_high
-
-
-def _adaptive_loudness_normalize(y, sr, target_lufs=-14.0):
-    if y.ndim == 1:
-        y_2d = y.reshape(1, -1)
-        _adaptive_loudness_normalize(y_2d, sr, target_lufs)
+    y_64 = y.astype(np.float64)
+    n_samples = y_64.shape[1]
+    block_samples = int(sr * 0.4)
+    overlap_samples = int(block_samples * 0.5)
+    hop_samples = block_samples - overlap_samples
+    if n_samples < block_samples:
+        block_rms = np.sqrt(np.mean(y_64 ** 2, axis=1, keepdims=True))
+        target_rms = 10 ** (target_loudness_lu / 20.0)
+        gains = target_rms / (block_rms + 1e-10)
+        gains = np.clip(gains, 0.1, 10.0)
+        for ch in range(y_64.shape[0]):
+            y_64[ch] *= gains[ch]
+        y[:] = y_64.astype(y.dtype)
         return y
-    try:
-        for ch in range(y.shape[0]):
-            data = y[ch].copy()
-            if 60 < sr / 2:
-                sos_hp = butter(2, 60 / (sr / 2), btype='high', output='sos')
-                data = sosfiltfilt(sos_hp, data)
-            shelf_low = 1000 / (sr / 2)
-            shelf_high = 4000 / (sr / 2)
-            if shelf_high < 1.0 and shelf_high > shelf_low:
-                sos_shelf = butter(2, [shelf_low, shelf_high], btype='band', output='sos')
-                shelf_signal = sosfiltfilt(sos_shelf, data)
-                data = data + shelf_signal * (10 ** (4.0 / 20) - 1)
-            rms_val = np.sqrt(np.mean(data ** 2))
-            if rms_val < 1e-10:
-                continue
-            current_lufs = -0.691 + 20 * np.log10(rms_val)
-            gain_db = np.clip(target_lufs - current_lufs, -15, 9)
-            y[ch] *= 10 ** (gain_db / 20)
-    except Exception:
-        for ch in range(y.shape[0]):
-            rms = np.sqrt(np.mean(y[ch] ** 2))
-            if rms > 1e-10:
-                current_lufs = -0.691 + 20 * np.log10(rms)
-                gain_db = np.clip(target_lufs - current_lufs, -15, 9)
-                y[ch] *= 10 ** (gain_db / 20)
-    return y
-
-
-def _enhanced_multiband_compress(y, sr, amount, music_type):
-    if amount <= 0:
-        return y
-    if y.ndim == 1:
-        y_2d = y.reshape(1, -1)
-        _enhanced_multiband_compress(y_2d, sr, amount, music_type)
-        return y
-    if music_type == "vocal":
-        low_cross = 250
-        high_cross = 4000
-    elif music_type == "electronic":
-        low_cross = 200
-        high_cross = 5000
-    elif music_type == "classical":
-        low_cross = 300
-        high_cross = 3500
-    else:
-        low_cross = 250
-        high_cross = 4000
-    nyq = sr / 2
-    w_low = low_cross / nyq
-    w_high = high_cross / nyq
-    cached = _multiband_sos_cache(sr, low_cross, high_cross)
-    if cached is None:
-        return y
-    sos_low, sos_mid_low, sos_mid_high, sos_high = cached
-    threshold_db = -18.0
-    threshold_lin = 10 ** (threshold_db / 20.0)
-    effective_ratio = 1.0 + (2.0 - 1.0) * min(amount, 1.0)
-    for ch in range(y.shape[0]):
-        data = y[ch].copy()
-        low_band = sosfiltfilt(sos_low, data)
-        low_rms = np.sqrt(np.mean(low_band ** 2))
-        low_gain = 1.0
-        if low_rms > threshold_lin and low_rms > 1e-10:
-            target_rms = threshold_lin + (low_rms - threshold_lin) / effective_ratio
-            low_gain = target_rms / low_rms
-        low_gain *= 10 ** (2.0 / 20.0)
-        y[ch] = low_band * low_gain
-        del low_band
-        mid_band = sosfiltfilt(sos_mid_low, data)
-        mid_band = sosfiltfilt(sos_mid_high, mid_band)
-        mid_rms = np.sqrt(np.mean(mid_band ** 2))
-        mid_gain = 1.0
-        if mid_rms > threshold_lin and mid_rms > 1e-10:
-            target_rms = threshold_lin + (mid_rms - threshold_lin) / effective_ratio
-            mid_gain = target_rms / mid_rms
-        y[ch] += mid_band * mid_gain
-        del mid_band
-        high_band = sosfiltfilt(sos_high, data)
-        high_rms = np.sqrt(np.mean(high_band ** 2))
-        high_gain = 1.0
-        if high_rms > threshold_lin and high_rms > 1e-10:
-            target_rms = threshold_lin + (high_rms - threshold_lin) / effective_ratio
-            high_gain = target_rms / high_rms
-        y[ch] += high_band * high_gain
-        del high_band
-        del data
-    makeup_gain_db = min(5.0, 1.5 * amount)
-    y *= 10 ** (makeup_gain_db / 20)
-    peak = np.max(np.abs(y))
-    if peak > 0.95:
-        y *= 0.95 / peak
-    return y
-
-
-def _ai_artifact_repair_channel(y_1d, sr, amount):
-    n_samples = len(y_1d)
-    if n_samples < N_FFT:
-        return y_1d
-
-    duration_sec = n_samples / sr
-    use_streaming = duration_sec > 300
-
-    if use_streaming:
-        def _ai_process_chunk(S, sr_chunk, n_fft, hop_length):
-            return _ai_artifact_repair_spectral(S, sr_chunk, amount)
-        result = streaming_spectral_process(
-            y_1d.astype(np.float64), sr,
-            _ai_process_chunk,
-            n_fft=N_FFT, hop_length=HOP_LENGTH,
-            chunk_seconds=10
-        )
-        return result.astype(y_1d.dtype)
-
-    S = stft(y_1d, n_fft=N_FFT, hop_length=HOP_LENGTH)
-    S = _ai_artifact_repair_spectral(S, sr, amount)
-    y_out = istft(S, hop_length=HOP_LENGTH, length=n_samples)
-    return y_out.astype(y_1d.dtype)
-
-
-def _ai_artifact_repair_spectral(S, sr, amount):
-    mag = np.abs(S)
-    phase = np.angle(S)
-
-    frame_energy = np.sum(mag ** 2, axis=0)
-    energy_change = np.abs(np.diff(frame_energy, prepend=frame_energy[0]))
-    mean_change = np.mean(energy_change)
-    std_change = np.std(energy_change)
-    transient_threshold = mean_change + 2 * std_change
-    transient_frames = energy_change > transient_threshold
-
-    smoothed_mag = np.empty_like(mag)
-    for i in range(mag.shape[0]):
-        m3 = medfilt(mag[i], 3)
-        m5 = medfilt(mag[i], 5)
-        m7 = medfilt(mag[i], 7)
-        smoothed_mag[i] = np.minimum(np.minimum(m3, m5), m7)
-
-    for j in range(S.shape[1]):
-        if not transient_frames[j]:
-            S[:, j] = smoothed_mag[:, j] * np.exp(1j * phase[:, j])
-
-    mag = np.abs(S)
-    phase = np.angle(S)
-
-    jitter_db = 0.5 + amount * 1.0
-    mag *= 10 ** (np.random.uniform(-jitter_db, jitter_db, mag.shape) / 20)
-
-    freqs = np.arange(S.shape[0]) * sr / N_FFT
-    presence_low = 2000
-    presence_high = 5000
-    presence_mask = (freqs >= presence_low) & (freqs <= presence_high)
-    if np.any(presence_mask):
-        presence_rms = np.sqrt(np.mean(mag[presence_mask, :] ** 2, axis=0))
-        global_rms = np.sqrt(np.mean(mag ** 2))
-        threshold = global_rms * 1.5
-        for j in range(S.shape[1]):
-            if presence_rms[j] > threshold:
-                attenuation = 1.0 - amount * 0.3 * (presence_rms[j] / (global_rms * threshold) - 1.0)
-                attenuation = np.clip(attenuation, 0.5, 1.0)
-                S[presence_mask, j] *= attenuation
-
-    block_size = int(0.5 * sr / HOP_LENGTH)
-    if block_size < 1:
-        block_size = 1
-    n_blocks = S.shape[1] // block_size
-    if n_blocks >= 2:
-        block_energy = np.zeros(n_blocks)
-        for b in range(n_blocks):
-            start_f = b * block_size
-            end_f = min((b + 1) * block_size, S.shape[1])
-            block_energy[b] = np.mean(mag[:, start_f:end_f] ** 2)
-        section_boundaries = [0]
-        for b in range(1, n_blocks):
-            if block_energy[b - 1] > 1e-10:
-                change = abs(block_energy[b] - block_energy[b - 1]) / block_energy[b - 1]
-                if change > 0.2:
-                    section_boundaries.append(b)
-        section_boundaries.append(n_blocks)
-        for s in range(len(section_boundaries) - 1):
-            brightness_offset = 0.5 if s % 2 == 0 else -0.5
-            gain = 10 ** (brightness_offset / 20)
-            start_f = section_boundaries[s] * block_size
-            end_f = section_boundaries[s + 1] * block_size
-            end_f = min(end_f, S.shape[1])
-            if start_f < end_f:
-                S[:, start_f:end_f] *= gain
-
-    freqs = np.arange(S.shape[0]) * sr / N_FFT
-    air_bins = freqs >= 10000
-    if np.any(air_bins):
-        mid_mask = (freqs >= 2000) & (freqs < 8000)
-        if np.any(mid_mask):
-            mid_energy = np.mean(mag[mid_mask, :] ** 2, axis=0)
-            mid_envelope = mid_energy / (np.max(mid_energy) + 1e-10)
-        else:
-            mid_envelope = np.ones(S.shape[1])
-        noise = np.random.randn(int(np.sum(air_bins)), S.shape[1]) * 0.001 * amount
-        noise *= mid_envelope[np.newaxis, :]
-        S[air_bins, :] += noise * np.exp(1j * np.angle(S[air_bins, :]))
-
-    return S
-
-
-def _ai_artifact_repair(y, sr, amount):
-    if amount <= 0:
-        return y
-    if y.ndim == 1:
-        return _ai_artifact_repair_channel(y, sr, amount)
-    for ch in range(y.shape[0]):
-        y[ch] = _ai_artifact_repair_channel(y[ch], sr, amount)
+    gains = np.ones(y_64.shape[0])
+    for ch in range(y_64.shape[0]):
+        block_energies = []
+        num_blocks = (n_samples - block_samples) // hop_samples + 1
+        for i in range(num_blocks):
+            start = i * hop_samples
+            end = start + block_samples
+            block = y_64[ch, start:end]
+            rms = np.sqrt(np.mean(block ** 2))
+            block_energies.append(rms)
+        avg_energy = np.mean(block_energies) if block_energies else np.sqrt(np.mean(y_64[ch] ** 2))
+        target_rms = 10 ** (target_loudness_lu / 20.0)
+        gain = target_rms / (avg_energy + 1e-10)
+        gain = np.clip(gain, 0.2, 5.0)
+        gains[ch] = gain
+    for ch in range(y_64.shape[0]):
+        y_64[ch] *= gains[ch]
+    y[:] = y_64.astype(y.dtype)
     return y
 
 
@@ -536,7 +295,7 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
     else:
         params = apply_music_type_params(params, music_type, confidence)
 
-    # v2.4 HiFi 优化：节奏分析
+    # v2.4 HiFi 优化：节奏分析（早期进行，影响后续处理）
     tempo_info = None
     tempo_params = {}
     if progress_callback:
@@ -570,6 +329,7 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
         if progress_callback:
             progress_callback(0.05 + 0.85 * step_idx / total_steps, f"v2.4 {label}...")
 
+    # 顺序按照 v2.4a 优化版：先修复，再归一化，最后增强
     if params.get("de_clipping", 0) > 0:
         y = _tanh_declip(y, params["de_clipping"])
         if "削波修复(tanh)" not in issues_found:
@@ -582,18 +342,49 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
             issues_found.append("爆音修复(diff)")
         advance("爆音修复")
 
-    if params.get("transient_repair", 0) > 0:
-        y = _soft_transient_limit(y, sr, params["transient_repair"])
-        if "瞬态修复(soft)" not in issues_found:
-            issues_found.append("瞬态修复(soft)")
-        advance("瞬态修复")
+    # 降噪（使用 noisereduce 3.x，优化版）
+    need_noise_process = (params.get("de_crackle", 0) > 0 or
+                         params.get("de_essing", 0) > 0 or
+                         params.get("noise_reduction", 0) > 0)
+    if need_noise_process:
+        try:
+            import noisereduce as nr
+            if params.get("noise_reduction", 0) > 0:
+                if y.ndim == 1:
+                    y = nr.reduce_noise(y=y, sr=sr, stationary=False, prop_decrease=params["noise_reduction"])
+                else:
+                    for ch in range(y.shape[0]):
+                        y[ch] = nr.reduce_noise(y=y[ch], sr=sr, stationary=False, prop_decrease=params["noise_reduction"])
+                if "降噪(noisereduce v3)" not in issues_found:
+                    issues_found.append("降噪(noisereduce v3)")
+            else:
+                y = apply_spectral_group_a(y, sr, params, N_FFT, HOP_LENGTH, issues_found, music_type)
+        except ImportError:
+            y = apply_spectral_group_a(y, sr, params, N_FFT, HOP_LENGTH, issues_found, music_type)
+        advance("频谱降噪")
 
+    # v2.4 HiFi AI 频谱修复 + 超分（核心新增功能）
+    if params.get("ai_repair", 0) > 0:
+        y = apply_hifi_ai_repair(y, sr, params["ai_repair"], tempo_params)
+        if "HiFi AI频谱修复" not in issues_found:
+            issues_found.append("HiFi AI频谱修复")
+        advance("AI频谱修复")
+
+    # 新增：AI 超分/频谱重建（类似 QQ 音乐臻品母带）
+    superres_amount = params.get("spectral_superres", 0.4)
+    if not is_hifi and superres_amount > 0:
+        y = apply_hifi_superres(y, sr, superres_amount, tempo_params)
+        if "HiFi频谱超分" not in issues_found:
+            issues_found.append("HiFi频谱超分")
+        advance("频谱超分")
+
+    # 响度归一化（放在降噪之后，压缩之前）
     y = _adaptive_loudness_normalize(y, sr, -14.0)
     if "响度归一化(adaptive)" not in issues_found:
         issues_found.append("响度归一化(adaptive)")
     advance("响度归一化")
 
-    # v2.4 HiFi 优化：使用新的 HiFi 多段压缩
+    # v2.4 HiFi 优化：使用新的 HiFi 多段压缩（BPM 自适应）
     if params.get("dynamic_range", 0) > 0:
         y = apply_hifi_multiband_compress(
             y, sr, params["dynamic_range"], music_type, tempo_params
@@ -602,77 +393,26 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
             issues_found.append("HiFi多段压缩")
         advance("动态处理")
 
-    # v2.4 HiFi 优化：使用新的 HiFi AI 修复
-    if params.get("ai_repair", 0) > 0:
-        y = apply_hifi_ai_repair(y, sr, params["ai_repair"], tempo_params)
-        if "HiFi AI频谱修复" not in issues_found:
-            issues_found.append("HiFi AI频谱修复")
-        advance("AI频谱修复")
-
-    use_subband = params.get("subband_processing", False)
-    if use_subband and not is_hifi:
-        need_subband = (params.get("noise_reduction", 0) > 0 or
-                       params.get("de_essing", 0) > 0 or
-                       params.get("harmonic_enhance", 0) > 0)
-        if need_subband:
-            y = apply_subband_repair(y, sr, params, music_type, N_FFT, HOP_LENGTH)
-            if "子带修复" not in issues_found:
-                issues_found.append("子带修复")
-            advance("子带修复")
-    else:
-        need_group_a = (params.get("de_crackle", 0) > 0 or
-                        params.get("de_essing", 0) > 0 or
-                        params.get("noise_reduction", 0) > 0)
-        if need_group_a:
-            try:
-                import noisereduce as nr
-                if params.get("noise_reduction", 0) > 0.5:
-                    if y.ndim == 1:
-                        y = nr.reduce_noise(y=y, sr=sr, stationary=False, prop_decrease=params["noise_reduction"])
-                    else:
-                        for ch in range(y.shape[0]):
-                            y[ch] = nr.reduce_noise(y=y[ch], sr=sr, stationary=False, prop_decrease=params["noise_reduction"])
-                    if "降噪(noisereduce)" not in issues_found:
-                        issues_found.append("降噪(noisereduce)")
-                else:
-                    y = apply_spectral_group_a(y, sr, params, N_FFT, HOP_LENGTH, issues_found, music_type)
-            except ImportError:
-                y = apply_spectral_group_a(y, sr, params, N_FFT, HOP_LENGTH, issues_found, music_type)
-            advance("频谱修复")
-
-        if not is_hifi:
-            need_group_b = (params.get("harmonic_enhance", 0) > 0 or
-                            params.get("harmonic_richness", 0) > 0)
-            if need_group_b:
-                y = apply_spectral_group_b(y, sr, params, N_FFT, HOP_LENGTH, issues_found, music_type)
-                advance("谐波增强")
-
-    if not use_subband and params.get("spatial_enhance", 0) > 0:
-        y = apply_spatial_enhance_v6(y, sr, params["spatial_enhance"], music_type)
-        if "空间感增强v6" not in issues_found:
-            issues_found.append("空间感增强v6")
-        advance("空间感")
-
     if not is_hifi:
-        if params.get("bass_enhance", 0) > 0 and not use_subband:
+        if params.get("bass_enhance", 0) > 0:
             y = _harmonic_bass_enhance(y, sr, params["bass_enhance"], music_type)
             if "低频增强(harmonic)" not in issues_found:
                 issues_found.append("低频增强(harmonic)")
             advance("低频增强")
 
-        if params.get("clarity", 0) > 0 and not use_subband:
+        if params.get("clarity", 0) > 0:
             y = _air_texture_reconstruct(y, sr, params["clarity"], music_type)
             if "空气质感重建" not in issues_found:
                 issues_found.append("空气质感重建")
             advance("空气质感重建")
 
-        if params.get("warmth", 0) > 0 and not use_subband:
+        if params.get("warmth", 0) > 0:
             y = apply_warmth_v2(y, sr, params["warmth"], music_type)
             if "温暖度v2" not in issues_found:
                 issues_found.append("温暖度v2")
             advance("温暖度")
 
-    # v2.4 HiFi 优化：自适应细节增强（v2.4 专属）
+    # v2.4 HiFi 优化：自适应细节增强（放在后面）
     if not is_hifi and tempo_info is not None:
         detail_amount = params.get("detail_enhance", 0.3)
         if detail_amount > 0:
@@ -680,6 +420,12 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
             if "自适应细节增强" not in issues_found:
                 issues_found.append("自适应细节增强")
             advance("细节增强")
+
+    if not is_hifi and params.get("spatial_enhance", 0) > 0:
+        y = apply_spatial_enhance_v6(y, sr, params["spatial_enhance"], music_type)
+        if "空间感增强v6" not in issues_found:
+            issues_found.append("空间感增强v6")
+        advance("空间感")
 
     # v2.4 HiFi 优化：基于节奏的立体声增强
     if y.shape[0] == 2:
@@ -742,13 +488,13 @@ def _count_active_steps(params, num_channels, is_hifi=False, has_tempo_info=Fals
     count = 0
     if params.get("de_clipping", 0) > 0: count += 1
     if params.get("de_pop", 0) > 0: count += 1
-    if params.get("transient_repair", 0) > 0: count += 1
-    if params.get("dynamic_range", 0) > 0: count += 1
-    if params.get("ai_repair", 0) > 0: count += 1
     if params.get("de_crackle", 0) > 0 or params.get("de_essing", 0) > 0 or params.get("noise_reduction", 0) > 0: count += 1
+    if params.get("ai_repair", 0) > 0: count += 1
+    # v2.4 HiFi 优化：频谱超分
+    if not is_hifi and params.get("spectral_superres", 0.4) > 0: count += 1
+    if params.get("dynamic_range", 0) > 0: count += 1
 
     if not is_hifi:
-        if params.get("harmonic_enhance", 0) > 0 or params.get("harmonic_richness", 0) > 0: count += 1
         if params.get("bass_enhance", 0) > 0: count += 1
         if params.get("clarity", 0) > 0: count += 1
         if params.get("warmth", 0) > 0: count += 1

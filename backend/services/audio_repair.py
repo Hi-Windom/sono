@@ -54,6 +54,7 @@ PARAM_DEFINITIONS = {
     "warmth": {"key": "warmth", "label": "温暖度", "min": 0, "max": 1, "step": 0.01},
     "clarity": {"key": "clarity", "label": "清晰度", "min": 0, "max": 1, "step": 0.01},
     "detail_enhance": {"key": "detailEnhance", "label": "细节增强", "min": 0, "max": 1, "step": 0.01},
+    "spectral_superres": {"key": "spectralSuperres", "label": "频谱超分", "min": 0, "max": 1, "step": 0.01},
 }
 
 ALGORITHM_VERSIONS = {
@@ -677,12 +678,12 @@ ALGORITHM_VERSIONS = {
             "dynamic_range": 0.10, "softness": 0.02,
             "bass_enhance": 0.12, "spatial_enhance": 0.10, "transient_repair": 0.10,
             "warmth": 0.20, "clarity": 0.20, "music_type": "auto", "repair_mode": "smart",
-            "quality": "standard", "detail_enhance": 0.3,
+            "quality": "standard", "detail_enhance": 0.3, "spectral_superres": 0.4,
         },
         "modes": [
             {
                 "name": "智能修复",
-                "description": "HiFi优化+BPM自适应，自动检测类型和节奏",
+                "description": "HiFi优化+BPM自适应+AI超分，自动检测类型和节奏",
                 "icon": "🧠",
                 "params": {
                     "de_clipping": 0.30, "noise_reduction": 0.20, "de_essing": 0.22,
@@ -690,12 +691,12 @@ ALGORITHM_VERSIONS = {
                     "dynamic_range": 0.10, "softness": 0.02,
                     "bass_enhance": 0.12, "spatial_enhance": 0.10, "transient_repair": 0.10,
                     "warmth": 0.20, "clarity": 0.20, "music_type": "auto", "repair_mode": "smart",
-                    "quality": "standard", "detail_enhance": 0.3,
+                    "quality": "standard", "detail_enhance": 0.3, "spectral_superres": 0.4,
                 },
             },
             {
                 "name": "人声修复",
-                "description": "HiFi优化，针对人声优化，节奏感知",
+                "description": "HiFi优化+AI超分，针对人声优化，节奏感知",
                 "icon": "🎤",
                 "params": {
                     "de_clipping": 0.25, "noise_reduction": 0.15, "de_essing": 0.32,
@@ -703,12 +704,12 @@ ALGORITHM_VERSIONS = {
                     "dynamic_range": 0.06, "softness": 0.015,
                     "bass_enhance": 0.08, "spatial_enhance": 0.08, "transient_repair": 0.12,
                     "warmth": 0.25, "clarity": 0.25, "music_type": "vocal", "repair_mode": "vocal",
-                    "quality": "standard", "detail_enhance": 0.25,
+                    "quality": "standard", "detail_enhance": 0.25, "spectral_superres": 0.35,
                 },
             },
             {
                 "name": "器乐修复",
-                "description": "HiFi优化，针对器乐优化，保留细节",
+                "description": "HiFi优化+AI超分，针对器乐优化，保留细节",
                 "icon": "🎻",
                 "params": {
                     "de_clipping": 0.20, "noise_reduction": 0.15, "de_essing": 0.10,
@@ -716,12 +717,12 @@ ALGORITHM_VERSIONS = {
                     "dynamic_range": 0.08, "softness": 0.01,
                     "bass_enhance": 0.08, "spatial_enhance": 0.15, "transient_repair": 0.08,
                     "warmth": 0.18, "clarity": 0.18, "music_type": "instrumental", "repair_mode": "instrumental",
-                    "quality": "standard", "detail_enhance": 0.35,
+                    "quality": "standard", "detail_enhance": 0.35, "spectral_superres": 0.45,
                 },
             },
             {
                 "name": "深度修复",
-                "description": "HiFi优化，较强修复力度，保持音质",
+                "description": "HiFi优化+AI超分，较强修复力度，保持音质",
                 "icon": "🔧",
                 "params": {
                     "de_clipping": 0.45, "noise_reduction": 0.35, "de_essing": 0.35,
@@ -729,12 +730,12 @@ ALGORITHM_VERSIONS = {
                     "dynamic_range": 0.18, "softness": 0.05,
                     "bass_enhance": 0.18, "spatial_enhance": 0.15, "transient_repair": 0.18,
                     "warmth": 0.30, "clarity": 0.30, "music_type": "auto", "repair_mode": "deep",
-                    "quality": "standard", "detail_enhance": 0.25,
+                    "quality": "standard", "detail_enhance": 0.25, "spectral_superres": 0.3,
                 },
             },
             {
                 "name": "温和优化",
-                "description": "HiFi优化，轻微处理保留音质",
+                "description": "HiFi优化+AI超分，轻微处理保留音质",
                 "icon": "🌿",
                 "params": {
                     "de_clipping": 0.12, "noise_reduction": 0.08, "de_essing": 0.10,
@@ -742,12 +743,12 @@ ALGORITHM_VERSIONS = {
                     "dynamic_range": 0.04, "softness": 0.01,
                     "bass_enhance": 0.06, "spatial_enhance": 0.05, "transient_repair": 0.05,
                     "warmth": 0.12, "clarity": 0.15, "music_type": "auto", "repair_mode": "gentle",
-                    "quality": "standard", "detail_enhance": 0.35,
+                    "quality": "standard", "detail_enhance": 0.35, "spectral_superres": 0.45,
                 },
             },
             {
                 "name": "HiFi 模式",
-                "description": "HiFi优化，最高音质保真度，最小处理",
+                "description": "HiFi优化+AI超分，最高音质保真度，最小处理",
                 "icon": "✨",
                 "params": {
                     "de_clipping": 0.08, "noise_reduction": 0.03, "de_essing": 0.05,
@@ -755,7 +756,7 @@ ALGORITHM_VERSIONS = {
                     "dynamic_range": 0.02, "softness": 0.005,
                     "bass_enhance": 0.03, "spatial_enhance": 0.03, "transient_repair": 0.03,
                     "warmth": 0.06, "clarity": 0.08, "music_type": "auto", "repair_mode": "smart",
-                    "quality": "hifi", "detail_enhance": 0.4,
+                    "quality": "hifi", "detail_enhance": 0.4, "spectral_superres": 0.5,
                 },
             },
         ],
