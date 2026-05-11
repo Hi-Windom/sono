@@ -1,13 +1,14 @@
 import numpy as np
 
 
-def load_audio_with_fallback(file_path: str, sr=None, mono=False) -> tuple:
+def load_audio_with_fallback(file_path: str, sr=None, mono=False, return_bit_depth=False) -> tuple:
     import miniaudio
 
     sound = miniaudio.decode_file(file_path, output_format=miniaudio.SampleFormat.FLOAT32)
 
     nchannels = sound.nchannels
     sample_rate = sound.sample_rate
+    source_bit_depth = sound.sample_width * 8
 
     raw = np.frombuffer(sound.samples, dtype=np.float32).copy()
 
@@ -37,4 +38,6 @@ def load_audio_with_fallback(file_path: str, sr=None, mono=False) -> tuple:
             raw = resampled
         sample_rate = target_sr
 
+    if return_bit_depth:
+        return raw, sample_rate, source_bit_depth
     return raw, sample_rate

@@ -456,13 +456,20 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
     if y.dtype == np.float32:
         y = y.astype(np.float64)
 
+    bit_depth = params.get("bit_depth", 24)
+    source_bit_depth = params.get("source_bit_depth", 24)
+    if source_bit_depth < bit_depth:
+        from .bit_depth_enhance import apply_bit_depth_enhance
+        y = apply_bit_depth_enhance(y, source_bit_depth, bit_depth, sr)
+        if "位深提升(16→24bit)" not in issues_found:
+            issues_found.append("位深提升(16→24bit)")
+
     if was_mono:
         y = y[0]
 
     if progress_callback:
         progress_callback(0.97, "导出WAV...")
 
-    bit_depth = params.get("bit_depth", 24)
     subtype_map = {16: "PCM_16", 24: "PCM_24", 32: "PCM_32"}
     subtype = subtype_map.get(bit_depth, "PCM_24")
 

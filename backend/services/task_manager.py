@@ -276,6 +276,14 @@ def _run_repair(task_id: str, audio_path: str, params: dict[str, Any], mobile_mo
         active_params = {k: v for k, v in params.items() if isinstance(v, (int, float)) and v > 0}
         logger.info(f"[repair] 参数 task_id={task_id} active_params={active_params}")
 
+        if "source_bit_depth" not in params:
+            try:
+                from services.audio_loader import load_audio_with_fallback
+                _, _, src_bd = load_audio_with_fallback(audio_path, sr=None, mono=False, return_bit_depth=True)
+                params["source_bit_depth"] = src_bd
+            except Exception:
+                params["source_bit_depth"] = 24
+
         def progress_callback(p, s):
             with _cancelled_lock:
                 if task_id in _cancelled_tasks:

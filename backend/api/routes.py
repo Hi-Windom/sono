@@ -358,6 +358,14 @@ def _run_render(task_id, input_path, output_path, target_sr, bit_depth, render_f
     from services.render import render_output
     from services.task_manager import _ws_send_progress
 
+    source_bit_depth = None
+    try:
+        from services.audio_loader import load_audio_with_fallback
+        _, _, src_bd = load_audio_with_fallback(input_path, sr=None, mono=False, return_bit_depth=True)
+        source_bit_depth = src_bd
+    except Exception:
+        pass
+
     def progress_callback(pct, step):
         update_task(task_id, progress=pct, step=step)
         _ws_send_progress(task_id, {
@@ -368,7 +376,7 @@ def _run_render(task_id, input_path, output_path, target_sr, bit_depth, render_f
         })
 
     try:
-        result = render_output(input_path, output_path, target_sr, bit_depth, progress_callback=progress_callback)
+        result = render_output(input_path, output_path, target_sr, bit_depth, progress_callback=progress_callback, source_bit_depth=source_bit_depth)
         update_task(task_id,
             status="render_completed",
             progress=1.0,

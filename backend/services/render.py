@@ -165,13 +165,17 @@ def _spectral_superres_upsample_1d(y, sr, amount):
     return y
 
 
-def render_output(input_path, output_path, target_sr, bit_depth, progress_callback=None):
+def render_output(input_path, output_path, target_sr, bit_depth, progress_callback=None, source_bit_depth=None):
     from scipy.signal import butter, sosfiltfilt, resample_poly
 
     if progress_callback:
         progress_callback(0.1, "加载修复结果...")
 
-    y, sr = load_audio_with_fallback(input_path, sr=None, mono=False)
+    if source_bit_depth is not None:
+        y, sr = load_audio_with_fallback(input_path, sr=None, mono=False)
+    else:
+        y, sr, src_bd = load_audio_with_fallback(input_path, sr=None, mono=False, return_bit_depth=True)
+        source_bit_depth = src_bd
     was_mono = False
     if y.ndim == 1:
         y = y.reshape(1, -1)
@@ -223,6 +227,10 @@ def render_output(input_path, output_path, target_sr, bit_depth, progress_callba
     if y.dtype == np.float32:
         y = y.astype(np.float64)
 
+    if source_bit_depth is not None and source_bit_depth < bit_depth:
+        from services.repair.repair_v2_4.bit_depth_enhance import apply_bit_depth_enhance
+        y = apply_bit_depth_enhance(y, source_bit_depth, bit_depth, sr)
+
     if progress_callback:
         progress_callback(0.9, "导出...")
 
@@ -237,7 +245,9 @@ def render_output(input_path, output_path, target_sr, bit_depth, progress_callba
             y_out = y.T
         else:
             y_out = y
-        if y_out.dtype != np.int16:
+        if bit_depth == 24:
+            y_out = np.clip(y_out * 8388607, -8388608, 8388607).astype(np.int32)
+        elif y_out.dtype != np.int16:
             y_out = np.clip(y_out * 32767, -32768, 32767).astype(np.int16)
         wavfile.write(output_path, sr, y_out)
 
