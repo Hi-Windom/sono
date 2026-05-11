@@ -91,10 +91,28 @@ export default function RepairPage() {
     setRenderDownloadUrl,
     showDownloadModal,
     setShowDownloadModal,
+    autoRenderInfo,
   } = useAudioProcessor();
 
   const [showDiag, setShowDiag] = useState(false);
   const [instantDownloadInfo, setInstantDownloadInfo] = useState<DownloadFileInfo | null>(null);
+  const [renderResultInfo, setRenderResultInfo] = useState<DownloadFileInfo | null>(null);
+
+  useEffect(() => {
+    if (autoRenderInfo) {
+      setRenderResultInfo({
+        filename: `${(audioFile?.name || 'audio').replace(/\.[^/.]+$/, '')}_repaired.wav`,
+        fileSize: autoRenderInfo.duration && autoRenderInfo.output_sample_rate && autoRenderInfo.channels && autoRenderInfo.output_bit_depth
+          ? `${((autoRenderInfo.duration * autoRenderInfo.output_sample_rate * autoRenderInfo.channels * (autoRenderInfo.output_bit_depth / 8)) / (1024 * 1024)).toFixed(2)} MB`
+          : '—',
+        sampleRate: autoRenderInfo.output_sample_rate ? `${autoRenderInfo.output_sample_rate / 1000} kHz` : 'N/A',
+        bitDepth: autoRenderInfo.output_bit_depth || 24,
+        channels: autoRenderInfo.channels || 2,
+        duration: autoRenderInfo.duration || 0,
+        algorithmVersion: algorithmVersion,
+      });
+    }
+  }, [autoRenderInfo, audioFile, algorithmVersion]);
 
   // 渲染缓存刷新回调
   const renderCacheRefreshRef = useRef<(() => Promise<void>) | null>(null);
@@ -473,8 +491,9 @@ export default function RepairPage() {
         onClose={() => {
           setShowDownloadModal(false);
           setInstantDownloadInfo(null);
+          setRenderResultInfo(null);
         }}
-        backendInfo={instantDownloadInfo || (hasBackendResult && repairResult ? {
+        backendInfo={instantDownloadInfo || renderResultInfo || (hasBackendResult && repairResult ? {
           filename: `${(audioFile?.name || 'audio').replace(/\.[^/.]+$/, '')}_backend_repaired.wav`,
           fileSize: repairResult.duration && repairResult.output_sample_rate && repairResult.channels && repairResult.output_bit_depth
             ? `${((repairResult.duration * repairResult.output_sample_rate * repairResult.channels * (repairResult.output_bit_depth / 8)) / (1024 * 1024)).toFixed(2)} MB`
@@ -501,6 +520,20 @@ export default function RepairPage() {
           const result = await renderAndDownload();
           if (result?.downloadUrl) {
             setRenderDownloadUrl(result.downloadUrl);
+          }
+          if (result?.renderInfo) {
+            const ri = result.renderInfo;
+            setRenderResultInfo({
+              filename: result.fileName || `${(audioFile?.name || 'audio').replace(/\.[^/.]+$/, '')}_repaired.wav`,
+              fileSize: ri.duration && ri.output_sample_rate && ri.channels && ri.output_bit_depth
+                ? `${((ri.duration * ri.output_sample_rate * ri.channels * (ri.output_bit_depth / 8)) / (1024 * 1024)).toFixed(2)} MB`
+                : '—',
+              sampleRate: ri.output_sample_rate ? `${ri.output_sample_rate / 1000} kHz` : 'N/A',
+              bitDepth: ri.output_bit_depth || 24,
+              channels: ri.channels || 2,
+              duration: ri.duration || 0,
+              algorithmVersion: algorithmVersion,
+            });
           }
         } : undefined}
         browserDownloadAction={hasBrowserResult ? () => downloadProcessedAudio('browser') : undefined}

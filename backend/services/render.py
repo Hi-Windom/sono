@@ -5,6 +5,7 @@ from services.audio_loader import load_audio_with_fallback
 
 
 def _harmonic_enhance(y, sr, amount=0.15):
+    """谐波增强 - 在上采样后添加更多高频细节"""
     if y.ndim > 1:
         for ch in range(y.shape[0]):
             y[ch] = _harmonic_enhance_1d(y[ch], sr, amount)
@@ -56,6 +57,114 @@ def _harmonic_enhance_1d(y, sr, amount):
     return y
 
 
+def _spectral_superres_upsample(y, sr, amount=0.3):
+    """
+    上采样时的频谱超分增强 - 为高频重建添加更多细节
+    类似 QQ 音乐臻品母带的上采样处理
+    """
+    if y.ndim > 1:
+        for ch in range(y.shape[0]):
+            y[ch] = _spectral_superres_upsample_1d(y[ch], sr, amount)
+        return y
+    return _spectral_superres_upsample_1d(y, sr, amount)
+
+
+def _spectral_superres_upsample_1d(y, sr, amount):
+    """单声道频谱超分增强"""
+    if amount <= 0 or len(y) < 4096:
+        return y
+
+    from scipy.signal import stft, istft
+    from scipy.ndimage import uniform_filter1d
+
+    n_fft = 2048
+    hop_length = 512
+
+    # STFT
+    f, t, S = stft(y, fs=sr, nperseg=n_fft, noverlap=n_fft - hop_length, boundary='zeros')
+    mag = np.abs(S)
+    phase = np.angle(S)
+
+    freqs = f
+    nyquist = sr / 2
+
+    # 1. 高频谐波重建 (8kHz+)
+    high_start_idx = np.searchsorted(freqs, 8000)
+    if high_start_idx < len(freqs):
+        # 基于中频(4-8kHz)重建高频
+        mid_start_idx = np.searchsorted(freqs, 4000)
+        mid_end_idx = high_start_idx
+
+        if mid_start_idx < mid_end_idx:
+            for j in range(mag.shape[1]):
+                # 计算中频包络
+                mid_env = mag[mid_start_idx:mid_end_idx, j]
+                mid_energy = np.sqrt(np.mean(mid_env ** 2) + 1e-10)
+
+                # 重建高频
+                for i in range(high_start_idx, len(freqs)):
+                    # 谐波关系外推
+                    harmonic_order = 2
+                    source_freq = freqs[i] / harmonic_order
+                    source_idx = np.searchsorted(freqs, source_freq)
+                    if source_idx < high_start_idx and source_idx < len(mag):
+                        # 基于谐波关系重建，带衰减
+                        freq_ratio = freqs[i] / source_freq
+                        decay = 1.0 / (1.0 + (freqs[i] / 18000) ** 1.5)
+                        reconstructed = mag[source_idx, j] * decay * 0.8
+                        # 混合
+                        blend = amount * 0.5
+                        mag[i, j] = blend * reconstructed + (1 - blend) * mag[i, j]
+
+    # 2. 临场感频段增强 (2-8kHz)
+    presence_low = np.searchsorted(freqs, 2000)
+    presence_high = np.searchsorted(freqs, 8000)
+    if presence_low < presence_high:
+        for j in range(mag.shape[1]):
+            freq_line = mag[presence_low:presence_high, j]
+            # 提取细节
+            smoothed = uniform_filter1d(freq_line, size=3, mode='nearest')
+            details = freq_line - smoothed
+            # 增强细节
+            enhanced = smoothed + details * (1.0 + amount * 0.5)
+            # 整体增益
+            enhanced *= (1.0 + amount * 0.15)
+            mag[presence_low:presence_high, j] = enhanced
+
+    # 3. 极高频空气感 (>16kHz)
+    air_start_idx = np.searchsorted(freqs, 16000)
+    if air_start_idx < len(freqs):
+        for j in range(mag.shape[1]):
+            # 基于 10-16kHz 的能量生成空气感
+            source_start = np.searchsorted(freqs, 10000)
+            source_end = air_start_idx
+            if source_start < source_end:
+                source_energy = np.sqrt(np.mean(mag[source_start:source_end, j] ** 2) + 1e-10)
+                air_len = len(freqs) - air_start_idx
+                # 生成带结构的噪声
+                air_noise = np.random.randn(air_len) * 0.015 * amount * source_energy
+                # 频谱衰减
+                for i in range(air_len):
+                    freq = freqs[air_start_idx + i]
+                    decay = 1.0 / (1.0 + (freq / 20000) ** 1.2)
+                    air_noise[i] *= decay
+                # 混合
+                mag[air_start_idx:, j] = mag[air_start_idx:, j] * (1 - amount * 0.3) + air_noise * amount * 0.3
+
+    # 重建信号
+    S_enhanced = mag * np.exp(1j * phase)
+    _, y_out = istft(S_enhanced, fs=sr, nperseg=n_fft, noverlap=n_fft - hop_length, boundary='zeros')
+
+    # 确保长度一致
+    if len(y_out) > len(y):
+        y_out = y_out[:len(y)]
+    elif len(y_out) < len(y):
+        y_out = np.pad(y_out, (0, len(y) - len(y_out)))
+
+    y[:] = y_out.astype(y.dtype)
+    return y
+
+
 def render_output(input_path, output_path, target_sr, bit_depth, progress_callback=None):
     from scipy.signal import butter, sosfiltfilt, resample_poly
 
@@ -84,8 +193,13 @@ def render_output(input_path, output_path, target_sr, bit_depth, progress_callba
             gc.collect()
 
             if progress_callback:
-                progress_callback(0.6, "谐波增强...")
-            y = _harmonic_enhance(y, sr, amount=0.15)
+                progress_callback(0.5, "频谱超分增强...")
+            # 上采样后的频谱超分增强
+            y = _spectral_superres_upsample(y, sr, amount=0.35)
+
+            if progress_callback:
+                progress_callback(0.75, "谐波增强...")
+            y = _harmonic_enhance(y, sr, amount=0.2)
         else:
             if progress_callback:
                 progress_callback(0.3, f"下采样到 {target_sr // 1000}kHz...")

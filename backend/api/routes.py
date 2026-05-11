@@ -53,7 +53,27 @@ async def memory_info(request: MemoryInfoRequest):
     if available is not None:
         is_sufficient = estimated <= available
     use_f32 = should_use_float32(n_samples, request.channels)
-    has_streaming = request.algorithm_version in ("v2.2", "v2.3", "v2.3a")
+    # 智能识别流式分块处理：v2.2 及以上版本都支持流式处理
+    # 通过版本号解析，避免硬编码列表，支持未来新版本自动识别
+    def _supports_streaming(version: str) -> bool:
+        """检查算法版本是否支持流式分块处理"""
+        try:
+            # 解析版本号，如 "v2.4a" -> major=2, minor=4
+            if version.startswith('v'):
+                version = version[1:]
+            # 移除后缀（如 'a', 'b', 'beta' 等）
+            import re
+            match = re.match(r'(\d+)\.(\d+)', version)
+            if match:
+                major = int(match.group(1))
+                minor = int(match.group(2))
+                # v2.2 及以上支持流式处理
+                return (major > 2) or (major == 2 and minor >= 2)
+        except (ValueError, AttributeError):
+            pass
+        return False
+
+    has_streaming = _supports_streaming(request.algorithm_version)
     total_mem = get_total_memory_bytes()
     used_mem = (total_mem - available) if (total_mem is not None and available is not None) else None
     baseline_samples = int(n_samples * working_sr / request.sample_rate) if working_sr > request.sample_rate else n_samples

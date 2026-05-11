@@ -187,6 +187,12 @@ export function useAudioProcessor() {
   const [enableBrowserRepair, setEnableBrowserRepair] = useState(true);
   const [renderDownloadUrl, setRenderDownloadUrl] = useState<string | null>(null);
   const [showDownloadModal, setShowDownloadModal] = useState(false);
+  const [autoRenderInfo, setAutoRenderInfo] = useState<{
+    output_sample_rate: number;
+    output_bit_depth: number;
+    duration: number;
+    channels: number;
+  } | null>(null);
 
   const audioContextRef = useRef<AudioContext | null>(null);
   const sourceNodeRef = useRef<AudioBufferSourceNode | null>(null);
@@ -1260,6 +1266,9 @@ export function useAudioProcessor() {
               if (result?.downloadUrl) {
                 setRenderDownloadUrl(result.downloadUrl);
               }
+              if (result?.renderInfo) {
+                setAutoRenderInfo(result.renderInfo);
+              }
               setShowDownloadModal(true);
             }).catch(err => {
               writeLog(`[applySettings] 缓存跳过修复后渲染失败: ${err}`);
@@ -1630,6 +1639,9 @@ export function useAudioProcessor() {
         renderAndDownload().then(result => {
           if (result?.downloadUrl) {
             setRenderDownloadUrl(result.downloadUrl);
+          }
+          if (result?.renderInfo) {
+            setAutoRenderInfo(result.renderInfo);
           }
           setShowDownloadModal(true);
         }).catch(err => {
@@ -2335,7 +2347,16 @@ export function useAudioProcessor() {
       const hit = caches.find(c => c.sample_rate === processingOptions.sampleRate && c.bit_depth === processingOptions.bitDepth && c.algorithm_version === algorithmVersion);
       if (hit) {
         writeLog(`[renderAndDownload] 渲染缓存命中: ${hit.filename}`);
-        return { downloadUrl: `/api/v1/download-file/${hit.filename}`, fileName };
+        return {
+          downloadUrl: `/api/v1/download-file/${hit.filename}`,
+          fileName,
+          renderInfo: {
+            output_sample_rate: hit.sample_rate,
+            output_bit_depth: hit.bit_depth,
+            duration: durationRef.current,
+            channels: 2,
+          },
+        };
       }
     } catch { /* 忽略缓存查询失败，继续渲染 */ }
 
@@ -2363,7 +2384,16 @@ export function useAudioProcessor() {
       } : null);
       setProcessingStep('');
       setProcessingProgress(0);
-      return { downloadUrl: `/api/v1/download-file/${renderRes.render_filename}`, fileName };
+      return {
+        downloadUrl: `/api/v1/download-file/${renderRes.render_filename}`,
+        fileName,
+        renderInfo: {
+          output_sample_rate: renderRes.render_result!.output_sample_rate,
+          output_bit_depth: renderRes.render_result!.output_bit_depth,
+          duration: renderRes.render_result!.duration,
+          channels: renderRes.render_result!.channels,
+        },
+      };
     } catch (renderErr) {
       wsControlRef.current?.close();
       wsControlRef.current = null;
@@ -2514,6 +2544,7 @@ export function useAudioProcessor() {
     setRenderDownloadUrl,
     showDownloadModal,
     setShowDownloadModal,
+    autoRenderInfo,
     // 波形缓存
     originalWaveformPeaks,
   };

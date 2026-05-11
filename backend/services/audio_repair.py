@@ -53,6 +53,8 @@ PARAM_DEFINITIONS = {
     "harmonic_richness": {"key": "harmonicRichness", "label": "谐波丰富度", "min": 0, "max": 1, "step": 0.01},
     "warmth": {"key": "warmth", "label": "温暖度", "min": 0, "max": 1, "step": 0.01},
     "clarity": {"key": "clarity", "label": "清晰度", "min": 0, "max": 1, "step": 0.01},
+    "detail_enhance": {"key": "detailEnhance", "label": "细节增强", "min": 0, "max": 1, "step": 0.01},
+    "spectral_superres": {"key": "spectralSuperres", "label": "频谱超分", "min": 0, "max": 1, "step": 0.01},
 }
 
 ALGORITHM_VERSIONS = {
@@ -667,94 +669,94 @@ ALGORITHM_VERSIONS = {
     "v2.4": {
         "name": "v2.4",
         "label": "v2.4 桌面版",
-        "description": "AI频谱修复+次谐波低频+空气质感重建（仅桌面端）",
+        "description": "HiFi优化+BPM自适应+节奏感知处理（仅桌面端）",
         "mobile_compatible": False,
         "repair_version": "v2.4",
         "default_params": {
-            "de_clipping": 0.35, "noise_reduction": 0.25, "de_essing": 0.25,
-            "de_crackle": 0.25, "de_pop": 0.2, "harmonic_enhance": 0.12,
-            "dynamic_range": 0.12, "softness": 0.03,
-            "bass_enhance": 0.15, "spatial_enhance": 0.12, "transient_repair": 0.12,
-            "warmth": 0.25, "clarity": 0.25, "music_type": "auto", "repair_mode": "smart",
-            "quality": "standard",
+            "de_clipping": 0.30, "noise_reduction": 0.20, "de_essing": 0.22,
+            "de_crackle": 0.20, "de_pop": 0.18, "harmonic_enhance": 0.10,
+            "dynamic_range": 0.10, "softness": 0.02,
+            "bass_enhance": 0.12, "spatial_enhance": 0.10, "transient_repair": 0.10,
+            "warmth": 0.20, "clarity": 0.20, "music_type": "auto", "repair_mode": "smart",
+            "quality": "standard", "detail_enhance": 0.3, "spectral_superres": 0.4,
         },
         "modes": [
             {
                 "name": "智能修复",
-                "description": "AI频谱修复+次谐波低频+空气质感，自动检测类型",
+                "description": "HiFi优化+BPM自适应+AI超分，自动检测类型和节奏",
                 "icon": "🧠",
                 "params": {
-                    "de_clipping": 0.35, "noise_reduction": 0.25, "de_essing": 0.25,
-                    "de_crackle": 0.25, "de_pop": 0.2, "harmonic_enhance": 0.12,
-                    "dynamic_range": 0.12, "softness": 0.03,
-                    "bass_enhance": 0.15, "spatial_enhance": 0.12, "transient_repair": 0.12,
-                    "warmth": 0.25, "clarity": 0.25, "music_type": "auto", "repair_mode": "smart",
-                    "quality": "standard",
+                    "de_clipping": 0.30, "noise_reduction": 0.20, "de_essing": 0.22,
+                    "de_crackle": 0.20, "de_pop": 0.18, "harmonic_enhance": 0.10,
+                    "dynamic_range": 0.10, "softness": 0.02,
+                    "bass_enhance": 0.12, "spatial_enhance": 0.10, "transient_repair": 0.10,
+                    "warmth": 0.20, "clarity": 0.20, "music_type": "auto", "repair_mode": "smart",
+                    "quality": "standard", "detail_enhance": 0.3, "spectral_superres": 0.4,
                 },
             },
             {
                 "name": "人声修复",
-                "description": "AI频谱修复，针对人声优化",
+                "description": "HiFi优化+AI超分，针对人声优化，节奏感知",
                 "icon": "🎤",
                 "params": {
-                    "de_clipping": 0.3, "noise_reduction": 0.18, "de_essing": 0.35,
-                    "de_crackle": 0.28, "de_pop": 0.22, "harmonic_enhance": 0.15,
-                    "dynamic_range": 0.08, "softness": 0.02,
-                    "bass_enhance": 0.12, "spatial_enhance": 0.1, "transient_repair": 0.15,
-                    "warmth": 0.3, "clarity": 0.3, "music_type": "vocal", "repair_mode": "vocal",
-                    "quality": "standard",
+                    "de_clipping": 0.25, "noise_reduction": 0.15, "de_essing": 0.32,
+                    "de_crackle": 0.22, "de_pop": 0.18, "harmonic_enhance": 0.12,
+                    "dynamic_range": 0.06, "softness": 0.015,
+                    "bass_enhance": 0.08, "spatial_enhance": 0.08, "transient_repair": 0.12,
+                    "warmth": 0.25, "clarity": 0.25, "music_type": "vocal", "repair_mode": "vocal",
+                    "quality": "standard", "detail_enhance": 0.25, "spectral_superres": 0.35,
                 },
             },
             {
                 "name": "器乐修复",
-                "description": "AI频谱修复，针对器乐优化",
+                "description": "HiFi优化+AI超分，针对器乐优化，保留细节",
                 "icon": "🎻",
                 "params": {
-                    "de_clipping": 0.25, "noise_reduction": 0.2, "de_essing": 0.12,
-                    "de_crackle": 0.2, "de_pop": 0.12, "harmonic_enhance": 0.2,
-                    "dynamic_range": 0.1, "softness": 0.01,
-                    "bass_enhance": 0.1, "spatial_enhance": 0.18, "transient_repair": 0.1,
-                    "warmth": 0.22, "clarity": 0.22, "music_type": "instrumental", "repair_mode": "instrumental",
-                    "quality": "standard",
+                    "de_clipping": 0.20, "noise_reduction": 0.15, "de_essing": 0.10,
+                    "de_crackle": 0.15, "de_pop": 0.08, "harmonic_enhance": 0.18,
+                    "dynamic_range": 0.08, "softness": 0.01,
+                    "bass_enhance": 0.08, "spatial_enhance": 0.15, "transient_repair": 0.08,
+                    "warmth": 0.18, "clarity": 0.18, "music_type": "instrumental", "repair_mode": "instrumental",
+                    "quality": "standard", "detail_enhance": 0.35, "spectral_superres": 0.45,
                 },
             },
             {
                 "name": "深度修复",
-                "description": "AI频谱修复，最强修复力度",
+                "description": "HiFi优化+AI超分，较强修复力度，保持音质",
                 "icon": "🔧",
                 "params": {
-                    "de_clipping": 0.5, "noise_reduction": 0.4, "de_essing": 0.38,
-                    "de_crackle": 0.4, "de_pop": 0.32, "harmonic_enhance": 0.2,
-                    "dynamic_range": 0.22, "softness": 0.06,
-                    "bass_enhance": 0.2, "spatial_enhance": 0.18, "transient_repair": 0.22,
-                    "warmth": 0.35, "clarity": 0.35, "music_type": "auto", "repair_mode": "deep",
-                    "quality": "standard",
+                    "de_clipping": 0.45, "noise_reduction": 0.35, "de_essing": 0.35,
+                    "de_crackle": 0.35, "de_pop": 0.28, "harmonic_enhance": 0.18,
+                    "dynamic_range": 0.18, "softness": 0.05,
+                    "bass_enhance": 0.18, "spatial_enhance": 0.15, "transient_repair": 0.18,
+                    "warmth": 0.30, "clarity": 0.30, "music_type": "auto", "repair_mode": "deep",
+                    "quality": "standard", "detail_enhance": 0.25, "spectral_superres": 0.3,
                 },
             },
             {
                 "name": "温和优化",
-                "description": "AI频谱修复，轻微处理保留音质",
+                "description": "HiFi优化+AI超分，轻微处理保留音质",
                 "icon": "🌿",
                 "params": {
-                    "de_clipping": 0.15, "noise_reduction": 0.1, "de_essing": 0.12,
-                    "de_crackle": 0.1, "de_pop": 0.08, "harmonic_enhance": 0.06,
-                    "dynamic_range": 0.06, "softness": 0.015,
-                    "bass_enhance": 0.08, "spatial_enhance": 0.06, "transient_repair": 0.06,
-                    "warmth": 0.15, "clarity": 0.18, "music_type": "auto", "repair_mode": "gentle",
-                    "quality": "standard",
+                    "de_clipping": 0.12, "noise_reduction": 0.08, "de_essing": 0.10,
+                    "de_crackle": 0.08, "de_pop": 0.06, "harmonic_enhance": 0.05,
+                    "dynamic_range": 0.04, "softness": 0.01,
+                    "bass_enhance": 0.06, "spatial_enhance": 0.05, "transient_repair": 0.05,
+                    "warmth": 0.12, "clarity": 0.15, "music_type": "auto", "repair_mode": "gentle",
+                    "quality": "standard", "detail_enhance": 0.35, "spectral_superres": 0.45,
                 },
             },
             {
                 "name": "HiFi 模式",
-                "description": "AI频谱修复，最高音质保真度",
+                "description": "HiFi优化+AI超分，最高音质保真度，最小处理",
                 "icon": "✨",
                 "params": {
-                    "de_clipping": 0.12, "noise_reduction": 0.05, "de_essing": 0.08,
-                    "de_crackle": 0.06, "de_pop": 0.05, "harmonic_enhance": 0.03,
-                    "dynamic_range": 0.03, "softness": 0.01,
-                    "bass_enhance": 0.05, "spatial_enhance": 0.04, "transient_repair": 0.04,
-                    "warmth": 0.1, "clarity": 0.12, "music_type": "auto", "repair_mode": "smart",
-                    "quality": "hifi",
+                    "de_clipping": 0.08, "noise_reduction": 0.03, "de_essing": 0.05,
+                    "de_crackle": 0.04, "de_pop": 0.03, "harmonic_enhance": 0.02,
+                    "dynamic_range": 0.02, "softness": 0.005,
+                    "bass_enhance": 0.03, "spatial_enhance": 0.03, "transient_repair": 0.03,
+                    "warmth": 0.06, "clarity": 0.08, "music_type": "auto", "repair_mode": "smart",
+                    "quality": "hifi", "detail_enhance": 0.4, "spectral_superres": 0.5,
                 },
             },
         ],
@@ -837,18 +839,28 @@ def get_available_versions(mobile_mode: bool = False) -> list[dict[str, Any]]:
                 "step": pdef["step"],
                 "label": pdef["label"],
             }
+
+        # 健壮性处理：过滤掉未在 PARAM_DEFINITIONS 中定义的参数
+        def _filter_params(params_dict: dict) -> dict:
+            filtered = {}
+            for k, val in params_dict.items():
+                if k in PARAM_DEFINITIONS:
+                    filtered[PARAM_DEFINITIONS[k]["key"]] = val
+                # 如果参数未定义，静默跳过（健壮性）
+            return filtered
+
         version_data = {
             "name": v["name"],
             "label": v["label"],
             "description": v["description"],
-            "defaultParams": {PARAM_DEFINITIONS[k]["key"]: val for k, val in v["default_params"].items()},
+            "defaultParams": _filter_params(v["default_params"]),
             "paramRanges": param_ranges,
             "modes": [
                 {
                     "name": m["name"],
                     "description": m["description"],
                     "icon": m["icon"],
-                    "params": {PARAM_DEFINITIONS[k]["key"]: val for k, val in m["params"].items()},
+                    "params": _filter_params(m["params"]),
                 }
                 for m in v["modes"]
             ],
