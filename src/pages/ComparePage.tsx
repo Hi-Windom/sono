@@ -51,6 +51,21 @@ function formatTimePrecise(seconds: number): string {
   return `${mins}:${secs.toString().padStart(2, '0')}.${ms}`;
 }
 
+function parseTimeInput(val: string): number | null {
+  const trimmed = val.trim();
+  if (!trimmed) return null;
+  const m = trimmed.match(/^(\d+):([0-5]?\d)(?:\.(\d))?$/);
+  if (m) {
+    const mins = parseInt(m[1], 10);
+    const secs = parseInt(m[2], 10);
+    const frac = m[3] ? parseInt(m[3], 10) / 10 : 0;
+    return mins * 60 + secs + frac;
+  }
+  const num = parseFloat(trimmed);
+  if (isFinite(num) && num >= 0) return num;
+  return null;
+}
+
 export { audioBufferCache, getCachedBuffer, setCachedBuffer };
 
 function getPreviewUrl(taskId: string, type: 'original' | 'repaired'): string {
@@ -82,6 +97,10 @@ export default function ComparePage() {
 
   const [pointA, setPointA] = useState<number | null>(null);
   const [pointB, setPointB] = useState<number | null>(null);
+  const [editingA, setEditingA] = useState(false);
+  const [editingB, setEditingB] = useState(false);
+  const [editAVal, setEditAVal] = useState('');
+  const [editBVal, setEditBVal] = useState('');
 
   const audioElRef = useRef<HTMLAudioElement | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -90,6 +109,9 @@ export default function ComparePage() {
   const gainNodeRef = useRef<GainNode | null>(null);
   const animFrameRef = useRef<number>();
   const abLoopRef = useRef(false);
+  const isFadingRef = useRef(false);
+  const vinylAngleRef = useRef(0);
+  const vinylAnimRef = useRef<number>();
 
   const activeBuffer = compareMode === 'original' ? originalBuffer : repairedBuffer;
 
@@ -147,6 +169,32 @@ export default function ComparePage() {
       audioContextRef.current = new AudioContext();
     }
     return audioContextRef.current;
+  }, []);
+
+  const fadeOut = useCallback((durationMs: number): Promise<void> => {
+    return new Promise(resolve => {
+      const gain = gainNodeRef.current;
+      if (!gain || isFadingRef.current) { resolve(); return; }
+      isFadingRef.current = true;
+      const ctx = gain.context;
+      const now = ctx.currentTime;
+      const currentVal = gain.gain.value;
+      gain.gain.cancelScheduledValues(now);
+      gain.gain.setValueAtTime(currentVal, now);
+      gain.gain.linearRampToValueAtTime(0.001, now + durationMs / 1000);
+      setTimeout(() => { resolve(); }, durationMs);
+    });
+  }, []);
+
+  const fadeIn = useCallback((durationMs: number) => {
+    const gain = gainNodeRef.current;
+    if (!gain) return;
+    const ctx = gain.context;
+    const now = ctx.currentTime;
+    gain.gain.cancelScheduledValues(now);
+    gain.gain.setValueAtTime(0.001, now);
+    gain.gain.linearRampToValueAtTime(1, now + durationMs / 1000);
+    setTimeout(() => { isFadingRef.current = false; }, durationMs);
   }, []);
 
   useEffect(() => {
@@ -215,7 +263,10 @@ export default function ComparePage() {
         setCurrentTime(t);
         if (abLoopRef.current && pointB !== null && t >= pointB) {
           const a = pointA ?? 0;
-          audio.currentTime = a;
+          fadeOut(30).then(() => {
+            audio.currentTime = a;
+            fadeIn(30);
+          });
         }
         animFrameRef.current = requestAnimationFrame(updateProgress);
       }
@@ -233,7 +284,19 @@ export default function ComparePage() {
       audio.removeEventListener('pause', onPause);
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
     };
-  }, [pointA, pointB]);
+  }, [pointA, pointB, fadeOut, fadeIn]);
+
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (document.hidden) return;
+      const ctx = audioContextRef.current;
+      if (ctx && ctx.state === 'suspended') {
+        ctx.resume().catch(() => {});
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => document.removeEventListener('visibilitychange', handleVisibility);
+  }, []);
 
   useEffect(() => {
     if (!taskId) return;
@@ -313,11 +376,10 @@ export default function ComparePage() {
     return () => { cancelled = true; };
   }, [taskId, getAudioContext]);
 
-  useEffect(() => {
-    if (!audioElRef.current || !audioContextRef.current) return;
+  const connectAudioGraph = useCallback((audio: HTMLAudioElement) => {
+    const ctx = getAudioContext();
     if (sourceNodeRef.current) return;
 
-    const ctx = audioContextRef.current;
     const analyser = ctx.createAnalyser();
     analyser.fftSize = 256;
     analyserRef.current = analyser;
@@ -327,7 +389,7 @@ export default function ComparePage() {
     gainNodeRef.current = gain;
 
     try {
-      const source = ctx.createMediaElementSource(audioElRef.current);
+      const source = ctx.createMediaElementSource(audio);
       sourceNodeRef.current = source;
       source.connect(analyser);
       analyser.connect(gain);
@@ -335,18 +397,13 @@ export default function ComparePage() {
     } catch {
       // already connected
     }
+  }, [getAudioContext]);
 
-    return () => {
-      try {
-        sourceNodeRef.current?.disconnect();
-        analyser.disconnect();
-        gain.disconnect();
-      } catch { /* ignore */ }
-      sourceNodeRef.current = null;
-      analyserRef.current = null;
-      gainNodeRef.current = null;
-    };
-  }, []);
+  useEffect(() => {
+    if (!audioElRef.current || !audioContextRef.current) return;
+    if (sourceNodeRef.current) return;
+    connectAudioGraph(audioElRef.current);
+  }, [connectAudioGraph]);
 
   const play = useCallback(() => {
     const audio = audioElRef.current;
@@ -356,34 +413,23 @@ export default function ComparePage() {
     if (ctx.state === 'suspended') ctx.resume();
 
     if (!sourceNodeRef.current) {
-      const analyser = ctx.createAnalyser();
-      analyser.fftSize = 256;
-      analyserRef.current = analyser;
-      const gain = ctx.createGain();
-      gain.gain.value = 1;
-      gainNodeRef.current = gain;
-      try {
-        const source = ctx.createMediaElementSource(audio);
-        sourceNodeRef.current = source;
-        source.connect(analyser);
-        analyser.connect(gain);
-        gain.connect(ctx.destination);
-      } catch {
-        // already connected
-      }
+      connectAudioGraph(audio);
     }
 
     audio.play().then(() => {
       setIsPlaying(true);
+      fadeIn(50);
     }).catch(() => {});
-  }, [audioReady, getAudioContext]);
+  }, [audioReady, getAudioContext, connectAudioGraph, fadeIn]);
 
   const pause = useCallback(() => {
     const audio = audioElRef.current;
     if (!audio) return;
-    audio.pause();
-    setIsPlaying(false);
-  }, []);
+    fadeOut(50).then(() => {
+      audio.pause();
+      setIsPlaying(false);
+    });
+  }, [fadeOut]);
 
   const seek = useCallback((time: number) => {
     const audio = audioElRef.current;
@@ -397,25 +443,35 @@ export default function ComparePage() {
     if (mode === compareMode) return;
     const wasPlaying = isPlaying;
     const audio = audioElRef.current;
-    if (audio) {
-      audio.pause();
-    }
-    setIsPlaying(false);
-    setCompareMode(mode);
 
-    const startPos = pointA ?? 0;
-    setCurrentTime(startPos);
+    const doSwitch = () => {
+      if (audio) audio.pause();
+      setIsPlaying(false);
+      setCompareMode(mode);
 
-    setTimeout(() => {
-      const a = audioElRef.current;
-      if (a && a.readyState >= 3) {
-        a.currentTime = startPos;
-        if (wasPlaying) {
-          a.play().then(() => setIsPlaying(true)).catch(() => {});
+      const startPos = pointA ?? 0;
+      setCurrentTime(startPos);
+
+      setTimeout(() => {
+        const a = audioElRef.current;
+        if (a && a.readyState >= 3) {
+          a.currentTime = startPos;
+          if (wasPlaying) {
+            a.play().then(() => {
+              setIsPlaying(true);
+              fadeIn(50);
+            }).catch(() => {});
+          }
         }
-      }
-    }, 300);
-  }, [compareMode, isPlaying, pointA]);
+      }, 200);
+    };
+
+    if (wasPlaying && gainNodeRef.current) {
+      fadeOut(40).then(doSwitch);
+    } else {
+      doSwitch();
+    }
+  }, [compareMode, isPlaying, pointA, fadeOut, fadeIn]);
 
   const setMarkA = useCallback(() => {
     setPointA(currentTime);
@@ -437,6 +493,27 @@ export default function ComparePage() {
     abLoopRef.current = false;
   }, []);
 
+  const confirmEditA = useCallback(() => {
+    const t = parseTimeInput(editAVal);
+    if (t !== null && t >= 0 && t <= (duration || Infinity)) {
+      setPointA(t);
+      if (pointB !== null && t >= pointB) {
+        setPointB(null);
+        abLoopRef.current = false;
+      }
+    }
+    setEditingA(false);
+  }, [editAVal, duration, pointB]);
+
+  const confirmEditB = useCallback(() => {
+    const t = parseTimeInput(editBVal);
+    if (t !== null && t >= 0 && t <= (duration || Infinity) && pointA !== null && t > pointA) {
+      setPointB(t);
+      abLoopRef.current = true;
+    }
+    setEditingB(false);
+  }, [editBVal, duration, pointA]);
+
   const selectTask = useCallback((id: string) => {
     setSearchParams({ taskId: id });
   }, [setSearchParams]);
@@ -454,8 +531,24 @@ export default function ComparePage() {
     };
   }, []);
 
+  useEffect(() => {
+    if (isPlaying) {
+      let lastTs = performance.now();
+      const spin = (now: number) => {
+        const dt = (now - lastTs) / 1000;
+        lastTs = now;
+        vinylAngleRef.current = (vinylAngleRef.current + dt * 33.3) % 360;
+        vinylAnimRef.current = requestAnimationFrame(spin);
+      };
+      vinylAnimRef.current = requestAnimationFrame(spin);
+      return () => {
+        if (vinylAnimRef.current) cancelAnimationFrame(vinylAnimRef.current);
+      };
+    }
+  }, [isPlaying]);
+
   const modeLabel: Record<CompareMode, string> = { original: '原始音频', repaired: '修复后' };
-  const modeColor: Record<CompareMode, string> = { original: '#6B7280', repaired: '#00D9FF' };
+  const modeColor: Record<CompareMode, string> = { original: '#9CA3AF', repaired: '#00D9FF' };
   const modeIcon: Record<CompareMode, string> = {
     original: 'M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3',
     repaired: 'M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z',
@@ -470,6 +563,106 @@ export default function ComparePage() {
     const bitDepth = mode === 'repaired' ? 24 : (taskInfo?.original_bit_depth as number || 16);
     const sizeMB = (dur * sr * ch * (bitDepth / 8)) / (1024 * 1024);
     return { sampleRate: sr, channels: ch, duration: dur, bitDepth, sizeMB };
+  };
+
+  const vinylSize = 140;
+
+  const renderVinyl = () => {
+    const color = modeColor[compareMode];
+    return (
+      <div className="flex flex-col items-center">
+        <div className="relative" style={{ width: vinylSize, height: vinylSize }}>
+          <svg
+            width={vinylSize}
+            height={vinylSize}
+            viewBox={`0 0 ${vinylSize} ${vinylSize}`}
+            style={{
+              transform: `rotate(${vinylAngleRef.current}deg)`,
+              transition: isPlaying ? 'none' : 'transform 0.5s ease-out',
+            }}
+          >
+            <defs>
+              <radialGradient id="vinylGrad" cx="50%" cy="50%" r="50%">
+                <stop offset="0%" stopColor="#1a1a1a" />
+                <stop offset="15%" stopColor="#111" />
+                <stop offset="30%" stopColor="#1a1a1a" />
+                <stop offset="45%" stopColor="#111" />
+                <stop offset="55%" stopColor="#1a1a1a" />
+                <stop offset="70%" stopColor="#111" />
+                <stop offset="85%" stopColor="#1a1a1a" />
+                <stop offset="100%" stopColor="#0a0a0a" />
+              </radialGradient>
+              <radialGradient id="labelGrad" cx="50%" cy="50%" r="50%">
+                <stop offset="0%" stopColor={color} stopOpacity="0.3" />
+                <stop offset="100%" stopColor={color} stopOpacity="0.1" />
+              </radialGradient>
+            </defs>
+            <circle cx={vinylSize / 2} cy={vinylSize / 2} r={vinylSize / 2} fill="url(#vinylGrad)" />
+            {[0.35, 0.42, 0.50, 0.58, 0.66, 0.74, 0.82, 0.90].map((r, i) => (
+              <circle
+                key={i}
+                cx={vinylSize / 2}
+                cy={vinylSize / 2}
+                r={vinylSize * r / 2}
+                fill="none"
+                stroke="rgba(255,255,255,0.04)"
+                strokeWidth="0.5"
+              />
+            ))}
+            <circle cx={vinylSize / 2} cy={vinylSize / 2} r={vinylSize * 0.22} fill="url(#labelGrad)" />
+            <circle cx={vinylSize / 2} cy={vinylSize / 2} r={vinylSize * 0.22} fill="none" stroke={color} strokeOpacity="0.3" strokeWidth="0.5" />
+            <circle cx={vinylSize / 2} cy={vinylSize / 2} r={3} fill="#333" />
+            <circle cx={vinylSize / 2} cy={vinylSize / 2} r={1.5} fill="#555" />
+          </svg>
+
+          <button
+            onClick={isPlaying ? pause : play}
+            disabled={!audioReady}
+            className="absolute inset-0 flex items-center justify-center group"
+          >
+            <div className={`w-14 h-14 rounded-full flex items-center justify-center transition-all duration-300 ${
+              isPlaying
+                ? 'bg-black/60 backdrop-blur-sm opacity-0 group-hover:opacity-100'
+                : 'bg-black/50 backdrop-blur-sm'
+            }`}>
+              {isPlaying ? (
+                <svg className="w-6 h-6 text-white/90" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" />
+                </svg>
+              ) : (
+                <svg className="w-6 h-6 text-white/90 ml-0.5" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M8 5v14l11-7z" />
+                </svg>
+              )}
+            </div>
+          </button>
+
+          <div
+            className="absolute pointer-events-none"
+            style={{
+              top: -8,
+              right: -12,
+              width: 4,
+              height: vinylSize * 0.55,
+              transformOrigin: `2px ${vinylSize * 0.55}px`,
+              transform: isPlaying ? 'rotate(-25deg)' : 'rotate(-55deg)',
+              transition: 'transform 0.4s ease-out',
+            }}
+          >
+            <div className="w-1 h-full bg-gradient-to-b from-gray-400 via-gray-500 to-gray-600 rounded-full shadow-md"
+              style={{ marginLeft: 2 }}
+            />
+            <div className="w-3 h-3 rounded-full bg-gray-400 absolute -top-1 left-1/2 -translate-x-1/2 shadow" />
+          </div>
+        </div>
+
+        <div className="mt-2 text-center">
+          <span className="text-xs font-medium" style={{ color }}>
+            {modeLabel[compareMode]}
+          </span>
+        </div>
+      </div>
+    );
   };
 
   const renderTaskList = () => (
@@ -564,7 +757,6 @@ export default function ComparePage() {
 
         <div className="grid grid-cols-2 gap-3 mb-6">
           {(['original', 'repaired'] as CompareMode[]).map((mode) => {
-            const buf = mode === 'original' ? originalBuffer : repairedBuffer;
             const isLoading = mode === 'original' ? originalLoading : repairedLoading;
             const loadError = mode === 'original' ? originalError : repairedError;
             const info = getBufferInfo(mode);
@@ -640,103 +832,145 @@ export default function ComparePage() {
           })}
         </div>
 
-        <div className="bg-gradient-to-br from-primary/90 to-dark/90 rounded-2xl p-4 border border-secondary/30 shadow-xl shadow-black/20">
-          <div className="flex items-center justify-center gap-3">
-            <button
-              onClick={isPlaying ? pause : play}
-              disabled={!audioReady}
-              className="w-12 h-12 rounded-full flex items-center justify-center transition-all duration-200 bg-gradient-to-r from-secondary to-accent hover:scale-110 hover:shadow-lg hover:shadow-secondary/40 active:scale-95 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:scale-100 shrink-0"
-            >
-              {isPlaying ? (
-                <svg className="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 24 24">
-                  <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" />
-                </svg>
-              ) : (
-                <svg className="w-5 h-5 text-white ml-0.5" fill="currentColor" viewBox="0 0 24 24">
-                  <path d="M8 5v14l11-7z" />
-                </svg>
-              )}
-            </button>
+        <div className="bg-gradient-to-br from-[#0d0d12] to-[#08080c] rounded-2xl p-6 border border-white/5 shadow-2xl shadow-black/40">
+          <div className="flex items-center gap-6">
+            {renderVinyl()}
 
-            <div className="flex-1 min-w-0">
-              <div className="text-xs text-gray-400 mb-1 text-center">
-                {!audioReady ? '缓冲中...' : `${formatTime(currentTime)} / ${formatTime(duration)}`}
-              </div>
-              <div className="relative">
-                <input
-                  type="range"
-                  min={0}
-                  max={duration || 0}
-                  step={0.01}
-                  value={currentTime}
-                  onChange={(e) => seek(parseFloat(e.target.value))}
-                  disabled={!audioReady}
-                  className="w-full h-1.5 bg-gray-700 rounded-full appearance-none cursor-pointer disabled:opacity-30 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:shadow-md [&::-webkit-slider-runnable-track]:rounded-full"
-                  style={{
-                    background: audioReady
-                      ? `linear-gradient(to right, ${modeColor[compareMode]} ${(currentTime / (duration || 1)) * 100}%, #374151 ${(currentTime / (duration || 1)) * 100}%)`
-                      : undefined,
-                  }}
-                />
-                {pointA !== null && (
-                  <div
-                    className="absolute top-0 w-0.5 h-1.5 bg-green-400 rounded-full pointer-events-none"
-                    style={{ left: `${(pointA / (duration || 1)) * 100}%` }}
-                  />
-                )}
-                {pointB !== null && (
-                  <div
-                    className="absolute top-0 w-0.5 h-1.5 bg-red-400 rounded-full pointer-events-none"
-                    style={{ left: `${(pointB / (duration || 1)) * 100}%` }}
-                  />
-                )}
-                {pointA !== null && pointB !== null && (
-                  <div
-                    className="absolute top-0 h-1.5 bg-yellow-400/10 pointer-events-none"
+            <div className="flex-1 min-w-0 space-y-4">
+              <div>
+                <div className="text-xs text-gray-400 mb-1.5 text-center font-mono tracking-wider">
+                  {!audioReady ? '缓冲中...' : `${formatTime(currentTime)} / ${formatTime(duration)}`}
+                </div>
+                <div className="relative">
+                  <input
+                    type="range"
+                    min={0}
+                    max={duration || 0}
+                    step={0.01}
+                    value={currentTime}
+                    onChange={(e) => seek(parseFloat(e.target.value))}
+                    disabled={!audioReady}
+                    className="w-full h-1.5 bg-gray-800 rounded-full appearance-none cursor-pointer disabled:opacity-30 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:shadow-md [&::-webkit-slider-runnable-track]:rounded-full"
                     style={{
-                      left: `${(pointA / (duration || 1)) * 100}%`,
-                      width: `${((pointB - pointA) / (duration || 1)) * 100}%`,
+                      background: audioReady
+                        ? `linear-gradient(to right, ${modeColor[compareMode]} ${(currentTime / (duration || 1)) * 100}%, #1f2937 ${(currentTime / (duration || 1)) * 100}%)`
+                        : undefined,
                     }}
                   />
+                  {pointA !== null && (
+                    <div
+                      className="absolute top-0 w-0.5 h-1.5 bg-green-400 rounded-full pointer-events-none"
+                      style={{ left: `${(pointA / (duration || 1)) * 100}%` }}
+                    />
+                  )}
+                  {pointB !== null && (
+                    <div
+                      className="absolute top-0 w-0.5 h-1.5 bg-red-400 rounded-full pointer-events-none"
+                      style={{ left: `${(pointB / (duration || 1)) * 100}%` }}
+                    />
+                  )}
+                  {pointA !== null && pointB !== null && (
+                    <div
+                      className="absolute top-0 h-1.5 bg-yellow-400/10 pointer-events-none rounded"
+                      style={{
+                        left: `${(pointA / (duration || 1)) * 100}%`,
+                        width: `${((pointB - pointA) / (duration || 1)) * 100}%`,
+                      }}
+                    />
+                  )}
+                </div>
+              </div>
+
+              <div className="flex items-center justify-center gap-2">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-green-400 text-xs font-bold w-3">A</span>
+                  {editingA ? (
+                    <input
+                      type="text"
+                      value={editAVal}
+                      onChange={(e) => setEditAVal(e.target.value)}
+                      onBlur={confirmEditA}
+                      onKeyDown={(e) => { if (e.key === 'Enter') confirmEditA(); if (e.key === 'Escape') setEditingA(false); }}
+                      placeholder="0:00.0"
+                      className="w-16 px-1.5 py-0.5 text-xs bg-black/40 border border-green-500/30 rounded text-green-400 font-mono text-center focus:outline-none focus:border-green-400/60"
+                      autoFocus
+                    />
+                  ) : (
+                    <button
+                      onClick={() => {
+                        if (pointA === null) {
+                          setMarkA();
+                        } else {
+                          setEditingA(true);
+                          setEditAVal(formatTimePrecise(pointA));
+                        }
+                      }}
+                      disabled={!audioReady}
+                      className={`px-2 py-0.5 rounded text-xs font-mono transition-colors ${
+                        pointA !== null
+                          ? 'bg-green-500/15 text-green-400 border border-green-500/25 hover:bg-green-500/25'
+                          : 'bg-white/5 text-gray-400 border border-white/10 hover:bg-white/10'
+                      } disabled:opacity-30 disabled:cursor-not-allowed`}
+                    >
+                      {pointA !== null ? formatTimePrecise(pointA) : '设置'}
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-1.5">
+                  <span className="text-red-400 text-xs font-bold w-3">B</span>
+                  {editingB ? (
+                    <input
+                      type="text"
+                      value={editBVal}
+                      onChange={(e) => setEditBVal(e.target.value)}
+                      onBlur={confirmEditB}
+                      onKeyDown={(e) => { if (e.key === 'Enter') confirmEditB(); if (e.key === 'Escape') setEditingB(false); }}
+                      placeholder="0:00.0"
+                      className="w-16 px-1.5 py-0.5 text-xs bg-black/40 border border-red-500/30 rounded text-red-400 font-mono text-center focus:outline-none focus:border-red-400/60"
+                      autoFocus
+                    />
+                  ) : (
+                    <button
+                      onClick={() => {
+                        if (pointA === null) return;
+                        if (pointB === null) {
+                          setMarkB();
+                        } else {
+                          setEditingB(true);
+                          setEditBVal(formatTimePrecise(pointB));
+                        }
+                      }}
+                      disabled={!audioReady || pointA === null}
+                      className={`px-2 py-0.5 rounded text-xs font-mono transition-colors ${
+                        pointB !== null
+                          ? 'bg-red-500/15 text-red-400 border border-red-500/25 hover:bg-red-500/25'
+                          : 'bg-white/5 text-gray-400 border border-white/10 hover:bg-white/10'
+                      } disabled:opacity-30 disabled:cursor-not-allowed`}
+                    >
+                      {pointB !== null ? formatTimePrecise(pointB) : '设置'}
+                    </button>
+                  )}
+                </div>
+
+                {abLoopRef.current && (
+                  <span className="text-yellow-400 text-xs flex items-center gap-1">
+                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    循环
+                  </span>
+                )}
+                {(pointA !== null || pointB !== null) && (
+                  <button
+                    onClick={clearAB}
+                    className="px-2 py-0.5 rounded text-xs bg-white/5 text-gray-500 border border-white/10 hover:bg-white/10 hover:text-gray-300 transition-colors"
+                  >
+                    清除
+                  </button>
                 )}
               </div>
             </div>
-          </div>
-
-          <div className="flex items-center justify-center gap-2 mt-3">
-            <button
-              onClick={setMarkA}
-              disabled={!audioReady}
-              className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${
-                pointA !== null
-                  ? 'bg-green-500/20 text-green-400 border border-green-500/30'
-                  : 'bg-white/5 text-gray-400 border border-white/10 hover:bg-white/10'
-              } disabled:opacity-30 disabled:cursor-not-allowed`}
-            >
-              A{pointA !== null ? ` ${formatTimePrecise(pointA)}` : ''}
-            </button>
-            <button
-              onClick={setMarkB}
-              disabled={!audioReady || pointA === null}
-              className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${
-                pointB !== null
-                  ? 'bg-red-500/20 text-red-400 border border-red-500/30'
-                  : 'bg-white/5 text-gray-400 border border-white/10 hover:bg-white/10'
-              } disabled:opacity-30 disabled:cursor-not-allowed`}
-            >
-              B{pointB !== null ? ` ${formatTimePrecise(pointB)}` : ''}
-            </button>
-            {abLoopRef.current && (
-              <span className="text-yellow-400 text-xs">循环</span>
-            )}
-            {(pointA !== null || pointB !== null) && (
-              <button
-                onClick={clearAB}
-                className="px-2 py-1 rounded text-xs bg-white/5 text-gray-500 border border-white/10 hover:bg-white/10 hover:text-gray-300 transition-colors"
-              >
-                清除
-              </button>
-            )}
           </div>
         </div>
 
