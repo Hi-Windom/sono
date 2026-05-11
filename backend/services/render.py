@@ -2,6 +2,7 @@ import gc
 import numpy as np
 
 from services.audio_loader import load_audio_with_fallback
+from services.repair.repair_v2_4.spectral_superres import hifi_spectral_superresolution
 
 
 def _harmonic_enhance(y, sr, amount=0.15):
@@ -198,8 +199,7 @@ def render_output(input_path, output_path, target_sr, bit_depth, progress_callba
 
             if progress_callback:
                 progress_callback(0.5, "频谱超分增强...")
-            # 上采样后的频谱超分增强
-            y = _spectral_superres_upsample(y, sr, amount=0.35)
+            y = hifi_spectral_superresolution(y, sr, amount=0.35)
 
             if progress_callback:
                 progress_callback(0.75, "谐波增强...")
