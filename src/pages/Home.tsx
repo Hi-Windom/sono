@@ -22,6 +22,7 @@ export default function Home() {
     isDecodingAudio,
     processingProgress,
     processingStep,
+    processingSource,
     params,
     audioAnalysis,
     selectedMode,
@@ -98,7 +99,18 @@ export default function Home() {
           <div className="container mx-auto px-4 max-w-7xl py-2">
             <div className="flex items-center gap-3">
               <div className="w-4 h-4 bg-gradient-to-r from-cyan-500 to-purple-500 rounded-full animate-spin flex-shrink-0" />
-              <span className="text-cyan-400 text-sm truncate">{processingStep || '正在处理音频...'}</span>
+              <span className="text-cyan-400 text-sm truncate flex items-center gap-2">
+                {processingSource && (
+                  <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium flex-shrink-0 ${
+                    processingSource === 'backend'
+                      ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                      : 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
+                  }`}>
+                    {processingSource === 'backend' ? '后端' : '浏览器'}
+                  </span>
+                )}
+                {processingStep || '正在处理音频...'}
+              </span>
               <div className="flex-1 min-w-0">
                 <div className="w-full h-1.5 bg-gray-700 rounded-full overflow-hidden">
                   <div

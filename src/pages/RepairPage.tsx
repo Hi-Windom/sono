@@ -26,6 +26,7 @@ export default function RepairPage() {
     isDecodingAudio,
     processingProgress,
     processingStep,
+    processingSource,
     params,
     audioAnalysis,
     selectedMode,
@@ -215,7 +216,16 @@ export default function RepairPage() {
           <div className="container mx-auto px-4 max-w-7xl py-2">
             <div className="flex items-center gap-3">
               <div className={`w-4 h-4 rounded-full animate-spin flex-shrink-0 ${isTaskStuck ? 'bg-yellow-500' : 'bg-gradient-to-r from-cyan-500 to-purple-500'}`} />
-              <span className={`text-sm truncate ${isTaskStuck ? 'text-yellow-400' : 'text-cyan-400'}`}>
+              <span className={`text-sm truncate flex items-center gap-2 ${isTaskStuck ? 'text-yellow-400' : 'text-cyan-400'}`}>
+                {processingSource && (
+                  <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium flex-shrink-0 ${
+                    processingSource === 'backend'
+                      ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                      : 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
+                  }`}>
+                    {processingSource === 'backend' ? '后端' : '浏览器'}
+                  </span>
+                )}
                 {isTaskStuck ? '任务可能已卡住...' : (processingStep || '正在处理音频...')}
               </span>
               {queueStatus && queueStatus.detecting + queueStatus.repairing > 0 && (

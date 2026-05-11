@@ -150,6 +150,7 @@ export function useAudioProcessor() {
   const [isDecodingAudio, setIsDecodingAudio] = useState(false);
   const [processingProgress, setProcessingProgress] = useState(0);
   const [processingStep, setProcessingStep] = useState('');
+  const [processingSource, setProcessingSource] = useState<'backend' | 'browser' | null>(null);
   const [isRenderLoading, setIsRenderLoading] = useState(false);
   const [fileHash, setFileHash] = useState<string | null>(null);
   const [params, setParams] = useState<AIRepairParams>(savedSettings.aiRepairParams);
@@ -1312,7 +1313,8 @@ export function useAudioProcessor() {
               onProgress: (event) => {
                 backendProg.value = 0.1 + event.progress * 0.8;
                 updateCombinedProgress('backend-ws');
-                setProcessingStep(`[后端] ${event.step}`);
+                setProcessingSource('backend');
+                setProcessingStep(event.step);
               },
               onError: reject,
               onComplete: resolve,
@@ -1348,7 +1350,8 @@ export function useAudioProcessor() {
         const msg = err instanceof Error ? err.message : String(err);
         console.warn(`[applySettings] 后端修复失败: ${msg}`);
         setBackendError(msg);
-        setProcessingStep('[后端] 修复失败: ' + msg);
+        setProcessingSource('backend');
+        setProcessingStep('修复失败: ' + msg);
         setBackendAvailable(false);
         return null;
       }
@@ -1357,7 +1360,8 @@ export function useAudioProcessor() {
     const browserRepairPromise = enableBrowserRepair ? (async () => {
       try {
         writeLog(`[browser] 开始修复`);
-        setProcessingStep('[浏览器] 准备修复...');
+        setProcessingSource('browser');
+        setProcessingStep('准备修复...');
         const { enhanceHighFrequencies } = await import('../utils/highFrequencyEnhancer');
 
         // 修复流程不自动触发AI检测，由用户手动触发
@@ -1385,7 +1389,8 @@ export function useAudioProcessor() {
         const repaired = await repairWithWorker(audioBuffer, workerParams, (progress, step) => {
           browserProg.value = 0.05 + progress * 0.8;
           updateCombinedProgress('browser-worker');
-          setProcessingStep(`[浏览器] ${step}`);
+          setProcessingSource('browser');
+          setProcessingStep(step);
         });
 
         browserProg.value = 0.85;
@@ -1396,13 +1401,15 @@ export function useAudioProcessor() {
 
         if (repaired.sampleRate !== targetSampleRate) {
           if (targetSampleRate === 96000) {
-            setProcessingStep('[浏览器] 96kHz高频增强重采样...');
+            setProcessingSource('browser');
+            setProcessingStep('96kHz高频增强重采样...');
             finalBuffer = await enhanceHighFrequencies(repaired, (progress) => {
               browserProg.value = 0.85 + progress * 0.08;
               updateCombinedProgress('browser-enhance');
             });
           } else {
-            setProcessingStep(`[浏览器] 重采样到 ${targetSampleRate / 1000} kHz...`);
+            setProcessingSource('browser');
+            setProcessingStep(`重采样到 ${targetSampleRate / 1000} kHz...`);
             const targetLength = Math.ceil(repaired.length * (targetSampleRate / repaired.sampleRate));
             const offlineContext = new OfflineAudioContext(
               repaired.numberOfChannels,
@@ -1422,7 +1429,8 @@ export function useAudioProcessor() {
         browserProg.value = 0.95;
         updateCombinedProgress('browser-pre-finish');
 
-        setProcessingStep('[浏览器] 完成');
+        setProcessingSource('browser');
+        setProcessingStep('完成');
         // 修复后不再自动触发AI检测，由用户手动触发
         // setBrowserAIDetection(checkAISong(finalBuffer));
 
@@ -1620,6 +1628,7 @@ export function useAudioProcessor() {
     setIsProcessing(false);
     setTimeout(() => {
       setProcessingStep('');
+      setProcessingSource(null);
       setProcessingProgress(0);
     }, 2000);
   }, [audioBuffer, audioFile, params, processingOptions, originalAIDetection, loadAudioFromUrl, repairWithWorker, wavInfo, startStreamingPlayback, detectorVersion, enableBrowserRepair]);
@@ -2324,6 +2333,7 @@ export function useAudioProcessor() {
     try {
       writeLog(`[renderAndDownload] 开始渲染: sr=${opts.sampleRate} bd=${opts.bitDepth}`);
       setIsProcessing(true); // 确保进度条显示
+      setProcessingSource('backend');
       setProcessingStep('渲染交付规格...');
       setProcessingProgress(0);
       setIsRenderLoading(true);
@@ -2347,6 +2357,7 @@ export function useAudioProcessor() {
         output_bit_depth: renderRes.render_result!.output_bit_depth,
       } : null);
       setProcessingStep('');
+      setProcessingSource(null);
       setProcessingProgress(0);
       setIsProcessing(false);
       return {
@@ -2366,6 +2377,7 @@ export function useAudioProcessor() {
       setIsProcessing(false);
       writeLog(`[renderAndDownload] 渲染失败: ${renderErr}`);
       setProcessingStep('');
+      setProcessingSource(null);
       setProcessingProgress(0);
       return null;
     }
@@ -2542,6 +2554,7 @@ export function useAudioProcessor() {
     isDecodingAudio,
     processingProgress,
     processingStep,
+    processingSource,
     params,
     audioAnalysis,
     selectedMode,
