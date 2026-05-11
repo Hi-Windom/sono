@@ -244,10 +244,12 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
     quality_mode = params.get("quality", "standard")
     is_hifi = quality_mode == "hifi"
 
+    # v2.4 默认保留原始采样率，只在内存不足时才下采样
     if MOBILE_MODE:
         working_sr = sr
     else:
-        working_sr = DESKTOP_WORKING_SR
+        # 优先使用原始采样率，除非超出内存限制
+        working_sr = original_sr
 
     from services.memory_guard import check_memory_before_repair, should_use_float32
     working_sr = check_memory_before_repair(

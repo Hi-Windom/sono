@@ -100,7 +100,21 @@ export function DownloadModal({
       }, 5000);
       console.log('[DOWNLOAD] Download triggered successfully');
     } catch (e) {
-      console.error('[DOWNLOAD] Download failed:', e);
+      console.error('[DOWNLOAD] Download failed, trying fallback method:', e);
+      // 备选方案：直接使用 window.open 或 a 标签
+      try {
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = fallbackFilename || 'audio.wav';
+        a.style.display = 'none';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        console.log('[DOWNLOAD] Fallback download triggered');
+      } catch (fallbackErr) {
+        console.error('[DOWNLOAD] Fallback also failed:', fallbackErr);
+        alert('下载失败，请尝试刷新页面后重试');
+      }
     } finally {
       setDownloading(false);
     }
