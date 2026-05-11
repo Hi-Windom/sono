@@ -384,7 +384,7 @@ def _run_render(task_id, input_path, output_path, target_sr, bit_depth, render_f
             render_filename=render_filename,
             render_result=result,
         )
-        _ws_send_progress(task_id, {
+        _ws_send_final(task_id, {
             "task_id": task_id,
             "status": "render_completed",
             "progress": 1.0,
@@ -395,7 +395,7 @@ def _run_render(task_id, input_path, output_path, target_sr, bit_depth, render_f
     except Exception as e:
         logger.error(f"[render] 渲染失败 task_id={task_id}: {e}")
         update_task(task_id, status="error", error=str(e), step="渲染失败")
-        _ws_send_progress(task_id, {
+        _ws_send_final(task_id, {
             "task_id": task_id,
             "status": "error",
             "error": str(e),
@@ -476,7 +476,7 @@ async def websocket_task_status(websocket: WebSocket, task_id: str):
         if task.get("error"):
             current["error"] = task["error"]
         await websocket.send_json(current)
-        if task["status"] in ("completed", "detected", "error"):
+        if task.get("status") in ("completed", "detected", "error", "render_completed"):
             await websocket.close()
             return
         
@@ -506,7 +506,7 @@ async def websocket_task_status(websocket: WebSocket, task_id: str):
                 if current_task.get("error"):
                     heartbeat_msg["error"] = current_task["error"]
                 await websocket.send_json(heartbeat_msg)
-                if current_task["status"] in ("completed", "detected", "error"):
+                if current_task["status"] in ("completed", "detected", "error", "render_completed"):
                     await websocket.close()
                     return
     except WebSocketDisconnect:
