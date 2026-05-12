@@ -83,6 +83,7 @@ export default function RepairPage() {
     setHasBeenProcessed,
     setRepairResult,
     setBackendProcessedBuffer,
+    setBackendWaveformPeaks,
     loadAudioFromUrl,
   } = useAudioProcessor();
 
@@ -426,17 +427,7 @@ export default function RepairPage() {
             <button
               onClick={() => {
                 if (isDualTrackMode) {
-                  setIsDualTrackMode(false);
-                  setDualTrackFilesSelected(false);
-                  setDualTrackTaskId(null);
-                  setDualTrackVocalTaskId(null);
-                  setDualTrackAccompanimentTaskId(null);
-                  setDualTrackVocalFile(null);
-                  setDualTrackAccompanimentFile(null);
-                  setDualTrackHasBeenProcessed(false);
-                  setDualTrackDownloadUrl(null);
-                  setDualTrackRepairResult(null);
-                  stopDualTrackPolling();
+                  handleSwitchToSingleTrack();
                 }
               }}
               className={`flex-1 py-2.5 px-6 rounded-lg font-medium transition ${
@@ -451,11 +442,6 @@ export default function RepairPage() {
               onClick={() => {
                 if (!isDualTrackMode) {
                   setIsDualTrackMode(true);
-                  setAudioFile(null);
-                  setAudioBuffer(null);
-                  setWavInfo(null);
-                  setHasBeenProcessed(false);
-                  setTaskId(null);
                 }
               }}
               className={`flex-1 py-2.5 px-6 rounded-lg font-medium transition ${
@@ -480,6 +466,67 @@ export default function RepairPage() {
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
             <div className="lg:col-span-7 space-y-6">
+              {isDualTrackMode ? (
+                <>
+                  <div className="bg-gradient-to-br from-pink-500/10 to-dark/60 border border-pink-500/20 rounded-xl p-5">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-3 min-w-0 flex-1">
+                        <div className="w-10 h-10 bg-pink-500/20 rounded-lg flex items-center justify-center border border-pink-400/20 shrink-0">
+                          <svg className="w-5 h-5 text-pink-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>
+                        </div>
+                        <div className="min-w-0">
+                          <h3 className="text-white font-semibold truncate">🎤 {dualTrackVocalFile?.name || '人声轨'}</h3>
+                          <p className="text-gray-400 text-sm">{((dualTrackVocalFile?.size || 0) / (1024 * 1024)).toFixed(2)} MB{dualTrackHasBeenProcessed && <span className="text-green-400 ml-2">✓ 已修复</span>}</p>
+                        </div>
+                      </div>
+                      <label className="flex items-center gap-1.5 px-3 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg cursor-pointer transition text-gray-400 hover:text-white text-sm shrink-0">
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                        替换
+                        <input type="file" accept="audio/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) { setDualTrackVocalFile(f); setDualTrackHasBeenProcessed(false); setDualTrackDownloadUrl(null); } e.target.value = ''; }} />
+                      </label>
+                    </div>
+                  </div>
+                  <div className="bg-gradient-to-br from-purple-500/10 to-dark/60 border border-purple-500/20 rounded-xl p-5">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-3 min-w-0 flex-1">
+                        <div className="w-10 h-10 bg-purple-500/20 rounded-lg flex items-center justify-center border border-purple-400/20 shrink-0">
+                          <svg className="w-5 h-5 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" /></svg>
+                        </div>
+                        <div className="min-w-0">
+                          <h3 className="text-white font-semibold truncate">🎵 {dualTrackAccompanimentFile?.name || '伴奏轨'}</h3>
+                          <p className="text-gray-400 text-sm">{((dualTrackAccompanimentFile?.size || 0) / (1024 * 1024)).toFixed(2)} MB{dualTrackHasBeenProcessed && <span className="text-green-400 ml-2">✓ 已修复</span>}</p>
+                        </div>
+                      </div>
+                      <label className="flex items-center gap-1.5 px-3 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg cursor-pointer transition text-gray-400 hover:text-white text-sm shrink-0">
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                        替换
+                        <input type="file" accept="audio/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) { setDualTrackAccompanimentFile(f); setDualTrackHasBeenProcessed(false); setDualTrackDownloadUrl(null); } e.target.value = ''; }} />
+                      </label>
+                    </div>
+                  </div>
+                  {dualTrackHasBeenProcessed && dualTrackDownloadUrl && (
+                    <button
+                      onClick={() => {
+                        setRenderDownloadUrl(dualTrackDownloadUrl);
+                        setInstantDownloadInfo({
+                          filename: generateExportFilename('dual_track', algorithmVersion, processingOptions.sampleRate, processingOptions.bitDepth, 'dual'),
+                          fileSize: '—',
+                          sampleRate: `${processingOptions.sampleRate / 1000} kHz`,
+                          bitDepth: processingOptions.bitDepth,
+                          channels: 2,
+                          duration: 0,
+                          algorithmVersion: algorithmVersion,
+                        });
+                        setShowDownloadModal(true);
+                      }}
+                      className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-cyan-500/20 to-purple-500/20 hover:from-cyan-500/30 hover:to-purple-500/30 border border-cyan-400/30 hover:border-cyan-400/50 rounded-lg text-cyan-400 text-sm font-medium transition-all w-full justify-center"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                      <span>下载双轨修复结果</span>
+                    </button>
+                  )}
+                </>
+              ) : (
               <div className={`bg-primary/50 border border-white/10 rounded-xl p-6${isDecodingAudio ? ' audio-card-loading' : ''}`}>
                 <div className="flex items-center justify-between mb-4 gap-3">
                   <div className="flex items-center gap-3 min-w-0 flex-1">
@@ -602,6 +649,7 @@ export default function RepairPage() {
                   </div>
                 )}
               </div>
+              )}
 
               {backendError && (
                 <div className="mt-4 p-4 bg-red-500/10 border border-red-500/30 rounded-lg">
