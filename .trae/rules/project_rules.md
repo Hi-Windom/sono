@@ -64,6 +64,29 @@ cd /workspace/backend && SERVE_STATIC=1 python main.py
 - Compatibility layer: `backend/services/librosa_compat.py` (re-exports dsp_utils)
 - librosa is ONLY used in `backend/training/feature_extractor.py` (desktop-only training)
 
+## Web Worker 策略
+
+前端计算密集型任务**必须优先考虑使用 Web Worker**，避免阻塞主线程导致 UI 卡顿。
+
+适合 Worker 的任务特征：
+- 逐样本音频数据处理（解码、分析、编码）
+- 大数组遍历/变换（>1M 次运算）
+- 可脱离 DOM 独立完成的纯计算
+
+不适合 Worker 的任务：
+- 需要 DOM/Canvas API 的操作
+- 已由 requestAnimationFrame 驱动的轻量渲染
+- 异步 I/O 操作（fetch、IndexedDB）
+- 计算量极低（<10ms）的任务
+
+Worker 与缓存协同：
+- 缓存命中时跳过 Worker 计算（避免不必要的通信开销）
+- 缓存未命中时 Worker 异步计算，结果写回缓存
+- Worker 结果不直接写缓存，由主线程负责缓存写入（Worker 无法访问 fetch/IndexedDB）
+
+当前 Worker 使用：
+- `src/workers/audioWorker.ts` — WAV PCM 解码 + 音频分析
+
 ## Memory Optimization (v2.2/v2.3/v2.3a)
 
 Design target: **60min audio @ 4GB RAM** without quality reduction.

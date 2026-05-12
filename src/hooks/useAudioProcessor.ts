@@ -1,9 +1,10 @@
 import { useRef, useState, useCallback, useEffect } from 'react';
-import { AIRepairParams, defaultAIRepairParams, detectAudioIssues, RepairMode } from '../utils/advancedAudioProcessing';
+import { AIRepairParams, defaultAIRepairParams, RepairMode } from '../utils/advancedAudioProcessing';
 import { loadSettings, saveSettings, resetSettings as resetStoredSettings, saveProfileToStorage } from '../utils/settingsStorage';
-import { parseWavHeader, WavInfo, decodeWavPcm } from '../utils/wavParser';
-import { saveSession, loadSession, clearSession } from '../utils/sessionDB';
+import { parseWavHeader, WavInfo } from '../utils/wavParser';
+import { saveSession, loadSession, clearSession, saveAnalysisCache } from '../utils/sessionDB';
 import { computeFileHash } from '../utils/fileHash';
+import { useAudioWorker } from '../workers/useAudioWorker';
 import {
   uploadAudio,
   repairAudio,
@@ -120,6 +121,7 @@ export function generateExportFilename(
 
 export function useAudioProcessor() {
   const savedSettings = loadSettings();
+  const audioWorker = useAudioWorker();
 
   const [audioFile, setAudioFile] = useState<File | null>(null);
   const [audioBuffer, setAudioBuffer] = useState<AudioBuffer | null>(null);
@@ -407,6 +409,7 @@ export function useAudioProcessor() {
   useEffect(() => {
     return () => {
       closeWS();
+      audioWorker.terminate();
     };
   }, []);
 
@@ -546,8 +549,8 @@ export function useAudioProcessor() {
             }
           } catch {}
         }
-        const fastDecoded = decodeWavPcm(context, arrayBuf);
-        const buffer = fastDecoded || await context.decodeAudioData(arrayBuf);
+        const { audioBuffer: workerBuffer, analysis: workerAnalysis } = await audioWorker.decodeAndAnalyze(context, arrayBuf);
+        const buffer = workerBuffer || await context.decodeAudioData(arrayBuf);
 
         setAudioBuffer(buffer);
         setDuration(buffer.duration);
@@ -555,8 +558,7 @@ export function useAudioProcessor() {
         setCurrentTime(0);
         pausedAtRef.current = 0;
 
-        const analysis = detectAudioIssues(buffer);
-        setAudioAnalysis(analysis);
+        if (workerAnalysis) setAudioAnalysis(workerAnalysis);
 
         setTaskId(session.taskId);
         taskIdRef.current = session.taskId;
@@ -786,11 +788,11 @@ export function useAudioProcessor() {
 
     const context = getAudioContext();
     let buffer: AudioBuffer;
-    const fastDecoded = decodeWavPcm(context, arrayBuf);
-    const isNonWavFile = !fastDecoded;
-    if (fastDecoded) {
-      buffer = fastDecoded;
-      writeLog(`[loadAudioFile] WAV PCM快速解码完成`);
+    const workerDecoded = await audioWorker.decodeWav(context, arrayBuf);
+    const isNonWavFile = !workerDecoded;
+    if (workerDecoded) {
+      buffer = workerDecoded;
+      writeLog(`[loadAudioFile] WAV PCM Worker解码完成`);
     } else {
       const decodedWavUrl = `/api/v1/decoded-wav/${hash}`;
       let usedDecodedCache = false;
@@ -799,11 +801,11 @@ export function useAudioProcessor() {
         if (headRes.ok && headRes.headers.get('Content-Length')) {
           writeLog(`[loadAudioFile] 发现后端解码WAV缓存，下载快速解码`);
           const wavBuf = await downloadWithProgress(decodedWavUrl);
-          const fastBuf = decodeWavPcm(context, wavBuf);
-          if (fastBuf) {
-            buffer = fastBuf;
+          const cachedBuf = await audioWorker.decodeWav(context, wavBuf);
+          if (cachedBuf) {
+            buffer = cachedBuf;
             usedDecodedCache = true;
-            writeLog(`[loadAudioFile] 后端解码WAV缓存快速解码完成`);
+            writeLog(`[loadAudioFile] 后端解码WAV缓存Worker解码完成`);
           }
         }
       } catch { /* 解码缓存不可用，继续正常流程 */ }
@@ -842,7 +844,14 @@ export function useAudioProcessor() {
       play();
     }
 
-    const analysis = cachedAnalysis || detectAudioIssues(buffer);
+    let analysis = cachedAnalysis;
+    if (!analysis) {
+      const channelData: Float32Array[] = [];
+      for (let ch = 0; ch < buffer.numberOfChannels; ch++) {
+        channelData.push(buffer.getChannelData(ch));
+      }
+      analysis = await audioWorker.analyzeAudio(channelData, buffer.sampleRate, buffer.numberOfChannels);
+    }
     setAudioAnalysis(analysis);
 
     if (!cachedAnalysis) {
@@ -857,6 +866,13 @@ export function useAudioProcessor() {
           analysis: JSON.stringify(analysis),
         }),
       }).catch(() => { /* 忽略缓存写入失败 */ });
+      saveAnalysisCache({
+        fileHash: hash,
+        fileName: file.name,
+        fileSize: file.size,
+        wavInfo: JSON.stringify(wavHeaderInfo || cachedWavInfo),
+        analysis: JSON.stringify(analysis),
+      }).catch(() => {});
     }
 
     (async () => {
