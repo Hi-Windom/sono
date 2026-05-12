@@ -281,6 +281,82 @@ export async function uploadAudio(file: File, onProgress?: ProgressCallback, fil
   });
 }
 
+export interface DualUploadResponse {
+  task_id: string;
+  vocal_task_id: string;
+  accompaniment_task_id: string;
+  vocal_filename: string;
+  accompaniment_filename: string;
+  vocal_size: number;
+  accompaniment_size: number;
+  vocal_info?: AudioInfo | null;
+  accompaniment_info?: AudioInfo | null;
+}
+
+export async function uploadDualAudio(
+  vocalFile: File,
+  accompanimentFile: File,
+  onProgress?: (loaded: number, total: number, speed: number, type: 'vocal' | 'accompaniment') => void,
+  fileHash?: string
+): Promise<DualUploadResponse> {
+  const url = `${API_BASE}/upload-dual`;
+  log('upload-dual', `POST ${url} vocal=${vocalFile.name} acc=${accompanimentFile.name}`);
+
+  const formData = new FormData();
+  formData.append('vocal_file', vocalFile);
+  formData.append('accompaniment_file', accompanimentFile);
+  if (fileHash) {
+    formData.append('file_hash', fileHash);
+  }
+
+  return new Promise<DualUploadResponse>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', url);
+    xhr.timeout = 300000;
+
+    const startTime = Date.now();
+
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && onProgress) {
+        const elapsed = (Date.now() - startTime) / 1000;
+        const speed = elapsed > 0 ? e.loaded / elapsed : 0;
+        const total = vocalFile.size + accompanimentFile.size;
+        const type = e.loaded <= vocalFile.size ? 'vocal' : 'accompaniment';
+        onProgress(e.loaded, total, speed, type);
+      }
+    };
+
+    xhr.onload = () => {
+      try {
+        const data = JSON.parse(xhr.responseText);
+        if (xhr.status >= 200 && xhr.status < 300) {
+          log('upload-dual', `success task_id=${data.task_id}`);
+          resolve(data);
+        } else {
+          const detail = data.detail || '双轨上传失败';
+          log('upload-dual', `ERROR: ${detail}`);
+          reject(new Error(detail));
+        }
+      } catch {
+        log('upload-dual', `PARSE ERROR`);
+        reject(new Error('双轨上传响应解析失败'));
+      }
+    };
+
+    xhr.onerror = () => {
+      log('upload-dual', `XHR ERROR`);
+      reject(new Error('双轨上传网络错误'));
+    };
+
+    xhr.ontimeout = () => {
+      log('upload-dual', 'TIMEOUT');
+      reject(new Error('双轨上传超时(300s)，请检查网络或后端是否正常运行'));
+    };
+
+    xhr.send(formData);
+  });
+}
+
 export interface DetectAudioResponse {
   task_id: string;
   status: string;
@@ -342,6 +418,86 @@ export async function repairAudio(taskId: string, params: AIRepairParams, option
     return data;
   } catch (e) {
     log('repair', `FETCH ERROR: ${e instanceof Error ? e.message : String(e)}`);
+    throw e;
+  }
+}
+
+export interface DualRepairResponse {
+  task_id: string;
+  status: string;
+}
+
+export async function repairDualAudio(
+  mainTaskId: string,
+  vocalTaskId: string,
+  accompanimentTaskId: string,
+  params: AIRepairParams,
+  options: ProcessingOptions,
+  algorithmVersion?: string
+): Promise<DualRepairResponse> {
+  const url = `${API_BASE}/repair-dual`;
+  const backendParams = mapParamsToBackend(params, options, algorithmVersion);
+  log('repair-dual', `POST ${url} task_id=${mainTaskId}`);
+
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        task_id: mainTaskId,
+        vocal_task_id: vocalTaskId,
+        accompaniment_task_id: accompanimentTaskId,
+        params: backendParams,
+      }),
+    });
+
+    log('repair-dual', `response status=${res.status} ok=${res.ok}`);
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: '双轨修复请求失败' }));
+      log('repair-dual', `ERROR: ${err.detail}`);
+      throw new Error(err.detail || '双轨修复请求失败');
+    }
+
+    const data = await res.json();
+    log('repair-dual', `success: task_id=${data.task_id}`);
+    return data;
+  } catch (e) {
+    log('repair-dual', `FETCH ERROR: ${e instanceof Error ? e.message : String(e)}`);
+    throw e;
+  }
+}
+
+export async function getTrackStatus(taskId: string): Promise<{
+  task_id: string;
+  status: string;
+  progress: number;
+  step: string;
+  vocal?: { task_id: string; status: string; progress: number };
+  accompaniment?: { task_id: string; status: string; progress: number };
+}> {
+  const url = `${API_BASE}/tracks/${taskId}`;
+
+  try {
+    const res = await fetch(url);
+
+    if (!res.ok) {
+      let detail = `获取轨道状态失败 (HTTP ${res.status})`;
+      try {
+        const body = await res.json();
+        if (body.detail) detail = body.detail;
+      } catch {}
+      log('track-status', `ERROR: ${detail} url=${url}`);
+      throw new Error(detail);
+    }
+
+    const data = await res.json();
+    log('track-status', `task_id=${taskId} status=${data.status}`);
+    return data;
+  } catch (e) {
+    if (!(e instanceof Error && e.message.includes('HTTP'))) {
+      log('track-status', `ERROR: ${e instanceof Error ? e.message : String(e)}`);
+    }
     throw e;
   }
 }

@@ -46,7 +46,7 @@ def estimate_repair_memory_bytes(n_samples, n_channels, sr, working_sr, algorith
     n_fft = 2048
     hop_length = 512
     n_frames = upsampled_samples // hop_length + 1
-    has_streaming = algorithm_version in ("v2.2", "v2.3", "v2.3a", "v2.4", "v2.4a")
+    has_streaming = algorithm_version in ("v2.2", "v2.3", "v2.3a", "v2.4", "v2.4a", "v3.0", "v3.0a")
 
     if has_streaming:
         stft_bytes = (n_fft // 2 + 1) * (working_sr * 10 // hop_length + 1) * 16
@@ -59,6 +59,10 @@ def estimate_repair_memory_bytes(n_samples, n_channels, sr, working_sr, algorith
         peak_temp += upsampled_samples * elem_size * 0.5
     elif algorithm_version in ("v2.2a", "v2.3a", "v2.4a"):
         peak_temp += upsampled_samples * elem_size * 0.15
+    elif algorithm_version == "v3.0":
+        peak_temp += upsampled_samples * elem_size * 1.0
+    elif algorithm_version == "v3.0a":
+        peak_temp += upsampled_samples * elem_size * 0.5
     elif algorithm_version in ("v1.0", "v1.1", "v1.2"):
         peak_temp += upsampled_samples * elem_size * 0.3
     elif algorithm_version in ("v2.0", "v2.1"):

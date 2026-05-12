@@ -255,6 +255,72 @@ async def upload_audio(file: UploadFile = File(...), file_hash: str = Form("")):
         "audio_info": audio_info,
     }
 
+@router.post("/upload-dual")
+async def upload_dual_audio(
+    vocal_file: UploadFile = File(...),
+    accompaniment_file: UploadFile = File(...),
+    file_hash: str = Form(""),
+):
+    vocal_ext = os.path.splitext(vocal_file.filename or '')[1].lower()
+    accompaniment_ext = os.path.splitext(accompaniment_file.filename or '')[1].lower()
+    if vocal_ext not in ALLOWED_EXTENSIONS:
+        raise HTTPException(status_code=400, detail=f"不支持的人声文件格式: {vocal_ext}")
+    if accompaniment_ext not in ALLOWED_EXTENSIONS:
+        raise HTTPException(status_code=400, detail=f"不支持的伴奏文件格式: {accompaniment_ext}")
+
+    vocal_task_id = generate_task_id()
+    accompaniment_task_id = generate_task_id()
+    main_task_id = generate_task_id()
+
+    vocal_upload_path = os.path.join(UPLOAD_DIR, f"{vocal_task_id}{vocal_ext}")
+    accompaniment_upload_path = os.path.join(UPLOAD_DIR, f"{accompaniment_task_id}{accompaniment_ext}")
+
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+    vocal_content = await vocal_file.read()
+    accompaniment_content = await accompaniment_file.read()
+
+    if len(vocal_content) > MAX_UPLOAD_SIZE:
+        raise HTTPException(status_code=413, detail=f"人声文件过大，最大支持 {MAX_UPLOAD_SIZE // 1024 // 1024}MB")
+    if len(accompaniment_content) > MAX_UPLOAD_SIZE:
+        raise HTTPException(status_code=413, detail=f"伴奏文件过大，最大支持 {MAX_UPLOAD_SIZE // 1024 // 1024}MB")
+
+    with open(vocal_upload_path, "wb") as f:
+        f.write(vocal_content)
+    with open(accompaniment_upload_path, "wb") as f:
+        f.write(accompaniment_content)
+
+    create_task(vocal_task_id, f"vocal_{vocal_file.filename or 'audio'}", vocal_upload_path, {}, file_hash, len(vocal_content))
+    create_task(accompaniment_task_id, f"acc_{accompaniment_file.filename or 'audio'}", accompaniment_upload_path, {}, file_hash, len(accompaniment_content))
+    create_task(main_task_id, f"dual_{vocal_file.filename or 'audio'}", vocal_upload_path, {}, file_hash, len(vocal_content) + len(accompaniment_content))
+
+    logger.info(f"[/upload-dual] main_task_id={main_task_id} vocal={vocal_task_id} acc={accompaniment_task_id}")
+
+    def get_audio_info(path):
+        try:
+            info = miniaudio.get_file_info(path)
+            return {
+                "sample_rate": info.sample_rate,
+                "channels": info.nchannels,
+                "duration": info.duration,
+                "num_frames": info.num_frames,
+            }
+        except Exception:
+            return None
+
+    return {
+        "task_id": main_task_id,
+        "vocal_task_id": vocal_task_id,
+        "accompaniment_task_id": accompaniment_task_id,
+        "vocal_filename": vocal_file.filename,
+        "accompaniment_filename": accompaniment_file.filename,
+        "vocal_size": len(vocal_content),
+        "accompaniment_size": len(accompaniment_content),
+        "vocal_info": get_audio_info(vocal_upload_path),
+        "accompaniment_info": get_audio_info(accompaniment_upload_path),
+    }
+
+
 class DetectRequest(BaseModel):
     task_id: str
     type: str = "original"
@@ -438,6 +504,76 @@ async def repair_audio_endpoint(request: RepairRequest):
     submit_repair_task(request.task_id, audio_path, request.params)
     
     return {"task_id": request.task_id, "status": "pending"}
+
+
+class DualRepairRequest(BaseModel):
+    task_id: str
+    vocal_task_id: str
+    accompaniment_task_id: str
+    params: dict
+
+
+@router.post("/repair-dual")
+async def repair_dual_audio_endpoint(request: DualRepairRequest):
+    vocal_task = get_task(request.vocal_task_id)
+    accompaniment_task = get_task(request.accompaniment_task_id)
+
+    if not vocal_task:
+        raise HTTPException(status_code=404, detail="人声任务不存在")
+    if not accompaniment_task:
+        raise HTTPException(status_code=404, detail="伴奏任务不存在")
+
+    vocal_path = vocal_task.get("original_path")
+    accompaniment_path = accompaniment_task.get("original_path")
+
+    if not vocal_path or not os.path.exists(vocal_path):
+        raise HTTPException(status_code=400, detail="人声音频不存在")
+    if not accompaniment_path or not os.path.exists(accompaniment_path):
+        raise HTTPException(status_code=400, detail="伴奏音频不存在")
+
+    params = request.params.copy()
+    params["vocal_path"] = vocal_path
+    params["accompaniment_path"] = accompaniment_path
+
+    submit_repair_task(request.task_id, vocal_path, params)
+
+    return {"task_id": request.task_id, "status": "pending"}
+
+
+@router.get("/tracks/{task_id}")
+async def get_track_status(task_id: str):
+    main_task = get_task(task_id)
+    if not main_task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    vocal_task_id = main_task.get("vocal_task_id")
+    accompaniment_task_id = main_task.get("accompaniment_task_id")
+
+    result = {
+        "task_id": task_id,
+        "status": main_task.get("status"),
+        "progress": main_task.get("progress", 0),
+        "step": main_task.get("step"),
+    }
+
+    if vocal_task_id:
+        vocal_task = get_task(vocal_task_id)
+        result["vocal"] = {
+            "task_id": vocal_task_id,
+            "status": vocal_task.get("status") if vocal_task else "unknown",
+            "progress": vocal_task.get("progress", 0) if vocal_task else 0,
+        }
+
+    if accompaniment_task_id:
+        accompaniment_task = get_task(accompaniment_task_id)
+        result["accompaniment"] = {
+            "task_id": accompaniment_task_id,
+            "status": accompaniment_task.get("status") if accompaniment_task else "unknown",
+            "progress": accompaniment_task.get("progress", 0) if accompaniment_task else 0,
+        }
+
+    return result
+
 
 class RenderRequest(BaseModel):
     task_id: str

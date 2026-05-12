@@ -938,3 +938,190 @@ class TestMemoryGuard:
         est_streaming = estimate_repair_memory_bytes(n, 2, 44100, 48000, algorithm_version="v2.3")
         est_non_streaming = estimate_repair_memory_bytes(n, 2, 44100, 48000, algorithm_version="v1.1")
         assert est_streaming < est_non_streaming
+
+
+class TestV30DualTrackQuality:
+
+    @pytest.fixture(autouse=True)
+    def import_v30_functions(self):
+        from services.repair.repair_v3_0.core import (
+            _vocal_formant_repair,
+            _vocal_breath_enhance,
+            _instrument_timbre_protect,
+            mix_tracks,
+            _soft_peak_limit,
+        )
+        self._vocal_formant_repair = _vocal_formant_repair
+        self._vocal_breath_enhance = _vocal_breath_enhance
+        self._instrument_timbre_protect = _instrument_timbre_protect
+        self.mix_tracks = mix_tracks
+        self._soft_peak_limit = _soft_peak_limit
+
+    def test_vocal_formant_repair_reduces_sibilance(self):
+        y = generate_speech_like(sr=SR, duration=2.0)
+        y_out = self._vocal_formant_repair(y, SR, 0.5)
+        assert np.all(np.isfinite(y_out)), "Output contains NaN or Inf"
+        assert np.max(np.abs(y_out)) <= 1.0, "Output exceeds clipping threshold"
+
+    def test_vocal_breath_enhance_preserves_signal(self):
+        y = generate_speech_like(sr=SR, duration=2.0)
+        y_out = self._vocal_breath_enhance(y, SR, 0.3)
+        assert np.all(np.isfinite(y_out)), "Output contains NaN or Inf"
+        assert len(y_out) == len(y), "Output length changed"
+
+    def test_instrument_timbre_protect_preserves_content(self):
+        y = generate_multi_tone(sr=SR, duration=2.0)
+        y_out = self._instrument_timbre_protect(y, SR, 0.5)
+        assert np.all(np.isfinite(y_out)), "Output contains NaN or Inf"
+        rms_before = np.sqrt(np.mean(y.astype(np.float64)**2))
+        rms_after = np.sqrt(np.mean(y_out.astype(np.float64)**2))
+        assert 0.1 < rms_after / (rms_before + 1e-10) < 10.0, "RMS changed too much"
+
+    def test_mix_tracks_normalizes_output(self):
+        vocal = generate_speech_like(sr=SR, duration=2.0)
+        accompaniment = generate_multi_tone(sr=SR, duration=2.0)
+        if vocal.ndim == 1:
+            vocal = vocal.reshape(1, -1)
+        if accompaniment.ndim == 1:
+            accompaniment = accompaniment.reshape(1, -1)
+        mixed = self.mix_tracks(vocal, accompaniment, 1.0, 1.0)
+        assert np.max(np.abs(mixed)) <= 1.0, "Mixed output exceeds clipping threshold"
+        assert np.all(np.isfinite(mixed)), "Mixed output contains NaN or Inf"
+
+    def test_mix_tracks_with_different_ratios(self):
+        vocal = generate_speech_like(sr=SR, duration=2.0)
+        accompaniment = generate_multi_tone(sr=SR, duration=2.0)
+        if vocal.ndim == 1:
+            vocal = vocal.reshape(1, -1)
+        if accompaniment.ndim == 1:
+            accompaniment = accompaniment.reshape(1, -1)
+        mixed = self.mix_tracks(vocal, accompaniment, 1.5, 0.5)
+        assert mixed.shape == vocal.shape, "Mixed shape mismatch"
+
+    def test_v30_integration_with_vocal_path(self):
+        from services.repair.repair_v3_0 import repair_audio
+        vocal = generate_speech_like(sr=SR, duration=2.0)
+        accompaniment = generate_multi_tone(sr=SR, duration=2.0)
+        if vocal.ndim == 1:
+            vocal = vocal.reshape(1, -1)
+        if accompaniment.ndim == 1:
+            accompaniment = accompaniment.reshape(1, -1)
+        import tempfile
+        import soundfile as sf
+        with tempfile.TemporaryDirectory() as tmpdir:
+            vocal_path = str(Path(tmpdir) / "vocal.wav")
+            acc_path = str(Path(tmpdir) / "acc.wav")
+            output_path = str(Path(tmpdir) / "output.wav")
+            sf.write(vocal_path, vocal.T, SR)
+            sf.write(acc_path, accompaniment.T, SR)
+            params = {
+                "vocal_path": vocal_path,
+                "accompaniment_path": acc_path,
+                "vocal_declip": 0.3, "vocal_depop": 0.18,
+                "vocal_formant_repair": 0.5, "vocal_de_ess": 0.25,
+                "vocal_breath_enhance": 0.3,
+                "vocal_ratio": 1.0, "accompaniment_ratio": 1.0,
+                "processing_mode": "dual",
+            }
+            result = repair_audio(vocal_path, output_path, params)
+            assert "issues_found" in result
+            assert result["algorithm_version"] == "v3.0"
+            assert result["processing_mode"] == "dual"
+
+
+class TestV30aDualTrackQuality:
+
+    @pytest.fixture(autouse=True)
+    def import_v30a_functions(self):
+        from services.repair.repair_v3_0a.core import (
+            _simple_declip,
+            _simple_depop,
+            _de_ess,
+            _spectral_denoise,
+            mix_tracks,
+            _soft_peak_limit,
+        )
+        self._simple_declip = _simple_declip
+        self._simple_depop = _simple_depop
+        self._de_ess = _de_ess
+        self._spectral_denoise = _spectral_denoise
+        self.mix_tracks = mix_tracks
+        self._soft_peak_limit = _soft_peak_limit
+
+    def test_simple_declip_softens_clipping(self):
+        y = generate_with_clipping(sr=SR, duration=2.0)
+        y_out = self._simple_declip(y, 0.3)
+        assert np.all(np.isfinite(y_out)), "Output contains NaN or Inf"
+        assert np.max(np.abs(y_out)) <= 1.0, "Output still clips"
+
+    def test_simple_depop_removes_pops(self):
+        y = generate_with_pops(sr=SR, duration=2.0)
+        y_out = self._simple_depop(y, SR, 0.15)
+        assert np.all(np.isfinite(y_out)), "Output contains NaN or Inf"
+
+    def test_de_ess_reduces_high_freq(self):
+        y = generate_speech_like(sr=SR, duration=2.0)
+        y_out = self._de_ess(y, SR, 0.2)
+        assert np.all(np.isfinite(y_out)), "Output contains NaN or Inf"
+
+    def test_spectral_denoise_reduces_noise(self):
+        y = generate_speech_like(sr=SR, duration=2.0)
+        y_out = self._spectral_denoise(y, SR, 0.1)
+        assert np.all(np.isfinite(y_out)), "Output contains NaN or Inf"
+        assert len(y_out) == len(y), "Output length changed"
+
+    def test_mix_tracks_output_bounded(self):
+        vocal = generate_speech_like(sr=SR, duration=2.0)
+        accompaniment = generate_multi_tone(sr=SR, duration=2.0)
+        if vocal.ndim == 1:
+            vocal = vocal.reshape(1, -1)
+        if accompaniment.ndim == 1:
+            accompaniment = accompaniment.reshape(1, -1)
+        mixed = self.mix_tracks(vocal, accompaniment, 1.0, 1.0)
+        assert np.max(np.abs(mixed)) <= 1.0, "Mixed output exceeds clipping"
+
+    def test_v30a_integration(self):
+        from services.repair.repair_v3_0a import repair_audio
+        vocal = generate_speech_like(sr=SR, duration=2.0)
+        accompaniment = generate_multi_tone(sr=SR, duration=2.0)
+        if vocal.ndim == 1:
+            vocal = vocal.reshape(1, -1)
+        if accompaniment.ndim == 1:
+            accompaniment = accompaniment.reshape(1, -1)
+        import tempfile
+        import soundfile as sf
+        with tempfile.TemporaryDirectory() as tmpdir:
+            vocal_path = str(Path(tmpdir) / "vocal.wav")
+            acc_path = str(Path(tmpdir) / "acc.wav")
+            output_path = str(Path(tmpdir) / "output.wav")
+            sf.write(vocal_path, vocal.T, SR)
+            sf.write(acc_path, accompaniment.T, SR)
+            params = {
+                "vocal_path": vocal_path,
+                "accompaniment_path": acc_path,
+                "vocal_declip": 0.3, "vocal_depop": 0.15,
+                "vocal_de_ess": 0.2,
+                "vocal_ratio": 1.0, "accompaniment_ratio": 1.0,
+                "processing_mode": "dual",
+            }
+            result = repair_audio(vocal_path, output_path, params)
+            assert "issues_found" in result
+            assert result["algorithm_version"] == "v3.0a"
+            assert result["processing_mode"] == "dual"
+
+
+class TestV30MemoryEstimate:
+
+    def test_v30_memory_higher_than_v24(self):
+        from services.memory_guard import estimate_repair_memory_bytes
+        n = 48000 * 300
+        est_v24 = estimate_repair_memory_bytes(n, 2, 44100, 48000, algorithm_version="v2.4")
+        est_v30 = estimate_repair_memory_bytes(n, 2, 44100, 48000, algorithm_version="v3.0")
+        assert est_v30 > est_v24, "v3.0 should use more memory than v2.4"
+
+    def test_v30a_memory_higher_than_v24a(self):
+        from services.memory_guard import estimate_repair_memory_bytes
+        n = 48000 * 300
+        est_v24a = estimate_repair_memory_bytes(n, 2, 44100, 48000, algorithm_version="v2.4a")
+        est_v30a = estimate_repair_memory_bytes(n, 2, 44100, 48000, algorithm_version="v3.0a")
+        assert est_v30a > est_v24a, "v3.0a should use more memory than v2.4a"
