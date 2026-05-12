@@ -84,6 +84,7 @@ export default function RepairPage() {
   const [showDiag, setShowDiag] = useState(false);
   const [instantDownloadInfo, setInstantDownloadInfo] = useState<DownloadFileInfo | null>(null);
   const [isDualTrackMode, setIsDualTrackMode] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
   const [dualTrackTaskId, setDualTrackTaskId] = useState<string | null>(null);
   const [dualTrackVocalFile, setDualTrackVocalFile] = useState<File | null>(null);
   const [dualTrackAccompanimentFile, setDualTrackAccompanimentFile] = useState<File | null>(null);
@@ -139,6 +140,7 @@ export default function RepairPage() {
 
   const handleDualTrackUpload = useCallback(async (vocalFile: File, accompanimentFile: File) => {
     try {
+      setIsUploading(true);
       setIsProcessing(true);
       setProcessingStep('上传双轨文件...');
       setProcessingSource('backend');
@@ -154,6 +156,7 @@ export default function RepairPage() {
           setProcessingStep(`上传中 ${(progress * 100).toFixed(0)}%`);
         }
       );
+      setIsUploading(false);
 
       setDualTrackTaskId(uploadResult.task_id);
       setProcessingProgress(0.1);
@@ -175,6 +178,7 @@ export default function RepairPage() {
       console.error('双轨处理失败:', error);
       setBackendError(error instanceof Error ? error.message : '双轨处理失败');
       setIsProcessing(false);
+      setIsUploading(false);
     }
   }, [params, processingOptions, algorithmVersion, setIsProcessing, setProcessingStep, setProcessingProgress, setProcessingSource, setBackendError, startDualTrackPolling]);
 
@@ -296,6 +300,8 @@ export default function RepairPage() {
     <div className="min-h-screen bg-dark py-6">
       <Header 
         backendAvailable={backendAvailable}
+        isUploading={isUploading}
+        isProcessing={isProcessing}
         onDiagnose={async () => { await runBackendDiag(); setShowDiag(true); }}
       />
 

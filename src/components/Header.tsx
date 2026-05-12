@@ -2,10 +2,15 @@ import React from 'react';
 
 interface HeaderProps {
   backendAvailable: boolean;
+  isUploading?: boolean;
+  isProcessing?: boolean;
   onDiagnose?: () => void;
 }
 
-export const Header = ({ backendAvailable, onDiagnose }: HeaderProps) => {
+export const Header = ({ backendAvailable, isUploading, isProcessing, onDiagnose }: HeaderProps) => {
+  const hasDownstreamActivity = isProcessing;
+  const hasUpstreamActivity = isUploading;
+
   return (
     <header className="border-b border-white/5 bg-gradient-to-b from-primary/30 to-transparent">
       <div className="container mx-auto px-4 py-6 max-w-7xl">
@@ -27,7 +32,7 @@ export const Header = ({ backendAvailable, onDiagnose }: HeaderProps) => {
               </p>
             </div>
           </div>
-          
+
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-3 bg-primary/50 border border-white/10 rounded-lg px-4 py-2.5">
               <div className={`w-2.5 h-2.5 rounded-full ${backendAvailable ? 'bg-green-400 animate-pulse' : 'bg-yellow-400'}`} />
@@ -35,16 +40,24 @@ export const Header = ({ backendAvailable, onDiagnose }: HeaderProps) => {
                 <span className={`text-xs font-medium ${backendAvailable ? 'text-green-400' : 'text-yellow-400'}`}>
                   {backendAvailable ? '已连接' : '未连接'}
                 </span>
-                {backendAvailable && (
-                  <div className="flex items-center gap-1.5 ml-1">
-                    <svg className="w-3 h-3 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
-                    </svg>
-                    <svg className="w-3 h-3 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 10l7-7m0 0l7 7m-7-7v18" />
-                    </svg>
-                  </div>
-                )}
+                <div className="flex items-center gap-1 ml-1">
+                  <svg
+                    className={`w-3 h-3 transition-colors duration-200 ${hasDownstreamActivity ? 'text-green-400' : 'text-gray-600'}`}
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+                  </svg>
+                  <svg
+                    className={`w-3 h-3 transition-colors duration-200 ${hasUpstreamActivity ? 'text-cyan-400' : 'text-gray-600'}`}
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 10l7-7m0 0l7 7m-7-7v18" />
+                  </svg>
+                </div>
               </div>
             </div>
             {onDiagnose && (
