@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useBackend } from '../contexts/BackendContext';
 
 const statusConfig = {
@@ -23,7 +23,19 @@ export const Header = () => {
   const { connectionStatus, hasUpstreamActivity, hasDownstreamActivity, runBackendDiag, backendDiag } = useBackend();
   const [showDiagModal, setShowDiagModal] = useState(false);
   const [isDiagLoading, setIsDiagLoading] = useState(false);
+  const [safePadding, setSafePadding] = useState(0);
+  const diagContentRef = useRef<HTMLDivElement>(null);
   const config = statusConfig[connectionStatus];
+
+  useEffect(() => {
+    if (!showDiagModal || !diagContentRef.current) return;
+    const el = diagContentRef.current;
+    const observer = new ResizeObserver(() => {
+      setSafePadding(el.scrollHeight * 2);
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [showDiagModal]);
 
   const handleDiagnose = async () => {
     setShowDiagModal(true);
@@ -173,11 +185,11 @@ export const Header = () => {
       {/* 诊断面板 - 终端风格 */}
       {showDiagModal && (
         <div
-          className="fixed bottom-0 left-0 right-0 z-50 bg-[#0a0a0f] border-t border-emerald-500/30 max-h-[55vh] overflow-auto"
-          style={{ fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace" }}
+          className="fixed bottom-0 left-0 right-0 z-50 bg-[#0a0a0f] border-t border-emerald-500/30 flex flex-col"
+          style={{ maxHeight: '60vh', fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace" }}
         >
           {/* 标题栏 */}
-          <div className="sticky top-0 bg-[#0a0a0f] flex items-center justify-between px-4 py-2.5 border-b border-white/5">
+          <div className="flex items-center justify-between px-4 py-2.5 border-b border-white/5 shrink-0">
             <div className="flex items-center gap-2">
               <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
               <span className="text-emerald-400 font-semibold text-xs tracking-wider uppercase">Backend Diagnostics</span>
@@ -203,14 +215,14 @@ export const Header = () => {
           </div>
 
           {/* 内容区 */}
-          <div className="relative px-4 py-3 text-[11px] leading-relaxed">
+          <div ref={diagContentRef} className="px-4 py-4 text-xs leading-relaxed overflow-y-auto min-h-0">
             {isDiagLoading ? (
-              <div className="flex items-center gap-2 text-emerald-400/60">
+              <div className="flex items-center gap-2 text-emerald-400/60 py-8 justify-center">
                 <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
                 <span>$ probing backend health...</span>
               </div>
             ) : backendDiag ? (
-              <div className="space-y-3">
+              <div className="space-y-4">
                 {/* 概览行 */}
                 <div className="flex items-center gap-2 text-gray-500">
                   <span className="text-gray-600">$</span>
@@ -272,18 +284,20 @@ export const Header = () => {
                     detail: backendDiag.gpu_info || 'N/A (CPU mode)',
                   },
                 ].map(item => (
-                  <div key={item.label} className="grid grid-cols-[auto_1fr_auto] gap-x-3 gap-y-0.5">
-                    <span className={item.ok ? (item.warn ? 'text-yellow-400' : 'text-emerald-400') : 'text-red-400'}>{item.icon}</span>
-                    <span className={item.ok ? 'text-gray-300' : 'text-gray-500'}>
-                      <span className="text-gray-600 mr-1.5">[{item.label}]</span>
-                      {item.name}
-                    </span>
-                    <span className={`text-right ${item.ok ? (item.warn ? 'text-yellow-400/70' : 'text-emerald-400/50') : 'text-red-400/50'}`}>
-                      {item.ok ? 'OK' : item.warn ? 'WARN' : 'FAIL'}
-                    </span>
-                    <span />
-                    <span className={`pl-4 text-[10px] ${item.ok ? 'text-gray-600' : 'text-gray-700'}`}>{item.detail}</span>
-                    <span />
+                  <div key={item.label}>
+                    <div className="grid grid-cols-[auto_1fr_auto] gap-x-4 gap-y-1">
+                      <span className={item.ok ? (item.warn ? 'text-yellow-400' : 'text-emerald-400') : 'text-red-400'}>{item.icon}</span>
+                      <span className={item.ok ? 'text-gray-300' : 'text-gray-500'}>
+                        <span className="text-gray-600 mr-2">[{item.label}]</span>
+                        {item.name}
+                      </span>
+                      <span className={`text-right font-medium ${item.ok ? (item.warn ? 'text-yellow-400/80' : 'text-emerald-400/70') : 'text-red-400/70'}`}>
+                        {item.ok ? 'OK' : item.warn ? 'WARN' : 'FAIL'}
+                      </span>
+                      <span />
+                      <span className={`pl-5 text-[11px] ${item.ok ? 'text-gray-600' : 'text-gray-700'}`}>{item.detail}</span>
+                      <span />
+                    </div>
                   </div>
                 ))}
 
@@ -291,19 +305,17 @@ export const Header = () => {
                 <div className="border-t border-white/5" />
 
                 {/* 底部时间戳 */}
-                <div className="flex items-center gap-2 text-gray-700 text-[10px]">
+                <div className="flex items-center gap-2 text-gray-700 text-[11px]">
                   <span>#</span>
                   <span>completed at {new Date().toLocaleTimeString('zh-CN', { hour12: false })}</span>
                 </div>
+
+                {/* 底部安全区：内容区实际高度的200% */}
+                {safePadding > 0 && <div style={{ height: safePadding }} aria-hidden="true" />}
               </div>
             ) : (
-              <div className="text-red-400/60">$ error: no response from backend</div>
+              <div className="text-red-400/60 py-8">$ error: no response from backend</div>
             )}
-            <div
-              className="absolute left-0 -z-10"
-              style={{ top: '100%', height: '200%', width: '100%' }}
-              aria-hidden="true"
-            />
           </div>
         </div>
       )}
