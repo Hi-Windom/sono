@@ -75,8 +75,9 @@ export const Header = () => {
             </div>
           </div>
 
-          {/* 移动端：上下布局 */}
+          {/* 移动端：上下布局 - 标题在上，状态+诊断在下 */}
           <div className="flex md:hidden flex-col gap-3">
+            {/* 第一行：标题 */}
             <div className="flex items-center gap-3">
               <div className="relative">
                 <div className="w-10 h-10 bg-gradient-to-br from-cyan-500 via-purple-500 to-yellow-500 rounded-xl flex items-center justify-center shadow-[0_0_30px_rgba(107,70,193,0.4)]">
@@ -95,7 +96,9 @@ export const Header = () => {
               </div>
             </div>
 
+            {/* 第二行：状态（左）+ 诊断（右） */}
             <div className="flex items-center justify-between gap-2">
+              {/* 状态显示 */}
               <div className="flex items-center gap-2 bg-primary/50 border border-white/10 rounded-lg px-3 py-2">
                 <div className={`w-2 h-2 rounded-full ${backendAvailable ? 'bg-green-400 animate-pulse' : 'bg-yellow-400'}`} />
                 <span className={`text-xs font-medium ${backendAvailable ? 'text-green-400' : 'text-yellow-400'}`}>
@@ -122,6 +125,8 @@ export const Header = () => {
                   </svg>
                 </div>
               </div>
+
+              {/* 诊断按钮 */}
               <button
                 onClick={handleDiagnose}
                 className="flex items-center gap-1.5 px-3 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg cursor-pointer transition text-gray-400 hover:text-white text-xs"

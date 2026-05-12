@@ -4,9 +4,6 @@ interface BackendContextType {
   backendAvailable: boolean;
   hasUpstreamActivity: boolean;
   hasDownstreamActivity: boolean;
-  setBackendAvailable: (available: boolean) => void;
-  triggerUpstream: () => void;
-  triggerDownstream: () => void;
   runBackendDiag: () => Promise<void>;
   backendDiag: {
     backend: boolean;
@@ -27,6 +24,30 @@ const BackendContext = createContext<BackendContextType | undefined>(undefined);
 
 // 活动指示持续时间（毫秒）
 const ACTIVITY_DURATION = 800;
+
+// 拦截 fetch 以捕获网络活动
+function setupNetworkInterceptor(
+  onRequest: () => void,
+  onResponse: () => void
+) {
+  const originalFetch = window.fetch;
+  
+  window.fetch = async function(...args) {
+    onRequest();
+    try {
+      const response = await originalFetch.apply(this, args);
+      onResponse();
+      return response;
+    } catch (error) {
+      onResponse();
+      throw error;
+    }
+  };
+
+  return () => {
+    window.fetch = originalFetch;
+  };
+}
 
 export function BackendProvider({ children }: { children: ReactNode }) {
   const [backendAvailable, setBackendAvailable] = useState(false);
@@ -59,7 +80,7 @@ export function BackendProvider({ children }: { children: ReactNode }) {
 
   const checkBackendHealth = useCallback(async () => {
     try {
-      const res = await fetch('/api/v1/health', { method: 'GET' });
+      const res = await fetch('/health', { method: 'GET' });
       setBackendAvailable(res.ok);
     } catch {
       setBackendAvailable(false);
@@ -81,6 +102,12 @@ export function BackendProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  // 设置网络拦截器
+  useEffect(() => {
+    const cleanup = setupNetworkInterceptor(triggerUpstream, triggerDownstream);
+    return cleanup;
+  }, [triggerUpstream, triggerDownstream]);
+
   useEffect(() => {
     checkBackendHealth();
     const interval = setInterval(checkBackendHealth, 5000);
@@ -100,9 +127,6 @@ export function BackendProvider({ children }: { children: ReactNode }) {
         backendAvailable,
         hasUpstreamActivity,
         hasDownstreamActivity,
-        setBackendAvailable,
-        triggerUpstream,
-        triggerDownstream,
         runBackendDiag,
         backendDiag,
       }}

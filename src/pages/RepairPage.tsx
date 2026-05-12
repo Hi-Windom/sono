@@ -16,7 +16,7 @@ export { useBackend };
 
 export default function RepairPage() {
   const navigate = useNavigate();
-  const { triggerUpstream, triggerDownstream, backendAvailable: globalBackendAvailable } = useBackend();
+  const { backendAvailable: globalBackendAvailable } = useBackend();
   const {
     audioFile,
     audioBuffer,
@@ -108,7 +108,6 @@ export default function RepairPage() {
 
     const poll = async () => {
       try {
-        triggerDownstream();
         const status = await getTrackStatus(taskId);
         setProcessingProgress(status.progress);
         setProcessingStep(status.step);
@@ -139,7 +138,7 @@ export default function RepairPage() {
     };
 
     poll();
-  }, [stopDualTrackPolling, setProcessingProgress, setProcessingStep, setIsProcessing, setBackendError, loadAudioFromUrl, setBackendProcessedBuffer, processingOptions.sampleRate, triggerDownstream]);
+  }, [stopDualTrackPolling, setProcessingProgress, setProcessingStep, setIsProcessing, setBackendError, loadAudioFromUrl, setBackendProcessedBuffer, processingOptions.sampleRate]);
 
   const handleDualTrackUpload = useCallback(async (vocalFile: File, accompanimentFile: File) => {
     try {
@@ -149,7 +148,6 @@ export default function RepairPage() {
       setDualTrackVocalFile(vocalFile);
       setDualTrackAccompanimentFile(accompanimentFile);
 
-      triggerUpstream();
       const uploadResult = await uploadDualAudio(
         vocalFile,
         accompanimentFile,
@@ -157,7 +155,6 @@ export default function RepairPage() {
           const progress = loaded / total;
           setProcessingProgress(progress * 0.1);
           setProcessingStep(`上传中 ${(progress * 100).toFixed(0)}%`);
-          if (progress < 1) triggerUpstream();
         }
       );
 
@@ -165,7 +162,6 @@ export default function RepairPage() {
       setProcessingProgress(0.1);
       setProcessingStep('开始双轨处理...');
 
-      triggerUpstream();
       await repairDualAudio(
         uploadResult.task_id,
         uploadResult.vocal_task_id,
@@ -183,7 +179,7 @@ export default function RepairPage() {
       setBackendError(error instanceof Error ? error.message : '双轨处理失败');
       setIsProcessing(false);
     }
-  }, [params, processingOptions, algorithmVersion, setIsProcessing, setProcessingStep, setProcessingProgress, setProcessingSource, setBackendError, startDualTrackPolling, triggerUpstream]);
+  }, [params, processingOptions, algorithmVersion, setIsProcessing, setProcessingStep, setProcessingProgress, setProcessingSource, setBackendError, startDualTrackPolling]);
 
   const handleSwitchToSingleTrack = useCallback(() => {
     setIsDualTrackMode(false);
