@@ -1,7 +1,10 @@
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef, ReactNode } from 'react';
 
+type ConnectionStatus = 'connected' | 'disconnected' | 'unstable';
+
 interface BackendContextType {
   backendAvailable: boolean;
+  connectionStatus: ConnectionStatus;
   hasUpstreamActivity: boolean;
   hasDownstreamActivity: boolean;
   runBackendDiag: () => Promise<void>;
@@ -25,21 +28,23 @@ const BackendContext = createContext<BackendContextType | undefined>(undefined);
 // 活动指示持续时间（毫秒）
 const ACTIVITY_DURATION = 800;
 
-// 拦截 fetch 以捕获网络活动
+// 连续失败次数阈值
+const UNSTABLE_THRESHOLD = 2;
+
 function setupNetworkInterceptor(
   onRequest: () => void,
-  onResponse: () => void
+  onResponse: (success: boolean) => void
 ) {
   const originalFetch = window.fetch;
-  
+
   window.fetch = async function(...args) {
     onRequest();
     try {
       const response = await originalFetch.apply(this, args);
-      onResponse();
+      onResponse(response.ok);
       return response;
     } catch (error) {
-      onResponse();
+      onResponse(false);
       throw error;
     }
   };
@@ -51,12 +56,14 @@ function setupNetworkInterceptor(
 
 export function BackendProvider({ children }: { children: ReactNode }) {
   const [backendAvailable, setBackendAvailable] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('disconnected');
   const [hasUpstreamActivity, setHasUpstreamActivity] = useState(false);
   const [hasDownstreamActivity, setHasDownstreamActivity] = useState(false);
   const [backendDiag, setBackendDiag] = useState<BackendContextType['backendDiag']>(null);
 
   const upstreamTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const downstreamTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const consecutiveFailuresRef = useRef(0);
 
   const triggerUpstream = useCallback(() => {
     setHasUpstreamActivity(true);
@@ -78,12 +85,41 @@ export function BackendProvider({ children }: { children: ReactNode }) {
     }, ACTIVITY_DURATION);
   }, []);
 
+  const handleResponseSuccess = useCallback((success: boolean) => {
+    triggerDownstream();
+    if (success) {
+      consecutiveFailuresRef.current = 0;
+      setConnectionStatus('connected');
+      setBackendAvailable(true);
+    } else {
+      consecutiveFailuresRef.current++;
+      if (consecutiveFailuresRef.current >= UNSTABLE_THRESHOLD) {
+        setConnectionStatus('unstable');
+        setBackendAvailable(false);
+      }
+    }
+  }, [triggerDownstream]);
+
   const checkBackendHealth = useCallback(async () => {
     try {
       const res = await fetch('/health', { method: 'GET' });
-      setBackendAvailable(res.ok);
+      if (res.ok) {
+        consecutiveFailuresRef.current = 0;
+        setBackendAvailable(true);
+        setConnectionStatus('connected');
+      } else {
+        consecutiveFailuresRef.current++;
+        if (consecutiveFailuresRef.current >= UNSTABLE_THRESHOLD) {
+          setConnectionStatus('unstable');
+          setBackendAvailable(false);
+        }
+      }
     } catch {
-      setBackendAvailable(false);
+      consecutiveFailuresRef.current++;
+      if (consecutiveFailuresRef.current >= UNSTABLE_THRESHOLD) {
+        setConnectionStatus('disconnected');
+        setBackendAvailable(false);
+      }
     }
   }, []);
 
@@ -94,19 +130,22 @@ export function BackendProvider({ children }: { children: ReactNode }) {
         const data = await res.json();
         setBackendDiag(data);
         setBackendAvailable(data.backend);
+        setConnectionStatus(data.backend ? 'connected' : 'disconnected');
       } else {
         setBackendAvailable(false);
+        setConnectionStatus('unstable');
       }
     } catch {
       setBackendAvailable(false);
+      setConnectionStatus('disconnected');
     }
   }, []);
 
   // 设置网络拦截器
   useEffect(() => {
-    const cleanup = setupNetworkInterceptor(triggerUpstream, triggerDownstream);
+    const cleanup = setupNetworkInterceptor(triggerUpstream, handleResponseSuccess);
     return cleanup;
-  }, [triggerUpstream, triggerDownstream]);
+  }, [triggerUpstream, handleResponseSuccess]);
 
   useEffect(() => {
     checkBackendHealth();
@@ -125,6 +164,7 @@ export function BackendProvider({ children }: { children: ReactNode }) {
     <BackendContext.Provider
       value={{
         backendAvailable,
+        connectionStatus,
         hasUpstreamActivity,
         hasDownstreamActivity,
         runBackendDiag,
