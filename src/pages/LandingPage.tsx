@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Header } from '../components/Header';
+import { useBackend } from '../contexts/BackendContext';
 
 interface CacheInfo {
   total_size: number;
@@ -18,6 +19,7 @@ interface CacheTask {
 
 export default function LandingPage() {
   const navigate = useNavigate();
+  const { backendAvailable } = useBackend();
   const [algorithmVersions, setAlgorithmVersions] = useState<{ name: string; description?: string }[]>([]);
   const [detectorVersions, setDetectorVersions] = useState<{ name: string; description?: string }[]>([]);
   const [deployDays, setDeployDays] = useState<number | null>(null);

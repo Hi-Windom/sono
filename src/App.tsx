@@ -9,6 +9,7 @@ import ComparePage from "@/pages/ComparePage";
 import DetectPage from "@/pages/DetectPage";
 import { BuildInfo } from "@/components/BuildInfo";
 import { useEffect } from "react";
+import { BackendProvider } from "@/contexts/BackendContext";
 
 function VConsoleInit() {
   useEffect(() => {
@@ -32,9 +33,9 @@ function VConsoleInit() {
   return null;
 }
 
-export default function App() {
+function AppRoutes() {
   return (
-    <Router>
+    <>
       <VConsoleInit />
       <Routes>
         <Route path="/" element={<LandingPage />} />
@@ -47,6 +48,16 @@ export default function App() {
         <Route path="/detect" element={<DetectPage />} />
       </Routes>
       <BuildInfo />
-    </Router>
+    </>
+  );
+}
+
+export default function App() {
+  return (
+    <BackendProvider>
+      <Router>
+        <AppRoutes />
+      </Router>
+    </BackendProvider>
   );
 }
