@@ -434,7 +434,7 @@ export default function RepairPage() {
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
             <div className="lg:col-span-7 space-y-6">
               <div className={`bg-primary/50 border border-white/10 rounded-xl p-6${isDecodingAudio ? ' audio-card-loading' : ''}`}>
-                <div className="flex items-center justify-between mb-6 gap-3">
+                <div className="flex items-center justify-between mb-4 gap-3">
                   <div className="flex items-center gap-3 min-w-0 flex-1">
                     <div className="w-12 h-12 bg-gradient-to-br from-cyan-500/20 to-purple-500/20 rounded-lg flex items-center justify-center border border-cyan-400/20 shrink-0">
                       <svg className="w-6 h-6 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -457,12 +457,11 @@ export default function RepairPage() {
                             🎤 人声: {((dualTrackVocalFile?.size || 0) / (1024 * 1024)).toFixed(2)} MB
                             {' • '}
                             🎵 伴奏: {((dualTrackAccompanimentFile?.size || 0) / (1024 * 1024)).toFixed(2)} MB
-                            {' • '}
                             {dualTrackHasBeenProcessed && <span className="text-green-400 ml-2">✓ 已修复</span>}
                           </>
                         ) : (
                           <>
-                            {(audioFile?.size || 0) / (1024 * 1024).toFixed(2)} MB
+                            {((audioFile?.size || 0) / (1024 * 1024)).toFixed(2)} MB
                             {' • '}
                             {(wavInfo ? wavInfo.sampleRate : originalSampleRate) / 1000} kHz
                             {wavInfo && ` • ${wavInfo.bitDepth}bit`}
@@ -473,14 +472,6 @@ export default function RepairPage() {
                             )}
                           </>
                         )}
-                        {' • '}
-                        <span
-                          className={backendAvailable ? 'text-green-400' : 'text-yellow-400'}
-                          style={{ cursor: 'pointer', textDecoration: 'underline' }}
-                          onClick={async () => { await runBackendDiag(); setShowDiag(true); }}
-                        >
-                          {backendAvailable ? '后端已连接' : '后端不可用(点击诊断)'}
-                        </span>
                       </p>
                     </div>
                   </div>
@@ -552,6 +543,31 @@ export default function RepairPage() {
                     )}
                   </div>
                 )}
+              </div>
+
+              <div className="bg-primary/50 border border-white/10 rounded-xl p-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className={`w-3 h-3 rounded-full ${backendAvailable ? 'bg-green-400 animate-pulse' : 'bg-yellow-400'}`} />
+                    <div>
+                      <p className="text-white text-sm font-medium">
+                        {backendAvailable ? '后端已连接' : '后端不可用'}
+                      </p>
+                      <p className="text-gray-400 text-xs">
+                        {backendAvailable ? '服务正常运行，所有功能可用' : '请检查后端服务是否启动'}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={async () => { await runBackendDiag(); setShowDiag(true); }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg cursor-pointer transition text-gray-400 hover:text-white text-xs"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                    </svg>
+                    运行诊断
+                  </button>
+                </div>
               </div>
 
               {backendError && (
