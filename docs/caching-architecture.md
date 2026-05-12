@@ -2,179 +2,305 @@
 
 ## 概述
 
-本文档详细描述 Sono 音频修复系统中使用的所有缓存机制，包括后端数据缓存和前端状态缓存。记录架构设计、实现细节以及开发过程中的经验教训。
+Sono 采用多层缓存架构，覆盖前端（IndexedDB、React State、Web Worker）和后端（SQLite、文件系统），确保相同文件和参数不重复计算。本文档描述所有缓存层的架构设计、数据流、一致性策略和经验教训。
 
 ---
 
-## 一、后端数据缓存
+## 一、缓存层级总览
 
-### 1.1 修复结果缓存 (Repair Result Cache)
-
-**目的**：避免对相同文件和相同参数重复执行修复计算
-
-**数据模型**：
 ```
-(file_hash + repair_params) → (output_path + output_size + repair_result + detection_results)
+┌─────────────────────────────────────────────────────────────────────┐
+│                        前端缓存层                                    │
+├─────────────────────────────────────────────────────────────────────┤
+│ L1. React State（内存，瞬时）                                        │
+│    audioBuffer / backendProcessedBuffer / audioAnalysis / wavInfo    │
+│    生命周期：组件挂载 → 卸载                                          │
+├─────────────────────────────────────────────────────────────────────┤
+│ L2. IndexedDB 会话缓存（浏览器持久化）                                │
+│    sessionDB.ts → 'session' store                                    │
+│    保存当前工作流状态，页面刷新后恢复                                   │
+├─────────────────────────────────────────────────────────────────────┤
+│ L3. IndexedDB 分析缓存（浏览器持久化）                                │
+│    sessionDB.ts → 'analysis_cache' store                             │
+│    按 fileHash 缓存 wavInfo + analysis，避免重复分析                   │
+├─────────────────────────────────────────────────────────────────────┤
+│ L4. Web Worker 计算缓存（隐式）                                      │
+│    Worker 结果通过 postMessage 返回主线程后，                          │
+│    由主线程写入 L2/L3/后端缓存                                        │
+│    Worker 本身不持有缓存，不直接访问任何存储 API                        │
+└─────────────────────────────────────────────────────────────────────┘
+                              ↕ fetch / WebSocket
+┌─────────────────────────────────────────────────────────────────────┐
+│                        后端缓存层                                    │
+├─────────────────────────────────────────────────────────────────────┤
+│ L5. 后端分析缓存（SQLite: analysis_cache 表）                        │
+│    GET/POST /api/v1/analysis-cache/{hash}                            │
+│    按 fileHash 缓存 wavInfo + analysis + waveform_peaks              │
+│    跨设备/跨浏览器共享                                                │
+├─────────────────────────────────────────────────────────────────────┤
+│ L6. 上传去重缓存（SQLite: tasks 表 file_hash 索引）                   │
+│    POST /api/v1/check-hash                                           │
+│    相同文件只上传一次，复用 task_id                                    │
+├─────────────────────────────────────────────────────────────────────┤
+│ L7. 修复结果缓存（SQLite: tasks 表 + 文件系统）                       │
+│    POST /api/v1/cache/lookup                                         │
+│    (fileHash + repairParams) → (outputPath + repairResult)           │
+├─────────────────────────────────────────────────────────────────────┤
+│ L8. 渲染缓存（文件系统: output/ 目录）                                │
+│    GET /api/v1/render-cache/{task_id}                                 │
+│    (taskId + sampleRate + bitDepth + algorithmVersion) → WAV file    │
+├─────────────────────────────────────────────────────────────────────┤
+│ L9. 解码 WAV 缓存（文件系统: decoded_wav/ 目录）                     │
+│    GET /api/v1/decoded-wav/{hash}                                    │
+│    非 WAV 文件解码后缓存为 WAV，前端可快速 PCM 解码                    │
+├─────────────────────────────────────────────────────────────────────┤
+│ L10. 波形缓存（SQLite: analysis_cache 表 waveform_peaks 字段）       │
+│     GET /api/v1/waveform/{hash}                                      │
+│     服务端预计算的波形峰值数据                                         │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
-**存储位置**：SQLite `tasks` 表
-- `file_hash`: 文件内容哈希 (SHA-256)
-- `params`: JSON 序列化的修复参数
-- `output_path`: 修复后文件路径
-- `output_size`: 文件大小（用于完整性校验）
-- `repair_result`: 修复元数据
-- `detection_result`: 原始文件AI检测结果
-- `repaired_detection_result`: 修复后文件AI检测结果
+---
 
-**查询实现**：`backend/database.py::find_repair_cache()`
+## 二、数据流与缓存命中路径
 
-```python
-def find_repair_cache(file_hash: str, params: dict) -> TaskDict | None:
-    # 1. 查询所有同 hash 的任务（按时间倒序）
-    # 2. 验证 output_path 存在且大小 > 10KB
-    # 3. JSON 规范化比较参数（sort_keys）
-    # 4. 返回第一个匹配项
+### 2.1 文件上传流程
+
+```
+用户选择文件
+  │
+  ├─ 1. computeFileHash(file) → SHA-256
+  │
+  ├─ 2. 查询后端分析缓存
+  │     GET /api/v1/analysis-cache/{hash}
+  │     命中 → 跳过 Worker 分析（零计算开销）
+  │     未命中 → 继续
+  │
+  ├─ 3. WAV PCM 解码（Web Worker）
+  │     audioWorker.decodeWav(context, arrayBuf)
+  │     成功 → AudioBuffer（零主线程阻塞）
+  │     失败 → 尝试后端解码缓存 / context.decodeAudioData
+  │
+  ├─ 4. 音频分析（Web Worker，仅缓存未命中时）
+  │     audioWorker.analyzeAudio(channelData, sampleRate, channels)
+  │     返回 AudioAnalysisResult（零主线程阻塞）
+  │
+  ├─ 5. 缓存写入（主线程负责）
+  │     POST /api/v1/analysis-cache → 后端分析缓存
+  │     saveAnalysisCache() → 前端 IndexedDB 分析缓存
+  │
+  └─ 6. 后台上传 + 波形缓存
+        POST /api/v1/upload → 上传去重
+        GET /api/v1/waveform/{hash} → 波形缓存
 ```
 
-**API 端点**：`POST /api/v1/cache/lookup`
+### 2.2 修复流程
 
-**关键设计决策**：
-- ❌ **不依赖 `status` 字段**：早期实现错误地加了 `status='completed'` 过滤，导致任务状态变化时缓存失效
-- ✅ **依赖输出文件存在性**：真正的完成标志是输出文件存在且大小合理
-- ✅ **JSON 规范化比较**：使用 `json.dumps(params, sort_keys=True)` 确保参数比较不受键顺序影响
+```
+用户点击"应用修复"
+  │
+  ├─ 1. 查询修复缓存
+  │     POST /api/v1/cache/lookup { file_hash, params }
+  │     命中 → 弹出 RepairCacheModal，用户选择使用/重新修复
+  │     未命中 → 继续
+  │
+  ├─ 2. 上传 + 修复
+  │     POST /api/v1/repair → WebSocket 进度推送
+  │
+  ├─ 3. 修复完成 → 加载预览 + 自动渲染
+  │     GET /api/v1/preview/{task_id} → AudioBuffer
+  │     POST /api/v1/render → 渲染交付规格
+  │
+  └─ 4. 渲染缓存查询
+        GET /api/v1/render-cache/{task_id}
+        命中 → 秒下载
+        未命中 → 重新渲染
+```
+
+### 2.3 Session 恢复流程
+
+```
+页面刷新 / 组件挂载
+  │
+  ├─ 1. loadSession() → IndexedDB 读取会话
+  │     无 taskId → 结束（不调用 clearSession）
+  │     有 taskId → 继续
+  │
+  ├─ 2. 检查音频数据获取方式（后端优先，IndexedDB File 回退）
+  │     后端下载 → /api/v1/preview/{task_id}?type=original（优先，更可靠）
+  │     后端失败 → IndexedDB File 回退（file.arrayBuffer()）
+  │     两者皆失败 → 跳过恢复，保留 session，下次刷新可重试
+  │
+  ├─ 3. 网络状态检查（不阻塞恢复）
+  │     fetch('/api/v1/status/{task_id}') 网络错误 → 跳过恢复（不清除 session）
+  │     HTTP 404/500 → 清除 session（任务确定不存在）
+  │     status=error → 清除 session（任务确定失败）
+  │
+  ├─ 4. Worker 解码 + 分析
+  │     audioWorker.decodeAndAnalyze(context, arrayBuf)
+  │     一步完成，避免两次 postMessage
+  │
+  ├─ 5. 恢复修复后音频（如果已完成）
+  │     GET /api/v1/preview/{task_id}?type=repaired → AudioBuffer
+  │     下载失败 → 静默跳过（不清除 session）
+  │
+  └─ 6. 恢复后重新保存 session
+        saveSession() → 刷新 IndexedDB 中的 File 对象
+```
 
 ---
 
-### 1.2 文件上传缓存 (Upload Deduplication)
+## 三、Web Worker 与缓存协同
 
-**目的**：相同文件只上传一次
+### 3.1 核心原则：缓存命中 > Worker 计算 > 主线程同步
 
-**流程**：
-1. 前端计算文件 hash
-2. `POST /api/v1/check-hash` 查询后端
-3. 如果存在且任务有效，复用现有 task_id
-4. 否则执行上传
+```
+优先级：
+  1. 后端分析缓存命中 → 跳过 Worker（零计算开销）
+  2. 前端 IndexedDB 分析缓存命中 → 跳过 Worker（零网络开销）
+  3. 缓存未命中 → Worker 异步计算（不阻塞 UI）
+  4. Worker 不可用 → 主线程同步 fallback（功能不中断）
+```
 
-**实现**：`backend/api/routes.py::check_hash()`
+### 3.2 Worker 不直接写缓存
+
+Worker 运行在独立线程，无法访问 `fetch`、`IndexedDB` 等浏览器 API。所有缓存写入由主线程负责：
+
+```
+Worker 计算结果 → postMessage → 主线程收到
+  → POST /api/v1/analysis-cache（后端缓存）
+  → saveAnalysisCache()（前端 IndexedDB 缓存）
+```
+
+### 3.3 Transferable 传输优化
+
+Worker 与主线程之间的大数组（Float32Array、ArrayBuffer）使用 Transferable 传输，零拷贝：
+
+```typescript
+// Worker → 主线程
+self.postMessage(response, [...channelData.map(ch => ch.buffer)]);
+
+// 主线程 → Worker
+worker.postMessage({ type: 'decode-wav', id, buffer }, [buffer]);
+```
+
+注意：Transferable 传输后，发送方不可再访问该 buffer。
 
 ---
 
-### 1.3 AI 检测缓存
+## 四、各缓存层详细说明
 
-**目的**：避免对相同文件重复执行 AI 检测
+### 4.1 前端 IndexedDB 会话缓存
 
-**存储**：`tasks` 表的 `detection_result` 和 `repaired_detection_result` 字段
+**文件**: `src/utils/sessionDB.ts`
 
-**触发条件**：
-- 原始文件检测：上传后首次检测
-- 修复后检测：修复完成后自动检测
+**Object Store**: `session`（keyPath: `'id'`，固定 id=`'current'`）
 
----
-
-### 1.4 音频特征缓存 (Training Features)
-
-**目的**：训练数据特征提取结果持久化
-
-**存储**：`backend/storage/training_features/{hash}.json`
-
-**使用场景**：算法版本升级时，复用已提取的特征进行重新训练
-
----
-
-## 二、前端状态缓存
-
-### 2.1 IndexedDB 会话持久化
-
-**目的**：页面刷新后恢复用户工作流
-
-**存储位置**：`src/utils/sessionDB.ts`
-
-**存储内容**：
+**存储内容**:
 ```typescript
 interface SessionData {
-  file: File | null;           // 音频文件（Blob）
+  id: 'current';
+  file: File | null;
   fileName: string;
   fileSize: number;
-  fileHash: string;            // 文件内容哈希
-  taskId: string;              // 后端任务ID
+  fileHash: string;
+  taskId: string;
   backendAvailable: boolean;
   hasBeenProcessed: boolean;
-  wavInfo: string;             // WAV头信息JSON
-  repairResult: string;        // 修复结果JSON
+  wavInfo: string;             // JSON
+  repairResult: string;        // JSON
+  originalDetectTime: string;
+  repairedDetectTime: string;
+  processingOptions: string;   // JSON { sampleRate, bitDepth }
 }
 ```
 
-**恢复时机**：`useAudioProcessor.ts` 中的 `useEffect`，在 `backendAvailable` 变为 true 时触发
+**关键设计变更**：File 对象不再是恢复的必要条件。恢复流程优先从后端下载原始音频（`/api/v1/preview/{task_id}?type=original`），失败后才回退到 IndexedDB File。即使两者都失败，也不会清除 session，下次刷新可重试。
 
-**关键问题与修复**：
+### 4.2 前端 IndexedDB 分析缓存
 
-#### 问题：替换文件后被旧会话覆盖
-**现象**：用户上传新文件后，系统自动恢复旧会话，导致新文件丢失
+**文件**: `src/utils/sessionDB.ts`
 
-**根因**：
-```javascript
-// loadAudioFile 中上传成功后设置 backendAvailable = true
-setBackendAvailable(true);
+**Object Store**: `analysis_cache`（keyPath: `'fileHash'`，index: `timestamp`）
 
-// 触发会话恢复 useEffect
-useEffect(() => {
-  if (backendAvailable && pendingSessionRef.current) {
-    restoreSession(pendingSessionRef.current); // 恢复旧会话！
-  }
-}, [backendAvailable]);
-```
-
-**修复**：上传新文件后清除 pending 会话并标记已恢复
-```javascript
-pendingSessionRef.current = null;
-sessionRestoredRef.current = true;
-```
-
----
-
-### 2.2 React State 缓存
-
-**目的**：避免重复计算，提升渲染性能
-
-**实现**：`useMemo` 和 `useCallback`
-
-**关键缓存**：
-- `currentParams`：当前修复参数（用于缓存键）
-- `currentParamsForCache`：映射到后端的参数格式
-- `formatBytes`：文件大小格式化
-
----
-
-### 2.3 音频缓冲区缓存
-
-**存储位置**：`useAudioProcessor.ts` 中的 state
-
+**存储内容**:
 ```typescript
-audioBuffer: AudioBuffer | null;        // 原始音频
-backendProcessedBuffer: AudioBuffer | null;  // 修复后音频
-browserProcessedBuffer: AudioBuffer | null;  // 浏览器修复音频
+interface AnalysisCacheEntry {
+  fileHash: string;
+  fileName: string;
+  fileSize: number;
+  wavInfo: string;     // JSON
+  analysis: string;    // JSON
+  timestamp: number;
+}
 ```
 
-**生命周期**：
-- 加载新文件时重置
-- 修复完成后填充
-- 页面刷新后从 IndexedDB 恢复（需重新解码）
+**写入时机**: Worker 分析完成后，主线程调用 `saveAnalysisCache()`
+
+**查询时机**: `loadAudioFile` 中优先查询后端分析缓存，后端不可用时查询前端 IndexedDB
+
+### 4.3 后端分析缓存
+
+**API**:
+- `GET /api/v1/analysis-cache/{quick_hash}` — 查询
+- `POST /api/v1/analysis-cache` — 写入
+- `GET /api/v1/analysis-cache-list` — 列表
+- `DELETE /api/v1/analysis-cache/{quick_hash}` — 删除
+- `POST /api/v1/analysis-cache-clear` — 清空
+
+**存储**: SQLite `analysis_cache` 表
+
+**字段**: `quick_hash`, `file_name`, `file_size`, `wav_info`, `analysis`, `waveform_peaks`, `created_at`
+
+### 4.4 修复结果缓存
+
+**API**: `POST /api/v1/cache/lookup`
+
+**匹配规则**: `(file_hash + repair_params)` → `(output_path + repair_result + detection_results)`
+
+**查询实现**: `backend/database.py::find_repair_cache()`
+
+**关键设计**:
+- 不依赖 `status` 字段（状态会变化）
+- 依赖输出文件存在性 + 大小 > 10KB
+- JSON 规范化比较参数（`sort_keys=True`）
+
+### 4.5 渲染缓存
+
+**API**: `GET /api/v1/render-cache/{task_id}`
+
+**匹配规则**: `(task_id + sample_rate + bit_depth + algorithm_version)` → WAV 文件
+
+**存储**: 文件系统 `output/` 目录
+
+**秒下载**: 缓存命中时直接返回下载 URL，无需重新渲染
+
+### 4.6 解码 WAV 缓存
+
+**API**:
+- `GET /api/v1/decoded-wav/{hash}` — 下载已解码 WAV
+- `POST /api/v1/decoded-wav/{hash}` — 触发解码缓存创建
+
+**目的**: 非 WAV 文件（MP3/FLAC）解码后缓存为 WAV，前端可使用快速 PCM 解码路径
+
+### 4.7 波形缓存
+
+**API**: `GET /api/v1/waveform/{hash}`
+
+**存储**: `analysis_cache` 表的 `waveform_peaks` 字段
+
+**计算时机**: 首次上传时后端计算并缓存
 
 ---
 
-## 三、缓存一致性策略
+## 五、缓存一致性策略
 
-### 3.1 写入时验证
+### 5.1 写入时验证
 
-**后端**：
-- 修复完成后验证输出文件大小 > 10KB
-- 无效输出不写入缓存
+- 后端：修复完成后验证输出文件大小 > 10KB，无效输出不写入缓存
+- 前端：缓存命中后二次确认（RepairCacheModal 弹窗）
 
-**前端**：
-- 缓存命中后二次确认（用户弹窗）
-- 用户可选择重新执行修复
-
-### 3.2 读取时验证
+### 5.2 读取时验证
 
 ```python
 # 1. 文件存在性检查
@@ -190,168 +316,142 @@ if json.dumps(stored_params, sort_keys=True) != json.dumps(params, sort_keys=Tru
     return None
 ```
 
-### 3.3 清理策略
+### 5.3 清理策略
 
-**自动清理**：
-- 任务管理器定期清理过期任务
-- 输出文件与数据库记录同步删除
-
-**手动清理**：
-- `CacheManager` 组件提供手动清除功能
+**手动清理**: CacheManagerPage 提供以下操作：
+- 清空所有缓存 (`POST /api/v1/cache/clear-all`)
+- 清空输出缓存 (`POST /api/v1/cache/clear-output`)
+- 清空渲染缓存 (`POST /api/v1/cache/clear-render`)
+- 清空上传缓存 (`POST /api/v1/cache/clear-upload`)
+- 删除指定任务 (`POST /api/v1/cache/delete/{task_id}`)
+- 清理无效缓存 (`POST /api/v1/cache/clean-invalid`)
 
 ---
 
-## 四、经验教训
+## 六、经验教训
 
 ### ❌ 错误1：缓存查询依赖任务状态
 
-**早期实现**：
-```python
-# 错误！
-rows = conn.execute(
-    "SELECT * FROM tasks WHERE file_hash = ? AND status = 'completed'",
-    (file_hash,)
-).fetchall()
-```
+早期实现加了 `status='completed'` 过滤，导致任务状态变化时缓存失效。正确做法是查所有任务，用输出文件存在性判断。
 
-**问题**：任务状态会变化（completed → repairing），导致缓存时灵时不灵
+### ❌ 错误2：会话恢复覆盖新文件
 
-**正确做法**：
-```python
-# 正确！查所有任务，用输出文件存在性判断
-rows = conn.execute(
-    "SELECT * FROM tasks WHERE file_hash = ? ORDER BY updated_at DESC",
-    (file_hash,)
-).fetchall()
-# 然后验证 output_path 存在且 size > 10KB
-```
+上传新文件后 `backendAvailable` 变化触发旧会话恢复。修复：上传成功后清除 `pendingSessionRef`。
 
----
+### ❌ 错误3：前端只写后端分析缓存，不写前端 IndexedDB
 
-### ❌ 错误2：前端 hash 计算与后端不一致
+导致后端不可用时无法命中分析缓存。修复：Worker 化后同时写入前端 IndexedDB 分析缓存。
 
-**问题**：前端用 `arrayBuffer` 计算 hash，后端可能读取文件时编码不同
+### ❌ 错误4：Session 恢复用旧数据覆盖实时解析结果
 
-**解决**：统一使用原始二进制内容计算 SHA-256
+Session restore 流程中，`wavInfo` 先从实际文件头解析（`parseWavHeader`）和/或后端 API 获取，最后又用 session 中保存的旧 `wavInfo` 覆盖。这导致：
+- 非 WAV 文件：session 中 `wavInfo` 为空字符串（`parseWavHeader` 返回 null），覆盖了 API 获取的准确数据
+- WAV 文件：session 中 `wavInfo` 可能缺少字段或 duration 不精确，覆盖了更准确的数据
+- 交付规格块因 `duration <= 0` 显示"加载音频后显示预估大小"
 
----
+**修复**：删除 session restore 中 `setWavInfo(JSON.parse(session.wavInfo))`，不再用旧数据覆盖实时解析结果。
 
-### ❌ 错误3：会话恢复覆盖新文件
+### ❌ 错误5：saveSession 保存中间变量而非最终 state
 
-**问题**：上传新文件后，`backendAvailable` 变化触发旧会话恢复
+`saveSession` 在 async 函数中调用时，使用闭包捕获的 `wavHeaderInfo`（中间变量）而非最终的 `wavInfo` state。由于 React 18 批量更新，`setWavInfo(infoFromApi)` 调用后 state 尚未更新，闭包中的 `wavHeaderInfo` 仍为旧值。
 
-**解决**：上传成功后清除 `pendingSessionRef`，阻止恢复逻辑
+**修复**：使用 `wavInfoRef` 追踪最新 `wavInfo`，`saveSession` 时读取 `wavInfoRef.current`。
 
----
+### ❌ 错误6：processingOptions 未纳入 session 持久化
 
-### ❌ 错误4：嵌套条件逻辑导致代码难以维护
+`processingOptions`（sampleRate/bitDepth）只从 localStorage `loadSettings()` 初始化，不保存在 session 中。用户修改导出选项后刷新页面，选项丢失。AIRepairPanel 的预估大小计算依赖 `processingOptions`，恢复后可能显示错误。
 
-**早期 `applySettings` 实现**：
-```javascript
-if (hasCachedResult) {
-    if (useCache) {
-        backendSkipped = true;
-    } else {
-        needsNewTask = true;
-    }
-}
+**修复**：在 `SessionData` 中添加 `processingOptions` 字段，`saveSession` 时写入，session restore 时恢复。
 
-if (!currentTaskId || needsNewTask) {
-    // 上传...
-}
+### ❌ 错误7：File 对象在 IndexedDB 中跨刷新失效
 
-// Promise 结果处理还要判断 backendSkipped
-if (backendSkipped) {
-    // 特殊处理...
-}
-```
+`File` 对象通过结构化克隆算法存入 IndexedDB，但页面刷新后底层 Blob 数据可能不可读（`file.arrayBuffer()` 抛异常）。旧代码在读取失败时直接 `clearSession()`，导致 session 被永久删除，后续刷新无法恢复。
 
-**重构后**：扁平双路径
-```javascript
-// 路径A：缓存查询
-const cache = await lookupRepairCache(hash, params);
-if (cache.found && userConfirm()) {
-    setStates(cache.data);
-    return;  // 直接返回，不进 Promise 链
-}
+**修复**：当 `file.arrayBuffer()` 失败时，从后端重新下载原始音频（`/api/v1/preview/{task_id}?type=original`），创建新 File 对象继续恢复流程。成功恢复后重新 `saveSession` 刷新 IndexedDB 中的 File 对象。
 
-// 路径B：正常修复
-uploadAndRepair();
-```
+### ❌ 错误8：两个 useEffect 之间的时序竞态
 
----
+原设计用两个 useEffect 协调 session 恢复：
+- useEffect #1 (deps=[])：异步 `loadSession()` → 写入 `pendingSessionRef`
+- useEffect #2 (deps=[backendAvailable])：检查 `pendingSessionRef` 有值后恢复
+
+当后端快速响应时，`backendAvailable` 在 `loadSession()` 完成前就变为 `true`，useEffect #2 提前触发并跳过（`pendingSessionRef` 还是 null），之后不再重新触发。
+
+**修复**：合并为单个 useEffect (deps=[backendAvailable])，在 `backendAvailable` 变为 true 时同步执行 `loadSession()` + 恢复，消除竞态。
+
+### ❌ 错误9：会话因瞬态错误被永久清除
+
+`useAudioProcessor` 的 restore useEffect 中有 **7 处**调用 `clearSession()`，包括：
+- File 对象无效 (`!(file instanceof File) || file.size===0`)
+- 任务状态检查网络错误
+- 后端下载失败
+- IndexedDB File 回退失败
+- 解码失败
+- 任意未捕获异常
+
+任何瞬态错误（网络波动、Blob 不可读）都会永久删除 session，导致二次刷新后无法恢复。
+
+**修复原则**：永远不因瞬态错误清除 session，只在任务确定不存在时才清除：
+1. **后端下载优先，IndexedDB File 回退**：先从 `/api/v1/preview/{task_id}?type=original` 下载（更可靠），失败后才尝试 IndexedDB File
+2. **只要求 `session.taskId`，不要求 `session.file`**：有 taskId 就能从后端下载，File 不是必需的
+3. **网络错误不清除 session**：`fetch('/api/v1/status/...')` 网络错误时跳过恢复但保留 session，下次刷新可重试
+4. **catch 块不清除 session**：只设 `sessionRestoredRef.current = true`，静默跳过
+5. **移出 useEffect 依赖**：`processingOptions.sampleRate` 不应在依赖数组中，避免 restore 过程中状态变化触发 useEffect 重新执行
+
+### ❌ 错误10：无并发保护导致 StrictMode 下多次恢复
+
+React 18 StrictMode 在开发模式下会先 mount → unmount → mount 组件，可能导致：
+1. 第一次 mount 的 async restore 仍在运行
+2. 组件 unmount 后状态丢失
+3. 第二次 mount 又触发新的 restore，与旧 restore 竞争
+
+**修复**：添加 `restoreSeqRef` 序列号，每次触发 useEffect 时 `++restoreSeqRef.current`，每个 await 点检查 `seq !== restoreSeqRef.current`，过期则中止。
 
 ### ✅ 最佳实践1：数据驱动缓存
 
-缓存应该是纯数据映射，与业务逻辑状态解耦：
+缓存应是纯数据映射，与业务逻辑状态解耦：
 ```
 (fileHash + params) → (outputFile)
 ```
-而不是：
-```
-(fileHash + params + taskStatus + ...) → (outputFile)
-```
-
----
 
 ### ✅ 最佳实践2：参数规范化
 
-使用 JSON `sort_keys` 确保参数比较不受键顺序影响：
-```python
-json.dumps(params, sort_keys=True, ensure_ascii=False)
-```
+使用 JSON `sort_keys` 确保参数比较不受键顺序影响。
+
+### ✅ 最佳实践3：缓存优先于 Worker
+
+后端分析缓存命中时完全跳过 Worker，避免不必要的通信和计算开销。
+
+### ✅ 最佳实践4：Worker fallback
+
+Worker 创建失败时 fallback 到主线程同步处理，确保功能不中断。
 
 ---
 
-### ✅ 最佳实践3：完整性校验
-
-缓存命中后验证文件大小，防止文件损坏或部分写入：
-```python
-if size < 10240:  # 10KB 阈值
-    return None  # 视为无效缓存
-```
-
----
-
-### ✅ 最佳实践4：用户确认
-
-缓存命中后给用户选择权：
-- 使用缓存结果（快速）
-- 重新执行修复（可能参数有细微差别）
-
----
-
-## 五、调试工具
-
-### 5.1 后端日志
-
-**端点**：`GET /api/v1/logs?lines=2000`
-
-**关键日志标记**：
-- `[cache-lookup]`：缓存查询过程
-- `[/upload]`：文件上传
-- `[applySettings]`：修复流程
-
-### 5.2 前端日志
-
-**控制台输出**：`writeLog()` 函数写入 IndexedDB，同时输出到 console
-
----
-
-## 六、相关文件
+## 七、相关文件
 
 | 文件 | 说明 |
 |------|------|
+| `src/workers/audioWorker.ts` | Web Worker：WAV PCM 解码 + 音频分析 |
+| `src/workers/useAudioWorker.ts` | Worker 管理 hook：生命周期、消息通信、fallback |
+| `src/utils/sessionDB.ts` | IndexedDB 会话缓存 + 分析缓存 |
+| `src/utils/wavParser.ts` | WAV 头解析（主线程轻量使用） |
+| `src/utils/advancedAudioProcessing.ts` | 类型定义（AIRepairParams, RepairMode 等） |
+| `src/hooks/useAudioProcessor.ts` | 核心状态管理，缓存查询与写入 |
+| `src/services/backendApi.ts` | 后端 API 调用（缓存查询、上传、渲染） |
+| `src/components/RepairCacheModal.tsx` | 修复缓存命中弹窗 |
+| `src/pages/CacheManagerPage.tsx` | 缓存管理页面 |
 | `backend/database.py` | 数据库操作，含 `find_repair_cache()` |
-| `backend/api/routes.py` | API 端点，含 `/cache/lookup` |
-| `src/services/backendApi.ts` | 前端 API 调用 |
-| `src/hooks/useAudioProcessor.ts` | 核心状态管理，含缓存逻辑 |
-| `src/utils/sessionDB.ts` | IndexedDB 会话存储 |
+| `backend/api/routes.py` | API 端点，含所有缓存相关路由 |
 
 ---
 
-## 七、版本历史
+## 八、版本历史
 
-- **v1.0**：基础修复结果缓存（有 status 过滤 bug）
-- **v2.0**：重构为纯数据驱动缓存，去掉 status 依赖
-- **v2.1**：修复文件替换后会话覆盖问题
+- **v1.0**: 基础修复结果缓存（有 status 过滤 bug）
+- **v2.0**: 重构为纯数据驱动缓存，去掉 status 依赖
+- **v2.1**: 修复文件替换后会话覆盖问题
+- **v3.0**: Web Worker 化 + 前端 IndexedDB 分析缓存 + 缓存协同优化
+- **v3.1**: 修复 session restore 覆盖问题 + processingOptions 持久化 + wavInfoRef 追踪
+- **v3.2**: File 对象失效后端兜底下载 + useEffect 合并消除竞态 + 恢复后刷新 session
+- **v3.3**: 移除所有瞬态错误时的 clearSession + 后端下载优先 + restoreSeqRef 并发保护 + File 非必须

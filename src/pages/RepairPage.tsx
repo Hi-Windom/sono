@@ -1,40 +1,30 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Header } from '../components/Header';
 import { AudioUploader } from '../components/AudioUploader';
-import { AudioPlayer } from '../components/AudioPlayer';
-import { WaveformVisualizer } from '../components/WaveformVisualizer';
-import { SpectrumVisualizer } from '../components/SpectrumVisualizer';
 import { AIRepairPanel } from '../components/AIRepairPanel';
-import { AIDetectionComparison } from '../components/AIDetectionComparison';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import { DownloadModal, DownloadFileInfo } from '../components/DownloadModal';
-import { useAudioProcessor } from '../hooks/useAudioProcessor';
+import { RepairCacheModal } from '../components/RepairCacheModal';
+import { useAudioProcessor, generateExportFilename } from '../hooks/useAudioProcessor';
 
 export default function RepairPage() {
   const navigate = useNavigate();
   const {
     audioFile,
     audioBuffer,
-    browserProcessedBuffer,
     backendProcessedBuffer,
-    isPlaying,
-    currentTime,
-    duration,
     isProcessing,
     isDecodingAudio,
     processingProgress,
     processingStep,
+    processingSource,
     params,
     audioAnalysis,
     selectedMode,
-    playMode,
     repairModes,
+    duration,
     processingOptions,
-    originalAIDetection,
-    backendAIDetection,
-    originalDetectTime,
-    repairedDetectTime,
     hasBeenProcessed,
     originalSampleRate,
     currentSampleRate,
@@ -48,10 +38,6 @@ export default function RepairPage() {
     algorithmVersion,
     availableAlgorithms,
     applyAlgorithmVersion,
-    detectorVersion,
-    availableDetectors,
-    setDetectorVersion,
-    // 任务卡住相关
     isTaskStuck,
     stuckInfo,
     queueStatus,
@@ -60,58 +46,46 @@ export default function RepairPage() {
     backendError,
     clearBackendError,
     loadAudioFile,
-    play,
-    pause,
-    seek,
     updateParam,
     resetParams,
     applyRepairMode,
     applySettings,
-    runAIDetection,
-    switchPlayMode,
     setProcessingOptions,
-    downloadProcessedAudio,
-    analyserRef,
-    // 浏览器修复信息
-    browserRepairInfo,
-    enableBrowserRepair,
-    setEnableBrowserRepair,
-    // 渲染加载状态
     isRenderLoading,
-    // 文件哈希
     fileHash,
-    // 修复参数配置管理
     saveProfile,
-    // 任务ID
     taskId,
-    // 渲染并下载
     renderAndDownload,
-    // 下载弹窗
     renderDownloadUrl,
     setRenderDownloadUrl,
     showDownloadModal,
     setShowDownloadModal,
     autoRenderInfo,
+    showRepairCacheModal,
+    setShowRepairCacheModal,
+    cacheHitInfo,
+    handleUseRepairCache,
+    handleRenderCacheDownload,
+    handleReRepair,
+    handleCloseRepairCacheModal,
   } = useAudioProcessor();
 
   const [showDiag, setShowDiag] = useState(false);
   const [instantDownloadInfo, setInstantDownloadInfo] = useState<DownloadFileInfo | null>(null);
-  const [renderResultInfo, setRenderResultInfo] = useState<DownloadFileInfo | null>(null);
 
-  useEffect(() => {
-    if (autoRenderInfo) {
-      setRenderResultInfo({
-        filename: `${(audioFile?.name || 'audio').replace(/\.[^/.]+$/, '')}_repaired.wav`,
-        fileSize: autoRenderInfo.duration && autoRenderInfo.output_sample_rate && autoRenderInfo.channels && autoRenderInfo.output_bit_depth
-          ? `${((autoRenderInfo.duration * autoRenderInfo.output_sample_rate * autoRenderInfo.channels * (autoRenderInfo.output_bit_depth / 8)) / (1024 * 1024)).toFixed(2)} MB`
-          : '—',
-        sampleRate: autoRenderInfo.output_sample_rate ? `${autoRenderInfo.output_sample_rate / 1000} kHz` : 'N/A',
-        bitDepth: autoRenderInfo.output_bit_depth || 24,
-        channels: autoRenderInfo.channels || 2,
-        duration: autoRenderInfo.duration || 0,
-        algorithmVersion: algorithmVersion,
-      });
-    }
+  const renderResultInfo = useMemo(() => {
+    if (!autoRenderInfo) return null;
+    return {
+      filename: `${(audioFile?.name || 'audio').replace(/\.[^/.]+$/, '')}_repaired.wav`,
+      fileSize: autoRenderInfo.duration && autoRenderInfo.output_sample_rate && autoRenderInfo.channels && autoRenderInfo.output_bit_depth
+        ? `${((autoRenderInfo.duration * autoRenderInfo.output_sample_rate * autoRenderInfo.channels * (autoRenderInfo.output_bit_depth / 8)) / (1024 * 1024)).toFixed(2)} MB`
+        : '—',
+      sampleRate: autoRenderInfo.output_sample_rate ? `${autoRenderInfo.output_sample_rate / 1000} kHz` : 'N/A',
+      bitDepth: autoRenderInfo.output_bit_depth || 24,
+      channels: autoRenderInfo.channels || 2,
+      duration: autoRenderInfo.duration || 0,
+      algorithmVersion: algorithmVersion,
+    };
   }, [autoRenderInfo, audioFile, algorithmVersion]);
 
   // 渲染缓存刷新回调
@@ -179,22 +153,7 @@ export default function RepairPage() {
     }
   }, [audioFile, saveProfile]);
 
-  const hasBrowserResult = !!browserProcessedBuffer;
   const hasBackendResult = !!backendProcessedBuffer || !!repairResult;
-
-  const activeBuffer = playMode === 'browser' ? (browserProcessedBuffer ?? audioBuffer)
-    : playMode === 'backend' ? (backendProcessedBuffer ?? audioBuffer)
-    : audioBuffer;
-
-  const isBufferReady = playMode === 'browser' ? !!browserProcessedBuffer
-    : playMode === 'backend' ? !!backendProcessedBuffer
-    : true;
-
-  const browserBufferInfo = browserProcessedBuffer ? {
-    sampleRate: browserProcessedBuffer.sampleRate,
-    channels: browserProcessedBuffer.numberOfChannels,
-    duration: browserProcessedBuffer.duration,
-  } : null;
 
   return (
     <ErrorBoundary>
@@ -206,7 +165,16 @@ export default function RepairPage() {
           <div className="container mx-auto px-4 max-w-7xl py-2">
             <div className="flex items-center gap-3">
               <div className={`w-4 h-4 rounded-full animate-spin flex-shrink-0 ${isTaskStuck ? 'bg-yellow-500' : 'bg-gradient-to-r from-cyan-500 to-purple-500'}`} />
-              <span className={`text-sm truncate ${isTaskStuck ? 'text-yellow-400' : 'text-cyan-400'}`}>
+              <span className={`text-sm truncate flex items-center gap-2 ${isTaskStuck ? 'text-yellow-400' : 'text-cyan-400'}`}>
+                {processingSource && (
+                  <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium flex-shrink-0 ${
+                    processingSource === 'backend'
+                      ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                      : 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
+                  }`}>
+                    {processingSource === 'backend' ? '后端' : ''}
+                  </span>
+                )}
                 {isTaskStuck ? '任务可能已卡住...' : (processingStep || '正在处理音频...')}
               </span>
               {queueStatus && queueStatus.detecting + queueStatus.repairing > 0 && (
@@ -241,7 +209,7 @@ export default function RepairPage() {
                     <p className="text-yellow-400 text-xs">任务执行似乎卡住了 - "{stuckInfo?.lastStep}" 已超过 {Math.round(stuckInfo?.duration || 0)} 秒</p>
                     <div className="flex gap-2 mt-1.5">
                       <button onClick={cancelCurrentTask} className="px-2.5 py-1 bg-red-500/20 hover:bg-red-500/30 text-red-400 text-xs rounded transition-colors">取消任务</button>
-                      <button onClick={() => { resetStuckState(); if (processingStep.includes('检测')) runAIDetection(); else if (processingStep.includes('修复')) applySettings(); }} className="px-2.5 py-1 bg-yellow-500/20 hover:bg-yellow-500/30 text-yellow-400 text-xs rounded transition-colors">重试</button>
+                      <button onClick={() => { resetStuckState(); if (processingStep.includes('修复')) applySettings(); }} className="px-2.5 py-1 bg-yellow-500/20 hover:bg-yellow-500/30 text-yellow-400 text-xs rounded transition-colors">重试</button>
                       <button onClick={resetStuckState} className="px-2.5 py-1 bg-white/5 hover:bg-white/10 text-gray-400 text-xs rounded transition-colors">继续等待</button>
                     </div>
                   </div>
@@ -345,41 +313,20 @@ export default function RepairPage() {
                   </label>
                 </div>
 
-                <AudioPlayer
-                  isPlaying={isPlaying}
-                  currentTime={currentTime}
-                  duration={duration}
-                  playMode={playMode}
-                  hasBrowserResult={hasBrowserResult}
-                  hasBackendResult={hasBackendResult}
-                  onPlay={play}
-                  onPause={pause}
-                  onSeek={seek}
-                  onSwitchPlayMode={switchPlayMode}
-                />
-
-                {analyserRef.current && (
-                  <div className="mt-6">
-                    <SpectrumVisualizer
-                      analyser={analyserRef.current}
-                      color={playMode === 'original' ? '#6B7280' : '#00D9FF'}
-                      label={playMode === 'original' ? '原始频谱' : '修复后频谱'}
-                    />
+                {taskId && hasBeenProcessed && (
+                  <div className="mt-4">
+                    <button
+                      onClick={() => navigate(`/compare?taskId=${taskId}`)}
+                      className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-cyan-500/20 to-purple-500/20 hover:from-cyan-500/30 hover:to-purple-500/30 border border-cyan-400/30 hover:border-cyan-400/50 rounded-lg text-cyan-400 text-sm font-medium transition-all w-full justify-center"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
+                      </svg>
+                      <span>前往 AB 对比</span>
+                      <span className="text-xs opacity-60 ml-1">原始 / 修复后</span>
+                    </button>
                   </div>
                 )}
-
-                <div className="mt-6">
-                  <WaveformVisualizer
-                    key={`waveform-${playMode}-${isBufferReady}`}
-                    audioBuffer={activeBuffer}
-                    waveformPeaks={playMode === 'backend' && !activeBuffer ? backendWaveformPeaks : playMode === 'original' && !activeBuffer ? originalWaveformPeaks : null}
-                    color={playMode === 'original' ? '#6B7280' : playMode === 'browser' ? '#A855F7' : '#00D9FF'}
-                    label={playMode === 'original' ? '原始波形' : playMode === 'browser' ? (isBufferReady ? '浏览器修复波形' : '浏览器修复波形 (加载中...)') : (isBufferReady ? '后端修复波形' : '后端修复波形 (预览中...)')}
-                    currentTime={currentTime}
-                    duration={duration}
-                    onSeek={seek}
-                  />
-                </div>
               </div>
 
               {backendError && (
@@ -397,18 +344,6 @@ export default function RepairPage() {
                 </div>
               )}
 
-              <AIDetectionComparison
-                before={originalAIDetection}
-                backendAfter={backendAIDetection}
-                onDetect={runAIDetection}
-                isProcessing={isProcessing}
-                detectorVersion={detectorVersion}
-                onDetectorVersionChange={setDetectorVersion}
-                availableDetectors={availableDetectors}
-                algorithmVersion={algorithmVersion}
-                originalDetectTime={originalDetectTime || undefined}
-                repairedDetectTime={repairedDetectTime || undefined}
-              />
             </div>
 
             <div className="lg:col-span-5 space-y-6">
@@ -421,14 +356,12 @@ export default function RepairPage() {
                 processingOptions={processingOptions}
                 algorithmVersion={algorithmVersion}
                 availableAlgorithms={availableAlgorithms}
-                enableBrowserRepair={enableBrowserRepair}
                 onAlgorithmChange={applyAlgorithmVersion}
                 onParamChange={updateParam}
                 onReset={resetParams}
                 onModeSelect={applyRepairMode}
                 onApply={applySettings}
                 onOptionsChange={setProcessingOptions}
-                onEnableBrowserRepairChange={setEnableBrowserRepair}
                 disabled={isProcessing}
                 duration={duration}
                 channels={audioBuffer?.numberOfChannels ?? 2}
@@ -441,7 +374,7 @@ export default function RepairPage() {
                   const downloadUrl = `/api/v1/download-file/${cacheEntry.filename}`;
                   setRenderDownloadUrl(downloadUrl);
                   setInstantDownloadInfo({
-                    filename: cacheEntry.filename,
+                    filename: generateExportFilename(audioFile?.name, cacheEntry.algorithm_version, cacheEntry.sample_rate, cacheEntry.bit_depth),
                     fileSize: `${(cacheEntry.size / (1024 * 1024)).toFixed(2)} MB`,
                     sampleRate: `${cacheEntry.sample_rate / 1000} kHz`,
                     bitDepth: cacheEntry.bit_depth,
@@ -491,53 +424,38 @@ export default function RepairPage() {
         onClose={() => {
           setShowDownloadModal(false);
           setInstantDownloadInfo(null);
-          setRenderResultInfo(null);
         }}
-        backendInfo={instantDownloadInfo || renderResultInfo || (hasBackendResult && repairResult ? {
-          filename: `${(audioFile?.name || 'audio').replace(/\.[^/.]+$/, '')}_backend_repaired.wav`,
-          fileSize: repairResult.duration && repairResult.output_sample_rate && repairResult.channels && repairResult.output_bit_depth
-            ? `${((repairResult.duration * repairResult.output_sample_rate * repairResult.channels * (repairResult.output_bit_depth / 8)) / (1024 * 1024)).toFixed(2)} MB`
+        backendInfo={instantDownloadInfo || renderResultInfo || (hasBackendResult ? {
+          filename: generateExportFilename(audioFile?.name, algorithmVersion, processingOptions.sampleRate, processingOptions.bitDepth),
+          fileSize: repairResult?.duration && repairResult?.channels
+            ? `${((repairResult.duration * processingOptions.sampleRate * repairResult.channels * (processingOptions.bitDepth / 8)) / (1024 * 1024)).toFixed(2)} MB`
             : '—',
-          sampleRate: repairResult.output_sample_rate ? `${(repairResult.output_sample_rate / 1000).toFixed(1)} kHz` : 'N/A',
-          bitDepth: repairResult.output_bit_depth || 32,
-          channels: repairResult.channels || 2,
-          duration: repairResult.duration || 0,
-          algorithmVersion: algorithmVersion,
-          completedAt: repairResult.completed_at,
-        } : null)}
-        browserInfo={hasBrowserResult && browserBufferInfo ? {
-          filename: `${(audioFile?.name || 'audio').replace(/\.[^/.]+$/, '')}_browser_repaired.wav`,
-          fileSize: `${((browserBufferInfo.duration * browserBufferInfo.sampleRate * browserBufferInfo.channels * (processingOptions.bitDepth / 8)) / (1024 * 1024)).toFixed(2)} MB`,
-          sampleRate: `${browserBufferInfo.sampleRate / 1000} kHz`,
+          sampleRate: `${processingOptions.sampleRate / 1000} kHz`,
           bitDepth: processingOptions.bitDepth,
-          channels: browserBufferInfo.channels,
-          duration: browserBufferInfo.duration,
-          algorithmVersion: browserRepairInfo?.algorithmVersion,
-          completedAt: browserRepairInfo?.completedAt,
-        } : null}
+          channels: repairResult?.channels || 2,
+          duration: repairResult?.duration || 0,
+          algorithmVersion: algorithmVersion,
+          completedAt: repairResult?.completed_at,
+        } : null)}
         backendDownloadUrl={renderDownloadUrl}
         backendDownloadAction={hasBackendResult ? async () => {
-          const result = await renderAndDownload();
+          const result = await renderAndDownload(processingOptions);
           if (result?.downloadUrl) {
             setRenderDownloadUrl(result.downloadUrl);
           }
-          if (result?.renderInfo) {
-            const ri = result.renderInfo;
-            setRenderResultInfo({
-              filename: result.fileName || `${(audioFile?.name || 'audio').replace(/\.[^/.]+$/, '')}_repaired.wav`,
-              fileSize: ri.duration && ri.output_sample_rate && ri.channels && ri.output_bit_depth
-                ? `${((ri.duration * ri.output_sample_rate * ri.channels * (ri.output_bit_depth / 8)) / (1024 * 1024)).toFixed(2)} MB`
-                : '—',
-              sampleRate: ri.output_sample_rate ? `${ri.output_sample_rate / 1000} kHz` : 'N/A',
-              bitDepth: ri.output_bit_depth || 24,
-              channels: ri.channels || 2,
-              duration: ri.duration || 0,
-              algorithmVersion: algorithmVersion,
-            });
-          }
         } : undefined}
-        browserDownloadAction={hasBrowserResult ? () => downloadProcessedAudio('browser') : undefined}
         isBackendLoading={isRenderLoading}
+      />
+
+      <RepairCacheModal
+        isOpen={showRepairCacheModal}
+        cacheHit={cacheHitInfo}
+        audioFileName={audioFile?.name}
+        algorithmVersion={algorithmVersion}
+        onUseRepairCache={handleUseRepairCache}
+        onRenderCacheDownload={handleRenderCacheDownload}
+        onReRepair={handleReRepair}
+        onClose={handleCloseRepairCacheModal}
       />
     </div>
     </ErrorBoundary>

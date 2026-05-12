@@ -736,12 +736,19 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
     if y.dtype == np.float32:
         y = y.astype(np.float64)
 
+    bit_depth = params.get("bit_depth", 24)
+    source_bit_depth = params.get("source_bit_depth", 24)
+    if source_bit_depth < bit_depth:
+        from services.repair.repair_v2_4.bit_depth_enhance import apply_bit_depth_enhance
+        y = apply_bit_depth_enhance(y, source_bit_depth, bit_depth, sr)
+        if "位深提升(16→24bit)" not in issues_found:
+            issues_found.append("位深提升(16→24bit)")
+
     if progress_callback:
         progress_callback(0.95, "v2.4a 导出...")
 
     try:
         import soundfile as sf
-        bit_depth = params.get("bit_depth", 24)
         subtype_map = {16: "PCM_16", 24: "PCM_24", 32: "PCM_32"}
         subtype = subtype_map.get(bit_depth, "PCM_24")
         sf.write(output_path, y.T if y.ndim > 1 else y, sr, subtype=subtype)
@@ -751,7 +758,9 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
             y_out = y.T
         else:
             y_out = y
-        if y_out.dtype != np.int16:
+        if bit_depth == 24:
+            y_out = np.clip(y_out * 8388607, -8388608, 8388607).astype(np.int32)
+        elif y_out.dtype != np.int16:
             y_out = np.clip(y_out * 32767, -32768, 32767).astype(np.int16)
         wavfile.write(output_path, sr, y_out)
 

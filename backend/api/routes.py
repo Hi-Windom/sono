@@ -310,6 +310,117 @@ async def detect_audio(request: DetectRequest):
 
     return {"task_id": request.task_id, "status": "detecting"}
 
+@router.post("/detect-file")
+async def detect_file(file: UploadFile = File(...), detector_version: str = Form("v1.1")):
+    ext = os.path.splitext(file.filename or '')[1].lower()
+    if ext not in ALLOWED_EXTENSIONS:
+        raise HTTPException(status_code=400, detail=f"不支持的文件格式: {ext}")
+
+    task_id = generate_task_id()
+    upload_path = os.path.join(UPLOAD_DIR, f"{task_id}{ext}")
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+    with open(upload_path, "wb") as f:
+        content = await file.read()
+        if len(content) > MAX_UPLOAD_SIZE:
+            os.remove(upload_path)
+            raise HTTPException(status_code=413, detail=f"文件过大，最大支持 {MAX_UPLOAD_SIZE // 1024 // 1024}MB")
+        f.write(content)
+
+    create_task(task_id, file.filename or "audio", upload_path, {}, "", len(content))
+    logger.info(f"[/detect-file] task_id={task_id} file={file.filename} detector_version={detector_version}")
+
+    submit_detect_task(task_id, upload_path, "original", detector_version)
+
+    return {"task_id": task_id, "status": "detecting"}
+
+_audio_files_cache: dict = {"data": None, "ts": 0}
+
+@router.get("/audio-files")
+async def list_audio_files():
+    import hashlib
+    import time
+
+    now = time.time()
+    if _audio_files_cache["data"] is not None and now - _audio_files_cache["ts"] < 5:
+        return _audio_files_cache["data"]
+
+    files = []
+    seen_paths = set()
+
+    for directory, ftype in [(UPLOAD_DIR, "upload"), (OUTPUT_DIR, "output")]:
+        if not os.path.exists(directory):
+            continue
+        for fname in os.listdir(directory):
+            fp = os.path.join(directory, fname)
+            if not os.path.isfile(fp):
+                continue
+            ext = os.path.splitext(fname)[1].lower()
+            if ext not in ALLOWED_EXTENSIONS:
+                continue
+            real = os.path.realpath(fp)
+            if real in seen_paths:
+                continue
+            seen_paths.add(real)
+            try:
+                st = os.stat(fp)
+            except OSError:
+                continue
+            file_id = hashlib.sha256(fp.encode()).hexdigest()[:16]
+            render_type = "render" if "_rendered_" in fname else ftype
+            files.append({
+                "file_id": file_id,
+                "filename": fname,
+                "size": st.st_size,
+                "type": render_type,
+                "modified_at": st.st_mtime,
+            })
+
+    files.sort(key=lambda x: x["modified_at"], reverse=True)
+
+    result = {"files": files, "count": len(files)}
+    _audio_files_cache["data"] = result
+    _audio_files_cache["ts"] = now
+    return result
+
+class DetectPathRequest(BaseModel):
+    file_id: str
+    detector_version: str = "v1.1"
+
+@router.post("/detect-path")
+async def detect_by_path(request: DetectPathRequest):
+    import hashlib
+
+    target_id = request.file_id
+    found_path = None
+    found_name = None
+
+    for directory in [UPLOAD_DIR, OUTPUT_DIR]:
+        if not os.path.exists(directory):
+            continue
+        for fname in os.listdir(directory):
+            fp = os.path.join(directory, fname)
+            if not os.path.isfile(fp):
+                continue
+            fid = hashlib.sha256(fp.encode()).hexdigest()[:16]
+            if fid == target_id:
+                found_path = fp
+                found_name = fname
+                break
+        if found_path:
+            break
+
+    if not found_path or not os.path.exists(found_path):
+        raise HTTPException(status_code=404, detail="音频文件不存在")
+
+    task_id = generate_task_id()
+    create_task(task_id, found_name, found_path, {}, "", os.path.getsize(found_path))
+    logger.info(f"[/detect-path] task_id={task_id} file_id={target_id} path={found_path} detector_version={request.detector_version}")
+
+    submit_detect_task(task_id, found_path, "original", request.detector_version)
+
+    return {"task_id": task_id, "status": "detecting"}
+
 class RepairRequest(BaseModel):
     task_id: str
     params: dict
@@ -356,7 +467,15 @@ async def render_audio_endpoint(request: RenderRequest):
 
 def _run_render(task_id, input_path, output_path, target_sr, bit_depth, render_filename):
     from services.render import render_output
-    from services.task_manager import _ws_send_progress
+    from services.task_manager import _ws_send_progress, _ws_send_final
+
+    source_bit_depth = None
+    try:
+        from services.audio_loader import load_audio_with_fallback
+        _, _, src_bd = load_audio_with_fallback(input_path, sr=None, mono=False, return_bit_depth=True)
+        source_bit_depth = src_bd
+    except Exception:
+        pass
 
     def progress_callback(pct, step):
         update_task(task_id, progress=pct, step=step)
@@ -368,7 +487,7 @@ def _run_render(task_id, input_path, output_path, target_sr, bit_depth, render_f
         })
 
     try:
-        result = render_output(input_path, output_path, target_sr, bit_depth, progress_callback=progress_callback)
+        result = render_output(input_path, output_path, target_sr, bit_depth, progress_callback=progress_callback, source_bit_depth=source_bit_depth)
         update_task(task_id,
             status="render_completed",
             progress=1.0,
@@ -376,7 +495,7 @@ def _run_render(task_id, input_path, output_path, target_sr, bit_depth, render_f
             render_filename=render_filename,
             render_result=result,
         )
-        _ws_send_progress(task_id, {
+        _ws_send_final(task_id, {
             "task_id": task_id,
             "status": "render_completed",
             "progress": 1.0,
@@ -387,7 +506,7 @@ def _run_render(task_id, input_path, output_path, target_sr, bit_depth, render_f
     except Exception as e:
         logger.error(f"[render] 渲染失败 task_id={task_id}: {e}")
         update_task(task_id, status="error", error=str(e), step="渲染失败")
-        _ws_send_progress(task_id, {
+        _ws_send_final(task_id, {
             "task_id": task_id,
             "status": "error",
             "error": str(e),
@@ -468,7 +587,7 @@ async def websocket_task_status(websocket: WebSocket, task_id: str):
         if task.get("error"):
             current["error"] = task["error"]
         await websocket.send_json(current)
-        if task["status"] in ("completed", "detected", "error"):
+        if task.get("status") in ("completed", "detected", "error", "render_completed"):
             await websocket.close()
             return
         
@@ -498,7 +617,7 @@ async def websocket_task_status(websocket: WebSocket, task_id: str):
                 if current_task.get("error"):
                     heartbeat_msg["error"] = current_task["error"]
                 await websocket.send_json(heartbeat_msg)
-                if current_task["status"] in ("completed", "detected", "error"):
+                if current_task["status"] in ("completed", "detected", "error", "render_completed"):
                     await websocket.close()
                     return
     except WebSocketDisconnect:
@@ -972,15 +1091,24 @@ async def cancel_task_endpoint(task_id: str):
         return {"task_id": task_id, "status": "cancelling", "message": "任务正在取消中"}
 
 @router.get("/preview/{task_id}")
-async def preview_audio(task_id: str):
+async def preview_audio(task_id: str, type: str = 'repaired'):
     task = get_task(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
-    
+
+    if type == 'original':
+        original_path = task.get("original_path", "")
+        if not original_path or not os.path.exists(original_path):
+            raise HTTPException(status_code=404, detail="原始音频不存在")
+        return FileResponse(
+            original_path,
+            media_type="audio/wav",
+        )
+
     output_path = task.get("output_path")
     if not output_path or not os.path.exists(output_path):
         raise HTTPException(status_code=404, detail="修复后的音频不存在")
-    
+
     return FileResponse(
         output_path,
         media_type="audio/wav",

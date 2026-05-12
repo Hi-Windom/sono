@@ -17,14 +17,12 @@ interface AIRepairPanelProps {
   processingOptions: ProcessingOptions;
   algorithmVersion: string;
   availableAlgorithms: AlgorithmVersion[];
-  enableBrowserRepair: boolean;
   onAlgorithmChange: (version: string) => void;
   onParamChange: (key: keyof AIRepairParams, value: number) => void;
   onReset: () => void;
   onModeSelect: (mode: RepairMode) => void;
   onApply?: () => void;
   onOptionsChange?: (options: ProcessingOptions) => void;
-  onEnableBrowserRepairChange?: (enabled: boolean) => void;
   disabled?: boolean;
   duration?: number;
   channels?: number;
@@ -104,14 +102,12 @@ export function AIRepairPanel({
   processingOptions,
   algorithmVersion,
   availableAlgorithms,
-  enableBrowserRepair,
   onAlgorithmChange,
   onParamChange,
   onReset,
   onModeSelect,
   onApply,
   onOptionsChange,
-  onEnableBrowserRepairChange,
   disabled,
   duration = 0,
   channels = 2,
@@ -781,18 +777,6 @@ export function AIRepairPanel({
         </button>
       )}
 
-      <div className="mb-3">
-        <label className="flex items-center gap-2 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={enableBrowserRepair}
-            onChange={(e) => onEnableBrowserRepairChange?.(e.target.checked)}
-            disabled={disabled}
-            className="w-4 h-4 rounded bg-gray-700 border-gray-600 text-cyan-500 focus:ring-cyan-500 focus:ring-offset-0"
-          />
-          <span className="text-gray-300 text-sm">同时进行浏览器修复</span>
-        </label>
-      </div>
       <div className="grid grid-cols-2 gap-3">
         <button
           onClick={onReset}

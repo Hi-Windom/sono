@@ -5,15 +5,13 @@ import { AudioPlayer } from '../components/AudioPlayer';
 import { WaveformVisualizer } from '../components/WaveformVisualizer';
 import { SpectrumVisualizer } from '../components/SpectrumVisualizer';
 import { AIRepairPanel } from '../components/AIRepairPanel';
-import { AIDetectionComparison } from '../components/AIDetectionComparison';
 import { DownloadModal, DownloadFileInfo } from '../components/DownloadModal';
-import { useAudioProcessor } from '../hooks/useAudioProcessor';
+import { useAudioProcessor, generateExportFilename } from '../hooks/useAudioProcessor';
 
 export default function Home() {
   const {
     audioFile,
     audioBuffer,
-    browserProcessedBuffer,
     backendProcessedBuffer,
     isPlaying,
     currentTime,
@@ -22,16 +20,13 @@ export default function Home() {
     isDecodingAudio,
     processingProgress,
     processingStep,
+    processingSource,
     params,
     audioAnalysis,
     selectedMode,
     playMode,
     repairModes,
     processingOptions,
-    originalAIDetection,
-    backendAIDetection,
-    originalDetectTime,
-    repairedDetectTime,
     hasBeenProcessed,
     originalSampleRate,
     currentSampleRate,
@@ -43,8 +38,6 @@ export default function Home() {
     algorithmVersion,
     availableAlgorithms,
     applyAlgorithmVersion,
-    detectorVersion,
-    setDetectorVersion,
     loadAudioFile,
     play,
     pause,
@@ -53,17 +46,12 @@ export default function Home() {
     resetParams,
     applyRepairMode,
     applySettings,
-    runAIDetection,
     switchPlayMode,
     setProcessingOptions,
-    downloadProcessedAudio,
     analyserRef,
-    enableBrowserRepair,
-    setEnableBrowserRepair,
     backendError,
     clearBackendError,
     renderAndDownload,
-    browserRepairInfo,
     isRenderLoading,
     taskId,
     renderDownloadUrl,
@@ -76,18 +64,10 @@ export default function Home() {
   const [showDiag, setShowDiag] = useState(false);
   const [instantDownloadInfo, setInstantDownloadInfo] = useState<DownloadFileInfo | null>(null);
 
-  const hasBrowserResult = !!browserProcessedBuffer;
   const hasBackendResult = !!backendProcessedBuffer || !!repairResult;
 
-  const activeBuffer = playMode === 'browser' ? browserProcessedBuffer
-    : playMode === 'backend' ? backendProcessedBuffer
+  const activeBuffer = playMode === 'backend' ? backendProcessedBuffer
     : audioBuffer;
-
-  const browserBufferInfo = browserProcessedBuffer ? {
-    sampleRate: browserProcessedBuffer.sampleRate,
-    channels: browserProcessedBuffer.numberOfChannels,
-    duration: browserProcessedBuffer.duration,
-  } : null;
 
   return (
     <div className="min-h-screen bg-dark py-6">
@@ -98,7 +78,18 @@ export default function Home() {
           <div className="container mx-auto px-4 max-w-7xl py-2">
             <div className="flex items-center gap-3">
               <div className="w-4 h-4 bg-gradient-to-r from-cyan-500 to-purple-500 rounded-full animate-spin flex-shrink-0" />
-              <span className="text-cyan-400 text-sm truncate">{processingStep || '正在处理音频...'}</span>
+              <span className="text-cyan-400 text-sm truncate flex items-center gap-2">
+                {processingSource && (
+                  <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium flex-shrink-0 ${
+                    processingSource === 'backend'
+                      ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                      : 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
+                  }`}>
+                    {processingSource === 'backend' ? '后端' : ''}
+                  </span>
+                )}
+                {processingStep || '正在处理音频...'}
+              </span>
               <div className="flex-1 min-w-0">
                 <div className="w-full h-1.5 bg-gray-700 rounded-full overflow-hidden">
                   <div
@@ -189,7 +180,6 @@ export default function Home() {
                   currentTime={currentTime}
                   duration={duration}
                   playMode={playMode}
-                  hasBrowserResult={hasBrowserResult}
                   hasBackendResult={hasBackendResult}
                   onPlay={play}
                   onPause={pause}
@@ -233,18 +223,6 @@ export default function Home() {
                   </div>
                 </div>
               )}
-
-              <AIDetectionComparison
-                before={originalAIDetection}
-                backendAfter={backendAIDetection}
-                onDetect={runAIDetection}
-                isProcessing={isProcessing}
-                detectorVersion={detectorVersion}
-                onDetectorVersionChange={setDetectorVersion}
-                algorithmVersion={algorithmVersion}
-                originalDetectTime={originalDetectTime || undefined}
-                repairedDetectTime={repairedDetectTime || undefined}
-              />
             </div>
 
             <div className="lg:col-span-5 space-y-6">
@@ -256,14 +234,12 @@ export default function Home() {
                 processingOptions={processingOptions}
                 algorithmVersion={algorithmVersion}
                 availableAlgorithms={availableAlgorithms}
-                enableBrowserRepair={enableBrowserRepair}
                 onAlgorithmChange={applyAlgorithmVersion}
                 onParamChange={updateParam}
                 onReset={resetParams}
                 onModeSelect={applyRepairMode}
                 onApply={applySettings}
                 onOptionsChange={setProcessingOptions}
-                onEnableBrowserRepairChange={setEnableBrowserRepair}
                 disabled={isProcessing}
                 duration={duration}
                 channels={audioBuffer?.numberOfChannels ?? 2}
@@ -272,7 +248,7 @@ export default function Home() {
                   const downloadUrl = `/api/v1/download-file/${cacheEntry.filename}`;
                   setRenderDownloadUrl(downloadUrl);
                   setInstantDownloadInfo({
-                    filename: cacheEntry.filename,
+                    filename: generateExportFilename(audioFile?.name, cacheEntry.algorithm_version, cacheEntry.sample_rate, cacheEntry.bit_depth),
                     fileSize: `${(cacheEntry.size / (1024 * 1024)).toFixed(2)} MB`,
                     sampleRate: `${cacheEntry.sample_rate / 1000} kHz`,
                     bitDepth: cacheEntry.bit_depth,
@@ -325,36 +301,25 @@ export default function Home() {
           setShowDownloadModal(false);
           setInstantDownloadInfo(null);
         }}
-        backendInfo={instantDownloadInfo || (hasBackendResult && repairResult ? {
-          filename: `${(audioFile?.name || 'audio').replace(/\.[^/.]+$/, '')}_backend_repaired.wav`,
-          fileSize: repairResult.duration && repairResult.output_sample_rate && repairResult.channels && repairResult.output_bit_depth
-            ? `${((repairResult.duration * repairResult.output_sample_rate * repairResult.channels * (repairResult.output_bit_depth / 8)) / (1024 * 1024)).toFixed(2)} MB`
+        backendInfo={instantDownloadInfo || (hasBackendResult ? {
+          filename: generateExportFilename(audioFile?.name, algorithmVersion, processingOptions.sampleRate, processingOptions.bitDepth),
+          fileSize: repairResult?.duration && repairResult?.channels
+            ? `${((repairResult.duration * processingOptions.sampleRate * repairResult.channels * (processingOptions.bitDepth / 8)) / (1024 * 1024)).toFixed(2)} MB`
             : '—',
-          sampleRate: repairResult.output_sample_rate ? `${(repairResult.output_sample_rate / 1000).toFixed(1)} kHz` : 'N/A',
-          bitDepth: repairResult.output_bit_depth || 32,
-          channels: repairResult.channels || 2,
-          duration: repairResult.duration || 0,
-          algorithmVersion: algorithmVersion,
-          completedAt: repairResult.completed_at,
-        } : null)}
-        browserInfo={hasBrowserResult && browserBufferInfo ? {
-          filename: `${(audioFile?.name || 'audio').replace(/\.[^/.]+$/, '')}_browser_repaired.wav`,
-          fileSize: `${((browserBufferInfo.duration * browserBufferInfo.sampleRate * browserBufferInfo.channels * (processingOptions.bitDepth / 8)) / (1024 * 1024)).toFixed(2)} MB`,
-          sampleRate: `${browserBufferInfo.sampleRate / 1000} kHz`,
+          sampleRate: `${processingOptions.sampleRate / 1000} kHz`,
           bitDepth: processingOptions.bitDepth,
-          channels: browserBufferInfo.channels,
-          duration: browserBufferInfo.duration,
-          algorithmVersion: browserRepairInfo?.algorithmVersion,
-          completedAt: browserRepairInfo?.completedAt,
-        } : null}
+          channels: repairResult?.channels || 2,
+          duration: repairResult?.duration || 0,
+          algorithmVersion: algorithmVersion,
+          completedAt: repairResult?.completed_at,
+        } : null)}
         backendDownloadUrl={renderDownloadUrl}
         backendDownloadAction={hasBackendResult ? async () => {
-          const result = await renderAndDownload();
+          const result = await renderAndDownload(processingOptions);
           if (result?.downloadUrl) {
             setRenderDownloadUrl(result.downloadUrl);
           }
         } : undefined}
-        browserDownloadAction={hasBrowserResult ? () => downloadProcessedAudio('browser') : undefined}
         isBackendLoading={isRenderLoading}
       />
     </div>

@@ -29,10 +29,8 @@ interface DownloadModalProps {
   isOpen: boolean;
   onClose: () => void;
   backendInfo?: DownloadFileInfo | null;
-  browserInfo?: DownloadFileInfo | null;
   backendDownloadUrl?: string | null;
   backendDownloadAction?: () => void;
-  browserDownloadAction?: () => void;
   isBackendLoading?: boolean;
 }
 
@@ -40,10 +38,8 @@ export function DownloadModal({
   isOpen,
   onClose,
   backendInfo,
-  browserInfo,
   backendDownloadUrl,
   backendDownloadAction,
-  browserDownloadAction,
   isBackendLoading = false,
 }: DownloadModalProps) {
   const [copySuccess, setCopySuccess] = useState(false);
@@ -54,17 +50,11 @@ export function DownloadModal({
   const [dlSpeed, setDlSpeed] = useState(0);
   const [editingBackendName, setEditingBackendName] = useState(false);
   const [backendFilename, setBackendFilename] = useState('');
-  const [editingBrowserName, setEditingBrowserName] = useState(false);
-  const [browserFilename, setBrowserFilename] = useState('');
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     if (backendInfo?.filename) setBackendFilename(backendInfo.filename);
   }, [backendInfo?.filename]);
-
-  useEffect(() => {
-    if (browserInfo?.filename) setBrowserFilename(browserInfo.filename);
-  }, [browserInfo?.filename]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -197,16 +187,6 @@ export function DownloadModal({
       abortRef.current = null;
     }
   }, []);
-
-  const handleBrowserDownload = useCallback(() => {
-    if (!browserDownloadAction) return;
-    setDownloading(true);
-    try {
-      browserDownloadAction();
-    } finally {
-      setTimeout(() => setDownloading(false), 1000);
-    }
-  }, [browserDownloadAction]);
 
   if (!isOpen) return null;
 
@@ -359,91 +339,7 @@ export function DownloadModal({
             </div>
           )}
 
-          {browserInfo && (
-            <div className="bg-purple-500/5 border border-purple-500/20 rounded-lg p-4">
-              <div className="flex items-center gap-2 mb-3">
-                <div className="w-2 h-2 rounded-full bg-purple-400" />
-                <span className="text-purple-400 font-medium text-sm">浏览器修复</span>
-              </div>
-              <div className="space-y-1.5 text-xs">
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-gray-400">文件名</span>
-                    {!editingBrowserName && (
-                      <button
-                        onClick={() => setEditingBrowserName(true)}
-                        className="text-gray-500 hover:text-purple-400 transition text-[10px]"
-                      >
-                        ✏️ 修改
-                      </button>
-                    )}
-                  </div>
-                  {editingBrowserName ? (
-                    <input
-                      type="text"
-                      value={browserFilename}
-                      onChange={(e) => setBrowserFilename(e.target.value)}
-                      onBlur={() => {
-                        if (!browserFilename.trim()) setBrowserFilename(browserInfo.filename);
-                        setEditingBrowserName(false);
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          if (!browserFilename.trim()) setBrowserFilename(browserInfo.filename);
-                          setEditingBrowserName(false);
-                        }
-                      }}
-                      autoFocus
-                      className="w-full px-2 py-1 bg-black/30 border border-purple-500/30 rounded text-white text-xs focus:outline-none focus:border-purple-400"
-                    />
-                  ) : (
-                    <span className="text-white truncate block max-w-[280px]" title={browserFilename}>{browserFilename}</span>
-                  )}
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-400">文件大小</span>
-                  <span className="text-white">{browserInfo.fileSize}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-400">音频格式</span>
-                  <span className="text-purple-400">{browserInfo.sampleRate} / {browserInfo.bitDepth} bit</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-400">声道</span>
-                  <span className="text-white">{browserInfo.channels === 2 ? '立体声' : browserInfo.channels === 1 ? '单声道' : `${browserInfo.channels}声道`}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-400">时长</span>
-                  <span className="text-white">{Math.floor(browserInfo.duration / 60)}:{(browserInfo.duration % 60).toFixed(1).padStart(4, '0')}</span>
-                </div>
-                {browserInfo.algorithmVersion && (
-                  <div className="flex justify-between">
-                    <span className="text-gray-400">修复算法</span>
-                    <span className="text-purple-400">{browserInfo.algorithmVersion}</span>
-                  </div>
-                )}
-                {browserInfo.completedAt && (
-                  <div className="flex justify-between">
-                    <span className="text-gray-400">完成时间</span>
-                    <span className="text-white">{new Date(browserInfo.completedAt).toLocaleString('zh-CN')}</span>
-                  </div>
-                )}
-              </div>
-              {browserDownloadAction && (
-                <div className="mt-3">
-                  <button
-                    onClick={handleBrowserDownload}
-                    disabled={downloading}
-                    className="w-full py-2 bg-purple-500/20 hover:bg-purple-500/30 border border-purple-500/30 rounded-lg text-purple-400 text-xs font-medium transition disabled:opacity-50"
-                  >
-                    {downloading ? '导出中...' : '⬇ 导出下载'}
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
-
-          {!backendInfo && !browserInfo && (
+          {!backendInfo && (
             <div className="text-center py-8 text-gray-500 text-sm">
               暂无可导出的音频
             </div>
