@@ -432,8 +432,32 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
 
     gc.collect()
 
+    bit_depth = params.get("bit_depth", 24)
+    subtype_map = {16: "PCM_16", 24: "PCM_24", 32: "PCM_32"}
+    subtype = subtype_map.get(bit_depth, "PCM_24")
+
     if progress_callback:
-        progress_callback(0.75, "v3.0a 混音...")
+        progress_callback(0.70, "v3.0a 保存人声修复结果...")
+
+    vocal_output_path = params.get("vocal_output_path")
+    if vocal_output_path:
+        vocal_out = _soft_peak_limit(vocal_y, threshold=0.9)
+        if vocal_out.dtype == np.float32:
+            vocal_out = vocal_out.astype(np.float64)
+        sf.write(vocal_output_path, vocal_out.T if vocal_out.ndim > 1 else vocal_out, working_sr, subtype=subtype)
+
+    if progress_callback:
+        progress_callback(0.75, "v3.0a 保存伴奏修复结果...")
+
+    accompaniment_output_path = params.get("accompaniment_output_path")
+    if accompaniment_output_path:
+        acc_out = _soft_peak_limit(accompaniment_y, threshold=0.9)
+        if acc_out.dtype == np.float32:
+            acc_out = acc_out.astype(np.float64)
+        sf.write(accompaniment_output_path, acc_out.T if acc_out.ndim > 1 else acc_out, working_sr, subtype=subtype)
+
+    if progress_callback:
+        progress_callback(0.80, "v3.0a 混音...")
 
     vocal_ratio = params.get("vocal_ratio", 1.0)
     accompaniment_ratio = params.get("accompaniment_ratio", 1.0)
@@ -449,16 +473,12 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
     if mixed.dtype == np.float32:
         mixed = mixed.astype(np.float64)
 
-    bit_depth = params.get("bit_depth", 24)
-    subtype_map = {16: "PCM_16", 24: "PCM_24", 32: "PCM_32"}
-    subtype = subtype_map.get(bit_depth, "PCM_24")
-
     sf.write(output_path, mixed.T if mixed.ndim > 1 else mixed, working_sr, subtype=subtype)
 
     if progress_callback:
         progress_callback(1.0, "v3.0a 修复完成")
 
-    return {
+    result = {
         "issues_found": issues_found,
         "original_sample_rate": vocal_sr,
         "output_sample_rate": working_sr,
@@ -468,3 +488,8 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
         "algorithm_version": "v3.0a",
         "processing_mode": "dual",
     }
+    if vocal_output_path:
+        result["vocal_output_path"] = vocal_output_path
+    if accompaniment_output_path:
+        result["accompaniment_output_path"] = accompaniment_output_path
+    return result

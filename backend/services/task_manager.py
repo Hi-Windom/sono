@@ -321,6 +321,16 @@ def _run_repair(task_id: str, audio_path: str, params: dict[str, Any], mobile_mo
             output_path=output_path if os.path.exists(output_path) else None,
             repair_result=repair_result
         )
+
+        if repair_result.get("vocal_output_path") and os.path.exists(repair_result["vocal_output_path"]):
+            vocal_task_id = params.get("vocal_task_id")
+            if vocal_task_id:
+                update_task(vocal_task_id, output_path=repair_result["vocal_output_path"], status="completed", progress=1)
+
+        if repair_result.get("accompaniment_output_path") and os.path.exists(repair_result["accompaniment_output_path"]):
+            accompaniment_task_id = params.get("accompaniment_task_id")
+            if accompaniment_task_id:
+                update_task(accompaniment_task_id, output_path=repair_result["accompaniment_output_path"], status="completed", progress=1)
         _ws_send_final(task_id, {"task_id": task_id, "status": "completed", "progress": 1, "step": f"修复完成 ({elapsed:.1f}s)", "repair_result": repair_result})
 
         logger.info(f"[repair] 完成 task_id={task_id} elapsed={elapsed:.1f}s issues={repair_result.get('issues_found', [])}")

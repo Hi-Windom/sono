@@ -677,6 +677,8 @@ async def repair_dual_audio_endpoint(request: DualRepairRequest):
     params = request.params.copy()
     params["vocal_path"] = vocal_path
     params["accompaniment_path"] = accompaniment_path
+    params["vocal_task_id"] = request.vocal_task_id
+    params["accompaniment_task_id"] = request.accompaniment_task_id
     params["processing_mode"] = "dual"
 
     _VOCAL_KEY_MAP = {
@@ -719,6 +721,12 @@ async def repair_dual_audio_endpoint(request: DualRepairRequest):
 
     params["vocal_path"] = vocal_path
     params["accompaniment_path"] = accompaniment_path
+
+    vocal_output_filename = f"{request.vocal_task_id}_repaired.wav"
+    accompaniment_output_filename = f"{request.accompaniment_task_id}_repaired.wav"
+    from services.task_manager import OUTPUT_DIR
+    params["vocal_output_path"] = os.path.join(OUTPUT_DIR, vocal_output_filename)
+    params["accompaniment_output_path"] = os.path.join(OUTPUT_DIR, accompaniment_output_filename)
 
     submit_repair_task(request.task_id, vocal_path, params)
 

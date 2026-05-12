@@ -11,6 +11,7 @@ import { useAudioProcessor, generateExportFilename } from '../hooks/useAudioProc
 import { uploadDualAudio, repairDualAudio, getTrackStatus, getDownloadUrl, VocalRepairParams, InstrumentRepairParams, defaultVocalRepairParams, defaultInstrumentRepairParams } from '../services/backendApi';
 import { useBackend } from '../contexts/BackendContext';
 import { AIRepairParams, defaultAIRepairParams } from '../utils/advancedAudioProcessing';
+import { saveSettings, loadSettings } from '../utils/settingsStorage';
 
 // 导出给其他页面使用
 export { useBackend };
@@ -99,9 +100,18 @@ export default function RepairPage() {
   const [dualTrackDownloadUrl, setDualTrackDownloadUrl] = useState<string | null>(null);
   const [dualTrackRepairResult, setDualTrackRepairResult] = useState<any>(null);
   const [dualTrackFilesSelected, setDualTrackFilesSelected] = useState(false);
-  const [dualTrackVocalParams, setDualTrackVocalParams] = useState<VocalRepairParams>({ ...defaultVocalRepairParams });
-  const [dualTrackAccompanimentParams, setDualTrackAccompanimentParams] = useState<InstrumentRepairParams>({ ...defaultInstrumentRepairParams });
-  const [mixRatio, setMixRatio] = useState(0.5);
+  const [dualTrackVocalParams, setDualTrackVocalParams] = useState<VocalRepairParams>(() => {
+    const saved = loadSettings();
+    return { ...defaultVocalRepairParams, ...saved.dualTrackVocalParams };
+  });
+  const [dualTrackAccompanimentParams, setDualTrackAccompanimentParams] = useState<InstrumentRepairParams>(() => {
+    const saved = loadSettings();
+    return { ...defaultInstrumentRepairParams, ...saved.dualTrackInstrumentParams };
+  });
+  const [mixRatio, setMixRatio] = useState(() => {
+    const saved = loadSettings();
+    return saved.dualTrackMixRatio ?? 0.5;
+  });
   const pollRef = useRef<NodeJS.Timeout | null>(null);
 
   const stopDualTrackPolling = useCallback(() => {
@@ -323,6 +333,16 @@ export default function RepairPage() {
     if (!isDualTrackMode && audioFile) {
     }
   }, [isDualTrackMode, audioFile]);
+
+  useEffect(() => {
+    if (isDualTrackMode) {
+      saveSettings({
+        dualTrackVocalParams: dualTrackVocalParams,
+        dualTrackInstrumentParams: dualTrackAccompanimentParams,
+        dualTrackMixRatio: mixRatio,
+      });
+    }
+  }, [isDualTrackMode, dualTrackVocalParams, dualTrackAccompanimentParams, mixRatio]);
 
   useEffect(() => {
     if (isDualTrackMode && availableAlgorithms.length > 0) {
