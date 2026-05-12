@@ -677,13 +677,45 @@ async def repair_dual_audio_endpoint(request: DualRepairRequest):
     params = request.params.copy()
     params["vocal_path"] = vocal_path
     params["accompaniment_path"] = accompaniment_path
+    params["processing_mode"] = "dual"
+
+    _VOCAL_KEY_MAP = {
+        "de_clipping": "vocal_declip",
+        "de_pop": "vocal_depop",
+        "de_essing": "vocal_de_ess",
+        "bass_enhance": "vocal_bass_enhance",
+        "clarity": "vocal_air_texture",
+        "air_texture": "vocal_air_texture",
+        "formant_repair": "vocal_formant_repair",
+        "breath_enhance": "vocal_breath_enhance",
+        "ai_repair": "vocal_ai_repair",
+        "loudness_optimize": "vocal_loudness",
+    }
+
+    _INST_KEY_MAP = {
+        "de_clipping": "inst_declip",
+        "de_pop": "inst_depop",
+        "noise_reduction": "inst_noise_reduction",
+        "dynamic_range": "inst_dynamic",
+        "spatial_enhance": "inst_spatial",
+        "warmth": "inst_warmth",
+        "timbre_protect": "inst_timbre_protect",
+        "loudness_optimize": "inst_loudness",
+    }
 
     if request.vocal_params:
-        params["vocal_params"] = request.vocal_params
+        for src_key, flat_key in _VOCAL_KEY_MAP.items():
+            if src_key in request.vocal_params:
+                params[flat_key] = request.vocal_params[src_key]
+
     if request.accompaniment_params:
-        params["accompaniment_params"] = request.accompaniment_params
+        for src_key, flat_key in _INST_KEY_MAP.items():
+            if src_key in request.accompaniment_params:
+                params[flat_key] = request.accompaniment_params[src_key]
+
     if request.mix_ratio is not None:
-        params["mix_ratio"] = request.mix_ratio
+        params["vocal_ratio"] = request.mix_ratio
+        params["accompaniment_ratio"] = 1.0
 
     submit_repair_task(request.task_id, vocal_path, params)
 
@@ -748,7 +780,14 @@ async def render_audio_endpoint(request: RenderRequest):
     if not output_path or not os.path.exists(output_path):
         raise HTTPException(status_code=400, detail="修复结果不存在，请先完成修复")
 
-    algo_ver = task.get("params", {}).get("algorithm_version", "v2.0").replace(".", "p")
+    task_params = task.get("params", {})
+    if isinstance(task_params, str):
+        import json as _json
+        try:
+            task_params = _json.loads(task_params)
+        except Exception:
+            task_params = {}
+    algo_ver = task_params.get("algorithm_version", "v2.0").replace(".", "p")
     render_filename = f"{request.task_id}_rendered_{algo_ver}_{request.sample_rate}_{request.bit_depth}.wav"
     render_path = os.path.join(OUTPUT_DIR, render_filename)
 

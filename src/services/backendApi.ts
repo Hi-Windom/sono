@@ -1,6 +1,52 @@
 import { AIRepairParams } from '../utils/advancedAudioProcessing';
 import { AISongDetectionResult } from '../utils/aiSongChecker';
 
+export interface VocalRepairParams {
+  deClipping: number;
+  dePop: number;
+  formantRepair: number;
+  deEssing: number;
+  breathEnhance: number;
+  aiRepair: number;
+  bassEnhance: number;
+  airTexture: number;
+  loudness: number;
+}
+
+export interface InstrumentRepairParams {
+  deClipping: number;
+  dePop: number;
+  timbreProtect: number;
+  dynamicRange: number;
+  noiseReduction: number;
+  spatialEnhance: number;
+  warmth: number;
+  loudness: number;
+}
+
+export const defaultVocalRepairParams: VocalRepairParams = {
+  deClipping: 0.30,
+  dePop: 0.18,
+  formantRepair: 0.5,
+  deEssing: 0.25,
+  breathEnhance: 0.3,
+  aiRepair: 0.2,
+  bassEnhance: 0.1,
+  airTexture: 0.2,
+  loudness: 0.5,
+};
+
+export const defaultInstrumentRepairParams: InstrumentRepairParams = {
+  deClipping: 0.30,
+  dePop: 0.18,
+  timbreProtect: 0.5,
+  dynamicRange: 0.2,
+  noiseReduction: 0.15,
+  spatialEnhance: 0.15,
+  warmth: 0.25,
+  loudness: 0.5,
+};
+
 export interface ProcessingOptions {
   sampleRate: number;
   bitDepth: 16 | 24 | 32;
@@ -131,6 +177,35 @@ export function mapParamsToBackend(params: AIRepairParams, _options?: Processing
     warmth: params.warmth,
     clarity: params.clarity,
     algorithm_version: algorithmVersion || 'v2.0',
+  };
+}
+
+export function mapVocalParamsToBackend(params: VocalRepairParams, _options?: ProcessingOptions, algorithmVersion?: string): Record<string, unknown> {
+  return {
+    de_clipping: params.deClipping,
+    de_pop: params.dePop,
+    formant_repair: params.formantRepair,
+    de_essing: params.deEssing,
+    breath_enhance: params.breathEnhance,
+    ai_repair: params.aiRepair,
+    bass_enhance: params.bassEnhance,
+    air_texture: params.airTexture,
+    loudness_optimize: params.loudness,
+    algorithm_version: algorithmVersion || 'v3.0',
+  };
+}
+
+export function mapInstrumentParamsToBackend(params: InstrumentRepairParams, _options?: ProcessingOptions, algorithmVersion?: string): Record<string, unknown> {
+  return {
+    de_clipping: params.deClipping,
+    de_pop: params.dePop,
+    timbre_protect: params.timbreProtect,
+    dynamic_range: params.dynamicRange,
+    noise_reduction: params.noiseReduction,
+    spatial_enhance: params.spatialEnhance,
+    warmth: params.warmth,
+    loudness_optimize: params.loudness,
+    algorithm_version: algorithmVersion || 'v3.0',
   };
 }
 
@@ -437,8 +512,8 @@ export async function repairDualAudio(
   params: AIRepairParams,
   options: ProcessingOptions,
   algorithmVersion?: string,
-  vocalParams?: AIRepairParams,
-  accompanimentParams?: AIRepairParams,
+  vocalParams?: VocalRepairParams,
+  accompanimentParams?: InstrumentRepairParams,
   mixRatio?: number
 ): Promise<DualRepairResponse> {
   const url = `${API_BASE}/repair-dual`;
@@ -453,10 +528,10 @@ export async function repairDualAudio(
   };
 
   if (vocalParams) {
-    body.vocal_params = mapParamsToBackend(vocalParams, options, algorithmVersion);
+    body.vocal_params = mapVocalParamsToBackend(vocalParams, options, algorithmVersion);
   }
   if (accompanimentParams) {
-    body.accompaniment_params = mapParamsToBackend(accompanimentParams, options, algorithmVersion);
+    body.accompaniment_params = mapInstrumentParamsToBackend(accompanimentParams, options, algorithmVersion);
   }
   if (mixRatio !== undefined) {
     body.mix_ratio = mixRatio;

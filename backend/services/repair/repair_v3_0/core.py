@@ -263,20 +263,20 @@ def _adaptive_loudness_normalize(y, sr, target_loudness_lu=-14.0):
 
 
 def process_vocal_track(y, sr, params):
-    if params.get("de_clipping", 0) > 0:
-        y = _tanh_declip(y, params["de_clipping"])
+    if params.get("declip", 0) > 0:
+        y = _tanh_declip(y, params["declip"])
 
-    if params.get("de_pop", 0) > 0:
-        y = _diff_clamp_depop(y, sr, params["de_pop"])
+    if params.get("depop", 0) > 0:
+        y = _diff_clamp_depop(y, sr, params["depop"])
 
-    if params.get("vocal_formant_repair", 0) > 0:
-        y = _vocal_formant_repair(y, sr, params["vocal_formant_repair"])
+    if params.get("formant_repair", 0) > 0:
+        y = _vocal_formant_repair(y, sr, params["formant_repair"])
 
-    if params.get("de_essing", 0) > 0:
-        y = _apply_vocal_de_ess(y, sr, params["de_essing"])
+    if params.get("de_ess", 0) > 0:
+        y = _apply_vocal_de_ess(y, sr, params["de_ess"])
 
-    if params.get("vocal_breath_enhance", 0) > 0:
-        y = _vocal_breath_enhance(y, sr, params["vocal_breath_enhance"])
+    if params.get("breath_enhance", 0) > 0:
+        y = _vocal_breath_enhance(y, sr, params["breath_enhance"])
 
     if params.get("ai_repair", 0) > 0:
         from services.repair.repair_v2_4.hifi_ai_repair import apply_hifi_ai_repair
@@ -296,14 +296,14 @@ def process_vocal_track(y, sr, params):
         except Exception:
             pass
 
-    if params.get("clarity", 0) > 0:
+    if params.get("air_texture", 0) > 0:
         from services.repair.repair_v2_4.core import _air_texture_reconstruct
         try:
-            y = _air_texture_reconstruct(y, sr, params["clarity"], "vocal")
+            y = _air_texture_reconstruct(y, sr, params["air_texture"], "vocal")
         except Exception:
             pass
 
-    if params.get("loudness_optimize", 0) > 0:
+    if params.get("loudness", 0) > 0:
         y = _adaptive_loudness_normalize(y, sr, -14.0)
 
     y = _soft_peak_limit(y, threshold=0.9)
@@ -337,19 +337,19 @@ def _apply_vocal_de_ess(y, sr, amount):
 
 
 def process_instrument_track(y, sr, params):
-    if params.get("de_clipping", 0) > 0:
-        y = _tanh_declip(y, params["de_clipping"])
+    if params.get("declip", 0) > 0:
+        y = _tanh_declip(y, params["declip"])
 
-    if params.get("de_pop", 0) > 0:
-        y = _diff_clamp_depop(y, sr, params["de_pop"])
+    if params.get("depop", 0) > 0:
+        y = _diff_clamp_depop(y, sr, params["depop"])
 
-    if params.get("inst_timbre_protect", 0) > 0:
-        y = _instrument_timbre_protect(y, sr, params["inst_timbre_protect"])
+    if params.get("timbre_protect", 0) > 0:
+        y = _instrument_timbre_protect(y, sr, params["timbre_protect"])
 
-    if params.get("dynamic_range", 0) > 0:
+    if params.get("dynamic", 0) > 0:
         from services.repair.repair_v2_2.dynamics import apply_softness_v5
         try:
-            y = apply_softness_v5(y, sr, params["dynamic_range"])
+            y = apply_softness_v5(y, sr, params["dynamic"])
         except Exception:
             pass
 
@@ -360,10 +360,10 @@ def process_instrument_track(y, sr, params):
         except Exception:
             pass
 
-    if params.get("spatial_enhance", 0) > 0:
+    if params.get("spatial", 0) > 0:
         from services.repair.repair_v2_2.spatial import apply_spatial_enhance_v6
         try:
-            y = apply_spatial_enhance_v6(y, sr, params["spatial_enhance"], "instrumental")
+            y = apply_spatial_enhance_v6(y, sr, params["spatial"], "instrumental")
         except Exception:
             pass
 
@@ -374,7 +374,7 @@ def process_instrument_track(y, sr, params):
         except Exception:
             pass
 
-    if params.get("loudness_optimize", 0) > 0:
+    if params.get("loudness", 0) > 0:
         y = _adaptive_loudness_normalize(y, sr, -14.0)
 
     y = _soft_peak_limit(y, threshold=0.9)

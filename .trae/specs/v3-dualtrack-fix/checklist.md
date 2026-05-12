@@ -1,0 +1,23 @@
+- [x] 后端 `/repair-dual` 端点将 vocal_params 嵌套字典展平为 vocal_ 前缀键合并入 params
+- [x] 后端 `/repair-dual` 端点将 accompaniment_params 嵌套字典展平为 inst_ 前缀键合并入 params
+- [x] 后端 mix_ratio 正确映射为 vocal_ratio 和 accompaniment_ratio
+- [x] repair_v3_0/core.py 的 vocal_/inst_ 前缀参数提取逻辑与展平后的 params 匹配
+- [x] repair_v3_0a/core.py 的参数提取逻辑与展平后的 params 匹配
+- [x] 前端定义 VocalRepairParams 和 InstrumentRepairParams 专用类型
+- [x] 前端 mapVocalParamsToBackend 映射为 vocal_declip/vocal_formant_repair 等
+- [x] 前端 mapInstrumentParamsToBackend 映射为 inst_declip/inst_timbre_protect 等
+- [x] AIRepairPanel 人声参数面板显示 v3.0 人声专用参数（口型修复/齿音抑制/气息增强等）
+- [x] AIRepairPanel 伴奏参数面板显示 v3.0 伴奏专用参数（音色保护/动态控制等）
+- [x] 双轨参数默认值使用 v3.0 ALGORITHM_VERSIONS 的 vocal_/inst_ 默认参数
+- [x] RepairPage dualTrackVocalParams 状态类型改为 VocalRepairParams
+- [x] RepairPage dualTrackAccompanimentParams 状态类型改为 InstrumentRepairParams
+- [x] 双轨修复完成后同时显示"下载修复结果"和"前往 AB 对比"按钮
+- [x] ComparePage 识别双轨任务并显示人声/伴奏/合并三选一切换
+- [x] ComparePage 人声模式加载 vocal_task_id 原始/修复后音频对比
+- [x] ComparePage 伴奏模式加载 accompaniment_task_id 原始/修复后音频对比
+- [x] ComparePage 合并模式加载主 task_id 修复后合并结果对比
+- [x] render 端点支持双轨任务的渲染输出
+- [x] AIRepairPanel 双轨模式下交付规格面板正常工作
+- [x] 后端自动化测试验证参数展平逻辑
+- [x] 全部测试通过
+- [x] 安卓打包成功

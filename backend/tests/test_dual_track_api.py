@@ -319,3 +319,206 @@ class TestDualTrackEndToEnd:
         })
         assert repair_res.status_code == 200
         assert repair_res.json()["status"] == "pending"
+
+
+class TestParamFlattening:
+    def test_vocal_params_flattened_with_vocal_prefix(self, api_client, fresh_db):
+        wav_bytes = _make_wav_bytes()
+        upload_res = api_client.post("/api/v1/upload-dual", files={
+            "vocal_file": ("vocal.wav", wav_bytes, "audio/wav"),
+            "accompaniment_file": ("acc.wav", wav_bytes, "audio/wav"),
+        })
+        assert upload_res.status_code == 200
+        upload_data = upload_res.json()
+
+        repair_res = api_client.post("/api/v1/repair-dual", json={
+            "task_id": upload_data["task_id"],
+            "vocal_task_id": upload_data["vocal_task_id"],
+            "accompaniment_task_id": upload_data["accompaniment_task_id"],
+            "params": {"algorithm_version": "v3.0"},
+            "vocal_params": {
+                "de_clipping": 0.8,
+                "de_pop": 0.6,
+                "de_essing": 0.4,
+                "bass_enhance": 0.3,
+                "clarity": 0.5,
+                "formant_repair": 0.7,
+                "breath_enhance": 0.2,
+                "ai_repair": 0.1,
+                "loudness_optimize": 0.9,
+            },
+            "accompaniment_params": {},
+            "mix_ratio": 0.6,
+        })
+        assert repair_res.status_code == 200
+
+        main_task = fresh_db["get_task"](upload_data["task_id"])
+        assert main_task is not None
+        params = main_task.get("params", {})
+        if isinstance(params, str):
+            params = json.loads(params)
+
+        assert params.get("vocal_declip") == 0.8
+        assert params.get("vocal_depop") == 0.6
+        assert params.get("vocal_de_ess") == 0.4
+        assert params.get("vocal_bass_enhance") == 0.3
+        assert params.get("vocal_air_texture") == 0.5
+        assert params.get("vocal_formant_repair") == 0.7
+        assert params.get("vocal_breath_enhance") == 0.2
+        assert params.get("vocal_ai_repair") == 0.1
+        assert params.get("vocal_loudness") == 0.9
+
+        assert "vocal_params" not in params, "Nested vocal_params should not exist after flattening"
+
+    def test_accompaniment_params_flattened_with_inst_prefix(self, api_client, fresh_db):
+        wav_bytes = _make_wav_bytes()
+        upload_res = api_client.post("/api/v1/upload-dual", files={
+            "vocal_file": ("vocal.wav", wav_bytes, "audio/wav"),
+            "accompaniment_file": ("acc.wav", wav_bytes, "audio/wav"),
+        })
+        assert upload_res.status_code == 200
+        upload_data = upload_res.json()
+
+        repair_res = api_client.post("/api/v1/repair-dual", json={
+            "task_id": upload_data["task_id"],
+            "vocal_task_id": upload_data["vocal_task_id"],
+            "accompaniment_task_id": upload_data["accompaniment_task_id"],
+            "params": {"algorithm_version": "v3.0"},
+            "vocal_params": {},
+            "accompaniment_params": {
+                "de_clipping": 0.7,
+                "de_pop": 0.5,
+                "noise_reduction": 0.6,
+                "dynamic_range": 0.4,
+                "spatial_enhance": 0.3,
+                "warmth": 0.2,
+                "timbre_protect": 0.8,
+                "loudness_optimize": 0.9,
+            },
+            "mix_ratio": 0.7,
+        })
+        assert repair_res.status_code == 200
+
+        main_task = fresh_db["get_task"](upload_data["task_id"])
+        assert main_task is not None
+        params = main_task.get("params", {})
+        if isinstance(params, str):
+            params = json.loads(params)
+
+        assert params.get("inst_declip") == 0.7
+        assert params.get("inst_depop") == 0.5
+        assert params.get("inst_noise_reduction") == 0.6
+        assert params.get("inst_dynamic") == 0.4
+        assert params.get("inst_spatial") == 0.3
+        assert params.get("inst_warmth") == 0.2
+        assert params.get("inst_timbre_protect") == 0.8
+        assert params.get("inst_loudness") == 0.9
+
+        assert "accompaniment_params" not in params, "Nested accompaniment_params should not exist after flattening"
+
+    def test_mix_ratio_flattened_to_vocal_ratio(self, api_client, fresh_db):
+        wav_bytes = _make_wav_bytes()
+        upload_res = api_client.post("/api/v1/upload-dual", files={
+            "vocal_file": ("vocal.wav", wav_bytes, "audio/wav"),
+            "accompaniment_file": ("acc.wav", wav_bytes, "audio/wav"),
+        })
+        assert upload_res.status_code == 200
+        upload_data = upload_res.json()
+
+        repair_res = api_client.post("/api/v1/repair-dual", json={
+            "task_id": upload_data["task_id"],
+            "vocal_task_id": upload_data["vocal_task_id"],
+            "accompaniment_task_id": upload_data["accompaniment_task_id"],
+            "params": {"algorithm_version": "v3.0"},
+            "mix_ratio": 0.6,
+        })
+        assert repair_res.status_code == 200
+
+        main_task = fresh_db["get_task"](upload_data["task_id"])
+        assert main_task is not None
+        params = main_task.get("params", {})
+        if isinstance(params, str):
+            params = json.loads(params)
+
+        assert params.get("vocal_ratio") == 0.6
+        assert params.get("accompaniment_ratio") == 1.0
+        assert "mix_ratio" not in params, "mix_ratio should be replaced by vocal_ratio"
+
+    def test_processing_mode_set_to_dual(self, api_client, fresh_db):
+        wav_bytes = _make_wav_bytes()
+        upload_res = api_client.post("/api/v1/upload-dual", files={
+            "vocal_file": ("vocal.wav", wav_bytes, "audio/wav"),
+            "accompaniment_file": ("acc.wav", wav_bytes, "audio/wav"),
+        })
+        assert upload_res.status_code == 200
+        upload_data = upload_res.json()
+
+        repair_res = api_client.post("/api/v1/repair-dual", json={
+            "task_id": upload_data["task_id"],
+            "vocal_task_id": upload_data["vocal_task_id"],
+            "accompaniment_task_id": upload_data["accompaniment_task_id"],
+            "params": {"algorithm_version": "v3.0"},
+        })
+        assert repair_res.status_code == 200
+
+        main_task = fresh_db["get_task"](upload_data["task_id"])
+        assert main_task is not None
+        params = main_task.get("params", {})
+        if isinstance(params, str):
+            params = json.loads(params)
+
+        assert params.get("processing_mode") == "dual"
+
+    def test_skipped_keys_not_in_flattened_params(self, api_client, fresh_db):
+        wav_bytes = _make_wav_bytes()
+        upload_res = api_client.post("/api/v1/upload-dual", files={
+            "vocal_file": ("vocal.wav", wav_bytes, "audio/wav"),
+            "accompaniment_file": ("acc.wav", wav_bytes, "audio/wav"),
+        })
+        assert upload_res.status_code == 200
+        upload_data = upload_res.json()
+
+        repair_res = api_client.post("/api/v1/repair-dual", json={
+            "task_id": upload_data["task_id"],
+            "vocal_task_id": upload_data["vocal_task_id"],
+            "accompaniment_task_id": upload_data["accompaniment_task_id"],
+            "params": {"algorithm_version": "v3.0"},
+            "vocal_params": {
+                "noise_reduction": 0.5,
+                "harmonic_enhance": 0.3,
+                "dynamic_range": 0.4,
+                "softness": 0.2,
+                "presence_boost": 0.1,
+                "spatial_enhance": 0.6,
+                "transient_repair": 0.7,
+                "warmth": 0.8,
+                "de_crackle": 0.9,
+            },
+            "accompaniment_params": {
+                "de_essing": 0.5,
+                "bass_enhance": 0.3,
+                "harmonic_enhance": 0.4,
+                "softness": 0.2,
+                "presence_boost": 0.1,
+                "transient_repair": 0.6,
+                "clarity": 0.7,
+                "de_crackle": 0.8,
+            },
+        })
+        assert repair_res.status_code == 200
+
+        main_task = fresh_db["get_task"](upload_data["task_id"])
+        assert main_task is not None
+        params = main_task.get("params", {})
+        if isinstance(params, str):
+            params = json.loads(params)
+
+        for key in ["vocal_noise_reduction", "vocal_harmonic_enhance", "vocal_dynamic_range",
+                     "vocal_softness", "vocal_presence_boost", "vocal_spatial_enhance",
+                     "vocal_transient_repair", "vocal_warmth", "vocal_de_crackle"]:
+            assert key not in params, f"Skipped vocal key {key} should not appear in flattened params"
+
+        for key in ["inst_de_essing", "inst_bass_enhance", "inst_harmonic_enhance",
+                     "inst_softness", "inst_presence_boost", "inst_transient_repair",
+                     "inst_clarity", "inst_de_crackle"]:
+            assert key not in params, f"Skipped inst key {key} should not appear in flattened params"

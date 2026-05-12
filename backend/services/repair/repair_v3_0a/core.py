@@ -234,14 +234,14 @@ def _loudness_normalize(y, sr, target_lufs=-14.0):
 
 
 def process_vocal_track(y, sr, params):
-    if params.get("de_clipping", 0) > 0:
-        y = _simple_declip(y, params["de_clipping"])
+    if params.get("declip", 0) > 0:
+        y = _simple_declip(y, params["declip"])
 
-    if params.get("de_pop", 0) > 0:
-        y = _simple_depop(y, sr, params["de_pop"])
+    if params.get("depop", 0) > 0:
+        y = _simple_depop(y, sr, params["depop"])
 
-    if params.get("de_essing", 0) > 0:
-        y = _de_ess(y, sr, params["de_essing"])
+    if params.get("de_ess", 0) > 0:
+        y = _de_ess(y, sr, params["de_ess"])
 
     if params.get("ai_repair", 0) > 0:
         from services.repair.repair_v2_3a.core import _spectral_denoise
@@ -253,10 +253,10 @@ def process_vocal_track(y, sr, params):
     if params.get("bass_enhance", 0) > 0:
         y = _apply_bass_enhance_lite(y, sr, params["bass_enhance"])
 
-    if params.get("clarity", 0) > 0:
-        y = _apply_air_texture_lite(y, sr, params["clarity"])
+    if params.get("air_texture", 0) > 0:
+        y = _apply_air_texture_lite(y, sr, params["air_texture"])
 
-    if params.get("loudness_optimize", 0) > 0:
+    if params.get("loudness", 0) > 0:
         y = _loudness_normalize(y, sr, -14.0)
 
     y = _soft_peak_limit(y, threshold=0.9)
@@ -312,19 +312,19 @@ def _apply_air_texture_lite(y, sr, amount):
 
 
 def process_instrument_track(y, sr, params):
-    if params.get("de_clipping", 0) > 0:
-        y = _simple_declip(y, params["de_clipping"])
+    if params.get("declip", 0) > 0:
+        y = _simple_declip(y, params["declip"])
 
-    if params.get("de_pop", 0) > 0:
-        y = _simple_depop(y, sr, params["de_pop"])
+    if params.get("depop", 0) > 0:
+        y = _simple_depop(y, sr, params["depop"])
 
     if params.get("noise_reduction", 0) > 0:
         y = _spectral_denoise(y, sr, params["noise_reduction"])
 
-    if params.get("dynamic_range", 0) > 0:
-        y = _transparent_compress(y, sr, params["dynamic_range"])
+    if params.get("dynamic", 0) > 0:
+        y = _transparent_compress(y, sr, params["dynamic"])
 
-    if params.get("loudness_optimize", 0) > 0:
+    if params.get("loudness", 0) > 0:
         y = _loudness_normalize(y, sr, -14.0)
 
     y = _soft_peak_limit(y, threshold=0.9)

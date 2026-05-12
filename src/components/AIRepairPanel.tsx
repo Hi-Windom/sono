@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { AIRepairParams, RepairMode } from '../utils/advancedAudioProcessing';
-import { ProcessingOptions, AlgorithmVersion, fetchMemoryInfo, MemoryInfoResult, fetchStorageEstimate, StorageEstimateResult, fetchRenderCache, RenderCacheEntry } from '../services/backendApi';
+import { ProcessingOptions, AlgorithmVersion, fetchMemoryInfo, MemoryInfoResult, fetchStorageEstimate, StorageEstimateResult, fetchRenderCache, RenderCacheEntry, VocalRepairParams, InstrumentRepairParams, defaultVocalRepairParams, defaultInstrumentRepairParams } from '../services/backendApi';
 
 interface AIRepairPanelProps {
   params: AIRepairParams;
@@ -33,11 +33,11 @@ interface AIRepairPanelProps {
   cacheTriggerKey?: number;
   onInstantDownload?: (cacheEntry: RenderCacheEntry) => void;
   isDualTrackMode?: boolean;
-  vocalParams?: AIRepairParams;
-  accompanimentParams?: AIRepairParams;
+  vocalParams?: VocalRepairParams;
+  accompanimentParams?: InstrumentRepairParams;
   mixRatio?: number;
-  onVocalParamChange?: (key: keyof AIRepairParams, value: number) => void;
-  onAccompanimentParamChange?: (key: keyof AIRepairParams, value: number) => void;
+  onVocalParamChange?: (key: keyof VocalRepairParams, value: number) => void;
+  onAccompanimentParamChange?: (key: keyof InstrumentRepairParams, value: number) => void;
   onMixRatioChange?: (ratio: number) => void;
   onDualTrackRepair?: () => void;
 }
@@ -203,6 +203,31 @@ export function AIRepairPanel({
   useEffect(() => {
     if (onRenderCacheRefresh) onRenderCacheRefresh(refreshRenderCache);
   }, [refreshRenderCache, onRenderCacheRefresh]);
+
+  const vocalParamLabels: Record<keyof VocalRepairParams, string> = {
+    deClipping: '去削波',
+    dePop: '去爆音',
+    formantRepair: '口型修复',
+    deEssing: '齿音抑制',
+    breathEnhance: '气息增强',
+    aiRepair: 'AI 修复',
+    bassEnhance: '低音增强',
+    airTexture: '空气质感',
+    loudness: '响度优化',
+  };
+  const vocalParamKeys = Object.keys(vocalParamLabels) as (keyof VocalRepairParams)[];
+
+  const instParamLabels: Record<keyof InstrumentRepairParams, string> = {
+    deClipping: '去削波',
+    dePop: '去爆音',
+    timbreProtect: '音色保护',
+    dynamicRange: '动态控制',
+    noiseReduction: '降噪',
+    spatialEnhance: '空间增强',
+    warmth: '温暖度',
+    loudness: '响度优化',
+  };
+  const instParamKeys = Object.keys(instParamLabels) as (keyof InstrumentRepairParams)[];
 
   const paramLabels: Record<keyof AIRepairParams, string> = {
     deClipping: '去削波',
@@ -774,21 +799,18 @@ export function AIRepairPanel({
             </button>
             {showParams === 'vocal' && vocalParams && onVocalParamChange && (
               <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3">
-                {paramKeys.map((key) => (
+                {vocalParamKeys.map((key) => (
                   <div key={key}>
                     <div className="flex justify-between items-center mb-1">
                       <label className="text-pink-300 text-xs font-medium">
-                        {paramLabels[key]}
+                        {vocalParamLabels[key]}
                       </label>
                       <span className="text-pink-400 text-xs">
                         {(vocalParams[key] ?? 0).toFixed(2)}
                       </span>
                     </div>
                     <input
-                      type="range"
-                      min="0"
-                      max="1"
-                      step="0.01"
+                      type="range" min="0" max="1" step="0.01"
                       value={vocalParams[key] ?? 0}
                       onChange={(e) => onVocalParamChange(key, parseFloat(e.target.value))}
                       disabled={disabled}
@@ -818,21 +840,18 @@ export function AIRepairPanel({
             </button>
             {showParams === 'accompaniment' && accompanimentParams && onAccompanimentParamChange && (
               <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3">
-                {paramKeys.map((key) => (
+                {instParamKeys.map((key) => (
                   <div key={key}>
                     <div className="flex justify-between items-center mb-1">
                       <label className="text-purple-300 text-xs font-medium">
-                        {paramLabels[key]}
+                        {instParamLabels[key]}
                       </label>
                       <span className="text-purple-400 text-xs">
                         {(accompanimentParams[key] ?? 0).toFixed(2)}
                       </span>
                     </div>
                     <input
-                      type="range"
-                      min="0"
-                      max="1"
-                      step="0.01"
+                      type="range" min="0" max="1" step="0.01"
                       value={accompanimentParams[key] ?? 0}
                       onChange={(e) => onAccompanimentParamChange(key, parseFloat(e.target.value))}
                       disabled={disabled}
