@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useState, useEffect } from 'react';
 
 interface DualTrackUploaderProps {
   onFilesSelect: (vocalFile: File, accompanimentFile: File) => void;
@@ -8,6 +8,12 @@ interface DualTrackUploaderProps {
 export function DualTrackUploader({ onFilesSelect, isLoading = false }: DualTrackUploaderProps) {
   const [vocalFile, setVocalFile] = useState<File | null>(null);
   const [accompanimentFile, setAccompanimentFile] = useState<File | null>(null);
+
+  useEffect(() => {
+    if (vocalFile && accompanimentFile && !isLoading) {
+      onFilesSelect(vocalFile, accompanimentFile);
+    }
+  }, [vocalFile, accompanimentFile, isLoading, onFilesSelect]);
 
   const handleVocalDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -47,19 +53,11 @@ export function DualTrackUploader({ onFilesSelect, isLoading = false }: DualTrac
     }
   }, [isLoading]);
 
-  const handleSubmit = useCallback(() => {
-    if (vocalFile && accompanimentFile) {
-      onFilesSelect(vocalFile, accompanimentFile);
-    }
-  }, [vocalFile, accompanimentFile, onFilesSelect]);
-
   const formatSize = (bytes: number) => {
     if (bytes < 1024) return `${bytes} B`;
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
     return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
   };
-
-  const canSubmit = vocalFile && accompanimentFile && !isLoading;
 
   return (
     <div className="w-full space-y-6">
@@ -152,22 +150,19 @@ export function DualTrackUploader({ onFilesSelect, isLoading = false }: DualTrac
         </div>
       </div>
 
-      <button
-        onClick={handleSubmit}
-        disabled={!canSubmit}
-        className={`w-full py-4 rounded-xl font-medium text-lg transition ${
-          canSubmit
-            ? 'bg-gradient-to-r from-secondary to-primary text-white hover:opacity-90'
-            : 'bg-gray-700 text-gray-400 cursor-not-allowed'
-        }`}
-      >
-        {isLoading ? '处理中...' : '开始双轨处理'}
-      </button>
-
+      {vocalFile && !accompanimentFile && (
+        <div className="text-center text-sm text-gray-400">
+          <p>已选择人声轨，请继续选择伴奏轨</p>
+        </div>
+      )}
+      {!vocalFile && accompanimentFile && (
+        <div className="text-center text-sm text-gray-400">
+          <p>已选择伴奏轨，请继续选择人声轨</p>
+        </div>
+      )}
       {vocalFile && accompanimentFile && (
         <div className="text-center text-sm text-gray-400">
-          <p>已选择人声轨和伴奏轨，点击开始处理</p>
-          <p className="text-xs mt-1">v3.0/v3.0a 会分别优化人声和伴奏后混音</p>
+          <p>文件已就绪，正在上传...</p>
         </div>
       )}
     </div>

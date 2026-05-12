@@ -97,6 +97,7 @@ export default function RepairPage() {
   const [dualTrackHasBeenProcessed, setDualTrackHasBeenProcessed] = useState(false);
   const [dualTrackDownloadUrl, setDualTrackDownloadUrl] = useState<string | null>(null);
   const [dualTrackRepairResult, setDualTrackRepairResult] = useState<any>(null);
+  const [dualTrackFilesSelected, setDualTrackFilesSelected] = useState(false);
   const [dualTrackVocalParams, setDualTrackVocalParams] = useState<AIRepairParams>({ ...defaultAIRepairParams });
   const [dualTrackAccompanimentParams, setDualTrackAccompanimentParams] = useState<AIRepairParams>({ ...defaultAIRepairParams });
   const [mixRatio, setMixRatio] = useState(0.5);
@@ -167,30 +168,17 @@ export default function RepairPage() {
       setDualTrackTaskId(uploadResult.task_id);
       setDualTrackVocalTaskId(uploadResult.vocal_task_id);
       setDualTrackAccompanimentTaskId(uploadResult.accompaniment_task_id);
-      setProcessingProgress(0.1);
-      setProcessingStep('开始双轨处理...');
-
-      await repairDualAudio(
-        uploadResult.task_id,
-        uploadResult.vocal_task_id,
-        uploadResult.accompaniment_task_id,
-        dualTrackVocalParams,
-        processingOptions,
-        algorithmVersion,
-        dualTrackVocalParams,
-        dualTrackAccompanimentParams,
-        mixRatio
-      );
-
-      setProcessingStep('等待处理完成...');
-      startDualTrackPolling(uploadResult.task_id);
+      setDualTrackFilesSelected(true);
+      setIsProcessing(false);
+      setProcessingStep('');
+      setProcessingProgress(0);
 
     } catch (error) {
-      console.error('双轨处理失败:', error);
-      setBackendError(error instanceof Error ? error.message : '双轨处理失败');
+      console.error('双轨上传失败:', error);
+      setBackendError(error instanceof Error ? error.message : '双轨上传失败');
       setIsProcessing(false);
     }
-  }, [dualTrackVocalParams, dualTrackAccompanimentParams, mixRatio, processingOptions, algorithmVersion, setIsProcessing, setProcessingStep, setProcessingProgress, setProcessingSource, setBackendError, startDualTrackPolling]);
+  }, [setIsProcessing, setProcessingStep, setProcessingProgress, setProcessingSource, setBackendError]);
 
   const handleSwitchToSingleTrack = useCallback(() => {
     setIsDualTrackMode(false);
@@ -433,33 +421,56 @@ export default function RepairPage() {
       </div>
 
       <div className="container mx-auto px-4 py-6 max-w-7xl">
-        {!audioFile && !dualTrackHasBeenProcessed ? (
-          <div className="flex flex-col items-center py-10">
-            <div className="w-full max-w-4xl mb-6">
-              <div className="flex items-center justify-center gap-4 p-1 bg-dark/80 rounded-xl border border-white/10">
-                <button
-                  onClick={() => setIsDualTrackMode(false)}
-                  className={`flex-1 py-2.5 px-6 rounded-lg font-medium transition ${
-                    !isDualTrackMode
-                      ? 'bg-gradient-to-r from-secondary/80 to-primary/80 text-white'
-                      : 'text-gray-400 hover:text-white'
-                  }`}
-                >
-                  单轨上传
-                </button>
-                <button
-                  onClick={() => setIsDualTrackMode(true)}
-                  className={`flex-1 py-2.5 px-6 rounded-lg font-medium transition ${
-                    isDualTrackMode
-                      ? 'bg-gradient-to-r from-secondary/80 to-primary/80 text-white'
-                      : 'text-gray-400 hover:text-white'
-                  }`}
-                >
-                  双轨上传 (v3.0)
-                </button>
-              </div>
-            </div>
+        <div className="w-full max-w-4xl mx-auto mb-6">
+          <div className="flex items-center justify-center gap-4 p-1 bg-dark/80 rounded-xl border border-white/10">
+            <button
+              onClick={() => {
+                if (isDualTrackMode) {
+                  setIsDualTrackMode(false);
+                  setDualTrackFilesSelected(false);
+                  setDualTrackTaskId(null);
+                  setDualTrackVocalTaskId(null);
+                  setDualTrackAccompanimentTaskId(null);
+                  setDualTrackVocalFile(null);
+                  setDualTrackAccompanimentFile(null);
+                  setDualTrackHasBeenProcessed(false);
+                  setDualTrackDownloadUrl(null);
+                  setDualTrackRepairResult(null);
+                  stopDualTrackPolling();
+                }
+              }}
+              className={`flex-1 py-2.5 px-6 rounded-lg font-medium transition ${
+                !isDualTrackMode
+                  ? 'bg-gradient-to-r from-secondary/80 to-primary/80 text-white'
+                  : 'text-gray-400 hover:text-white'
+              }`}
+            >
+              单轨上传
+            </button>
+            <button
+              onClick={() => {
+                if (!isDualTrackMode) {
+                  setIsDualTrackMode(true);
+                  setAudioFile(null);
+                  setAudioBuffer(null);
+                  setWavInfo(null);
+                  setHasBeenProcessed(false);
+                  setTaskId(null);
+                }
+              }}
+              className={`flex-1 py-2.5 px-6 rounded-lg font-medium transition ${
+                isDualTrackMode
+                  ? 'bg-gradient-to-r from-secondary/80 to-primary/80 text-white'
+                  : 'text-gray-400 hover:text-white'
+              }`}
+            >
+              双轨上传 (v3.0)
+            </button>
+          </div>
+        </div>
 
+        {(!audioFile && !dualTrackFilesSelected) ? (
+          <div className="flex flex-col items-center py-10">
             {isDualTrackMode ? (
               <DualTrackUploader onFilesSelect={handleDualTrackUpload} />
             ) : (
@@ -512,15 +523,26 @@ export default function RepairPage() {
                     </div>
                   </div>
                   {isDualTrackMode ? (
-                    <button
-                      onClick={handleSwitchToSingleTrack}
-                      className="flex items-center gap-1.5 px-3 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg cursor-pointer transition text-gray-400 hover:text-white text-sm shrink-0"
-                    >
+                    <label className="flex items-center gap-1.5 px-3 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg cursor-pointer transition text-gray-400 hover:text-white text-sm shrink-0">
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                       </svg>
-                      返回选择
-                    </button>
+                      替换文件
+                      <input
+                        type="file"
+                        accept="audio/*"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            setDualTrackVocalFile(file);
+                            setDualTrackHasBeenProcessed(false);
+                            setDualTrackDownloadUrl(null);
+                          }
+                          e.target.value = '';
+                        }}
+                      />
+                    </label>
                   ) : (
                     <label className="flex items-center gap-1.5 px-3 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg cursor-pointer transition text-gray-400 hover:text-white text-sm shrink-0">
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
