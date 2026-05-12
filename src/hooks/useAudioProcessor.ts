@@ -440,7 +440,11 @@ export function useAudioProcessor() {
   } | null>(null);
 
   useEffect(() => {
-    if (sessionRestoredRef.current || !backendAvailable) return;
+    writeLog(`[useAudioProcessor] 合并useEffect触发: backendAvailable=${backendAvailable}, sessionRestored=${sessionRestoredRef.current}, audioFile=${!!audioFile}`);
+    if (sessionRestoredRef.current || !backendAvailable) {
+      writeLog(`[useAudioProcessor] useEffect跳过: sessionRestored=${sessionRestoredRef.current}, backendAvailable=${backendAvailable}`);
+      return;
+    }
 
     (async () => {
       try {
