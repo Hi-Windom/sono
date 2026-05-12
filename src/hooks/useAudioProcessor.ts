@@ -144,7 +144,11 @@ export function useAudioProcessor() {
   const [hasBeenProcessed, setHasBeenProcessed] = useState(false);
   const [backendAvailable, setBackendAvailable] = useState(false);
   const [backendDiag, setBackendDiag] = useState<string>('未检测');
-  const [taskId, setTaskId] = useState<string | null>(null);
+  const [taskId, setTaskIdState] = useState<string | null>(null);
+  const setTaskId = useCallback((id: string | null) => {
+    setTaskIdState(id);
+    taskIdRef.current = id;
+  }, []);
   const [algorithmVersion, setAlgorithmVersionState] = useState<string>(savedSettings.algorithmVersion);
   const [availableAlgorithms, setAvailableAlgorithms] = useState<AlgorithmVersion[]>([]);
   const [repairModes, setRepairModes] = useState<RepairMode[]>([]);
@@ -2036,6 +2040,7 @@ export function useAudioProcessor() {
     setBackendProcessedBuffer,
     setBackendWaveformPeaks,
     loadAudioFromUrl,
+    setTaskId,
   };
 }
 

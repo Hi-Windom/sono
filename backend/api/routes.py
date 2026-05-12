@@ -397,6 +397,8 @@ async def upload_dual_audio(
     vocal_file: UploadFile = File(...),
     accompaniment_file: UploadFile = File(...),
     file_hash: str = Form(""),
+    vocal_file_hash: str = Form(""),
+    accompaniment_file_hash: str = Form(""),
 ):
     vocal_ext = os.path.splitext(vocal_file.filename or '')[1].lower()
     accompaniment_ext = os.path.splitext(accompaniment_file.filename or '')[1].lower()
@@ -427,14 +429,21 @@ async def upload_dual_audio(
     with open(accompaniment_upload_path, "wb") as f:
         f.write(accompaniment_content)
 
-    create_task(vocal_task_id, f"vocal_{vocal_file.filename or 'audio'}", vocal_upload_path, {}, file_hash, len(vocal_content))
-    create_task(accompaniment_task_id, f"acc_{accompaniment_file.filename or 'audio'}", accompaniment_upload_path, {}, file_hash, len(accompaniment_content))
+    vocal_hash = vocal_file_hash or file_hash
+    accompaniment_hash = accompaniment_file_hash or file_hash
+
+    create_task(vocal_task_id, f"vocal_{vocal_file.filename or 'audio'}", vocal_upload_path, {}, vocal_hash, len(vocal_content))
+    create_task(accompaniment_task_id, f"acc_{accompaniment_file.filename or 'audio'}", accompaniment_upload_path, {}, accompaniment_hash, len(accompaniment_content))
     create_task(main_task_id, f"dual_{vocal_file.filename or 'audio'}", vocal_upload_path, {
         "vocal_task_id": vocal_task_id,
         "accompaniment_task_id": accompaniment_task_id,
+        "vocal_file_hash": vocal_hash,
+        "accompaniment_file_hash": accompaniment_hash,
+        "vocal_filename": vocal_file.filename or "",
+        "accompaniment_filename": accompaniment_file.filename or "",
     }, file_hash, len(vocal_content) + len(accompaniment_content))
 
-    logger.info(f"[/upload-dual] main_task_id={main_task_id} vocal={vocal_task_id} acc={accompaniment_task_id}")
+    logger.info(f"[/upload-dual] main_task_id={main_task_id} vocal={vocal_task_id} acc={accompaniment_task_id} vocal_hash={vocal_hash[:12] if vocal_hash else 'none'} acc_hash={accompaniment_hash[:12] if accompaniment_hash else 'none'}")
 
     def get_audio_info(path):
         try:
@@ -731,6 +740,115 @@ async def repair_dual_audio_endpoint(request: DualRepairRequest):
     submit_repair_task(request.task_id, vocal_path, params)
 
     return {"task_id": request.task_id, "status": "pending"}
+
+
+class DualRepairFromHashRequest(BaseModel):
+    vocal_file_hash: str
+    accompaniment_file_hash: str
+    vocal_filename: str = ""
+    accompaniment_filename: str = ""
+    params: dict
+    vocal_params: dict | None = None
+    accompaniment_params: dict | None = None
+    mix_ratio: float | None = None
+
+
+@router.post("/repair-dual-from-hash")
+async def repair_dual_from_hash(request: DualRepairFromHashRequest):
+    vocal_task = find_task_by_hash(request.vocal_file_hash)
+    if not vocal_task or not vocal_task.get("original_path") or not os.path.exists(vocal_task["original_path"]):
+        raise HTTPException(status_code=404, detail="人声音频不存在，请重新上传")
+
+    accompaniment_task = find_task_by_hash(request.accompaniment_file_hash)
+    if not accompaniment_task or not accompaniment_task.get("original_path") or not os.path.exists(accompaniment_task["original_path"]):
+        raise HTTPException(status_code=404, detail="伴奏音频不存在，请重新上传")
+
+    vocal_path = vocal_task["original_path"]
+    accompaniment_path = accompaniment_task["original_path"]
+
+    vocal_task_id = generate_task_id()
+    accompaniment_task_id = generate_task_id()
+    main_task_id = generate_task_id()
+
+    import shutil
+    vocal_ext = os.path.splitext(vocal_path)[1].lower()
+    accompaniment_ext = os.path.splitext(accompaniment_path)[1].lower()
+    vocal_new_path = os.path.join(UPLOAD_DIR, f"{vocal_task_id}{vocal_ext}")
+    accompaniment_new_path = os.path.join(UPLOAD_DIR, f"{accompaniment_task_id}{accompaniment_ext}")
+    shutil.copy2(vocal_path, vocal_new_path)
+    shutil.copy2(accompaniment_path, accompaniment_new_path)
+
+    create_task(vocal_task_id, f"vocal_{request.vocal_filename or 'audio'}", vocal_new_path, {}, request.vocal_file_hash, os.path.getsize(vocal_new_path))
+    create_task(accompaniment_task_id, f"acc_{request.accompaniment_filename or 'audio'}", accompaniment_new_path, {}, request.accompaniment_file_hash, os.path.getsize(accompaniment_new_path))
+    create_task(main_task_id, f"dual_{request.vocal_filename or 'audio'}", vocal_new_path, {
+        "vocal_task_id": vocal_task_id,
+        "accompaniment_task_id": accompaniment_task_id,
+        "vocal_file_hash": request.vocal_file_hash,
+        "accompaniment_file_hash": request.accompaniment_file_hash,
+        "vocal_filename": request.vocal_filename,
+        "accompaniment_filename": request.accompaniment_filename,
+        "processing_mode": "dual",
+    }, "", os.path.getsize(vocal_new_path) + os.path.getsize(accompaniment_new_path))
+
+    params = request.params.copy()
+    params["vocal_path"] = vocal_new_path
+    params["accompaniment_path"] = accompaniment_new_path
+    params["vocal_task_id"] = vocal_task_id
+    params["accompaniment_task_id"] = accompaniment_task_id
+    params["processing_mode"] = "dual"
+
+    _VOCAL_KEY_MAP = {
+        "de_clipping": "vocal_declip",
+        "de_pop": "vocal_depop",
+        "de_essing": "vocal_de_ess",
+        "bass_enhance": "vocal_bass_enhance",
+        "clarity": "vocal_air_texture",
+        "air_texture": "vocal_air_texture",
+        "formant_repair": "vocal_formant_repair",
+        "breath_enhance": "vocal_breath_enhance",
+        "ai_repair": "vocal_ai_repair",
+        "loudness_optimize": "vocal_loudness",
+    }
+
+    _INST_KEY_MAP = {
+        "de_clipping": "inst_declip",
+        "de_pop": "inst_depop",
+        "noise_reduction": "inst_noise_reduction",
+        "dynamic_range": "inst_dynamic",
+        "spatial_enhance": "inst_spatial",
+        "warmth": "inst_warmth",
+        "timbre_protect": "inst_timbre_protect",
+        "loudness_optimize": "inst_loudness",
+    }
+
+    if request.vocal_params:
+        for src_key, flat_key in _VOCAL_KEY_MAP.items():
+            if src_key in request.vocal_params:
+                params[flat_key] = request.vocal_params[src_key]
+
+    if request.accompaniment_params:
+        for src_key, flat_key in _INST_KEY_MAP.items():
+            if src_key in request.accompaniment_params:
+                params[flat_key] = request.accompaniment_params[src_key]
+
+    if request.mix_ratio is not None:
+        params["vocal_ratio"] = request.mix_ratio
+        params["accompaniment_ratio"] = 1.0
+
+    vocal_output_filename = f"{vocal_task_id}_repaired.wav"
+    accompaniment_output_filename = f"{accompaniment_task_id}_repaired.wav"
+    from services.task_manager import OUTPUT_DIR
+    params["vocal_output_path"] = os.path.join(OUTPUT_DIR, vocal_output_filename)
+    params["accompaniment_output_path"] = os.path.join(OUTPUT_DIR, accompaniment_output_filename)
+
+    submit_repair_task(main_task_id, vocal_new_path, params)
+
+    return {
+        "task_id": main_task_id,
+        "vocal_task_id": vocal_task_id,
+        "accompaniment_task_id": accompaniment_task_id,
+        "status": "pending",
+    }
 
 
 @router.get("/tracks/{task_id}")

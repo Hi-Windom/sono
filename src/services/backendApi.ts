@@ -372,7 +372,9 @@ export async function uploadDualAudio(
   vocalFile: File,
   accompanimentFile: File,
   onProgress?: (loaded: number, total: number, speed: number, type: 'vocal' | 'accompaniment') => void,
-  fileHash?: string
+  fileHash?: string,
+  vocalFileHash?: string,
+  accompanimentFileHash?: string
 ): Promise<DualUploadResponse> {
   const url = `${API_BASE}/upload-dual`;
   log('upload-dual', `POST ${url} vocal=${vocalFile.name} acc=${accompanimentFile.name}`);
@@ -382,6 +384,12 @@ export async function uploadDualAudio(
   formData.append('accompaniment_file', accompanimentFile);
   if (fileHash) {
     formData.append('file_hash', fileHash);
+  }
+  if (vocalFileHash) {
+    formData.append('vocal_file_hash', vocalFileHash);
+  }
+  if (accompanimentFileHash) {
+    formData.append('accompaniment_file_hash', accompanimentFileHash);
   }
 
   return new Promise<DualUploadResponse>((resolve, reject) => {
@@ -560,6 +568,74 @@ export async function repairDualAudio(
     return data;
   } catch (e) {
     log('repair-dual', `FETCH ERROR: ${e instanceof Error ? e.message : String(e)}`);
+    throw e;
+  }
+}
+
+export interface DualRepairFromHashResponse {
+  task_id: string;
+  vocal_task_id: string;
+  accompaniment_task_id: string;
+  status: string;
+}
+
+export async function repairDualFromHash(
+  vocalFileHash: string,
+  accompanimentFileHash: string,
+  vocalFileName: string,
+  accompanimentFileName: string,
+  params: AIRepairParams,
+  options: ProcessingOptions,
+  algorithmVersion?: string,
+  vocalParams?: VocalRepairParams,
+  accompanimentParams?: InstrumentRepairParams,
+  mixRatio?: number
+): Promise<DualRepairFromHashResponse> {
+  const url = `${API_BASE}/repair-dual-from-hash`;
+  const backendParams = mapParamsToBackend(params, options, algorithmVersion);
+  log('repair-dual-from-hash', `POST ${url} vocal_hash=${vocalFileHash.slice(0, 12)} acc_hash=${accompanimentFileHash.slice(0, 12)}`);
+
+  const body: Record<string, unknown> = {
+    vocal_file_hash: vocalFileHash,
+    accompaniment_file_hash: accompanimentFileHash,
+    vocal_filename: vocalFileName,
+    accompaniment_filename: accompanimentFileName,
+    params: backendParams,
+  };
+
+  if (vocalParams) {
+    body.vocal_params = mapVocalParamsToBackend(vocalParams, options, algorithmVersion);
+  }
+  if (accompanimentParams) {
+    body.accompaniment_params = mapInstrumentParamsToBackend(accompanimentParams, options, algorithmVersion);
+  }
+  if (mixRatio !== undefined) {
+    body.mix_ratio = mixRatio;
+  }
+
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+    log('repair-dual-from-hash', `response status=${res.status} ok=${res.ok}`);
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: '双轨修复请求失败' }));
+      const detail = Array.isArray(err.detail)
+        ? err.detail.map((e: any) => e.msg || String(e)).join('; ')
+        : (err.detail || '双轨修复请求失败');
+      log('repair-dual-from-hash', `ERROR: ${detail}`);
+      throw new Error(detail);
+    }
+
+    const data = await res.json();
+    log('repair-dual-from-hash', `success: task_id=${data.task_id} vocal=${data.vocal_task_id} acc=${data.accompaniment_task_id}`);
+    return data;
+  } catch (e) {
+    log('repair-dual-from-hash', `FETCH ERROR: ${e instanceof Error ? e.message : String(e)}`);
     throw e;
   }
 }
