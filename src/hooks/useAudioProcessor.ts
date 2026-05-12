@@ -504,27 +504,45 @@ export function useAudioProcessor() {
 
         const file = session.file;
 
-        if (!(file instanceof File) || file.size === 0) {
-          writeLog(`[useAudioProcessor] 会话中的 File 对象无效(size=${file?.size ?? 'N/A'})，清除会话`);
+        let arrayBuf: ArrayBuffer | null = null;
+        let restoredFile: File | null = null;
+
+        if (file instanceof File && file.size > 0) {
+          try {
+            arrayBuf = await file.arrayBuffer();
+            if (arrayBuf.byteLength === 0) throw new Error('arrayBuffer 为空');
+            restoredFile = file;
+          } catch (fileErr) {
+            writeLog(`[useAudioProcessor] File 对象读取失败: ${fileErr instanceof Error ? fileErr.message : String(fileErr)}，尝试从后端重新下载`);
+            arrayBuf = null;
+          }
+        }
+
+        if (!arrayBuf && session.taskId) {
+          try {
+            const originalUrl = getPreviewUrl(session.taskId, 'original');
+            arrayBuf = await downloadWithProgress(originalUrl);
+            if (arrayBuf.byteLength === 0) throw new Error('下载的原始音频为空');
+            restoredFile = new File([arrayBuf], session.fileName || 'audio.wav', { type: 'audio/wav' });
+            writeLog(`[useAudioProcessor] 从后端重新下载原始音频成功: ${arrayBuf.byteLength} bytes`);
+          } catch (dlErr) {
+            writeLog(`[useAudioProcessor] 从后端下载原始音频也失败: ${dlErr instanceof Error ? dlErr.message : String(dlErr)}，清除会话`);
+            await clearSession();
+            pendingSessionRef.current = null;
+            sessionRestoredRef.current = true;
+            return;
+          }
+        }
+
+        if (!arrayBuf) {
+          writeLog(`[useAudioProcessor] 无法获取音频数据，清除会话`);
           await clearSession();
           pendingSessionRef.current = null;
           sessionRestoredRef.current = true;
           return;
         }
 
-        let arrayBuf: ArrayBuffer;
-        try {
-          arrayBuf = await file.arrayBuffer();
-          if (arrayBuf.byteLength === 0) throw new Error('arrayBuffer 为空');
-        } catch (fileErr) {
-          writeLog(`[useAudioProcessor] File 对象读取失败: ${fileErr instanceof Error ? fileErr.message : String(fileErr)}，清除会话`);
-          await clearSession();
-          pendingSessionRef.current = null;
-          sessionRestoredRef.current = true;
-          return;
-        }
-
-        setAudioFile(file);
+        setAudioFile(restoredFile);
         fileHashRef.current = session.fileHash;
 
         const context = getAudioContext();
@@ -584,6 +602,21 @@ export function useAudioProcessor() {
               setProcessingOptionsState(prev => ({ ...prev, ...restoredOpts }));
             }
           } catch {}
+        }
+
+        if (restoredFile) {
+          saveSession({
+            file: restoredFile,
+            fileName: session.fileName,
+            fileSize: restoredFile.size,
+            fileHash: session.fileHash,
+            taskId: session.taskId,
+            backendAvailable: true,
+            hasBeenProcessed: session.hasBeenProcessed,
+            wavInfo: wavInfoRef.current ? JSON.stringify(wavInfoRef.current) : '',
+            repairResult: session.repairResult || '',
+            processingOptions: session.processingOptions || JSON.stringify(processingOptionsRef.current),
+          });
         }
 
         sessionRestoredRef.current = true;

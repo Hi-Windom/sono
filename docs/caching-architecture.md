@@ -353,6 +353,22 @@ Session restore 流程中，`wavInfo` 先从实际文件头解析（`parseWavHea
 
 **修复**：在 `SessionData` 中添加 `processingOptions` 字段，`saveSession` 时写入，session restore 时恢复。
 
+### ❌ 错误7：File 对象在 IndexedDB 中跨刷新失效
+
+`File` 对象通过结构化克隆算法存入 IndexedDB，但页面刷新后底层 Blob 数据可能不可读（`file.arrayBuffer()` 抛异常）。旧代码在读取失败时直接 `clearSession()`，导致 session 被永久删除，后续刷新无法恢复。
+
+**修复**：当 `file.arrayBuffer()` 失败时，从后端重新下载原始音频（`/api/v1/preview/{task_id}?type=original`），创建新 File 对象继续恢复流程。成功恢复后重新 `saveSession` 刷新 IndexedDB 中的 File 对象。
+
+### ❌ 错误8：两个 useEffect 之间的时序竞态
+
+原设计用两个 useEffect 协调 session 恢复：
+- useEffect #1 (deps=[])：异步 `loadSession()` → 写入 `pendingSessionRef`
+- useEffect #2 (deps=[backendAvailable])：检查 `pendingSessionRef` 有值后恢复
+
+当后端快速响应时，`backendAvailable` 在 `loadSession()` 完成前就变为 `true`，useEffect #2 提前触发并跳过（`pendingSessionRef` 还是 null），之后不再重新触发。
+
+**修复**：合并为单个 useEffect (deps=[backendAvailable])，在 `backendAvailable` 变为 true 时同步执行 `loadSession()` + 恢复，消除竞态。
+
 ### ✅ 最佳实践1：数据驱动缓存
 
 缓存应是纯数据映射，与业务逻辑状态解耦：
@@ -399,3 +415,4 @@ Worker 创建失败时 fallback 到主线程同步处理，确保功能不中断
 - **v2.1**: 修复文件替换后会话覆盖问题
 - **v3.0**: Web Worker 化 + 前端 IndexedDB 分析缓存 + 缓存协同优化
 - **v3.1**: 修复 session restore 覆盖问题 + processingOptions 持久化 + wavInfoRef 追踪
+- **v3.2**: File 对象失效后端兜底下载 + useEffect 合并消除竞态 + 恢复后刷新 session
