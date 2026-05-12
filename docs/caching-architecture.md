@@ -123,19 +123,29 @@ Sono 采用多层缓存架构，覆盖前端（IndexedDB、React State、Web Wor
 页面刷新 / 组件挂载
   │
   ├─ 1. loadSession() → IndexedDB 读取会话
-  │     无会话 → 结束
-  │     有会话 → 继续
+  │     无 taskId → 结束（不调用 clearSession）
+  │     有 taskId → 继续
   │
-  ├─ 2. 验证 File 对象有效性
-  │     无效（移动端暂离后 File 失效）→ 清除会话
-  │     有效 → 继续
+  ├─ 2. 检查音频数据获取方式（后端优先，IndexedDB File 回退）
+  │     后端下载 → /api/v1/preview/{task_id}?type=original（优先，更可靠）
+  │     后端失败 → IndexedDB File 回退（file.arrayBuffer()）
+  │     两者皆失败 → 跳过恢复，保留 session，下次刷新可重试
   │
-  ├─ 3. Worker 解码 + 分析
+  ├─ 3. 网络状态检查（不阻塞恢复）
+  │     fetch('/api/v1/status/{task_id}') 网络错误 → 跳过恢复（不清除 session）
+  │     HTTP 404/500 → 清除 session（任务确定不存在）
+  │     status=error → 清除 session（任务确定失败）
+  │
+  ├─ 4. Worker 解码 + 分析
   │     audioWorker.decodeAndAnalyze(context, arrayBuf)
   │     一步完成，避免两次 postMessage
   │
-  └─ 4. 恢复修复后音频（如果已完成）
-        GET /api/v1/preview/{task_id} → AudioBuffer
+  ├─ 5. 恢复修复后音频（如果已完成）
+  │     GET /api/v1/preview/{task_id}?type=repaired → AudioBuffer
+  │     下载失败 → 静默跳过（不清除 session）
+  │
+  └─ 6. 恢复后重新保存 session
+        saveSession() → 刷新 IndexedDB 中的 File 对象
 ```
 
 ---
@@ -205,7 +215,7 @@ interface SessionData {
 }
 ```
 
-**关键问题**：移动端暂离后 `File` 对象可能失效（`file.size === 0`），恢复时需验证。
+**关键设计变更**：File 对象不再是恢复的必要条件。恢复流程优先从后端下载原始音频（`/api/v1/preview/{task_id}?type=original`），失败后才回退到 IndexedDB File。即使两者都失败，也不会清除 session，下次刷新可重试。
 
 ### 4.2 前端 IndexedDB 分析缓存
 
@@ -369,6 +379,34 @@ Session restore 流程中，`wavInfo` 先从实际文件头解析（`parseWavHea
 
 **修复**：合并为单个 useEffect (deps=[backendAvailable])，在 `backendAvailable` 变为 true 时同步执行 `loadSession()` + 恢复，消除竞态。
 
+### ❌ 错误9：会话因瞬态错误被永久清除
+
+`useAudioProcessor` 的 restore useEffect 中有 **7 处**调用 `clearSession()`，包括：
+- File 对象无效 (`!(file instanceof File) || file.size===0`)
+- 任务状态检查网络错误
+- 后端下载失败
+- IndexedDB File 回退失败
+- 解码失败
+- 任意未捕获异常
+
+任何瞬态错误（网络波动、Blob 不可读）都会永久删除 session，导致二次刷新后无法恢复。
+
+**修复原则**：永远不因瞬态错误清除 session，只在任务确定不存在时才清除：
+1. **后端下载优先，IndexedDB File 回退**：先从 `/api/v1/preview/{task_id}?type=original` 下载（更可靠），失败后才尝试 IndexedDB File
+2. **只要求 `session.taskId`，不要求 `session.file`**：有 taskId 就能从后端下载，File 不是必需的
+3. **网络错误不清除 session**：`fetch('/api/v1/status/...')` 网络错误时跳过恢复但保留 session，下次刷新可重试
+4. **catch 块不清除 session**：只设 `sessionRestoredRef.current = true`，静默跳过
+5. **移出 useEffect 依赖**：`processingOptions.sampleRate` 不应在依赖数组中，避免 restore 过程中状态变化触发 useEffect 重新执行
+
+### ❌ 错误10：无并发保护导致 StrictMode 下多次恢复
+
+React 18 StrictMode 在开发模式下会先 mount → unmount → mount 组件，可能导致：
+1. 第一次 mount 的 async restore 仍在运行
+2. 组件 unmount 后状态丢失
+3. 第二次 mount 又触发新的 restore，与旧 restore 竞争
+
+**修复**：添加 `restoreSeqRef` 序列号，每次触发 useEffect 时 `++restoreSeqRef.current`，每个 await 点检查 `seq !== restoreSeqRef.current`，过期则中止。
+
 ### ✅ 最佳实践1：数据驱动缓存
 
 缓存应是纯数据映射，与业务逻辑状态解耦：
@@ -416,3 +454,4 @@ Worker 创建失败时 fallback 到主线程同步处理，确保功能不中断
 - **v3.0**: Web Worker 化 + 前端 IndexedDB 分析缓存 + 缓存协同优化
 - **v3.1**: 修复 session restore 覆盖问题 + processingOptions 持久化 + wavInfoRef 追踪
 - **v3.2**: File 对象失效后端兜底下载 + useEffect 合并消除竞态 + 恢复后刷新 session
+- **v3.3**: 移除所有瞬态错误时的 clearSession + 后端下载优先 + restoreSeqRef 并发保护 + File 非必须

@@ -441,11 +441,7 @@ export function useAudioProcessor() {
   } | null>(null);
 
   useEffect(() => {
-    writeLog(`[useAudioProcessor] restore useEffect触发: backendAvailable=${backendAvailable}, sessionRestored=${sessionRestoredRef.current}, audioFile=${!!audioFile}`);
-    if (sessionRestoredRef.current || !backendAvailable) {
-      writeLog(`[useAudioProcessor] restore跳过: sessionRestored=${sessionRestoredRef.current}, backendAvailable=${backendAvailable}`);
-      return;
-    }
+    if (sessionRestoredRef.current || !backendAvailable) return;
 
     const seq = ++restoreSeqRef.current;
 
