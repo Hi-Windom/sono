@@ -111,9 +111,34 @@ export const Header = () => {
     setIsDiagLoading(false);
   };
 
+  const copyToClipboard = (text: string) => {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).catch(() => {
+        fallbackCopy(text);
+      });
+    } else {
+      fallbackCopy(text);
+    }
+  };
+
+  const fallbackCopy = (text: string) => {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.left = '-9999px';
+    ta.style.top = '-9999px';
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    try {
+      document.execCommand('copy');
+    } catch {}
+    document.body.removeChild(ta);
+  };
+
   const handleCopy = () => {
     if (backendDiag) {
-      navigator.clipboard.writeText(buildCopyText(backendDiag));
+      copyToClipboard(buildCopyText(backendDiag));
     } else {
       const fe = getFrontendDiag('后端无响应');
       const lines = [
@@ -128,7 +153,7 @@ export const Header = () => {
         `UA: ${fe.user_agent}`,
         `错误: ${fe.error_detail}`,
       ];
-      navigator.clipboard.writeText(lines.join('\n'));
+      copyToClipboard(lines.join('\n'));
     }
   };
 

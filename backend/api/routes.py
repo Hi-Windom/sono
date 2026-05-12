@@ -151,16 +151,19 @@ async def diagnostics():
     import sys
     import platform
     import shutil
-    import psutil
     from datetime import datetime, timezone
+
+    try:
+        import psutil
+        _has_psutil = True
+    except ImportError:
+        _has_psutil = False
 
     result = {"backend": True, "timestamp": datetime.now(timezone.utc).isoformat()}
 
-    # Python
     result["python"] = True
     result["python_version"] = f"Python {sys.version.split()[0]}"
 
-    # FFmpeg
     ffmpeg_ok = False
     ffmpeg_ver = None
     try:
@@ -180,22 +183,23 @@ async def diagnostics():
     result["ffmpeg"] = ffmpeg_ok
     result["ffmpeg_version"] = ffmpeg_ver or "Not found"
 
-    # 内存
-    try:
-        mem = psutil.virtual_memory()
-        total_gb = round(mem.total / (1024**3), 1)
-        avail_gb = round(mem.available / (1024**3), 1)
-        used_pct = mem.percent
-        result["memory"] = avail_gb >= 0.5
-        result["memory_info"] = {
-            "total_gb": total_gb,
-            "available_gb": avail_gb,
-            "used_percent": used_pct,
-        }
-    except Exception:
+    if _has_psutil:
+        try:
+            mem = psutil.virtual_memory()
+            total_gb = round(mem.total / (1024**3), 1)
+            avail_gb = round(mem.available / (1024**3), 1)
+            used_pct = mem.percent
+            result["memory"] = avail_gb >= 0.5
+            result["memory_info"] = {
+                "total_gb": total_gb,
+                "available_gb": avail_gb,
+                "used_percent": used_pct,
+            }
+        except Exception:
+            result["memory"] = False
+    else:
         result["memory"] = False
 
-    # 磁盘
     try:
         disk = shutil.disk_usage("/")
         total_gb = round(disk.total / (1024**3), 1)
@@ -210,7 +214,6 @@ async def diagnostics():
     except Exception:
         result["storage"] = False
 
-    # GPU
     gpu_ok = False
     gpu_info = None
     try:
@@ -230,7 +233,6 @@ async def diagnostics():
     result["gpu"] = gpu_ok
     result["gpu_info"] = gpu_info
 
-    # 系统信息
     result["system"] = {
         "os": f"{platform.system()} {platform.release()}",
         "arch": platform.machine(),
@@ -238,12 +240,12 @@ async def diagnostics():
         "hostname": platform.node(),
     }
 
-    # 运行时
     uptime_seconds = None
-    try:
-        uptime_seconds = int(time.time() - psutil.boot_time())
-    except Exception:
-        pass
+    if _has_psutil:
+        try:
+            uptime_seconds = int(time.time() - psutil.boot_time())
+        except Exception:
+            pass
     result["runtime"] = {
         "pid": os.getpid(),
         "mobile_mode": MOBILE_MODE,
@@ -251,7 +253,6 @@ async def diagnostics():
         "algorithm_versions": get_available_versions(mobile_mode=MOBILE_MODE),
     }
 
-    # 上传/输出目录状态
     try:
         upload_count = len(os.listdir(UPLOAD_DIR)) if os.path.isdir(UPLOAD_DIR) else -1
         output_count = len(os.listdir(OUTPUT_DIR)) if os.path.isdir(OUTPUT_DIR) else -1
@@ -264,16 +265,18 @@ async def diagnostics():
     except Exception:
         result["directories"] = None
 
-    # 进程资源
-    try:
-        p = psutil.Process(os.getpid())
-        result["process"] = {
-            "cpu_percent": round(p.cpu_percent(), 1),
-            "memory_mb": round(p.memory_info().rss / (1024 * 1024), 1),
-            "threads": p.num_threads(),
-            "fd_count": p.num_fds() if hasattr(p, 'num_fds') else None,
-        }
-    except Exception:
+    if _has_psutil:
+        try:
+            p = psutil.Process(os.getpid())
+            result["process"] = {
+                "cpu_percent": round(p.cpu_percent(), 1),
+                "memory_mb": round(p.memory_info().rss / (1024 * 1024), 1),
+                "threads": p.num_threads(),
+                "fd_count": p.num_fds() if hasattr(p, 'num_fds') else None,
+            }
+        except Exception:
+            result["process"] = None
+    else:
         result["process"] = None
 
     return result
