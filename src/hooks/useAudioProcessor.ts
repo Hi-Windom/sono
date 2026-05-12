@@ -428,7 +428,6 @@ export function useAudioProcessor() {
     return audioContextRef.current;
   }, []);
 
-  // 会话恢复逻辑 - 监听后端可用性变化来触发恢复
   const pendingSessionRef = useRef<{
     file: File;
     fileName: string;
@@ -437,50 +436,44 @@ export function useAudioProcessor() {
     hasBeenProcessed: boolean;
     wavInfo?: string;
     repairResult?: string;
+    processingOptions?: string;
   } | null>(null);
 
   useEffect(() => {
-    if (sessionRestoredRef.current) return;
-
-    (async () => {
-      const session = await loadSession();
-      if (!session || !session.file || !session.taskId) {
-        sessionRestoredRef.current = true; // 没有会话需要恢复，标记为已完成
-        return;
-      }
-
-      // 验证 File 对象基本有效性
-      if (!(session.file instanceof File) || session.file.size === 0) {
-        writeLog(`[useAudioProcessor] 会话中的 File 对象无效，清除`);
-        await clearSession();
-        sessionRestoredRef.current = true;
-        return;
-      }
-
-      writeLog(`[useAudioProcessor] 发现保存的会话: file=${session.fileName} taskId=${session.taskId}`);
-
-      // 保存会话数据到 ref，等待后端可用时恢复
-      pendingSessionRef.current = {
-        file: session.file,
-        fileName: session.fileName,
-        fileHash: session.fileHash || '',
-        taskId: session.taskId,
-        hasBeenProcessed: session.hasBeenProcessed,
-        wavInfo: session.wavInfo,
-        repairResult: session.repairResult,
-      };
-    })();
-  }, []);
-
-  // 当后端变为可用时，尝试恢复会话
-  useEffect(() => {
-    if (!backendAvailable || !pendingSessionRef.current || sessionRestoredRef.current) return;
-
-    const session = pendingSessionRef.current;
+    if (sessionRestoredRef.current || !backendAvailable) return;
 
     (async () => {
       try {
-        // 保护：如果用户已经加载了新文件（在会话恢复前），放弃恢复旧会话
+        if (!pendingSessionRef.current) {
+          const session = await loadSession();
+          if (!session || !session.file || !session.taskId) {
+            sessionRestoredRef.current = true;
+            return;
+          }
+
+          if (!(session.file instanceof File) || session.file.size === 0) {
+            writeLog(`[useAudioProcessor] 会话中的 File 对象无效，清除`);
+            await clearSession();
+            sessionRestoredRef.current = true;
+            return;
+          }
+
+          writeLog(`[useAudioProcessor] 发现保存的会话: file=${session.fileName} taskId=${session.taskId}`);
+
+          pendingSessionRef.current = {
+            file: session.file,
+            fileName: session.fileName,
+            fileHash: session.fileHash || '',
+            taskId: session.taskId,
+            hasBeenProcessed: session.hasBeenProcessed,
+            wavInfo: session.wavInfo,
+            repairResult: session.repairResult,
+            processingOptions: session.processingOptions,
+          };
+        }
+
+        const session = pendingSessionRef.current;
+
         if (audioFile) {
           writeLog(`[useAudioProcessor] 用户已加载文件 ${audioFile.name}，跳过旧会话恢复`);
           await clearSession();
@@ -511,7 +504,6 @@ export function useAudioProcessor() {
 
         const file = session.file;
 
-        // 验证 File 对象有效性（移动端暂离后 File 可能失效）
         if (!(file instanceof File) || file.size === 0) {
           writeLog(`[useAudioProcessor] 会话中的 File 对象无效(size=${file?.size ?? 'N/A'})，清除会话`);
           await clearSession();
@@ -520,7 +512,6 @@ export function useAudioProcessor() {
           return;
         }
 
-        // 尝试读取文件确认数据可用
         let arrayBuf: ArrayBuffer;
         try {
           arrayBuf = await file.arrayBuffer();

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import 'fake-indexeddb/auto';
 
-import { saveSession, loadSession, clearSession } from '../utils/sessionDB';
+import { saveSession, loadSession, clearSession, saveAnalysisCache, getAnalysisCache } from '../utils/sessionDB';
 
 describe('sessionDB', () => {
   beforeEach(async () => {
@@ -14,7 +14,7 @@ describe('sessionDB', () => {
 
   function makeMockFile(name = 'test.mp3', size = 1024): File {
     const arr = new Uint8Array(size);
-    arr[0] = 0x49; arr[1] = 0x44; arr[2] = 0x33; // fake ID3 header
+    arr[0] = 0x49; arr[1] = 0x44; arr[2] = 0x33;
     return new File([arr], name, { type: 'audio/mpeg' });
   }
 
@@ -32,6 +32,7 @@ describe('sessionDB', () => {
       repairResult: '',
       originalDetectTime: '',
       repairedDetectTime: '',
+      processingOptions: '',
     });
 
     const loaded = await loadSession();
@@ -63,6 +64,7 @@ describe('sessionDB', () => {
       repairResult: '{"issues_found":[]}',
       originalDetectTime: '2024-01-01',
       repairedDetectTime: '2024-01-02',
+      processingOptions: '{"sampleRate":48000,"bitDepth":24}',
     });
 
     await clearSession();
@@ -85,6 +87,7 @@ describe('sessionDB', () => {
       repairResult: '',
       originalDetectTime: '',
       repairedDetectTime: '',
+      processingOptions: '',
     });
 
     const file2 = makeMockFile('second.wav', 200);
@@ -100,6 +103,7 @@ describe('sessionDB', () => {
       repairResult: '{}',
       originalDetectTime: '',
       repairedDetectTime: '',
+      processingOptions: '{"sampleRate":96000,"bitDepth":32}',
     });
 
     const loaded = await loadSession();
@@ -119,6 +123,7 @@ describe('sessionDB', () => {
       algorithm_version: 'v2.4a',
     });
     const wavInfo = JSON.stringify({ sampleRate: 44100, channels: 2, duration: 180.5, bitDepth: 16 });
+    const processingOptions = JSON.stringify({ sampleRate: 48000, bitDepth: 24 });
 
     await saveSession({
       file,
@@ -132,6 +137,7 @@ describe('sessionDB', () => {
       repairResult,
       originalDetectTime: '2024-06-15T10:30:00Z',
       repairedDetectTime: '2024-06-15T10:35:22Z',
+      processingOptions,
     });
 
     const loaded = await loadSession();
@@ -147,6 +153,10 @@ describe('sessionDB', () => {
     const parsedWav = JSON.parse(loaded!.wavInfo);
     expect(parsedWav.sampleRate).toBe(44100);
     expect(parsedWav.channels).toBe(2);
+
+    const parsedOpts = JSON.parse(loaded!.processingOptions);
+    expect(parsedOpts.sampleRate).toBe(48000);
+    expect(parsedOpts.bitDepth).toBe(24);
 
     expect(loaded!.originalDetectTime).toBe('2024-06-15T10:30:00Z');
     expect(loaded!.repairedDetectTime).toBe('2024-06-15T10:35:22Z');
@@ -169,6 +179,7 @@ describe('sessionDB', () => {
       repairResult: '',
       originalDetectTime: '',
       repairedDetectTime: '',
+      processingOptions: '',
     });
 
     const loaded = await loadSession();
@@ -192,6 +203,7 @@ describe('sessionDB', () => {
         repairResult: '',
         originalDetectTime: '',
         repairedDetectTime: '',
+        processingOptions: JSON.stringify({ sampleRate: 44100 + i * 975, bitDepth: 16 + i * 4 }),
       });
     }
 
@@ -201,5 +213,142 @@ describe('sessionDB', () => {
     expect(loaded!.fileHash).toBe('hash-4');
     expect(loaded!.backendAvailable).toBe(true);
     expect(loaded!.hasBeenProcessed).toBe(true);
+
+    const parsedOpts = JSON.parse(loaded!.processingOptions);
+    expect(parsedOpts.sampleRate).toBe(44100 + 4 * 975);
+    expect(parsedOpts.bitDepth).toBe(32);
+  });
+
+  it('processingOptions 持久化和恢复', async () => {
+    const file = makeMockFile('opts-test.wav', 2048);
+    const opts = JSON.stringify({ sampleRate: 96000, bitDepth: 32 });
+    await saveSession({
+      file,
+      fileName: file.name,
+      fileSize: file.size,
+      fileHash: 'opts-hash',
+      taskId: 'task-opts',
+      backendAvailable: true,
+      hasBeenProcessed: false,
+      wavInfo: '',
+      repairResult: '',
+      originalDetectTime: '',
+      repairedDetectTime: '',
+      processingOptions: opts,
+    });
+
+    const loaded = await loadSession();
+    expect(loaded).not.toBeNull();
+    expect(loaded!.processingOptions).toBe(opts);
+    const parsed = JSON.parse(loaded!.processingOptions);
+    expect(parsed.sampleRate).toBe(96000);
+    expect(parsed.bitDepth).toBe(32);
+  });
+
+  it('processingOptions 为空字符串时不影响其他字段', async () => {
+    const file = makeMockFile('empty-opts.wav', 512);
+    await saveSession({
+      file,
+      fileName: file.name,
+      fileSize: file.size,
+      fileHash: 'empty-opts-hash',
+      taskId: 'task-empty-opts',
+      backendAvailable: true,
+      hasBeenProcessed: false,
+      wavInfo: '{"sampleRate":44100}',
+      repairResult: '',
+      originalDetectTime: '',
+      repairedDetectTime: '',
+      processingOptions: '',
+    });
+
+    const loaded = await loadSession();
+    expect(loaded).not.toBeNull();
+    expect(loaded!.processingOptions).toBe('');
+    expect(loaded!.wavInfo).toBe('{"sampleRate":44100}');
+  });
+
+  it('旧版 session 无 processingOptions 字段时 loadSession 不崩溃', async () => {
+    const file = makeMockFile('legacy.wav', 1024);
+    await saveSession({
+      file,
+      fileName: file.name,
+      fileSize: file.size,
+      fileHash: 'legacy-hash',
+      taskId: 'task-legacy',
+      backendAvailable: true,
+      hasBeenProcessed: false,
+      wavInfo: '',
+      repairResult: '',
+      originalDetectTime: '',
+      repairedDetectTime: '',
+      processingOptions: '',
+    });
+
+    const loaded = await loadSession();
+    expect(loaded).not.toBeNull();
+    expect(loaded!.taskId).toBe('task-legacy');
+    expect(loaded!.processingOptions).toBe('');
+  });
+});
+
+describe('sessionDB analysis cache', () => {
+  beforeEach(async () => {
+    const { clearAllAnalysisCache } = await import('../utils/sessionDB');
+    await clearAllAnalysisCache();
+  });
+
+  it('saveAnalysisCache + getAnalysisCache 往返正确', async () => {
+    const wavInfo = JSON.stringify({ sampleRate: 44100, channels: 2, duration: 120, bitDepth: 16 });
+    const analysis = JSON.stringify({ spectralFlatness: 0.5, dynamicRange: 40, issues: ['noise'] });
+
+    await saveAnalysisCache({
+      fileHash: 'analysis-hash-1',
+      fileName: 'test.wav',
+      fileSize: 1024,
+      wavInfo,
+      analysis,
+    });
+
+    const cached = await getAnalysisCache('analysis-hash-1');
+    expect(cached).not.toBeNull();
+    expect(cached!.fileHash).toBe('analysis-hash-1');
+    expect(cached!.fileName).toBe('test.wav');
+
+    const parsedWav = JSON.parse(cached!.wavInfo);
+    expect(parsedWav.sampleRate).toBe(44100);
+    expect(parsedWav.duration).toBe(120);
+
+    const parsedAnalysis = JSON.parse(cached!.analysis);
+    expect(parsedAnalysis.spectralFlatness).toBe(0.5);
+    expect(parsedAnalysis.issues).toEqual(['noise']);
+  });
+
+  it('getAnalysisCache 在无数据时返回 null', async () => {
+    const cached = await getAnalysisCache('nonexistent');
+    expect(cached).toBeNull();
+  });
+
+  it('saveAnalysisCache 覆盖已有缓存', async () => {
+    await saveAnalysisCache({
+      fileHash: 'overwrite-hash',
+      fileName: 'old.wav',
+      fileSize: 100,
+      wavInfo: '{"sampleRate":44100}',
+      analysis: '{"old":true}',
+    });
+
+    await saveAnalysisCache({
+      fileHash: 'overwrite-hash',
+      fileName: 'new.wav',
+      fileSize: 200,
+      wavInfo: '{"sampleRate":48000}',
+      analysis: '{"new":true}',
+    });
+
+    const cached = await getAnalysisCache('overwrite-hash');
+    expect(cached).not.toBeNull();
+    expect(cached!.fileName).toBe('new.wav');
+    expect(cached!.fileSize).toBe(200);
   });
 });
