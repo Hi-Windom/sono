@@ -201,6 +201,7 @@ interface SessionData {
   repairResult: string;        // JSON
   originalDetectTime: string;
   repairedDetectTime: string;
+  processingOptions: string;   // JSON { sampleRate, bitDepth }
 }
 ```
 
@@ -331,6 +332,27 @@ if json.dumps(stored_params, sort_keys=True) != json.dumps(params, sort_keys=Tru
 
 导致后端不可用时无法命中分析缓存。修复：Worker 化后同时写入前端 IndexedDB 分析缓存。
 
+### ❌ 错误4：Session 恢复用旧数据覆盖实时解析结果
+
+Session restore 流程中，`wavInfo` 先从实际文件头解析（`parseWavHeader`）和/或后端 API 获取，最后又用 session 中保存的旧 `wavInfo` 覆盖。这导致：
+- 非 WAV 文件：session 中 `wavInfo` 为空字符串（`parseWavHeader` 返回 null），覆盖了 API 获取的准确数据
+- WAV 文件：session 中 `wavInfo` 可能缺少字段或 duration 不精确，覆盖了更准确的数据
+- 交付规格块因 `duration <= 0` 显示"加载音频后显示预估大小"
+
+**修复**：删除 session restore 中 `setWavInfo(JSON.parse(session.wavInfo))`，不再用旧数据覆盖实时解析结果。
+
+### ❌ 错误5：saveSession 保存中间变量而非最终 state
+
+`saveSession` 在 async 函数中调用时，使用闭包捕获的 `wavHeaderInfo`（中间变量）而非最终的 `wavInfo` state。由于 React 18 批量更新，`setWavInfo(infoFromApi)` 调用后 state 尚未更新，闭包中的 `wavHeaderInfo` 仍为旧值。
+
+**修复**：使用 `wavInfoRef` 追踪最新 `wavInfo`，`saveSession` 时读取 `wavInfoRef.current`。
+
+### ❌ 错误6：processingOptions 未纳入 session 持久化
+
+`processingOptions`（sampleRate/bitDepth）只从 localStorage `loadSettings()` 初始化，不保存在 session 中。用户修改导出选项后刷新页面，选项丢失。AIRepairPanel 的预估大小计算依赖 `processingOptions`，恢复后可能显示错误。
+
+**修复**：在 `SessionData` 中添加 `processingOptions` 字段，`saveSession` 时写入，session restore 时恢复。
+
 ### ✅ 最佳实践1：数据驱动缓存
 
 缓存应是纯数据映射，与业务逻辑状态解耦：
@@ -376,3 +398,4 @@ Worker 创建失败时 fallback 到主线程同步处理，确保功能不中断
 - **v2.0**: 重构为纯数据驱动缓存，去掉 status 依赖
 - **v2.1**: 修复文件替换后会话覆盖问题
 - **v3.0**: Web Worker 化 + 前端 IndexedDB 分析缓存 + 缓存协同优化
+- **v3.1**: 修复 session restore 覆盖问题 + processingOptions 持久化 + wavInfoRef 追踪

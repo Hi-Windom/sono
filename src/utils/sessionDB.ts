@@ -16,6 +16,7 @@ interface SessionData {
   repairResult: string;
   originalDetectTime: string;
   repairedDetectTime: string;
+  processingOptions: string;
 }
 
 export interface AnalysisCacheEntry {

@@ -151,7 +151,12 @@ export function useAudioProcessor() {
   const versionInitializedRef = useRef(false);
   const taskIdRef = useRef<string | null>(null);
   const wsControlRef = useRef<WSProgressControl | null>(null);
-  const [wavInfo, setWavInfo] = useState<WavInfo | null>(null);
+  const [wavInfo, setWavInfoState] = useState<WavInfo | null>(null);
+  const wavInfoRef = useRef<WavInfo | null>(null);
+  const setWavInfo = useCallback((info: WavInfo | null) => {
+    wavInfoRef.current = info;
+    setWavInfoState(info);
+  }, []);
   const [repairResult, setRepairResult] = useState<{
     issues_found: string[];
     original_sample_rate: number;
@@ -578,11 +583,16 @@ export function useAudioProcessor() {
           }
         }
 
-        if (session.wavInfo) {
-          try { setWavInfo(JSON.parse(session.wavInfo)); } catch {}
-        }
         if (session.repairResult) {
           try { setRepairResult(JSON.parse(session.repairResult)); } catch {}
+        }
+        if (session.processingOptions) {
+          try {
+            const restoredOpts = JSON.parse(session.processingOptions);
+            if (restoredOpts.sampleRate && restoredOpts.bitDepth) {
+              setProcessingOptionsState(prev => ({ ...prev, ...restoredOpts }));
+            }
+          } catch {}
         }
 
         sessionRestoredRef.current = true;
@@ -913,8 +923,9 @@ export function useAudioProcessor() {
           taskId: newTaskId,
           backendAvailable: true,
           hasBeenProcessed: false,
-          wavInfo: wavHeaderInfo ? JSON.stringify(wavHeaderInfo) : '',
+          wavInfo: wavInfoRef.current ? JSON.stringify(wavInfoRef.current) : '',
           repairResult: '',
+          processingOptions: JSON.stringify(processingOptionsRef.current),
         });
 
         if (isNonWavFile) {
@@ -1217,10 +1228,11 @@ export function useAudioProcessor() {
           taskId: taskIdRef.current,
           backendAvailable: !!backendResult,
           hasBeenProcessed: true,
-          wavInfo: wavInfo ? JSON.stringify(wavInfo) : '',
+          wavInfo: wavInfoRef.current ? JSON.stringify(wavInfoRef.current) : '',
           repairResult: backendResult?.repairResult
             ? JSON.stringify(backendResult.repairResult)
             : '',
+          processingOptions: JSON.stringify(processingOptionsRef.current),
         });
       }
 
@@ -1855,8 +1867,9 @@ export function useAudioProcessor() {
       taskId,
       backendAvailable: true,
       hasBeenProcessed: true,
-      wavInfo: wavInfo ? JSON.stringify(wavInfo) : '',
+      wavInfo: wavInfoRef.current ? JSON.stringify(wavInfoRef.current) : '',
       repairResult: cache.repair_result ? JSON.stringify(cache.repair_result) : '',
+      processingOptions: JSON.stringify(processingOptionsRef.current),
     });
 
     // 直接开始渲染下载，确保进度条显示
