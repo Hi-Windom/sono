@@ -32,7 +32,7 @@ export const Header = () => {
   return (
     <>
       <header className="border-b border-white/5 bg-gradient-to-b from-primary/30 to-transparent">
-        <div className="container mx-auto px-4 py-3 md:py-6 max-w-7xl">
+        <div className="header-container container mx-auto px-4 py-3 md:py-6 max-w-7xl">
           {/* 桌面端：左右布局 */}
           <div className="hidden md:flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -96,18 +96,17 @@ export const Header = () => {
 
           {/* 移动端：一行布局 - 左侧标题，右侧状态上诊断下 */}
           <div className="md:hidden flex items-center justify-between h-11">
-            {/* 左侧：图标 + 标题（空间不够时隐藏文字） */}
-            <div className="flex items-center gap-2 min-w-0 flex-shrink">
+            {/* 左侧：图标 + 标题（空间不够时自动隐藏） */}
+            <div className="flex items-center gap-2 min-w-0 overflow-hidden">
               <div className="w-9 h-9 bg-gradient-to-br from-cyan-500 via-purple-500 to-yellow-500 rounded-xl flex items-center justify-center shadow-[0_0_20px_rgba(107,70,193,0.4)] flex-shrink-0">
                 <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
                 </svg>
               </div>
-              <div className="hidden sm:block min-w-0">
-                <h1 className="text-sm font-bold bg-gradient-to-r from-cyan-400 via-purple-400 to-yellow-400 bg-clip-text text-transparent truncate">
-                  AI音乐修复工具
-                </h1>
-              </div>
+              {/* 用容器查询：父容器宽度足够时才显示标题 */}
+              <h1 className="header-title text-sm font-bold bg-gradient-to-r from-cyan-400 via-purple-400 to-yellow-400 bg-clip-text text-transparent whitespace-nowrap overflow-hidden text-ellipsis min-w-0">
+                AI音乐修复工具
+              </h1>
             </div>
 
             {/* 右侧：状态（上）+ 诊断（下）垂直排列 */}
@@ -152,6 +151,21 @@ export const Header = () => {
           </div>
         </div>
       </header>
+
+      <style>{`
+        .header-container {
+          container-type: inline-size;
+          container-name: header;
+        }
+        .header-title {
+          display: block;
+        }
+        @container header (max-width: 280px) {
+          .header-title {
+            display: none;
+          }
+        }
+      `}</style>
 
       {/* 诊断模态框 */}
       {showDiagModal && backendDiag && (
