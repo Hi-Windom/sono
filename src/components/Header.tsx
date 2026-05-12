@@ -62,7 +62,7 @@ export const Header = () => {
                   </span>
                   <div className="flex items-center gap-1 ml-1">
                     <svg
-                      className={`w-3 h-3 transition-all duration-200 ${hasDownstreamActivity ? 'text-green-400 scale-125 drop-shadow-[0_0_4px_rgba(74,222,128,0.6)]' : 'text-gray-600'}`}
+                      className={`w-3 h-3 transition-all duration-200 ${hasDownstreamActivity ? 'text-cyan-400 scale-125 drop-shadow-[0_0_4px_rgba(34,211,238,0.6)]' : 'text-gray-600'}`}
                       fill="none"
                       stroke="currentColor"
                       viewBox="0 0 24 24"
@@ -94,8 +94,8 @@ export const Header = () => {
             </div>
           </div>
 
-          {/* 移动端：上下布局 - 标题在上，状态在中间，诊断在下 */}
-          <div className="flex md:hidden flex-col gap-2">
+          {/* 移动端：上下布局 - 标题在上，状态在中，诊断在下 */}
+          <div className="md:hidden space-y-2">
             {/* 第一行：标题 */}
             <div className="flex items-center gap-3">
               <div className="relative">
@@ -115,7 +115,7 @@ export const Header = () => {
               </div>
             </div>
 
-            {/* 第二行：状态显示（独占一行） */}
+            {/* 第二行：状态显示 */}
             <div className="flex items-center gap-2 bg-primary/50 border border-white/10 rounded-lg px-3 py-2 w-full">
               <div className={`w-2 h-2 rounded-full ${config.dotColor}`} />
               <span className={`text-xs font-medium flex-1 ${config.textColor}`}>
@@ -123,7 +123,7 @@ export const Header = () => {
               </span>
               <div className="flex items-center gap-1">
                 <svg
-                  className={`w-3 h-3 transition-all duration-200 ${hasDownstreamActivity ? 'text-green-400 scale-125 drop-shadow-[0_0_4px_rgba(74,222,128,0.6)]' : 'text-gray-600'}`}
+                  className={`w-3 h-3 transition-all duration-200 ${hasDownstreamActivity ? 'text-cyan-400 scale-125 drop-shadow-[0_0_4px_rgba(34,211,238,0.6)]' : 'text-gray-600'}`}
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"
@@ -143,10 +143,10 @@ export const Header = () => {
               </div>
             </div>
 
-            {/* 第三行：诊断按钮（独占一行） */}
+            {/* 第三行：诊断按钮 */}
             <button
               onClick={handleDiagnose}
-              className="flex items-center justify-center gap-1.5 px-3 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg cursor-pointer transition text-gray-400 hover:text-white text-xs w-full"
+              className="flex items-center justify-center gap-1.5 px-3 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg cursor-pointer transition text-gray-400 hover:text-white text-xs w-full"
             >
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
