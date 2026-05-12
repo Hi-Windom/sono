@@ -434,7 +434,7 @@ export default function RepairPage() {
 
       <div className="container mx-auto px-4 py-6 max-w-7xl">
         {!audioFile && !dualTrackHasBeenProcessed ? (
-          <div className="flex flex-col items-center justify-center py-20">
+          <div className="flex flex-col items-center py-10">
             <div className="w-full max-w-4xl mb-6">
               <div className="flex items-center justify-center gap-4 p-1 bg-dark/80 rounded-xl border border-white/10">
                 <button
@@ -461,7 +461,7 @@ export default function RepairPage() {
             </div>
 
             {isDualTrackMode ? (
-              <DualTrackUploader onUpload={handleDualTrackUpload} />
+              <DualTrackUploader onFilesSelect={handleDualTrackUpload} />
             ) : (
               <AudioUploader onFileSelect={loadAudioFile} />
             )}
