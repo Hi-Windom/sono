@@ -170,63 +170,135 @@ export const Header = () => {
         }
       `}</style>
 
-      {/* 诊断模态框 */}
+      {/* 诊断面板 - 终端风格 */}
       {showDiagModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setShowDiagModal(false)}>
-          <div className="bg-[#1a1a2e] border border-white/10 rounded-2xl p-6 max-w-sm w-full mx-4 shadow-2xl shadow-black/40" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-5">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-cyan-500/20 to-purple-500/20 flex items-center justify-center">
-                  <svg className="w-4 h-4 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                  </svg>
-                </div>
-                <h3 className="text-white font-semibold text-base">后端诊断</h3>
-              </div>
-              <button onClick={() => setShowDiagModal(false)} className="w-7 h-7 flex items-center justify-center rounded-lg text-gray-500 hover:text-white hover:bg-white/10 transition-colors text-lg">×</button>
+        <div
+          className="fixed bottom-0 left-0 right-0 z-50 bg-[#0a0a0f] border-t border-emerald-500/30 max-h-[55vh] overflow-auto"
+          style={{ fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace" }}
+        >
+          {/* 标题栏 */}
+          <div className="sticky top-0 bg-[#0a0a0f] flex items-center justify-between px-4 py-2.5 border-b border-white/5">
+            <div className="flex items-center gap-2">
+              <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
+              <span className="text-emerald-400 font-semibold text-xs tracking-wider uppercase">Backend Diagnostics</span>
             </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => { setIsDiagLoading(true); runBackendDiag().then(() => setIsDiagLoading(false)); }}
+                disabled={isDiagLoading}
+                className="flex items-center gap-1 px-2.5 py-1 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 rounded text-emerald-400 text-[10px] transition-colors disabled:opacity-40 cursor-pointer"
+              >
+                {isDiagLoading ? (
+                  <>
+                    <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                    检测中...
+                  </>
+                ) : '↻ 重新检测'}
+              </button>
+              <button
+                onClick={() => setShowDiagModal(false)}
+                className="w-6 h-6 flex items-center justify-center rounded text-gray-500 hover:text-red-400 hover:bg-red-400/10 transition-colors text-sm cursor-pointer"
+              >✕</button>
+            </div>
+          </div>
 
+          {/* 内容区 */}
+          <div className="px-4 py-3 text-[11px] leading-relaxed">
             {isDiagLoading ? (
-              <div className="flex flex-col items-center py-8 gap-3">
-                <div className="w-8 h-8 border-2 border-cyan-400/30 border-t-cyan-400 rounded-full animate-spin" />
-                <span className="text-gray-400 text-sm">正在检测...</span>
+              <div className="flex items-center gap-2 text-emerald-400/60">
+                <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                <span>$ probing backend health...</span>
               </div>
             ) : backendDiag ? (
-              <div className="space-y-1">
+              <div className="space-y-3">
+                {/* 概览行 */}
+                <div className="flex items-center gap-2 text-gray-500">
+                  <span className="text-gray-600">$</span>
+                  <span>diag --check-all</span>
+                  <span className="text-emerald-400/60">→ OK</span>
+                </div>
+
+                {/* 分隔线 */}
+                <div className="border-t border-white/5" />
+
+                {/* 各项检测 */}
                 {[
-                  { label: '后端服务', key: 'backend', ok: backendDiag.backend, warn: false },
-                  { label: 'Python 环境', key: 'python', ok: backendDiag.python, extra: backendDiag.python_version || '', warn: false },
-                  { label: 'FFmpeg 引擎', key: 'ffmpeg', ok: backendDiag.ffmpeg, extra: backendDiag.ffmpeg_version || '', warn: false },
-                  { label: '内存', key: 'memory', ok: backendDiag.memory, extra: backendDiag.memory_info ? `${backendDiag.memory_info.available_gb.toFixed(1)} / ${backendDiag.memory_info.total_gb.toFixed(1)} GB` : '', warn: !backendDiag.memory },
-                  { label: '磁盘存储', key: 'storage', ok: backendDiag.storage, extra: backendDiag.storage_info ? `${backendDiag.storage_info.available_gb.toFixed(1)} / ${backendDiag.storage_info.total_gb.toFixed(1)} GB` : '', warn: !backendDiag.storage },
-                  { label: 'GPU 加速', key: 'gpu', ok: backendDiag.gpu, extra: backendDiag.gpu_info || '', warn: false },
+                  {
+                    icon: '◆',
+                    label: 'BACKEND',
+                    name: '后端服务',
+                    ok: backendDiag.backend,
+                    detail: backendDiag.backend ? 'FastAPI running' : 'Service unreachable',
+                  },
+                  {
+                    icon: '◆',
+                    label: 'PYTHON',
+                    name: 'Python 环境',
+                    ok: backendDiag.python,
+                    detail: backendDiag.python_version || 'Not found',
+                  },
+                  {
+                    icon: '◆',
+                    label: 'FFMPEG',
+                    name: 'FFmpeg 引擎',
+                    ok: backendDiag.ffmpeg,
+                    detail: backendDiag.ffmpeg_version || 'Not found',
+                  },
+                  {
+                    icon: '◆',
+                    label: 'MEMORY',
+                    name: '内存',
+                    ok: backendDiag.memory,
+                    warn: !backendDiag.memory,
+                    detail: backendDiag.memory_info
+                      ? `${backendDiag.memory_info.available_gb.toFixed(1)}G free / ${backendDiag.memory_info.total_gb.toFixed(1)}G total`
+                      : 'Insufficient memory',
+                  },
+                  {
+                    icon: '◆',
+                    label: 'STORAGE',
+                    name: '磁盘存储',
+                    ok: backendDiag.storage,
+                    warn: !backendDiag.storage,
+                    detail: backendDiag.storage_info
+                      ? `${backendDiag.storage_info.available_gb.toFixed(1)}G free / ${backendDiag.storage_info.total_gb.toFixed(1)}G total`
+                      : 'Low disk space',
+                  },
+                  {
+                    icon: '◆',
+                    label: 'GPU',
+                    name: 'GPU 加速',
+                    ok: backendDiag.gpu,
+                    detail: backendDiag.gpu_info || 'N/A (CPU mode)',
+                  },
                 ].map(item => (
-                  <div key={item.key} className={`flex items-center justify-between px-3 py-2.5 rounded-lg ${item.ok ? 'bg-green-500/5' : item.warn ? 'bg-yellow-500/5' : 'bg-red-500/5'}`}>
-                    <div className="flex items-center gap-2.5">
-                      {item.ok ? (
-                        <svg className="w-4 h-4 text-green-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-                        </svg>
-                      ) : item.warn ? (
-                        <svg className="w-4 h-4 text-yellow-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
-                        </svg>
-                      ) : (
-                        <svg className="w-4 h-4 text-red-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                      )}
-                      <span className="text-gray-300 text-sm">{item.label}</span>
-                    </div>
-                    {item.extra && (
-                      <span className={`text-xs font-mono tabular-nums ${item.ok ? 'text-gray-500' : item.warn ? 'text-yellow-400/70' : 'text-red-400/70'}`}>
-                        {item.extra}
-                      </span>
-                    )}
+                  <div key={item.label} className="grid grid-cols-[auto_1fr_auto] gap-x-3 gap-y-0.5">
+                    <span className={item.ok ? (item.warn ? 'text-yellow-400' : 'text-emerald-400') : 'text-red-400'}>{item.icon}</span>
+                    <span className={item.ok ? 'text-gray-300' : 'text-gray-500'}>
+                      <span className="text-gray-600 mr-1.5">[{item.label}]</span>
+                      {item.name}
+                    </span>
+                    <span className={`text-right ${item.ok ? (item.warn ? 'text-yellow-400/70' : 'text-emerald-400/50') : 'text-red-400/50'}`}>
+                      {item.ok ? 'OK' : item.warn ? 'WARN' : 'FAIL'}
+                    </span>
+                    <span />
+                    <span className={`pl-4 text-[10px] ${item.ok ? 'text-gray-600' : 'text-gray-700'}`}>{item.detail}</span>
+                    <span />
                   </div>
                 ))}
+
+                {/* 分隔线 */}
+                <div className="border-t border-white/5" />
+
+                {/* 底部时间戳 */}
+                <div className="flex items-center gap-2 text-gray-700 text-[10px]">
+                  <span>#</span>
+                  <span>completed at {new Date().toLocaleTimeString('zh-CN', { hour12: false })}</span>
+                </div>
               </div>
-            ) : null}
+            ) : (
+              <div className="text-red-400/60">$ error: no response from backend</div>
+            )}
           </div>
         </div>
       )}
