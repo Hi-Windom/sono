@@ -628,27 +628,6 @@ export default function RepairPage() {
                       </label>
                     </div>
                   </div>
-                  {dualTrackHasBeenProcessed && dualTrackDownloadUrl && (
-                    <button
-                      onClick={() => {
-                        setRenderDownloadUrl(dualTrackDownloadUrl);
-                        setInstantDownloadInfo({
-                          filename: generateExportFilename('dual_track', algorithmVersion, processingOptions.sampleRate, processingOptions.bitDepth, 'dual'),
-                          fileSize: '—',
-                          sampleRate: `${processingOptions.sampleRate / 1000} kHz`,
-                          bitDepth: processingOptions.bitDepth,
-                          channels: 2,
-                          duration: 0,
-                          algorithmVersion: algorithmVersion,
-                        });
-                        setShowDownloadModal(true);
-                      }}
-                      className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-cyan-500/20 to-purple-500/20 hover:from-cyan-500/30 hover:to-purple-500/30 border border-cyan-400/30 hover:border-cyan-400/50 rounded-lg text-cyan-400 text-sm font-medium transition-all w-full justify-center"
-                    >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
-                      <span>下载双轨修复结果</span>
-                    </button>
-                  )}
                   {dualTrackHasBeenProcessed && dualTrackTaskId && (
                     <button
                       onClick={() => navigate(`/compare?taskId=${dualTrackTaskId}&mode=dual`)}
@@ -744,54 +723,18 @@ export default function RepairPage() {
                   )}
                 </div>
 
-                {((isDualTrackMode && dualTrackHasBeenProcessed && dualTrackDownloadUrl) || (!isDualTrackMode && taskId && hasBeenProcessed)) && (
+                {((isDualTrackMode && dualTrackHasBeenProcessed && dualTrackTaskId) || (!isDualTrackMode && taskId && hasBeenProcessed)) && (
                   <div className="mt-4 space-y-2">
-                    {isDualTrackMode && dualTrackDownloadUrl ? (
-                      <>
-                        <button
-                          onClick={() => {
-                            setRenderDownloadUrl(dualTrackDownloadUrl);
-                            setInstantDownloadInfo({
-                              filename: generateExportFilename('dual_track', algorithmVersion, processingOptions.sampleRate, processingOptions.bitDepth, 'dual'),
-                              fileSize: '—',
-                              sampleRate: `${processingOptions.sampleRate / 1000} kHz`,
-                              bitDepth: processingOptions.bitDepth,
-                              channels: 2,
-                              duration: 0,
-                              algorithmVersion: algorithmVersion,
-                            });
-                            setShowDownloadModal(true);
-                          }}
-                          className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-cyan-500/20 to-purple-500/20 hover:from-cyan-500/30 hover:to-purple-500/30 border border-cyan-400/30 hover:border-cyan-400/50 rounded-lg text-cyan-400 text-sm font-medium transition-all w-full justify-center"
-                        >
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                          </svg>
-                          <span>下载双轨修复结果</span>
-                        </button>
-                        <button
-                          onClick={() => navigate(`/compare?taskId=${dualTrackTaskId}&mode=dual`)}
-                          className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-pink-500/20 to-purple-500/20 hover:from-pink-500/30 hover:to-purple-500/30 border border-pink-400/30 hover:border-pink-400/50 rounded-lg text-pink-400 text-sm font-medium transition-all w-full justify-center"
-                        >
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
-                          </svg>
-                          <span>前往 AB 对比</span>
-                          <span className="text-xs opacity-60 ml-1">人声 / 伴奏 / 合并</span>
-                        </button>
-                      </>
-                    ) : (
-                      <button
-                        onClick={() => navigate(`/compare?taskId=${taskId}${isDualTrackMode ? '&mode=dual' : ''}`)}
-                        className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-cyan-500/20 to-purple-500/20 hover:from-cyan-500/30 hover:to-purple-500/30 border border-cyan-400/30 hover:border-cyan-400/50 rounded-lg text-cyan-400 text-sm font-medium transition-all w-full justify-center"
-                      >
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
-                        </svg>
-                        <span>前往 AB 对比</span>
-                        <span className="text-xs opacity-60 ml-1">原始 / 修复后</span>
-                      </button>
-                    )}
+                    <button
+                      onClick={() => navigate(`/compare?taskId=${isDualTrackMode ? dualTrackTaskId : taskId}${isDualTrackMode ? '&mode=dual' : ''}`)}
+                      className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-cyan-500/20 to-purple-500/20 hover:from-cyan-500/30 hover:to-purple-500/30 border border-cyan-400/30 hover:border-cyan-400/50 rounded-lg text-cyan-400 text-sm font-medium transition-all w-full justify-center"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
+                      </svg>
+                      <span>前往 AB 对比</span>
+                      <span className="text-xs opacity-60 ml-1">{isDualTrackMode ? '人声 / 伴奏 / 合并' : '原始 / 修复后'}</span>
+                    </button>
                   </div>
                 )}
               </div>

@@ -95,6 +95,8 @@ export default function ComparePage() {
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [audioReady, setAudioReady] = useState(false);
+  const [isRenderLoading, setIsRenderLoading] = useState(false);
+  const [renderError, setRenderError] = useState<string | null>(null);
   const [dualTrackMode, setDualTrackMode] = useState<DualTrackMode | null>(null);
 
   const [pointA, setPointA] = useState<number | null>(null);
@@ -521,6 +523,71 @@ export default function ComparePage() {
   const selectTask = useCallback((id: string) => {
     setSearchParams({ taskId: id });
   }, [setSearchParams]);
+
+  const handleRenderAndDownload = useCallback(async () => {
+    if (!effectiveTaskId) return;
+    setIsRenderLoading(true);
+    setRenderError(null);
+
+    try {
+      const cacheRes = await fetch(`${API_BASE}/render-cache/${effectiveTaskId}`);
+      const cacheData = await cacheRes.json();
+      const caches: Array<{ filename: string; sample_rate: number; bit_depth: number; size: number; algorithm_version: string; duration?: number }> = cacheData.caches || [];
+
+      if (caches.length > 0) {
+        const entry = caches[0];
+        const downloadUrl = `${API_BASE}/download-file/${entry.filename}`;
+        const a = document.createElement('a');
+        a.href = downloadUrl;
+        a.download = entry.filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setIsRenderLoading(false);
+        return;
+      }
+
+      const renderRes = await fetch(`${API_BASE}/render`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ task_id: effectiveTaskId, sample_rate: 48000, bit_depth: 24 }),
+      });
+
+      if (!renderRes.ok) {
+        const err = await renderRes.json().catch(() => ({ detail: '渲染请求失败' }));
+        throw new Error(err.detail || '渲染请求失败');
+      }
+
+      const pollRender = async () => {
+        for (let i = 0; i < 60; i++) {
+          await new Promise(r => setTimeout(r, 1000));
+          const statusRes = await fetch(`${API_BASE}/status/${effectiveTaskId}`);
+          if (!statusRes.ok) continue;
+          const statusData = await statusRes.json();
+          if (statusData.status === 'render_completed' && statusData.render_filename) {
+            const downloadUrl = `${API_BASE}/download-file/${statusData.render_filename}`;
+            const a = document.createElement('a');
+            a.href = downloadUrl;
+            a.download = statusData.render_filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            return;
+          }
+          if (statusData.status === 'error') {
+            throw new Error(statusData.error || '渲染失败');
+          }
+        }
+        throw new Error('渲染超时');
+      };
+
+      await pollRender();
+    } catch (e) {
+      setRenderError(e instanceof Error ? e.message : '下载失败');
+    } finally {
+      setIsRenderLoading(false);
+    }
+  }, [effectiveTaskId]);
 
   useEffect(() => {
     return () => {
@@ -960,6 +1027,32 @@ export default function ComparePage() {
             {audioReady && originalBuffer && repairedBuffer && <span className="text-green-400/50">就绪</span>}
           </span>
         </div>
+
+        {taskId && (
+          <div className="mt-4">
+            <button
+              onClick={handleRenderAndDownload}
+              disabled={isRenderLoading || !audioReady}
+              className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-cyan-500/20 to-purple-500/20 hover:from-cyan-500/30 hover:to-purple-500/30 border border-cyan-400/30 hover:border-cyan-400/50 rounded-lg text-cyan-400 text-sm font-medium transition-all w-full justify-center disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isRenderLoading ? (
+                <>
+                  <div className="w-4 h-4 rounded-full animate-spin border-2 border-cyan-500/30 border-t-cyan-500" />
+                  <span>渲染交付中...</span>
+                </>
+              ) : (
+                <>
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                  <span>下载修复结果</span>
+                  {dualTrackMode && <span className="text-xs opacity-60 ml-1">({dualTrackMode === 'vocal' ? '人声' : dualTrackMode === 'accompaniment' ? '伴奏' : '合并'})</span>}
+                </>
+              )}
+            </button>
+            {renderError && (
+              <p className="text-red-400 text-xs mt-2 text-center">{renderError}</p>
+            )}
+          </div>
+        )}
       </>
     );
   };
