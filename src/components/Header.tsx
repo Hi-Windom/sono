@@ -32,7 +32,7 @@ export const Header = () => {
   return (
     <>
       <header className="border-b border-white/5 bg-gradient-to-b from-primary/30 to-transparent">
-        <div className="container mx-auto px-4 py-4 md:py-6 max-w-7xl">
+        <div className="container mx-auto px-4 py-3 md:py-4 max-w-7xl">
           {/* 桌面端：左右布局 */}
           <div className="hidden md:flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -94,61 +94,47 @@ export const Header = () => {
             </div>
           </div>
 
-          {/* 移动端：上下布局 - 标题在上，状态在中，诊断在下 */}
-          <div className="md:hidden space-y-2">
-            {/* 第一行：标题 */}
-            <div className="flex items-center gap-3">
-              <div className="relative">
-                <div className="w-10 h-10 bg-gradient-to-br from-cyan-500 via-purple-500 to-yellow-500 rounded-xl flex items-center justify-center shadow-[0_0_30px_rgba(107,70,193,0.4)]">
-                  <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                  </svg>
-                </div>
-              </div>
-              <div>
-                <h1 className="text-xl font-bold bg-gradient-to-r from-cyan-400 via-purple-400 to-yellow-400 bg-clip-text text-transparent">
-                  AI音乐修复工具
-                </h1>
-                <p className="text-xs text-gray-400">
-                  专业音频修复与AI检测分析
-                </p>
-              </div>
+          {/* 移动端：一行布局 - 图标 + 状态 + 诊断 */}
+          <div className="md:hidden flex items-center justify-between">
+            {/* 左侧：图标 */}
+            <div className="w-9 h-9 bg-gradient-to-br from-cyan-500 via-purple-500 to-yellow-500 rounded-xl flex items-center justify-center shadow-[0_0_20px_rgba(107,70,193,0.4)]">
+              <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+              </svg>
             </div>
 
-            {/* 第二行：状态显示 */}
-            <div className="flex items-center gap-2 bg-primary/50 border border-white/10 rounded-lg px-3 py-2 w-full">
+            {/* 中间：状态 */}
+            <div className="flex items-center gap-2 flex-1 mx-3">
               <div className={`w-2 h-2 rounded-full ${config.dotColor}`} />
-              <span className={`text-xs font-medium flex-1 ${config.textColor}`}>
+              <span className={`text-xs font-medium ${config.textColor}`}>
                 {config.label}
               </span>
               <div className="flex items-center gap-1">
                 <svg
-                  className={`w-3 h-3 transition-all duration-200 ${hasDownstreamActivity ? 'text-cyan-400 scale-125 drop-shadow-[0_0_4px_rgba(34,211,238,0.6)]' : 'text-gray-600'}`}
+                  className={`w-3 h-3 transition-all duration-200 ${hasDownstreamActivity ? 'text-cyan-400 scale-125' : 'text-gray-600'}`}
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"
-                  style={{ transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)' }}
                 >
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
                 </svg>
                 <svg
-                  className={`w-3 h-3 transition-all duration-200 ${hasUpstreamActivity ? 'text-pink-400 scale-125 drop-shadow-[0_0_4px_rgba(236,72,153,0.6)]' : 'text-gray-600'}`}
+                  className={`w-3 h-3 transition-all duration-200 ${hasUpstreamActivity ? 'text-pink-400 scale-125' : 'text-gray-600'}`}
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"
-                  style={{ transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)' }}
                 >
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 10l7-7m0 0l7 7m-7-7v18" />
                 </svg>
               </div>
             </div>
 
-            {/* 第三行：诊断按钮 */}
+            {/* 右侧：诊断按钮 */}
             <button
               onClick={handleDiagnose}
-              className="flex items-center justify-center gap-1.5 px-3 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg cursor-pointer transition text-gray-400 hover:text-white text-xs w-full"
+              className="flex items-center gap-1 px-2.5 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg cursor-pointer transition text-gray-400 hover:text-white text-xs"
             >
-              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
               </svg>
               诊断
