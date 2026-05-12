@@ -26,7 +26,7 @@ interface BackendContextType {
 const BackendContext = createContext<BackendContextType | undefined>(undefined);
 
 // 活动指示持续时间（毫秒）
-const ACTIVITY_DURATION = 500;
+const ACTIVITY_DURATION = 800;
 
 export function BackendProvider({ children }: { children: ReactNode }) {
   const [backendAvailable, setBackendAvailable] = useState(false);
