@@ -1,18 +1,13 @@
 import React, { useState } from 'react';
 import { useBackend } from '../contexts/BackendContext';
 
-interface HeaderProps {
-  onDiagnose?: () => void;
-}
-
-export const Header = ({ onDiagnose }: HeaderProps) => {
-  const { backendAvailable, isUploading, isProcessing, runBackendDiag, backendDiag } = useBackend();
+export const Header = () => {
+  const { backendAvailable, hasUpstreamActivity, hasDownstreamActivity, runBackendDiag, backendDiag } = useBackend();
   const [showDiagModal, setShowDiagModal] = useState(false);
 
   const handleDiagnose = async () => {
     await runBackendDiag();
     setShowDiagModal(true);
-    if (onDiagnose) onDiagnose();
   };
 
   return (
@@ -47,7 +42,7 @@ export const Header = ({ onDiagnose }: HeaderProps) => {
                   </span>
                   <div className="flex items-center gap-1 ml-1">
                     <svg
-                      className={`w-3 h-3 transition-colors duration-200 ${isProcessing ? 'text-green-400' : 'text-gray-600'}`}
+                      className={`w-3 h-3 transition-colors duration-150 ${hasDownstreamActivity ? 'text-green-400' : 'text-gray-600'}`}
                       fill="none"
                       stroke="currentColor"
                       viewBox="0 0 24 24"
@@ -55,7 +50,7 @@ export const Header = ({ onDiagnose }: HeaderProps) => {
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
                     </svg>
                     <svg
-                      className={`w-3 h-3 transition-colors duration-200 ${isUploading ? 'text-cyan-400' : 'text-gray-600'}`}
+                      className={`w-3 h-3 transition-colors duration-150 ${hasUpstreamActivity ? 'text-cyan-400' : 'text-gray-600'}`}
                       fill="none"
                       stroke="currentColor"
                       viewBox="0 0 24 24"

@@ -16,7 +16,7 @@ export { useBackend };
 
 export default function RepairPage() {
   const navigate = useNavigate();
-  const { setIsUploading, setIsProcessing: setGlobalIsProcessing, backendAvailable: globalBackendAvailable } = useBackend();
+  const { triggerUpstream, triggerDownstream, backendAvailable: globalBackendAvailable } = useBackend();
   const {
     audioFile,
     audioBuffer,
@@ -88,7 +88,6 @@ export default function RepairPage() {
   const [showDiag, setShowDiag] = useState(false);
   const [instantDownloadInfo, setInstantDownloadInfo] = useState<DownloadFileInfo | null>(null);
   const [isDualTrackMode, setIsDualTrackMode] = useState(false);
-  const [localIsUploading, setLocalIsUploading] = useState(false);
   const [dualTrackTaskId, setDualTrackTaskId] = useState<string | null>(null);
   const [dualTrackVocalFile, setDualTrackVocalFile] = useState<File | null>(null);
   const [dualTrackAccompanimentFile, setDualTrackAccompanimentFile] = useState<File | null>(null);
@@ -109,18 +108,17 @@ export default function RepairPage() {
 
     const poll = async () => {
       try {
+        triggerDownstream();
         const status = await getTrackStatus(taskId);
         setProcessingProgress(status.progress);
         setProcessingStep(status.step);
 
         if (status.status === 'completed') {
           setIsProcessing(false);
-          setGlobalIsProcessing(false);
           setDualTrackHasBeenProcessed(true);
           setDualTrackRepairResult(status);
           const downloadUrl = getDownloadUrl(taskId);
           setDualTrackDownloadUrl(downloadUrl);
-          // 自动加载处理后的音频
           try {
             const buffer = await loadAudioFromUrl(downloadUrl, processingOptions.sampleRate, true);
             setBackendProcessedBuffer(buffer);
@@ -130,7 +128,6 @@ export default function RepairPage() {
           }
         } else if (status.status === 'error') {
           setIsProcessing(false);
-          setGlobalIsProcessing(false);
           setBackendError(status.step || '双轨处理失败');
         } else {
           pollRef.current = setTimeout(poll, 1000);
@@ -142,19 +139,17 @@ export default function RepairPage() {
     };
 
     poll();
-  }, [stopDualTrackPolling, setProcessingProgress, setProcessingStep, setIsProcessing, setBackendError, loadAudioFromUrl, setBackendProcessedBuffer, processingOptions.sampleRate, setGlobalIsProcessing]);
+  }, [stopDualTrackPolling, setProcessingProgress, setProcessingStep, setIsProcessing, setBackendError, loadAudioFromUrl, setBackendProcessedBuffer, processingOptions.sampleRate, triggerDownstream]);
 
   const handleDualTrackUpload = useCallback(async (vocalFile: File, accompanimentFile: File) => {
     try {
-      setLocalIsUploading(true);
-      setIsUploading(true);
       setIsProcessing(true);
-      setGlobalIsProcessing(true);
       setProcessingStep('上传双轨文件...');
       setProcessingSource('backend');
       setDualTrackVocalFile(vocalFile);
       setDualTrackAccompanimentFile(accompanimentFile);
 
+      triggerUpstream();
       const uploadResult = await uploadDualAudio(
         vocalFile,
         accompanimentFile,
@@ -162,15 +157,15 @@ export default function RepairPage() {
           const progress = loaded / total;
           setProcessingProgress(progress * 0.1);
           setProcessingStep(`上传中 ${(progress * 100).toFixed(0)}%`);
+          if (progress < 1) triggerUpstream();
         }
       );
-      setLocalIsUploading(false);
-      setIsUploading(false);
 
       setDualTrackTaskId(uploadResult.task_id);
       setProcessingProgress(0.1);
       setProcessingStep('开始双轨处理...');
 
+      triggerUpstream();
       await repairDualAudio(
         uploadResult.task_id,
         uploadResult.vocal_task_id,
@@ -187,11 +182,8 @@ export default function RepairPage() {
       console.error('双轨处理失败:', error);
       setBackendError(error instanceof Error ? error.message : '双轨处理失败');
       setIsProcessing(false);
-      setGlobalIsProcessing(false);
-      setLocalIsUploading(false);
-      setIsUploading(false);
     }
-  }, [params, processingOptions, algorithmVersion, setIsProcessing, setProcessingStep, setProcessingProgress, setProcessingSource, setBackendError, startDualTrackPolling, setIsUploading, setGlobalIsProcessing]);
+  }, [params, processingOptions, algorithmVersion, setIsProcessing, setProcessingStep, setProcessingProgress, setProcessingSource, setBackendError, startDualTrackPolling, triggerUpstream]);
 
   const handleSwitchToSingleTrack = useCallback(() => {
     setIsDualTrackMode(false);
@@ -205,14 +197,11 @@ export default function RepairPage() {
   }, [stopDualTrackPolling]);
 
   useEffect(() => {
-    // 当切换回单轨模式时，如果有音频文件，恢复单轨状态
     if (!isDualTrackMode && audioFile) {
-      // 确保状态正确
     }
   }, [isDualTrackMode, audioFile]);
 
   useEffect(() => {
-    // 当进入双轨模式时，自动切换到 v3.0 算法（如果可用）
     if (isDualTrackMode && availableAlgorithms.length > 0) {
       const v30 = availableAlgorithms.find(a => a.name === 'v3.0');
       const v30a = availableAlgorithms.find(a => a.name === 'v3.0a');
@@ -223,11 +212,6 @@ export default function RepairPage() {
       }
     }
   }, [isDualTrackMode, availableAlgorithms, algorithmVersion, applyAlgorithmVersion]);
-
-  // 同步处理状态到全局
-  useEffect(() => {
-    setGlobalIsProcessing(isProcessing);
-  }, [isProcessing, setGlobalIsProcessing]);
 
   const renderResultInfo = useMemo(() => {
     if (!autoRenderInfo) return null;
@@ -244,39 +228,32 @@ export default function RepairPage() {
     };
   }, [autoRenderInfo, audioFile, algorithmVersion]);
 
-  // 渲染缓存刷新回调
   const renderCacheRefreshRef = useRef<(() => Promise<void>) | null>(null);
   const handleRegisterCacheRefresh = useCallback((fn: () => Promise<void>) => {
     renderCacheRefreshRef.current = fn;
   }, []);
   const [cacheTriggerKey, setCacheTriggerKey] = useState(0);
 
-  // 修复完成时刷新缓存
   useEffect(() => {
     if (hasBeenProcessed) {
       setCacheTriggerKey(k => k + 1);
     }
   }, [hasBeenProcessed]);
 
-  // 渲染下载完成后刷新缓存
   const prevRenderLoadingRef = useRef(false);
   useEffect(() => {
     if (prevRenderLoadingRef.current && !isRenderLoading) {
-      // isRenderLoading 从 true → false，渲染完成
       setCacheTriggerKey(k => k + 1);
     }
     prevRenderLoadingRef.current = isRenderLoading;
   }, [isRenderLoading]);
 
-  // 实时更新卡住秒数
   const [stuckDuration, setStuckDuration] = useState(0);
   const stuckTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     if (isTaskStuck && stuckInfo) {
-      // 立即设置初始值
       setStuckDuration(stuckInfo.duration);
-      // 每秒更新一次
       stuckTimerRef.current = setInterval(() => {
         setStuckDuration(prev => prev + 1);
       }, 1000);
@@ -297,17 +274,23 @@ export default function RepairPage() {
 
   const [profileSaveMsg, setProfileSaveMsg] = useState('');
 
-  const handleSaveProfile = useCallback(() => {
-    if (!audioFile) return;
-    try {
-      saveProfile(audioFile.name.replace(/\.[^.]+$/, ''));
-      setProfileSaveMsg('✓ 已保存');
+  const handleSaveProfile = useCallback(async (name: string) => {
+    if (!name.trim()) return;
+    const result = await saveProfile(name.trim());
+    if (result.success) {
+      setProfileSaveMsg('配置已保存');
       setTimeout(() => setProfileSaveMsg(''), 2000);
-    } catch (e) {
-      setProfileSaveMsg('保存失败');
-      setTimeout(() => setProfileSaveMsg(''), 2000);
+    } else {
+      setProfileSaveMsg(result.message || '保存失败');
+      setTimeout(() => setProfileSaveMsg(''), 3000);
     }
-  }, [audioFile, saveProfile]);
+  }, [saveProfile]);
+
+  useEffect(() => {
+    return () => {
+      stopDualTrackPolling();
+    };
+  }, [stopDualTrackPolling]);
 
   const hasBackendResult = !!backendProcessedBuffer || !!repairResult;
 
@@ -376,11 +359,9 @@ export default function RepairPage() {
         </div>
       )}
 
-      {/* 返回首页按钮 */}
       <div className="container mx-auto px-4 max-w-7xl mt-4">
         <button
           onClick={() => {
-            // 如果有正在进行的任务，显示二次确认
             if (isProcessing) {
               const confirmed = window.confirm('当前有正在进行的修复任务，返回首页将中断任务。是否确认返回？');
               if (!confirmed) return;
@@ -430,12 +411,7 @@ export default function RepairPage() {
             </div>
 
             {isDualTrackMode ? (
-              <div className="w-full max-w-4xl">
-                <DualTrackUploader
-                  onFilesSelect={handleDualTrackUpload}
-                  isLoading={isProcessing}
-                />
-              </div>
+              <DualTrackUploader onUpload={handleDualTrackUpload} />
             ) : (
               <AudioUploader onFileSelect={loadAudioFile} />
             )}
@@ -605,85 +581,41 @@ export default function RepairPage() {
                     sampleRate: `${cacheEntry.sample_rate / 1000} kHz`,
                     bitDepth: cacheEntry.bit_depth,
                     channels: 2,
-                    duration: duration,
+                    duration: cacheEntry.duration || 0,
                     algorithmVersion: cacheEntry.algorithm_version,
                   });
                   setShowDownloadModal(true);
                 }}
                 isDualTrackMode={isDualTrackMode}
               />
+
+              {profileSaveMsg && (
+                <div className={`text-xs text-center ${profileSaveMsg.includes('失败') ? 'text-red-400' : 'text-green-400'}`}>
+                  {profileSaveMsg}
+                </div>
+              )}
             </div>
           </div>
         )}
       </div>
 
-      {showDiag && (
-        <div
-          style={{
-            position: 'fixed', bottom: 0, left: 0, right: 0,
-            background: 'rgba(0,0,0,0.95)', color: '#0f0',
-            fontFamily: 'monospace', fontSize: 12,
-            padding: 16, zIndex: 9999, maxHeight: '50vh', overflow: 'auto',
-            borderTop: '2px solid #0f0',
-          }}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-            <span style={{ color: '#0f0', fontWeight: 'bold' }}>后端连接诊断</span>
-            <button
-              onClick={() => setShowDiag(false)}
-              style={{ color: '#f00', background: 'none', border: 'none', cursor: 'pointer', fontSize: 16 }}
-            >✕ 关闭</button>
-          </div>
-          <pre style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{backendDiag}</pre>
-          <button
-            onClick={runBackendDiag}
-            style={{
-              marginTop: 8, padding: '4px 12px',
-              background: '#0f0', color: '#000', border: 'none',
-              cursor: 'pointer', fontWeight: 'bold',
-            }}
-          >重新检测</button>
-        </div>
+      {showDownloadModal && instantDownloadInfo && (
+        <DownloadModal
+          downloadUrl={renderDownloadUrl || ''}
+          fileInfo={instantDownloadInfo}
+          onClose={() => setShowDownloadModal(false)}
+        />
       )}
 
-      <DownloadModal
-        isOpen={showDownloadModal}
-        onClose={() => {
-          setShowDownloadModal(false);
-          setInstantDownloadInfo(null);
-        }}
-        backendInfo={instantDownloadInfo || renderResultInfo || (hasBackendResult ? {
-          filename: generateExportFilename(audioFile?.name, algorithmVersion, processingOptions.sampleRate, processingOptions.bitDepth),
-          fileSize: repairResult?.duration && repairResult?.channels
-            ? `${((repairResult.duration * processingOptions.sampleRate * repairResult.channels * (processingOptions.bitDepth / 8)) / (1024 * 1024)).toFixed(2)} MB`
-            : '—',
-          sampleRate: `${processingOptions.sampleRate / 1000} kHz`,
-          bitDepth: processingOptions.bitDepth,
-          channels: repairResult?.channels || 2,
-          duration: repairResult?.duration || 0,
-          algorithmVersion: algorithmVersion,
-          completedAt: repairResult?.completed_at,
-        } : null)}
-        backendDownloadUrl={renderDownloadUrl}
-        backendDownloadAction={hasBackendResult ? async () => {
-          const result = await renderAndDownload(processingOptions);
-          if (result?.downloadUrl) {
-            setRenderDownloadUrl(result.downloadUrl);
-          }
-        } : undefined}
-        isBackendLoading={isRenderLoading}
-      />
-
-      <RepairCacheModal
-        isOpen={showRepairCacheModal}
-        cacheHit={cacheHitInfo}
-        audioFileName={audioFile?.name}
-        algorithmVersion={algorithmVersion}
-        onUseRepairCache={handleUseRepairCache}
-        onRenderCacheDownload={handleRenderCacheDownload}
-        onReRepair={handleReRepair}
-        onClose={handleCloseRepairCacheModal}
-      />
+      {showRepairCacheModal && cacheHitInfo && (
+        <RepairCacheModal
+          cacheInfo={cacheHitInfo}
+          onUseCache={handleUseRepairCache}
+          onReRepair={handleReRepair}
+          onClose={handleCloseRepairCacheModal}
+          onDownload={handleRenderCacheDownload}
+        />
+      )}
     </div>
     </ErrorBoundary>
   );

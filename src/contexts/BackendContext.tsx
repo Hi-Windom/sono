@@ -1,12 +1,12 @@
-import React, { createContext, useContext, useState, useCallback, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect, useRef, ReactNode } from 'react';
 
 interface BackendContextType {
   backendAvailable: boolean;
-  isUploading: boolean;
-  isProcessing: boolean;
+  hasUpstreamActivity: boolean;
+  hasDownstreamActivity: boolean;
   setBackendAvailable: (available: boolean) => void;
-  setIsUploading: (uploading: boolean) => void;
-  setIsProcessing: (processing: boolean) => void;
+  triggerUpstream: () => void;
+  triggerDownstream: () => void;
   runBackendDiag: () => Promise<void>;
   backendDiag: {
     backend: boolean;
@@ -25,11 +25,37 @@ interface BackendContextType {
 
 const BackendContext = createContext<BackendContextType | undefined>(undefined);
 
+// 活动指示持续时间（毫秒）
+const ACTIVITY_DURATION = 500;
+
 export function BackendProvider({ children }: { children: ReactNode }) {
   const [backendAvailable, setBackendAvailable] = useState(false);
-  const [isUploading, setIsUploading] = useState(false);
-  const [isProcessing, setIsProcessing] = useState(false);
+  const [hasUpstreamActivity, setHasUpstreamActivity] = useState(false);
+  const [hasDownstreamActivity, setHasDownstreamActivity] = useState(false);
   const [backendDiag, setBackendDiag] = useState<BackendContextType['backendDiag']>(null);
+
+  const upstreamTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const downstreamTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const triggerUpstream = useCallback(() => {
+    setHasUpstreamActivity(true);
+    if (upstreamTimeoutRef.current) {
+      clearTimeout(upstreamTimeoutRef.current);
+    }
+    upstreamTimeoutRef.current = setTimeout(() => {
+      setHasUpstreamActivity(false);
+    }, ACTIVITY_DURATION);
+  }, []);
+
+  const triggerDownstream = useCallback(() => {
+    setHasDownstreamActivity(true);
+    if (downstreamTimeoutRef.current) {
+      clearTimeout(downstreamTimeoutRef.current);
+    }
+    downstreamTimeoutRef.current = setTimeout(() => {
+      setHasDownstreamActivity(false);
+    }, ACTIVITY_DURATION);
+  }, []);
 
   const checkBackendHealth = useCallback(async () => {
     try {
@@ -61,15 +87,22 @@ export function BackendProvider({ children }: { children: ReactNode }) {
     return () => clearInterval(interval);
   }, [checkBackendHealth]);
 
+  useEffect(() => {
+    return () => {
+      if (upstreamTimeoutRef.current) clearTimeout(upstreamTimeoutRef.current);
+      if (downstreamTimeoutRef.current) clearTimeout(downstreamTimeoutRef.current);
+    };
+  }, []);
+
   return (
     <BackendContext.Provider
       value={{
         backendAvailable,
-        isUploading,
-        isProcessing,
+        hasUpstreamActivity,
+        hasDownstreamActivity,
         setBackendAvailable,
-        setIsUploading,
-        setIsProcessing,
+        triggerUpstream,
+        triggerDownstream,
         runBackendDiag,
         backendDiag,
       }}
