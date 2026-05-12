@@ -1969,6 +1969,7 @@ export function useAudioProcessor() {
     processingProgress,
     processingStep,
     processingSource,
+    setProcessingSource,
     params,
     audioAnalysis,
     selectedMode,
@@ -2026,6 +2027,10 @@ export function useAudioProcessor() {
     handleReRepair,
     handleCloseRepairCacheModal,
     originalWaveformPeaks,
+    setIsProcessing,
+    setProcessingStep,
+    setProcessingProgress,
+    setBackendError,
   };
 }
 

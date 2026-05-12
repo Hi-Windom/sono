@@ -2,11 +2,13 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom';
 import { Header } from '../components/Header';
 import { AudioUploader } from '../components/AudioUploader';
+import { DualTrackUploader } from '../components/DualTrackUploader';
 import { AIRepairPanel } from '../components/AIRepairPanel';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import { DownloadModal, DownloadFileInfo } from '../components/DownloadModal';
 import { RepairCacheModal } from '../components/RepairCacheModal';
 import { useAudioProcessor, generateExportFilename } from '../hooks/useAudioProcessor';
+import { uploadDualAudio, repairDualAudio } from '../services/backendApi';
 
 export default function RepairPage() {
   const navigate = useNavigate();
@@ -68,10 +70,54 @@ export default function RepairPage() {
     handleRenderCacheDownload,
     handleReRepair,
     handleCloseRepairCacheModal,
+    setIsProcessing,
+    setProcessingStep,
+    setProcessingProgress,
+    setProcessingSource,
+    setBackendError,
   } = useAudioProcessor();
 
   const [showDiag, setShowDiag] = useState(false);
   const [instantDownloadInfo, setInstantDownloadInfo] = useState<DownloadFileInfo | null>(null);
+  const [isDualTrackMode, setIsDualTrackMode] = useState(false);
+
+  const handleDualTrackUpload = useCallback(async (vocalFile: File, accompanimentFile: File) => {
+    try {
+      setIsProcessing(true);
+      setProcessingStep('上传双轨文件...');
+      setProcessingSource('backend');
+
+      const uploadResult = await uploadDualAudio(
+        vocalFile,
+        accompanimentFile,
+        (loaded, total, speed) => {
+          const progress = loaded / total;
+          setProcessingProgress(progress * 0.1);
+          setProcessingStep(`上传中 ${(progress * 100).toFixed(0)}%`);
+        }
+      );
+
+      setProcessingProgress(0.1);
+      setProcessingStep('开始双轨处理...');
+
+      await repairDualAudio(
+        uploadResult.task_id,
+        uploadResult.vocal_task_id,
+        uploadResult.accompaniment_task_id,
+        params,
+        processingOptions,
+        algorithmVersion
+      );
+
+      setProcessingStep('等待处理完成...');
+      setIsProcessing(true);
+
+    } catch (error) {
+      console.error('双轨处理失败:', error);
+      setBackendError(error instanceof Error ? error.message : '双轨处理失败');
+      setIsProcessing(false);
+    }
+  }, [params, processingOptions, algorithmVersion]);
 
   const renderResultInfo = useMemo(() => {
     if (!autoRenderInfo) return null;
@@ -257,7 +303,42 @@ export default function RepairPage() {
                 {backendAvailable ? '● 后端已连接' : '● 后端不可用(点击诊断)'}
               </span>
             </div>
-            <AudioUploader onFileSelect={loadAudioFile} />
+
+            <div className="w-full max-w-4xl mb-6">
+              <div className="flex items-center justify-center gap-4 p-1 bg-dark/80 rounded-xl border border-white/10">
+                <button
+                  onClick={() => setIsDualTrackMode(false)}
+                  className={`flex-1 py-2.5 px-6 rounded-lg font-medium transition ${
+                    !isDualTrackMode
+                      ? 'bg-gradient-to-r from-secondary/80 to-primary/80 text-white'
+                      : 'text-gray-400 hover:text-white'
+                  }`}
+                >
+                  单轨上传
+                </button>
+                <button
+                  onClick={() => setIsDualTrackMode(true)}
+                  className={`flex-1 py-2.5 px-6 rounded-lg font-medium transition ${
+                    isDualTrackMode
+                      ? 'bg-gradient-to-r from-secondary/80 to-primary/80 text-white'
+                      : 'text-gray-400 hover:text-white'
+                  }`}
+                >
+                  双轨上传 (v3.0)
+                </button>
+              </div>
+            </div>
+
+            {isDualTrackMode ? (
+              <div className="w-full max-w-4xl">
+                <DualTrackUploader
+                  onFilesSelect={handleDualTrackUpload}
+                  isLoading={isProcessing}
+                />
+              </div>
+            ) : (
+              <AudioUploader onFileSelect={loadAudioFile} />
+            )}
           </div>
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
