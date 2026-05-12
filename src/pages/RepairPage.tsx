@@ -294,7 +294,10 @@ export default function RepairPage() {
   return (
     <ErrorBoundary>
     <div className="min-h-screen bg-dark py-6">
-      <Header />
+      <Header 
+        backendAvailable={backendAvailable}
+        onDiagnose={async () => { await runBackendDiag(); setShowDiag(true); }}
+      />
 
       {isProcessing && (
         <div className="sticky top-0 z-40 bg-dark/95 backdrop-blur border-b border-white/5">
@@ -384,16 +387,6 @@ export default function RepairPage() {
       <div className="container mx-auto px-4 py-6 max-w-7xl">
         {!audioFile && !dualTrackHasBeenProcessed ? (
           <div className="flex flex-col items-center justify-center py-20">
-            <div className="mb-4 text-sm">
-              <span
-                className={backendAvailable ? 'text-green-400' : 'text-yellow-400'}
-                style={{ cursor: 'pointer', textDecoration: 'underline' }}
-                onClick={async () => { await runBackendDiag(); setShowDiag(true); }}
-              >
-                {backendAvailable ? '● 后端已连接' : '● 后端不可用(点击诊断)'}
-              </span>
-            </div>
-
             <div className="w-full max-w-4xl mb-6">
               <div className="flex items-center justify-center gap-4 p-1 bg-dark/80 rounded-xl border border-white/10">
                 <button
@@ -543,31 +536,6 @@ export default function RepairPage() {
                     )}
                   </div>
                 )}
-              </div>
-
-              <div className="bg-primary/50 border border-white/10 rounded-xl p-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className={`w-3 h-3 rounded-full ${backendAvailable ? 'bg-green-400 animate-pulse' : 'bg-yellow-400'}`} />
-                    <div>
-                      <p className="text-white text-sm font-medium">
-                        {backendAvailable ? '后端已连接' : '后端不可用'}
-                      </p>
-                      <p className="text-gray-400 text-xs">
-                        {backendAvailable ? '服务正常运行，所有功能可用' : '请检查后端服务是否启动'}
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={async () => { await runBackendDiag(); setShowDiag(true); }}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg cursor-pointer transition text-gray-400 hover:text-white text-xs"
-                  >
-                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                    </svg>
-                    运行诊断
-                  </button>
-                </div>
               </div>
 
               {backendError && (

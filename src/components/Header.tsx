@@ -1,24 +1,69 @@
 import React from 'react';
 
-export const Header = () => {
+interface HeaderProps {
+  backendAvailable: boolean;
+  onDiagnose?: () => void;
+}
+
+export const Header = ({ backendAvailable, onDiagnose }: HeaderProps) => {
   return (
     <header className="border-b border-white/5 bg-gradient-to-b from-primary/30 to-transparent">
       <div className="container mx-auto px-4 py-6 max-w-7xl">
-        <div className="flex items-center gap-3">
-          <div className="relative">
-            <div className="w-12 h-12 bg-gradient-to-br from-cyan-500 via-purple-500 to-yellow-500 rounded-xl flex items-center justify-center shadow-[0_0_30px_rgba(107,70,193,0.4)]">
-              <svg className="w-7 h-7 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-              </svg>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="relative">
+              <div className="w-12 h-12 bg-gradient-to-br from-cyan-500 via-purple-500 to-yellow-500 rounded-xl flex items-center justify-center shadow-[0_0_30px_rgba(107,70,193,0.4)]">
+                <svg className="w-7 h-7 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                </svg>
+              </div>
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold bg-gradient-to-r from-cyan-400 via-purple-400 to-yellow-400 bg-clip-text text-transparent">
+                AI音乐修复工具
+              </h1>
+              <p className="text-sm text-gray-400">
+                专业音频修复与AI检测分析
+              </p>
             </div>
           </div>
-          <div>
-            <h1 className="text-2xl font-bold bg-gradient-to-r from-cyan-400 via-purple-400 to-yellow-400 bg-clip-text text-transparent">
-              AI音乐修复工具
-            </h1>
-            <p className="text-sm text-gray-400">
-              专业音频修复与AI检测分析
-            </p>
+          
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-3 bg-primary/50 border border-white/10 rounded-lg px-4 py-2.5">
+              <div className={`w-2.5 h-2.5 rounded-full ${backendAvailable ? 'bg-green-400 animate-pulse' : 'bg-yellow-400'}`} />
+              <div className="flex flex-col gap-0.5">
+                <div className="flex items-center gap-2">
+                  <span className={`text-xs font-medium ${backendAvailable ? 'text-green-400' : 'text-yellow-400'}`}>
+                    {backendAvailable ? '已连接' : '未连接'}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 text-gray-500">
+                  <span className="text-xs flex items-center gap-0.5">
+                    <svg className="w-3 h-3 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16l-4-4m0 0l4-4m-4 4h18" />
+                    </svg>
+                    下行
+                  </span>
+                  <span className="text-xs flex items-center gap-0.5">
+                    <svg className="w-3 h-3 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
+                    </svg>
+                    上行
+                  </span>
+                </div>
+              </div>
+            </div>
+            {onDiagnose && (
+              <button
+                onClick={onDiagnose}
+                className="flex items-center gap-1.5 px-3 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg cursor-pointer transition text-gray-400 hover:text-white text-xs"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                </svg>
+                诊断
+              </button>
+            )}
           </div>
         </div>
       </div>
