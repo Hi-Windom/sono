@@ -32,6 +32,7 @@ interface AIRepairPanelProps {
   onRenderCacheRefresh?: (fn: () => Promise<void>) => void;
   cacheTriggerKey?: number;
   onInstantDownload?: (cacheEntry: RenderCacheEntry) => void;
+  isDualTrackMode?: boolean;
 }
 
 const sampleRateOptions = [
@@ -117,7 +118,13 @@ export function AIRepairPanel({
   onRenderCacheRefresh,
   cacheTriggerKey,
   onInstantDownload,
+  isDualTrackMode = false,
 }: AIRepairPanelProps) {
+  // 双轨模式只显示 v3.0 和 v3.0a
+  const filteredAlgorithms = useMemo(() => {
+    if (!isDualTrackMode) return availableAlgorithms;
+    return availableAlgorithms.filter(algo => algo.name === 'v3.0' || algo.name === 'v3.0a');
+  }, [availableAlgorithms, isDualTrackMode]);
   const [showParams, setShowParams] = useState(false);
   const [memoryInfo, setMemoryInfo] = useState<MemoryInfoResult | null>(null);
   const [storageEstimate, setStorageEstimate] = useState<StorageEstimateResult | null>(null);
@@ -290,8 +297,16 @@ export function AIRepairPanel({
         </div>
       )}
 
-      {availableAlgorithms.length > 0 ? (
+      {filteredAlgorithms.length > 0 ? (
         <div className="mb-4 p-3 bg-gradient-to-r from-cyan-900/30 to-purple-900/30 rounded-lg border border-cyan-500/20">
+          {isDualTrackMode && (
+            <div className="mb-2 text-xs text-cyan-300 flex items-center gap-1">
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+              </svg>
+              双轨模式仅支持 v3.0/v3.0a 算法
+            </div>
+          )}
           <div className="flex items-center justify-between gap-2">
             <h4 className="text-cyan-400 text-sm font-medium flex items-center gap-1.5 shrink-0">
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -306,7 +321,7 @@ export function AIRepairPanel({
                 disabled={disabled}
                 className="appearance-none bg-cyan-500/20 text-white text-sm font-medium py-1.5 pl-3 pr-8 rounded-lg border border-cyan-400/40 focus:outline-none focus:border-cyan-400 cursor-pointer hover:bg-cyan-500/30 transition disabled:opacity-50 disabled:cursor-not-allowed w-full truncate"
               >
-                {[...availableAlgorithms].reverse().map((algo) => (
+                {[...filteredAlgorithms].reverse().map((algo) => (
                   <option key={algo.name} value={algo.name} className="bg-gray-900 text-white">
                     {algo.label} — {algo.description}
                   </option>

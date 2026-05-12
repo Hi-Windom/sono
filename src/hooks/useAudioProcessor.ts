@@ -2031,6 +2031,11 @@ export function useAudioProcessor() {
     setProcessingStep,
     setProcessingProgress,
     setBackendError,
+    setHasBeenProcessed,
+    setRepairResult,
+    setBackendProcessedBuffer,
+    setBackendWaveformPeaks,
+    loadAudioFromUrl,
   };
 }
 

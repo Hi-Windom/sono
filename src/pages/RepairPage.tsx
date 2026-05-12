@@ -8,7 +8,7 @@ import { ErrorBoundary } from '../components/ErrorBoundary';
 import { DownloadModal, DownloadFileInfo } from '../components/DownloadModal';
 import { RepairCacheModal } from '../components/RepairCacheModal';
 import { useAudioProcessor, generateExportFilename } from '../hooks/useAudioProcessor';
-import { uploadDualAudio, repairDualAudio } from '../services/backendApi';
+import { uploadDualAudio, repairDualAudio, getTrackStatus, getDownloadUrl } from '../services/backendApi';
 
 export default function RepairPage() {
   const navigate = useNavigate();
@@ -75,17 +75,75 @@ export default function RepairPage() {
     setProcessingProgress,
     setProcessingSource,
     setBackendError,
+    setHasBeenProcessed,
+    setRepairResult,
+    setBackendProcessedBuffer,
+    loadAudioFromUrl,
   } = useAudioProcessor();
 
   const [showDiag, setShowDiag] = useState(false);
   const [instantDownloadInfo, setInstantDownloadInfo] = useState<DownloadFileInfo | null>(null);
   const [isDualTrackMode, setIsDualTrackMode] = useState(false);
+  const [dualTrackTaskId, setDualTrackTaskId] = useState<string | null>(null);
+  const [dualTrackVocalFile, setDualTrackVocalFile] = useState<File | null>(null);
+  const [dualTrackAccompanimentFile, setDualTrackAccompanimentFile] = useState<File | null>(null);
+  const [dualTrackHasBeenProcessed, setDualTrackHasBeenProcessed] = useState(false);
+  const [dualTrackDownloadUrl, setDualTrackDownloadUrl] = useState<string | null>(null);
+  const [dualTrackRepairResult, setDualTrackRepairResult] = useState<any>(null);
+  const pollRef = useRef<NodeJS.Timeout | null>(null);
+
+  const stopDualTrackPolling = useCallback(() => {
+    if (pollRef.current) {
+      clearTimeout(pollRef.current);
+      pollRef.current = null;
+    }
+  }, []);
+
+  const startDualTrackPolling = useCallback((taskId: string) => {
+    stopDualTrackPolling();
+
+    const poll = async () => {
+      try {
+        const status = await getTrackStatus(taskId);
+        setProcessingProgress(status.progress);
+        setProcessingStep(status.step);
+
+        if (status.status === 'completed') {
+          setIsProcessing(false);
+          setDualTrackHasBeenProcessed(true);
+          setDualTrackRepairResult(status);
+          const downloadUrl = getDownloadUrl(taskId);
+          setDualTrackDownloadUrl(downloadUrl);
+          // 自动加载处理后的音频
+          try {
+            const buffer = await loadAudioFromUrl(downloadUrl, processingOptions.sampleRate, true);
+            setBackendProcessedBuffer(buffer);
+            setBackendWaveformPeaks(null);
+          } catch (e) {
+            console.error('加载双轨处理结果失败:', e);
+          }
+        } else if (status.status === 'error') {
+          setIsProcessing(false);
+          setBackendError(status.step || '双轨处理失败');
+        } else {
+          pollRef.current = setTimeout(poll, 1000);
+        }
+      } catch (error) {
+        console.error('轮询双轨状态失败:', error);
+        pollRef.current = setTimeout(poll, 2000);
+      }
+    };
+
+    poll();
+  }, [stopDualTrackPolling, setProcessingProgress, setProcessingStep, setIsProcessing, setBackendError, loadAudioFromUrl, setBackendProcessedBuffer, processingOptions.sampleRate]);
 
   const handleDualTrackUpload = useCallback(async (vocalFile: File, accompanimentFile: File) => {
     try {
       setIsProcessing(true);
       setProcessingStep('上传双轨文件...');
       setProcessingSource('backend');
+      setDualTrackVocalFile(vocalFile);
+      setDualTrackAccompanimentFile(accompanimentFile);
 
       const uploadResult = await uploadDualAudio(
         vocalFile,
@@ -97,6 +155,7 @@ export default function RepairPage() {
         }
       );
 
+      setDualTrackTaskId(uploadResult.task_id);
       setProcessingProgress(0.1);
       setProcessingStep('开始双轨处理...');
 
@@ -110,14 +169,45 @@ export default function RepairPage() {
       );
 
       setProcessingStep('等待处理完成...');
-      setIsProcessing(true);
+      startDualTrackPolling(uploadResult.task_id);
 
     } catch (error) {
       console.error('双轨处理失败:', error);
       setBackendError(error instanceof Error ? error.message : '双轨处理失败');
       setIsProcessing(false);
     }
-  }, [params, processingOptions, algorithmVersion]);
+  }, [params, processingOptions, algorithmVersion, setIsProcessing, setProcessingStep, setProcessingProgress, setProcessingSource, setBackendError, startDualTrackPolling]);
+
+  const handleSwitchToSingleTrack = useCallback(() => {
+    setIsDualTrackMode(false);
+    setDualTrackTaskId(null);
+    setDualTrackVocalFile(null);
+    setDualTrackAccompanimentFile(null);
+    setDualTrackHasBeenProcessed(false);
+    setDualTrackDownloadUrl(null);
+    setDualTrackRepairResult(null);
+    stopDualTrackPolling();
+  }, [stopDualTrackPolling]);
+
+  useEffect(() => {
+    // 当切换回单轨模式时，如果有音频文件，恢复单轨状态
+    if (!isDualTrackMode && audioFile) {
+      // 确保状态正确
+    }
+  }, [isDualTrackMode, audioFile]);
+
+  useEffect(() => {
+    // 当进入双轨模式时，自动切换到 v3.0 算法（如果可用）
+    if (isDualTrackMode && availableAlgorithms.length > 0) {
+      const v30 = availableAlgorithms.find(a => a.name === 'v3.0');
+      const v30a = availableAlgorithms.find(a => a.name === 'v3.0a');
+      if (v30 && algorithmVersion !== 'v3.0' && algorithmVersion !== 'v3.0a') {
+        applyAlgorithmVersion('v3.0');
+      } else if (v30a && algorithmVersion !== 'v3.0' && algorithmVersion !== 'v3.0a') {
+        applyAlgorithmVersion('v3.0a');
+      }
+    }
+  }, [isDualTrackMode, availableAlgorithms, algorithmVersion, applyAlgorithmVersion]);
 
   const renderResultInfo = useMemo(() => {
     if (!autoRenderInfo) return null;
@@ -292,7 +382,7 @@ export default function RepairPage() {
       </div>
 
       <div className="container mx-auto px-4 py-6 max-w-7xl">
-        {!audioFile ? (
+        {!audioFile && !dualTrackHasBeenProcessed ? (
           <div className="flex flex-col items-center justify-center py-20">
             <div className="mb-4 text-sm">
               <span
@@ -348,22 +438,40 @@ export default function RepairPage() {
                   <div className="flex items-center gap-3 min-w-0 flex-1">
                     <div className="w-12 h-12 bg-gradient-to-br from-cyan-500/20 to-purple-500/20 rounded-lg flex items-center justify-center border border-cyan-400/20 shrink-0">
                       <svg className="w-6 h-6 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2z" />
+                        {isDualTrackMode ? (
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                        ) : (
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2z" />
+                        )}
                       </svg>
                     </div>
                     <div className="min-w-0">
                       <h3 className="text-white font-semibold text-lg truncate">
-                        {audioFile.name}
+                        {isDualTrackMode 
+                          ? `${dualTrackVocalFile?.name} + ${dualTrackAccompanimentFile?.name}` 
+                          : audioFile?.name}
                       </h3>
                       <p className="text-gray-400 text-sm">
-                        {(audioFile.size / (1024 * 1024)).toFixed(2)} MB
-                        {' • '}
-                        {(wavInfo ? wavInfo.sampleRate : originalSampleRate) / 1000} kHz
-                        {wavInfo && ` • ${wavInfo.bitDepth}bit`}
-                        {' • '}
-                        {wavInfo ? (wavInfo.channels === 1 ? '单声道' : '立体声') : (audioBuffer ? (audioBuffer.numberOfChannels === 1 ? '单声道' : '立体声') : '')}
-                        {hasBeenProcessed && (
-                          <span className="text-green-400 ml-2">✓ 已修复</span>
+                        {isDualTrackMode ? (
+                          <>
+                            🎤 人声: {((dualTrackVocalFile?.size || 0) / (1024 * 1024)).toFixed(2)} MB
+                            {' • '}
+                            🎵 伴奏: {((dualTrackAccompanimentFile?.size || 0) / (1024 * 1024)).toFixed(2)} MB
+                            {' • '}
+                            {dualTrackHasBeenProcessed && <span className="text-green-400 ml-2">✓ 已修复</span>}
+                          </>
+                        ) : (
+                          <>
+                            {(audioFile?.size || 0) / (1024 * 1024).toFixed(2)} MB
+                            {' • '}
+                            {(wavInfo ? wavInfo.sampleRate : originalSampleRate) / 1000} kHz
+                            {wavInfo && ` • ${wavInfo.bitDepth}bit`}
+                            {' • '}
+                            {wavInfo ? (wavInfo.channels === 1 ? '单声道' : '立体声') : (audioBuffer ? (audioBuffer.numberOfChannels === 1 ? '单声道' : '立体声') : '')}
+                            {hasBeenProcessed && (
+                              <span className="text-green-400 ml-2">✓ 已修复</span>
+                            )}
+                          </>
                         )}
                         {' • '}
                         <span
@@ -376,36 +484,72 @@ export default function RepairPage() {
                       </p>
                     </div>
                   </div>
-                  <label className="flex items-center gap-1.5 px-3 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg cursor-pointer transition text-gray-400 hover:text-white text-sm shrink-0">
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                    </svg>
-                    替换文件
-                    <input
-                      type="file"
-                      accept="audio/*"
-                      className="hidden"
-                      onChange={(e) => {
-                        const file = e.target.files?.[0];
-                        if (file) loadAudioFile(file);
-                        e.target.value = '';
-                      }}
-                    />
-                  </label>
-                </div>
-
-                {taskId && hasBeenProcessed && (
-                  <div className="mt-4">
+                  {isDualTrackMode ? (
                     <button
-                      onClick={() => navigate(`/compare?taskId=${taskId}`)}
-                      className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-cyan-500/20 to-purple-500/20 hover:from-cyan-500/30 hover:to-purple-500/30 border border-cyan-400/30 hover:border-cyan-400/50 rounded-lg text-cyan-400 text-sm font-medium transition-all w-full justify-center"
+                      onClick={handleSwitchToSingleTrack}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg cursor-pointer transition text-gray-400 hover:text-white text-sm shrink-0"
                     >
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
                       </svg>
-                      <span>前往 AB 对比</span>
-                      <span className="text-xs opacity-60 ml-1">原始 / 修复后</span>
+                      返回选择
                     </button>
+                  ) : (
+                    <label className="flex items-center gap-1.5 px-3 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg cursor-pointer transition text-gray-400 hover:text-white text-sm shrink-0">
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                      </svg>
+                      替换文件
+                      <input
+                        type="file"
+                        accept="audio/*"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) loadAudioFile(file);
+                          e.target.value = '';
+                        }}
+                      />
+                    </label>
+                  )}
+                </div>
+
+                {((isDualTrackMode && dualTrackHasBeenProcessed && dualTrackDownloadUrl) || (!isDualTrackMode && taskId && hasBeenProcessed)) && (
+                  <div className="mt-4">
+                    {isDualTrackMode && dualTrackDownloadUrl ? (
+                      <button
+                        onClick={() => {
+                          setRenderDownloadUrl(dualTrackDownloadUrl);
+                          setInstantDownloadInfo({
+                            filename: generateExportFilename('dual_track', algorithmVersion, processingOptions.sampleRate, processingOptions.bitDepth, 'dual'),
+                            fileSize: '—',
+                            sampleRate: `${processingOptions.sampleRate / 1000} kHz`,
+                            bitDepth: processingOptions.bitDepth,
+                            channels: 2,
+                            duration: 0,
+                            algorithmVersion: algorithmVersion,
+                          });
+                          setShowDownloadModal(true);
+                        }}
+                        className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-cyan-500/20 to-purple-500/20 hover:from-cyan-500/30 hover:to-purple-500/30 border border-cyan-400/30 hover:border-cyan-400/50 rounded-lg text-cyan-400 text-sm font-medium transition-all w-full justify-center"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                        </svg>
+                        <span>下载双轨修复结果</span>
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => navigate(`/compare?taskId=${taskId}`)}
+                        className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-cyan-500/20 to-purple-500/20 hover:from-cyan-500/30 hover:to-purple-500/30 border border-cyan-400/30 hover:border-cyan-400/50 rounded-lg text-cyan-400 text-sm font-medium transition-all w-full justify-center"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
+                        </svg>
+                        <span>前往 AB 对比</span>
+                        <span className="text-xs opacity-60 ml-1">原始 / 修复后</span>
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -441,14 +585,14 @@ export default function RepairPage() {
                 onParamChange={updateParam}
                 onReset={resetParams}
                 onModeSelect={applyRepairMode}
-                onApply={applySettings}
+                onApply={isDualTrackMode ? undefined : applySettings}
                 onOptionsChange={setProcessingOptions}
                 disabled={isProcessing}
                 duration={duration}
                 channels={audioBuffer?.numberOfChannels ?? 2}
                 backendAvailable={backendAvailable}
                 onSaveProfile={handleSaveProfile}
-                taskId={taskId}
+                taskId={isDualTrackMode ? dualTrackTaskId : taskId}
                 onRenderCacheRefresh={handleRegisterCacheRefresh}
                 cacheTriggerKey={cacheTriggerKey}
                 onInstantDownload={(cacheEntry) => {
@@ -465,6 +609,7 @@ export default function RepairPage() {
                   });
                   setShowDownloadModal(true);
                 }}
+                isDualTrackMode={isDualTrackMode}
               />
             </div>
           </div>
