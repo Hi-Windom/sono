@@ -202,13 +202,93 @@ export default function RepairPage() {
     setDualTrackAccompanimentParams(prev => ({ ...prev, [key]: value }));
   }, []);
 
+  const handleDualTrackFileReplace = useCallback(async (type: 'vocal' | 'accompaniment', newFile: File) => {
+    const vocal = type === 'vocal' ? newFile : dualTrackVocalFile;
+    const accompaniment = type === 'accompaniment' ? newFile : dualTrackAccompanimentFile;
+
+    if (type === 'vocal') setDualTrackVocalFile(newFile);
+    else setDualTrackAccompanimentFile(newFile);
+
+    setDualTrackHasBeenProcessed(false);
+    setDualTrackDownloadUrl(null);
+
+    if (!vocal || !accompaniment) return;
+
+    try {
+      setIsProcessing(true);
+      setProcessingStep('重新上传双轨文件...');
+      setProcessingSource('backend');
+
+      const uploadResult = await uploadDualAudio(
+        vocal,
+        accompaniment,
+        (loaded, total, speed) => {
+          const progress = loaded / total;
+          setProcessingProgress(progress * 0.1);
+          setProcessingStep(`上传中 ${(progress * 100).toFixed(0)}%`);
+        }
+      );
+
+      setDualTrackTaskId(uploadResult.task_id);
+      setDualTrackVocalTaskId(uploadResult.vocal_task_id);
+      setDualTrackAccompanimentTaskId(uploadResult.accompaniment_task_id);
+      setIsProcessing(false);
+      setProcessingStep('');
+      setProcessingProgress(0);
+    } catch (error) {
+      console.error('双轨重新上传失败:', error);
+      setBackendError(error instanceof Error ? error.message : '双轨重新上传失败');
+      setDualTrackTaskId(null);
+      setDualTrackVocalTaskId(null);
+      setDualTrackAccompanimentTaskId(null);
+      setIsProcessing(false);
+    }
+  }, [dualTrackVocalFile, dualTrackAccompanimentFile, setIsProcessing, setProcessingStep, setProcessingProgress, setProcessingSource, setBackendError]);
+
   const handleDualTrackRepair = useCallback(async () => {
     if (!dualTrackVocalFile || !dualTrackAccompanimentFile) {
       setBackendError('请先上传人声和伴奏文件');
       return;
     }
     if (!dualTrackTaskId || !dualTrackVocalTaskId || !dualTrackAccompanimentTaskId) {
-      setBackendError('任务ID缺失，请重新上传文件');
+      try {
+        setIsProcessing(true);
+        setProcessingStep('重新上传双轨文件...');
+        setProcessingSource('backend');
+
+        const uploadResult = await uploadDualAudio(
+          dualTrackVocalFile,
+          dualTrackAccompanimentFile,
+          (loaded, total, speed) => {
+            const progress = loaded / total;
+            setProcessingProgress(progress * 0.1);
+            setProcessingStep(`上传中 ${(progress * 100).toFixed(0)}%`);
+          }
+        );
+
+        setDualTrackTaskId(uploadResult.task_id);
+        setDualTrackVocalTaskId(uploadResult.vocal_task_id);
+        setDualTrackAccompanimentTaskId(uploadResult.accompaniment_task_id);
+
+        await repairDualAudio(
+          uploadResult.task_id,
+          uploadResult.vocal_task_id,
+          uploadResult.accompaniment_task_id,
+          dualTrackVocalParams,
+          processingOptions,
+          algorithmVersion,
+          dualTrackVocalParams,
+          dualTrackAccompanimentParams,
+          mixRatio
+        );
+
+        setProcessingStep('等待处理完成...');
+        startDualTrackPolling(uploadResult.task_id);
+      } catch (error) {
+        console.error('双轨修复失败:', error);
+        setBackendError(error instanceof Error ? error.message : '双轨修复失败');
+        setIsProcessing(false);
+      }
       return;
     }
     try {
@@ -231,7 +311,7 @@ export default function RepairPage() {
       );
 
       setProcessingStep('等待处理完成...');
-      startDualTrackPolling(dualTrackTaskId!);
+      startDualTrackPolling(dualTrackTaskId);
     } catch (error) {
       console.error('双轨修复失败:', error);
       setBackendError(error instanceof Error ? error.message : '双轨修复失败');
@@ -459,10 +539,10 @@ export default function RepairPage() {
           </div>
         </div>
 
-        {(!audioFile && !dualTrackFilesSelected) ? (
+        {(isDualTrackMode ? !dualTrackFilesSelected : !audioFile) ? (
           <div className="flex flex-col items-center py-10">
             {isDualTrackMode ? (
-              <DualTrackUploader onFilesSelect={handleDualTrackUpload} />
+              <DualTrackUploader onFilesSelect={handleDualTrackUpload} isLoading={isProcessing} />
             ) : (
               <AudioUploader onFileSelect={loadAudioFile} />
             )}
@@ -496,7 +576,7 @@ export default function RepairPage() {
                       <label className="flex items-center gap-1 px-2 py-1 bg-white/5 hover:bg-white/10 border border-white/10 rounded cursor-pointer transition text-gray-500 hover:text-white text-xs shrink-0">
                         <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
                         替换
-                        <input type="file" accept="audio/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) { setDualTrackVocalFile(f); setDualTrackHasBeenProcessed(false); setDualTrackDownloadUrl(null); } e.target.value = ''; }} />
+                        <input type="file" accept="audio/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleDualTrackFileReplace('vocal', f); e.target.value = ''; }} />
                       </label>
                     </div>
                   </div>
@@ -524,7 +604,7 @@ export default function RepairPage() {
                       <label className="flex items-center gap-1 px-2 py-1 bg-white/5 hover:bg-white/10 border border-white/10 rounded cursor-pointer transition text-gray-500 hover:text-white text-xs shrink-0">
                         <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
                         替换
-                        <input type="file" accept="audio/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) { setDualTrackAccompanimentFile(f); setDualTrackHasBeenProcessed(false); setDualTrackDownloadUrl(null); } e.target.value = ''; }} />
+                        <input type="file" accept="audio/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleDualTrackFileReplace('accompaniment', f); e.target.value = ''; }} />
                       </label>
                     </div>
                   </div>

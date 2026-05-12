@@ -429,7 +429,10 @@ async def upload_dual_audio(
 
     create_task(vocal_task_id, f"vocal_{vocal_file.filename or 'audio'}", vocal_upload_path, {}, file_hash, len(vocal_content))
     create_task(accompaniment_task_id, f"acc_{accompaniment_file.filename or 'audio'}", accompaniment_upload_path, {}, file_hash, len(accompaniment_content))
-    create_task(main_task_id, f"dual_{vocal_file.filename or 'audio'}", vocal_upload_path, {}, file_hash, len(vocal_content) + len(accompaniment_content))
+    create_task(main_task_id, f"dual_{vocal_file.filename or 'audio'}", vocal_upload_path, {
+        "vocal_task_id": vocal_task_id,
+        "accompaniment_task_id": accompaniment_task_id,
+    }, file_hash, len(vocal_content) + len(accompaniment_content))
 
     logger.info(f"[/upload-dual] main_task_id={main_task_id} vocal={vocal_task_id} acc={accompaniment_task_id}")
 
@@ -693,8 +696,16 @@ async def get_track_status(task_id: str):
     if not main_task:
         raise HTTPException(status_code=404, detail="任务不存在")
 
-    vocal_task_id = main_task.get("vocal_task_id")
-    accompaniment_task_id = main_task.get("accompaniment_task_id")
+    params = main_task.get("params", {})
+    if isinstance(params, str):
+        import json as _json
+        try:
+            params = _json.loads(params)
+        except Exception:
+            params = {}
+
+    vocal_task_id = params.get("vocal_task_id") or main_task.get("vocal_task_id")
+    accompaniment_task_id = params.get("accompaniment_task_id") or main_task.get("accompaniment_task_id")
 
     result = {
         "task_id": task_id,
