@@ -409,8 +409,11 @@ export async function repairAudio(taskId: string, params: AIRepairParams, option
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: '修复请求失败' }));
-      log('repair', `ERROR: ${err.detail}`);
-      throw new Error(err.detail || '修复请求失败');
+      const detail = Array.isArray(err.detail)
+        ? err.detail.map((e: any) => e.msg || String(e)).join('; ')
+        : (err.detail || '修复请求失败');
+      log('repair', `ERROR: ${detail}`);
+      throw new Error(detail);
     }
 
     const data = await res.json();
@@ -470,8 +473,11 @@ export async function repairDualAudio(
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: '双轨修复请求失败' }));
-      log('repair-dual', `ERROR: ${err.detail}`);
-      throw new Error(err.detail || '双轨修复请求失败');
+      const detail = Array.isArray(err.detail)
+        ? err.detail.map((e: any) => e.msg || String(e)).join('; ')
+        : (err.detail || '双轨修复请求失败');
+      log('repair-dual', `ERROR: ${detail}`);
+      throw new Error(detail);
     }
 
     const data = await res.json();
