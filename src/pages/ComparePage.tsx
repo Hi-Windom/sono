@@ -154,7 +154,7 @@ export default function ComparePage() {
 
   useEffect(() => {
     if (isDualTrackTask && dualTrackMode === null) {
-      setDualTrackMode('vocal');
+      setDualTrackMode('merged');
     } else if (!isDualTrackTask && dualTrackMode !== null) {
       setDualTrackMode(null);
     }

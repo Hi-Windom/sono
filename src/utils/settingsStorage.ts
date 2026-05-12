@@ -1,5 +1,51 @@
 import { AIRepairParams, defaultAIRepairParams } from './advancedAudioProcessing';
 
+export interface VocalRepairParams {
+  deClipping: number;
+  dePop: number;
+  formantRepair: number;
+  deEssing: number;
+  breathEnhance: number;
+  aiRepair: number;
+  bassEnhance: number;
+  airTexture: number;
+  loudness: number;
+}
+
+export interface InstrumentRepairParams {
+  deClipping: number;
+  dePop: number;
+  timbreProtect: number;
+  dynamicRange: number;
+  noiseReduction: number;
+  spatialEnhance: number;
+  warmth: number;
+  loudness: number;
+}
+
+export const defaultVocalRepairParams: VocalRepairParams = {
+  deClipping: 0.30,
+  dePop: 0.18,
+  formantRepair: 0.5,
+  deEssing: 0.25,
+  breathEnhance: 0.3,
+  aiRepair: 0.2,
+  bassEnhance: 0.1,
+  airTexture: 0.2,
+  loudness: 0.5,
+};
+
+export const defaultInstrumentRepairParams: InstrumentRepairParams = {
+  deClipping: 0.30,
+  dePop: 0.18,
+  timbreProtect: 0.5,
+  dynamicRange: 0.2,
+  noiseReduction: 0.15,
+  spatialEnhance: 0.15,
+  warmth: 0.25,
+  loudness: 0.5,
+};
+
 export interface ProfileConfig {
   id: string;
   name: string;
@@ -10,6 +56,9 @@ export interface ProfileConfig {
 
 export interface AppSettings {
   aiRepairParams: AIRepairParams;
+  dualTrackVocalParams: VocalRepairParams;
+  dualTrackInstrumentParams: InstrumentRepairParams;
+  dualTrackMixRatio: number;
   exportOptions: {
     sampleRate: number;
     bitDepth: 16 | 24 | 32;
@@ -28,6 +77,9 @@ const SETTINGS_KEY = 'ai-music-repair-settings';
 
 export const defaultSettings: AppSettings = {
   aiRepairParams: defaultAIRepairParams,
+  dualTrackVocalParams: defaultVocalRepairParams,
+  dualTrackInstrumentParams: defaultInstrumentRepairParams,
+  dualTrackMixRatio: 0.5,
   exportOptions: {
     sampleRate: 48000,
     bitDepth: 24,
@@ -54,6 +106,15 @@ export function loadSettings(): AppSettings {
           ...defaultSettings.aiRepairParams,
           ...parsed.aiRepairParams,
         },
+        dualTrackVocalParams: {
+          ...defaultSettings.dualTrackVocalParams,
+          ...parsed.dualTrackVocalParams,
+        },
+        dualTrackInstrumentParams: {
+          ...defaultSettings.dualTrackInstrumentParams,
+          ...parsed.dualTrackInstrumentParams,
+        },
+        dualTrackMixRatio: parsed.dualTrackMixRatio ?? defaultSettings.dualTrackMixRatio,
         exportOptions: {
           ...defaultSettings.exportOptions,
           ...parsed.exportOptions,

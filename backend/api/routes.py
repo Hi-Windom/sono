@@ -717,6 +717,9 @@ async def repair_dual_audio_endpoint(request: DualRepairRequest):
         params["vocal_ratio"] = request.mix_ratio
         params["accompaniment_ratio"] = 1.0
 
+    params["vocal_path"] = vocal_path
+    params["accompaniment_path"] = accompaniment_path
+
     submit_repair_task(request.task_id, vocal_path, params)
 
     return {"task_id": request.task_id, "status": "pending"}
