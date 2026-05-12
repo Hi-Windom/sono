@@ -2,6 +2,19 @@ import React, { createContext, useContext, useState, useCallback, useEffect, use
 
 type ConnectionStatus = 'connected' | 'disconnected' | 'unstable';
 
+interface FrontendDiag {
+  user_agent: string;
+  platform: string;
+  language: string;
+  online: boolean;
+  screen: string;
+  viewport: string;
+  pixel_ratio: number;
+  connection_type: string;
+  timestamp: string;
+  error_detail: string;
+}
+
 interface BackendContextType {
   backendAvailable: boolean;
   connectionStatus: ConnectionStatus;
@@ -25,16 +38,30 @@ interface BackendContextType {
     runtime?: { pid: number; mobile_mode: boolean; uptime_seconds: number | null; algorithm_versions: string[] };
     directories?: { upload_files: number; output_files: number; decoded_files: number };
     process?: { cpu_percent: number; memory_mb: number; threads: number; fd_count: number | null };
+    frontend?: FrontendDiag;
   } | null;
 }
 
 const BackendContext = createContext<BackendContextType | undefined>(undefined);
 
-// 活动指示持续时间（毫秒）
 const ACTIVITY_DURATION = 800;
-
-// 连续失败次数阈值
 const UNSTABLE_THRESHOLD = 2;
+
+export function getFrontendDiag(errorDetail: string = ''): FrontendDiag {
+  const nav = navigator as any;
+  return {
+    user_agent: navigator.userAgent,
+    platform: navigator.platform,
+    language: navigator.language,
+    online: navigator.onLine,
+    screen: `${screen.width}x${screen.height}`,
+    viewport: `${window.innerWidth}x${window.innerHeight}`,
+    pixel_ratio: window.devicePixelRatio,
+    connection_type: nav.connection?.effectiveType || nav.connection?.type || 'unknown',
+    timestamp: new Date().toISOString(),
+    error_detail: errorDetail,
+  };
+}
 
 function setupNetworkInterceptor(
   onRequest: () => void,
@@ -129,24 +156,55 @@ export function BackendProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const runBackendDiag = useCallback(async () => {
+    const frontendFallback = {
+      backend: false,
+      python: false,
+      ffmpeg: false,
+      memory: false,
+      storage: false,
+      gpu: false,
+      frontend: getFrontendDiag('正在检测后端...'),
+    };
+    setBackendDiag(frontendFallback);
+
     try {
       const res = await fetch('/api/v1/diag');
       if (res.ok) {
         const data = await res.json();
+        data.frontend = getFrontendDiag();
         setBackendDiag(data);
         setBackendAvailable(data.backend);
         setConnectionStatus(data.backend ? 'connected' : 'disconnected');
       } else {
+        const errorDetail = `HTTP ${res.status} ${res.statusText}`;
+        setBackendDiag({
+          backend: false,
+          python: false,
+          ffmpeg: false,
+          memory: false,
+          storage: false,
+          gpu: false,
+          frontend: getFrontendDiag(errorDetail),
+        });
         setBackendAvailable(false);
         setConnectionStatus('unstable');
       }
-    } catch {
+    } catch (err) {
+      const errorDetail = err instanceof Error ? `${err.name}: ${err.message}` : 'Network request failed';
+      setBackendDiag({
+        backend: false,
+        python: false,
+        ffmpeg: false,
+        memory: false,
+        storage: false,
+        gpu: false,
+        frontend: getFrontendDiag(errorDetail),
+      });
       setBackendAvailable(false);
       setConnectionStatus('disconnected');
     }
   }, []);
 
-  // 设置网络拦截器
   useEffect(() => {
     const cleanup = setupNetworkInterceptor(triggerUpstream, handleResponseSuccess);
     return cleanup;

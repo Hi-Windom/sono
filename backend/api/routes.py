@@ -645,6 +645,9 @@ class DualRepairRequest(BaseModel):
     vocal_task_id: str
     accompaniment_task_id: str
     params: dict
+    vocal_params: dict | None = None
+    accompaniment_params: dict | None = None
+    mix_ratio: float | None = None
 
 
 @router.post("/repair-dual")
@@ -668,6 +671,13 @@ async def repair_dual_audio_endpoint(request: DualRepairRequest):
     params = request.params.copy()
     params["vocal_path"] = vocal_path
     params["accompaniment_path"] = accompaniment_path
+
+    if request.vocal_params:
+        params["vocal_params"] = request.vocal_params
+    if request.accompaniment_params:
+        params["accompaniment_params"] = request.accompaniment_params
+    if request.mix_ratio is not None:
+        params["mix_ratio"] = request.mix_ratio
 
     submit_repair_task(request.task_id, vocal_path, params)
 

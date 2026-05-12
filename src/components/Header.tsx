@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useBackend } from '../contexts/BackendContext';
+import { getFrontendDiag } from '../contexts/BackendContext';
 
 const statusConfig = {
   connected: {
@@ -19,7 +20,7 @@ const statusConfig = {
   },
 };
 
-const formatUptime = (seconds?: number) => {
+const formatUptime = (seconds?: number | null) => {
   if (!seconds) return '-';
   const days = Math.floor(seconds / 86400);
   const hours = Math.floor((seconds % 86400) / 3600);
@@ -53,6 +54,38 @@ const Section = ({ title, items }: { title: string; items: Array<{ label: string
   </div>
 );
 
+const buildCopyText = (backendDiag: NonNullable<ReturnType<typeof useBackend>['backendDiag']>) => {
+  const lines = [
+    `=== AI音乐修复工具 - 诊断报告 ===`,
+    `时间: ${backendDiag.timestamp || new Date().toISOString()}`,
+    ``,
+    `[后端服务]  ${backendDiag.backend ? 'OK' : 'FAIL'}`,
+    `[Python]     ${backendDiag.python ? 'OK' : 'FAIL'}  ${backendDiag.python_version || ''}`,
+    `[FFmpeg]     ${backendDiag.ffmpeg ? 'OK' : 'FAIL'}  ${backendDiag.ffmpeg_version || ''}`,
+    `[内存]       ${backendDiag.memory ? 'OK' : 'WARN'}  ${backendDiag.memory_info ? `${backendDiag.memory_info.available_gb}G / ${backendDiag.memory_info.total_gb}G (${backendDiag.memory_info.used_percent}%使用)` : ''}`,
+    `[磁盘]       ${backendDiag.storage ? 'OK' : 'WARN'}  ${backendDiag.storage_info ? `${backendDiag.storage_info.available_gb}G / ${backendDiag.storage_info.total_gb}G (${backendDiag.storage_info.used_percent}%使用)` : ''}`,
+    `[GPU]        ${backendDiag.gpu ? 'OK' : 'N/A'}   ${backendDiag.gpu_info || ''}`,
+  ];
+  if (backendDiag.system) {
+    lines.push('', '--- 系统 ---', backendDiag.system.os, backendDiag.system.arch, `主机: ${backendDiag.system.hostname}`);
+  }
+  if (backendDiag.runtime) {
+    lines.push('', '--- 运行时 ---', `PID: ${backendDiag.runtime.pid}  模式: ${backendDiag.runtime.mobile_mode ? '移动端' : '桌面端'}`, `算法版本: ${(backendDiag.runtime.algorithm_versions || []).join(', ')}`, `运行时间: ${formatUptime(backendDiag.runtime.uptime_seconds)}`);
+  }
+  if (backendDiag.process) {
+    lines.push('', '--- 进程资源 ---', `CPU: ${backendDiag.process.cpu_percent}%  内存: ${backendDiag.process.memory_mb}MB  线程: ${backendDiag.process.threads}`);
+  }
+  if (backendDiag.directories) {
+    lines.push('', '--- 目录 ---', `上传: ${backendDiag.directories.upload_files} 文件  输出: ${backendDiag.directories.output_files} 文件  解码: ${backendDiag.directories.decoded_files} 文件`);
+  }
+  if (backendDiag.frontend) {
+    const fe = backendDiag.frontend;
+    lines.push('', '--- 前端 ---', `在线: ${fe.online}  语言: ${fe.language}  屏幕: ${fe.screen}`, `视口: ${fe.viewport}  DPR: ${fe.pixel_ratio}  网络: ${fe.connection_type}`);
+    if (fe.error_detail) lines.push(`错误: ${fe.error_detail}`);
+  }
+  return lines.filter(l => l !== undefined).join('\n');
+};
+
 export const Header = () => {
   const { connectionStatus, hasUpstreamActivity, hasDownstreamActivity, runBackendDiag, backendDiag } = useBackend();
   const [showDiagModal, setShowDiagModal] = useState(false);
@@ -76,6 +109,27 @@ export const Header = () => {
     setIsDiagLoading(true);
     await runBackendDiag();
     setIsDiagLoading(false);
+  };
+
+  const handleCopy = () => {
+    if (backendDiag) {
+      navigator.clipboard.writeText(buildCopyText(backendDiag));
+    } else {
+      const fe = getFrontendDiag('后端无响应');
+      const lines = [
+        `=== AI音乐修复工具 - 诊断报告 ===`,
+        `时间: ${new Date().toISOString()}`,
+        ``,
+        `[后端服务]  FAIL - 无响应`,
+        ``,
+        `--- 前端 ---`,
+        `在线: ${fe.online}  语言: ${fe.language}  屏幕: ${fe.screen}`,
+        `视口: ${fe.viewport}  DPR: ${fe.pixel_ratio}  网络: ${fe.connection_type}`,
+        `UA: ${fe.user_agent}`,
+        `错误: ${fe.error_detail}`,
+      ];
+      navigator.clipboard.writeText(lines.join('\n'));
+    }
   };
 
   return (
@@ -112,18 +166,14 @@ export const Header = () => {
                   <div className="flex items-center gap-1 ml-1">
                     <svg
                       className={`w-3 h-3 transition-all duration-200 ${hasDownstreamActivity ? 'text-cyan-400 scale-125 drop-shadow-[0_0_8px_rgba(34,211,238,0.8)]' : 'text-gray-600'}`}
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
+                      fill="none" stroke="currentColor" viewBox="0 0 24 24"
                       style={{ transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)' }}
                     >
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
                     </svg>
                     <svg
                       className={`w-3 h-3 transition-all duration-200 ${hasUpstreamActivity ? 'text-pink-400 scale-125 drop-shadow-[0_0_8px_rgba(236,72,153,0.8)]' : 'text-gray-600'}`}
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
+                      fill="none" stroke="currentColor" viewBox="0 0 24 24"
                       style={{ transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)' }}
                     >
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 10l7-7m0 0l7 7m-7-7v18" />
@@ -143,24 +193,20 @@ export const Header = () => {
             </div>
           </div>
 
-          {/* 移动端：一行布局 - 左侧标题，右侧状态上诊断下 */}
+          {/* 移动端：一行布局 */}
           <div className="md:hidden flex items-center justify-between h-11">
-            {/* 左侧：图标 + 标题（空间不够时自动隐藏） */}
             <div className="flex items-center gap-2 min-w-0 overflow-hidden">
               <div className="w-9 h-9 bg-gradient-to-br from-cyan-500 via-purple-500 to-yellow-500 rounded-xl flex items-center justify-center shadow-[0_0_20px_rgba(107,70,193,0.4)] flex-shrink-0">
                 <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
                 </svg>
               </div>
-              {/* 用容器查询：父容器宽度足够时才显示标题 */}
               <h1 className="header-title text-sm font-bold bg-gradient-to-r from-cyan-400 via-purple-400 to-yellow-400 bg-clip-text text-transparent whitespace-nowrap overflow-hidden text-ellipsis min-w-0">
                 AI音乐修复工具
               </h1>
             </div>
 
-            {/* 右侧：状态（上）+ 诊断（下）垂直排列 */}
             <div className="flex flex-col gap-0.5 items-end flex-shrink-0">
-              {/* 状态行 */}
               <div className="flex items-center gap-1.5 bg-primary/40 border border-white/10 rounded-md px-2 py-0.5">
                 <div className={`w-1.5 h-1.5 rounded-full ${config.dotColor}`} />
                 <span className={`text-[10px] font-medium ${config.textColor}`}>
@@ -169,24 +215,19 @@ export const Header = () => {
                 <div className="flex items-center gap-0.5">
                   <svg
                     className={`w-2.5 h-2.5 transition-all duration-200 ${hasDownstreamActivity ? 'text-cyan-400 scale-110 drop-shadow-[0_0_6px_rgba(34,211,238,0.8)]' : 'text-gray-600'}`}
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
+                    fill="none" stroke="currentColor" viewBox="0 0 24 24"
                   >
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
                   </svg>
                   <svg
                     className={`w-2.5 h-2.5 transition-all duration-200 ${hasUpstreamActivity ? 'text-pink-400 scale-110 drop-shadow-[0_0_6px_rgba(236,72,153,0.8)]' : 'text-gray-600'}`}
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
+                    fill="none" stroke="currentColor" viewBox="0 0 24 24"
                   >
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 10l7-7m0 0l7 7m-7-7v18" />
                   </svg>
                 </div>
               </div>
 
-              {/* 诊断按钮 */}
               <button
                 onClick={handleDiagnose}
                 className="flex items-center gap-1 px-2 py-0.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-md cursor-pointer transition text-gray-400 hover:text-white text-[10px]"
@@ -229,44 +270,15 @@ export const Header = () => {
               <span className="text-emerald-400 font-semibold text-xs tracking-wider uppercase">Backend Diagnostics</span>
             </div>
             <div className="flex items-center gap-1.5">
-              {backendDiag && !isDiagLoading && (
-                <button
-                  onClick={() => {
-                    const lines = [
-                      `=== AI音乐修复工具 - 后端诊断报告 ===`,
-                      `时间: ${backendDiag.timestamp || new Date().toISOString()}`,
-                      ``,
-                      `[后端服务]  ${backendDiag.backend ? 'OK' : 'FAIL'}`,
-                      `[Python]     ${backendDiag.python ? 'OK' : 'FAIL'}  ${backendDiag.python_version || ''}`,
-                      `[FFmpeg]     ${backendDiag.ffmpeg ? 'OK' : 'FAIL'}  ${backendDiag.ffmpeg_version || ''}`,
-                      `[内存]       ${backendDiag.memory ? 'OK' : 'WARN'}  ${backendDiag.memory_info ? `${backendDiag.memory_info.available_gb}G / ${backendDiag.memory_info.total_gb}G (${backendDiag.memory_info.used_percent}%使用)` : ''}`,
-                      `[磁盘]       ${backendDiag.storage ? 'OK' : 'WARN'}  ${backendDiag.storage_info ? `${backendDiag.storage_info.available_gb}G / ${backendDiag.storage_info.total_gb}G (${backendDiag.storage_info.used_percent}%使用)` : ''}`,
-                      `[GPU]        ${backendDiag.gpu ? 'OK' : 'N/A'}   ${backendDiag.gpu_info || ''}`,
-                      ``,
-                      `--- 系统 ---`,
-                      backendDiag.system?.os || '',
-                      backendDiag.system?.arch || '',
-                      ``,
-                      `--- 运行时 ---`,
-                      `PID: ${backendDiag.runtime?.pid || ''}  模式: ${backendDiag.runtime?.mobile_mode ? '移动端' : '桌面端'}`,
-                      `算法版本: ${(backendDiag.runtime?.algorithm_versions || []).join(', ')}`,
-                      `运行时间: ${formatUptime(backendDiag.runtime?.uptime_seconds)}`,
-                      ``,
-                      `--- 进程资源 ---`,
-                      `CPU: ${backendDiag.process?.cpu_percent || '-'}%  内存: ${backendDiag.process?.memory_mb || '-'}MB  线程: ${backendDiag.process?.threads || '-'}`,
-                      ``,
-                      `--- 目录 ---`,
-                      `上传: ${backendDiag.directories?.upload_files ?? '-'} 文件  输出: ${backendDiag.directories?.output_files ?? '-'} 文件  解码: ${backendDiag.directories?.decoded_files ?? '-'} 文件`,
-                    ].filter(Boolean).join('\n');
-                    navigator.clipboard.writeText(lines);
-                  }}
-                  className="flex items-center gap-1 px-2 py-1 bg-white/5 hover:bg-white/10 border border-white/10 rounded text-gray-400 hover:text-white text-[10px] transition-colors cursor-pointer"
-                  title="复制全部"
-                >
-                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
-                  复制
-                </button>
-              )}
+              <button
+                onClick={handleCopy}
+                disabled={isDiagLoading}
+                className="flex items-center gap-1 px-2 py-1 bg-white/5 hover:bg-white/10 border border-white/10 rounded text-gray-400 hover:text-white text-[10px] transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                title="复制全部"
+              >
+                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+                复制
+              </button>
               <button
                 onClick={() => { setIsDiagLoading(true); runBackendDiag().then(() => setIsDiagLoading(false)); }}
                 disabled={isDiagLoading}
@@ -299,7 +311,7 @@ export const Header = () => {
                 <div className="flex items-center gap-2 text-gray-500">
                   <span className="text-gray-600">$</span>
                   <span>diag --check-all</span>
-                  <span className="text-emerald-400/60">→ OK</span>
+                  <span className={backendDiag.backend ? 'text-emerald-400/60' : 'text-red-400/60'}>→ {backendDiag.backend ? 'OK' : 'FAIL'}</span>
                   {backendDiag.timestamp && (
                     <span className="text-gray-700 text-[10px] ml-auto">{new Date(backendDiag.timestamp).toLocaleTimeString('zh-CN', { hour12: false })}</span>
                   )}
@@ -309,7 +321,7 @@ export const Header = () => {
 
                 {/* === 核心组件 === */}
                 <Section title="核心组件" items={[
-                  { label: 'BACKEND', name: '后端服务', ok: backendDiag.backend, detail: 'FastAPI running' },
+                  { label: 'BACKEND', name: '后端服务', ok: backendDiag.backend, detail: backendDiag.backend ? 'FastAPI running' : 'Service unreachable' },
                   { label: 'PYTHON', name: 'Python 环境', ok: backendDiag.python, detail: backendDiag.python_version },
                   { label: 'FFMPEG', name: 'FFmpeg 引擎', ok: backendDiag.ffmpeg, detail: backendDiag.ffmpeg_version },
                   { label: 'MEMORY', name: '内存', ok: backendDiag.memory, warn: !backendDiag.memory, detail: backendDiag.memory_info ? `${backendDiag.memory_info.available_gb.toFixed(1)}G free / ${backendDiag.memory_info.total_gb.toFixed(1)}G (${backendDiag.memory_info.used_percent}%使用)` : null },
@@ -367,6 +379,21 @@ export const Header = () => {
                   </>
                 )}
 
+                {/* === 前端信息 === */}
+                {backendDiag.frontend && (
+                  <>
+                    <div className="border-t border-white/5" />
+                    <Section title="前端信息" items={[
+                      { label: 'ONLINE', name: '网络在线', ok: backendDiag.frontend.online, detail: backendDiag.frontend.online ? '在线' : '离线', dim: true },
+                      { label: 'SCREEN', name: '屏幕', ok: true, detail: backendDiag.frontend.screen, dim: true },
+                      { label: 'VIEW', name: '视口', ok: true, detail: `${backendDiag.frontend.viewport} @${backendDiag.frontend.pixel_ratio}x`, dim: true },
+                      { label: 'LANG', name: '语言', ok: true, detail: backendDiag.frontend.language, dim: true },
+                      { label: 'NET', name: '网络类型', ok: true, detail: backendDiag.frontend.connection_type, dim: true },
+                      ...(backendDiag.frontend.error_detail ? [{ label: 'ERROR', name: '错误详情', ok: false, detail: backendDiag.frontend.error_detail }] : []),
+                    ]} />
+                  </>
+                )}
+
                 <div className="border-t border-white/5" />
 
                 <div className="flex items-center gap-2 text-gray-700 text-[11px]">
@@ -377,7 +404,33 @@ export const Header = () => {
                 {safePadding > 0 && <div style={{ height: safePadding }} aria-hidden="true" />}
               </div>
             ) : (
-              <div className="text-red-400/60 py-8">$ error: no response from backend</div>
+              <div className="space-y-4">
+                <div className="flex items-center gap-2 text-red-400/60">
+                  <span className="text-gray-600">$</span>
+                  <span>diag --check-all</span>
+                  <span className="text-red-400/60">→ FAIL</span>
+                </div>
+                <div className="border-t border-white/5" />
+                <Section title="后端服务" items={[
+                  { label: 'BACKEND', name: '后端服务', ok: false, detail: 'Service unreachable' },
+                ]} />
+                <div className="border-t border-white/5" />
+                {(() => {
+                  const fe = getFrontendDiag('后端无响应');
+                  return (
+                    <Section title="前端信息" items={[
+                      { label: 'ONLINE', name: '网络在线', ok: fe.online, detail: fe.online ? '在线' : '离线', dim: true },
+                      { label: 'SCREEN', name: '屏幕', ok: true, detail: fe.screen, dim: true },
+                      { label: 'VIEW', name: '视口', ok: true, detail: `${fe.viewport} @${fe.pixel_ratio}x`, dim: true },
+                      { label: 'LANG', name: '语言', ok: true, detail: fe.language, dim: true },
+                      { label: 'NET', name: '网络类型', ok: true, detail: fe.connection_type, dim: true },
+                      { label: 'UA', name: '浏览器', ok: true, detail: fe.user_agent.substring(0, 80), dim: true },
+                      { label: 'ERROR', name: '错误详情', ok: false, detail: fe.error_detail },
+                    ]} />
+                  );
+                })()}
+                {safePadding > 0 && <div style={{ height: safePadding }} aria-hidden="true" />}
+              </div>
             )}
           </div>
         </div>

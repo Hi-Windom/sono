@@ -433,22 +433,37 @@ export async function repairDualAudio(
   accompanimentTaskId: string,
   params: AIRepairParams,
   options: ProcessingOptions,
-  algorithmVersion?: string
+  algorithmVersion?: string,
+  vocalParams?: AIRepairParams,
+  accompanimentParams?: AIRepairParams,
+  mixRatio?: number
 ): Promise<DualRepairResponse> {
   const url = `${API_BASE}/repair-dual`;
   const backendParams = mapParamsToBackend(params, options, algorithmVersion);
   log('repair-dual', `POST ${url} task_id=${mainTaskId}`);
 
+  const body: Record<string, unknown> = {
+    task_id: mainTaskId,
+    vocal_task_id: vocalTaskId,
+    accompaniment_task_id: accompanimentTaskId,
+    params: backendParams,
+  };
+
+  if (vocalParams) {
+    body.vocal_params = mapParamsToBackend(vocalParams, options, algorithmVersion);
+  }
+  if (accompanimentParams) {
+    body.accompaniment_params = mapParamsToBackend(accompanimentParams, options, algorithmVersion);
+  }
+  if (mixRatio !== undefined) {
+    body.mix_ratio = mixRatio;
+  }
+
   try {
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        task_id: mainTaskId,
-        vocal_task_id: vocalTaskId,
-        accompaniment_task_id: accompanimentTaskId,
-        params: backendParams,
-      }),
+      body: JSON.stringify(body),
     });
 
     log('repair-dual', `response status=${res.status} ok=${res.ok}`);

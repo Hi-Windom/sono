@@ -10,6 +10,7 @@ import { RepairCacheModal } from '../components/RepairCacheModal';
 import { useAudioProcessor, generateExportFilename } from '../hooks/useAudioProcessor';
 import { uploadDualAudio, repairDualAudio, getTrackStatus, getDownloadUrl } from '../services/backendApi';
 import { useBackend } from '../contexts/BackendContext';
+import { AIRepairParams, defaultAIRepairParams } from '../utils/advancedAudioProcessing';
 
 // 导出给其他页面使用
 export { useBackend };
@@ -89,11 +90,16 @@ export default function RepairPage() {
   const [instantDownloadInfo, setInstantDownloadInfo] = useState<DownloadFileInfo | null>(null);
   const [isDualTrackMode, setIsDualTrackMode] = useState(false);
   const [dualTrackTaskId, setDualTrackTaskId] = useState<string | null>(null);
+  const [dualTrackVocalTaskId, setDualTrackVocalTaskId] = useState<string | null>(null);
+  const [dualTrackAccompanimentTaskId, setDualTrackAccompanimentTaskId] = useState<string | null>(null);
   const [dualTrackVocalFile, setDualTrackVocalFile] = useState<File | null>(null);
   const [dualTrackAccompanimentFile, setDualTrackAccompanimentFile] = useState<File | null>(null);
   const [dualTrackHasBeenProcessed, setDualTrackHasBeenProcessed] = useState(false);
   const [dualTrackDownloadUrl, setDualTrackDownloadUrl] = useState<string | null>(null);
   const [dualTrackRepairResult, setDualTrackRepairResult] = useState<any>(null);
+  const [dualTrackVocalParams, setDualTrackVocalParams] = useState<AIRepairParams>({ ...defaultAIRepairParams });
+  const [dualTrackAccompanimentParams, setDualTrackAccompanimentParams] = useState<AIRepairParams>({ ...defaultAIRepairParams });
+  const [mixRatio, setMixRatio] = useState(0.5);
   const pollRef = useRef<NodeJS.Timeout | null>(null);
 
   const stopDualTrackPolling = useCallback(() => {
@@ -159,6 +165,8 @@ export default function RepairPage() {
       );
 
       setDualTrackTaskId(uploadResult.task_id);
+      setDualTrackVocalTaskId(uploadResult.vocal_task_id);
+      setDualTrackAccompanimentTaskId(uploadResult.accompaniment_task_id);
       setProcessingProgress(0.1);
       setProcessingStep('开始双轨处理...');
 
@@ -166,9 +174,12 @@ export default function RepairPage() {
         uploadResult.task_id,
         uploadResult.vocal_task_id,
         uploadResult.accompaniment_task_id,
-        params,
+        dualTrackVocalParams,
         processingOptions,
-        algorithmVersion
+        algorithmVersion,
+        dualTrackVocalParams,
+        dualTrackAccompanimentParams,
+        mixRatio
       );
 
       setProcessingStep('等待处理完成...');
@@ -179,11 +190,13 @@ export default function RepairPage() {
       setBackendError(error instanceof Error ? error.message : '双轨处理失败');
       setIsProcessing(false);
     }
-  }, [params, processingOptions, algorithmVersion, setIsProcessing, setProcessingStep, setProcessingProgress, setProcessingSource, setBackendError, startDualTrackPolling]);
+  }, [dualTrackVocalParams, dualTrackAccompanimentParams, mixRatio, processingOptions, algorithmVersion, setIsProcessing, setProcessingStep, setProcessingProgress, setProcessingSource, setBackendError, startDualTrackPolling]);
 
   const handleSwitchToSingleTrack = useCallback(() => {
     setIsDualTrackMode(false);
     setDualTrackTaskId(null);
+    setDualTrackVocalTaskId(null);
+    setDualTrackAccompanimentTaskId(null);
     setDualTrackVocalFile(null);
     setDualTrackAccompanimentFile(null);
     setDualTrackHasBeenProcessed(false);
@@ -191,6 +204,47 @@ export default function RepairPage() {
     setDualTrackRepairResult(null);
     stopDualTrackPolling();
   }, [stopDualTrackPolling]);
+
+  const handleDualTrackVocalParamChange = useCallback((key: keyof AIRepairParams, value: number) => {
+    setDualTrackVocalParams(prev => ({ ...prev, [key]: value }));
+  }, []);
+
+  const handleDualTrackAccompanimentParamChange = useCallback((key: keyof AIRepairParams, value: number) => {
+    setDualTrackAccompanimentParams(prev => ({ ...prev, [key]: value }));
+  }, []);
+
+  const handleDualTrackRepair = useCallback(async () => {
+    if (!dualTrackVocalFile || !dualTrackAccompanimentFile) {
+      setBackendError('请先上传人声和伴奏文件');
+      return;
+    }
+    try {
+      setIsProcessing(true);
+      setProcessingStep('开始双轨修复...');
+      setProcessingSource('backend');
+      setDualTrackHasBeenProcessed(false);
+      setDualTrackDownloadUrl(null);
+
+      await repairDualAudio(
+        dualTrackTaskId!,
+        dualTrackVocalTaskId!,
+        dualTrackAccompanimentTaskId!,
+        dualTrackVocalParams,
+        processingOptions,
+        algorithmVersion,
+        dualTrackVocalParams,
+        dualTrackAccompanimentParams,
+        mixRatio
+      );
+
+      setProcessingStep('等待处理完成...');
+      startDualTrackPolling(dualTrackTaskId!);
+    } catch (error) {
+      console.error('双轨修复失败:', error);
+      setBackendError(error instanceof Error ? error.message : '双轨修复失败');
+      setIsProcessing(false);
+    }
+  }, [dualTrackVocalFile, dualTrackAccompanimentFile, dualTrackTaskId, dualTrackVocalTaskId, dualTrackAccompanimentTaskId, dualTrackVocalParams, dualTrackAccompanimentParams, mixRatio, processingOptions, algorithmVersion, setIsProcessing, setProcessingStep, setProcessingSource, setBackendError, startDualTrackPolling]);
 
   useEffect(() => {
     if (!isDualTrackMode && audioFile) {
@@ -583,6 +637,13 @@ export default function RepairPage() {
                   setShowDownloadModal(true);
                 }}
                 isDualTrackMode={isDualTrackMode}
+                vocalParams={dualTrackVocalParams}
+                accompanimentParams={dualTrackAccompanimentParams}
+                mixRatio={mixRatio}
+                onVocalParamChange={handleDualTrackVocalParamChange}
+                onAccompanimentParamChange={handleDualTrackAccompanimentParamChange}
+                onMixRatioChange={setMixRatio}
+                onDualTrackRepair={isDualTrackMode ? handleDualTrackRepair : undefined}
               />
 
               {profileSaveMsg && (
