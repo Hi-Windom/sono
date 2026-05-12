@@ -1,5 +1,7 @@
 import os
+import asyncio
 import logging
+import time
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -143,6 +145,138 @@ async def deploy_info():
     except (FileNotFoundError, ValueError, OSError):
         pass
     return {"deploy_time": deploy_time, "deploy_days": deploy_days}
+
+@router.get("/diag")
+async def diagnostics():
+    import sys
+    import platform
+    import shutil
+    import psutil
+    from datetime import datetime, timezone
+
+    result = {"backend": True, "timestamp": datetime.now(timezone.utc).isoformat()}
+
+    # Python
+    result["python"] = True
+    result["python_version"] = f"Python {sys.version.split()[0]}"
+
+    # FFmpeg
+    ffmpeg_ok = False
+    ffmpeg_ver = None
+    try:
+        proc = await asyncio.create_subprocess_shell(
+            "ffmpeg -version", stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+        )
+        stdout, _ = await proc.communicate()
+        output = stdout.decode("utf-8", errors="replace")
+        first_line = output.split("\n")[0] if output else ""
+        if "ffmpeg" in first_line.lower():
+            ffmpeg_ok = True
+            parts = first_line.split()
+            if len(parts) >= 3:
+                ffmpeg_ver = f"{parts[2]} {parts[3]}" if len(parts) > 3 else parts[2]
+    except Exception:
+        pass
+    result["ffmpeg"] = ffmpeg_ok
+    result["ffmpeg_version"] = ffmpeg_ver or "Not found"
+
+    # 内存
+    try:
+        mem = psutil.virtual_memory()
+        total_gb = round(mem.total / (1024**3), 1)
+        avail_gb = round(mem.available / (1024**3), 1)
+        used_pct = mem.percent
+        result["memory"] = avail_gb >= 0.5
+        result["memory_info"] = {
+            "total_gb": total_gb,
+            "available_gb": avail_gb,
+            "used_percent": used_pct,
+        }
+    except Exception:
+        result["memory"] = False
+
+    # 磁盘
+    try:
+        disk = shutil.disk_usage("/")
+        total_gb = round(disk.total / (1024**3), 1)
+        free_gb = round(disk.free / (1024**3), 1)
+        used_pct = round(disk.used / disk.total * 100, 1)
+        result["storage"] = free_gb >= 0.5
+        result["storage_info"] = {
+            "total_gb": total_gb,
+            "available_gb": free_gb,
+            "used_percent": used_pct,
+        }
+    except Exception:
+        result["storage"] = False
+
+    # GPU
+    gpu_ok = False
+    gpu_info = None
+    try:
+        import torch
+        if torch.cuda.is_available():
+            gpu_ok = True
+            props = torch.cuda.get_device_properties(0)
+            vram_total = round(props.total_mem / (1024**3), 1)
+            vram_free = round(torch.cuda.mem_get_info(0)[0] / (1024**3), 1)
+            gpu_info = f"{props.name} ({vram_free}/{vram_total}GB VRAM)"
+        else:
+            gpu_info = "N/A (CUDA not available)"
+    except ImportError:
+        gpu_info = "N/A (PyTorch not installed)"
+    except Exception as e:
+        gpu_info = f"N/A ({str(e)[:40]})"
+    result["gpu"] = gpu_ok
+    result["gpu_info"] = gpu_info
+
+    # 系统信息
+    result["system"] = {
+        "os": f"{platform.system()} {platform.release()}",
+        "arch": platform.machine(),
+        "platform": platform.platform(),
+        "hostname": platform.node(),
+    }
+
+    # 运行时
+    uptime_seconds = None
+    try:
+        uptime_seconds = int(time.time() - psutil.boot_time())
+    except Exception:
+        pass
+    result["runtime"] = {
+        "pid": os.getpid(),
+        "mobile_mode": MOBILE_MODE,
+        "uptime_seconds": uptime_seconds,
+        "algorithm_versions": get_available_versions(mobile_mode=MOBILE_MODE),
+    }
+
+    # 上传/输出目录状态
+    try:
+        upload_count = len(os.listdir(UPLOAD_DIR)) if os.path.isdir(UPLOAD_DIR) else -1
+        output_count = len(os.listdir(OUTPUT_DIR)) if os.path.isdir(OUTPUT_DIR) else -1
+        decoded_count = len(os.listdir(DECODED_DIR)) if os.path.isdir(DECODED_DIR) else -1
+        result["directories"] = {
+            "upload_files": upload_count,
+            "output_files": output_count,
+            "decoded_files": decoded_count,
+        }
+    except Exception:
+        result["directories"] = None
+
+    # 进程资源
+    try:
+        p = psutil.Process(os.getpid())
+        result["process"] = {
+            "cpu_percent": round(p.cpu_percent(), 1),
+            "memory_mb": round(p.memory_info().rss / (1024 * 1024), 1),
+            "threads": p.num_threads(),
+            "fd_count": p.num_fds() if hasattr(p, 'num_fds') else None,
+        }
+    except Exception:
+        result["process"] = None
+
+    return result
 
 class StorageEstimateRequest(BaseModel):
     duration: float

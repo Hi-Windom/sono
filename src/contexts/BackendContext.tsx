@@ -18,8 +18,13 @@ interface BackendContextType {
     python_version?: string;
     ffmpeg_version?: string;
     gpu_info?: string;
-    memory_info?: { total_gb: number; available_gb: number };
-    storage_info?: { total_gb: number; available_gb: number };
+    memory_info?: { total_gb: number; available_gb: number; used_percent?: number };
+    storage_info?: { total_gb: number; available_gb: number; used_percent?: number };
+    timestamp?: string;
+    system?: { os: string; arch: string; platform: string; hostname: string };
+    runtime?: { pid: number; mobile_mode: boolean; uptime_seconds: number | null; algorithm_versions: string[] };
+    directories?: { upload_files: number; output_files: number; decoded_files: number };
+    process?: { cpu_percent: number; memory_mb: number; threads: number; fd_count: number | null };
   } | null;
 }
 

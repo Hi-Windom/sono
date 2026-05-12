@@ -19,6 +19,40 @@ const statusConfig = {
   },
 };
 
+const formatUptime = (seconds?: number) => {
+  if (!seconds) return '-';
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor((seconds % 86400) / 3600);
+  const mins = Math.floor((seconds % 3600) / 60);
+  const secs = seconds % 60;
+  const parts = [];
+  if (days > 0) parts.push(`${days}d`);
+  if (hours > 0) parts.push(`${hours}h`);
+  if (mins > 0) parts.push(`${mins}m`);
+  parts.push(`${secs}s`);
+  return parts.join(' ');
+};
+
+const Section = ({ title, items }: { title: string; items: Array<{ label: string; name: string; ok?: boolean; warn?: boolean; detail?: string | null; dim?: boolean }> }) => (
+  <div>
+    <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-2">{title}</div>
+    <div className="space-y-1">
+      {items.map(item => (
+        <div key={item.label} className={`flex items-center gap-2 ${item.dim ? 'text-gray-500' : ''}`}>
+          <span className="w-16 text-gray-600 text-[10px] font-mono shrink-0">{item.label}</span>
+          <span className="text-xs">{item.name}</span>
+          {item.ok !== undefined && (
+            <span className={`ml-auto text-[10px] px-1.5 py-0.5 rounded ${item.ok ? 'bg-emerald-500/10 text-emerald-400' : item.warn ? 'bg-yellow-500/10 text-yellow-400' : 'bg-red-500/10 text-red-400'}`}>
+              {item.ok ? 'OK' : item.warn ? 'WARN' : 'FAIL'}
+            </span>
+          )}
+          {item.detail && <span className="text-[10px] text-gray-600 ml-2 truncate">{item.detail}</span>}
+        </div>
+      ))}
+    </div>
+  </div>
+);
+
 export const Header = () => {
   const { connectionStatus, hasUpstreamActivity, hasDownstreamActivity, runBackendDiag, backendDiag } = useBackend();
   const [showDiagModal, setShowDiagModal] = useState(false);
@@ -194,7 +228,45 @@ export const Header = () => {
               <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
               <span className="text-emerald-400 font-semibold text-xs tracking-wider uppercase">Backend Diagnostics</span>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5">
+              {backendDiag && !isDiagLoading && (
+                <button
+                  onClick={() => {
+                    const lines = [
+                      `=== AI音乐修复工具 - 后端诊断报告 ===`,
+                      `时间: ${backendDiag.timestamp || new Date().toISOString()}`,
+                      ``,
+                      `[后端服务]  ${backendDiag.backend ? 'OK' : 'FAIL'}`,
+                      `[Python]     ${backendDiag.python ? 'OK' : 'FAIL'}  ${backendDiag.python_version || ''}`,
+                      `[FFmpeg]     ${backendDiag.ffmpeg ? 'OK' : 'FAIL'}  ${backendDiag.ffmpeg_version || ''}`,
+                      `[内存]       ${backendDiag.memory ? 'OK' : 'WARN'}  ${backendDiag.memory_info ? `${backendDiag.memory_info.available_gb}G / ${backendDiag.memory_info.total_gb}G (${backendDiag.memory_info.used_percent}%使用)` : ''}`,
+                      `[磁盘]       ${backendDiag.storage ? 'OK' : 'WARN'}  ${backendDiag.storage_info ? `${backendDiag.storage_info.available_gb}G / ${backendDiag.storage_info.total_gb}G (${backendDiag.storage_info.used_percent}%使用)` : ''}`,
+                      `[GPU]        ${backendDiag.gpu ? 'OK' : 'N/A'}   ${backendDiag.gpu_info || ''}`,
+                      ``,
+                      `--- 系统 ---`,
+                      backendDiag.system?.os || '',
+                      backendDiag.system?.arch || '',
+                      ``,
+                      `--- 运行时 ---`,
+                      `PID: ${backendDiag.runtime?.pid || ''}  模式: ${backendDiag.runtime?.mobile_mode ? '移动端' : '桌面端'}`,
+                      `算法版本: ${(backendDiag.runtime?.algorithm_versions || []).join(', ')}`,
+                      `运行时间: ${formatUptime(backendDiag.runtime?.uptime_seconds)}`,
+                      ``,
+                      `--- 进程资源 ---`,
+                      `CPU: ${backendDiag.process?.cpu_percent || '-'}%  内存: ${backendDiag.process?.memory_mb || '-'}MB  线程: ${backendDiag.process?.threads || '-'}`,
+                      ``,
+                      `--- 目录 ---`,
+                      `上传: ${backendDiag.directories?.upload_files ?? '-'} 文件  输出: ${backendDiag.directories?.output_files ?? '-'} 文件  解码: ${backendDiag.directories?.decoded_files ?? '-'} 文件`,
+                    ].filter(Boolean).join('\n');
+                    navigator.clipboard.writeText(lines);
+                  }}
+                  className="flex items-center gap-1 px-2 py-1 bg-white/5 hover:bg-white/10 border border-white/10 rounded text-gray-400 hover:text-white text-[10px] transition-colors cursor-pointer"
+                  title="复制全部"
+                >
+                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+                  复制
+                </button>
+              )}
               <button
                 onClick={() => { setIsDiagLoading(true); runBackendDiag().then(() => setIsDiagLoading(false)); }}
                 disabled={isDiagLoading}
@@ -205,7 +277,7 @@ export const Header = () => {
                     <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
                     检测中...
                   </>
-                ) : '↻ 重新检测'}
+                ) : '↻ 检测'}
               </button>
               <button
                 onClick={() => setShowDiagModal(false)}
@@ -223,94 +295,85 @@ export const Header = () => {
               </div>
             ) : backendDiag ? (
               <div className="space-y-4">
-                {/* 概览行 */}
+                {/* 概览 */}
                 <div className="flex items-center gap-2 text-gray-500">
                   <span className="text-gray-600">$</span>
                   <span>diag --check-all</span>
                   <span className="text-emerald-400/60">→ OK</span>
+                  {backendDiag.timestamp && (
+                    <span className="text-gray-700 text-[10px] ml-auto">{new Date(backendDiag.timestamp).toLocaleTimeString('zh-CN', { hour12: false })}</span>
+                  )}
                 </div>
 
-                {/* 分隔线 */}
                 <div className="border-t border-white/5" />
 
-                {/* 各项检测 */}
-                {[
-                  {
-                    icon: '◆',
-                    label: 'BACKEND',
-                    name: '后端服务',
-                    ok: backendDiag.backend,
-                    detail: backendDiag.backend ? 'FastAPI running' : 'Service unreachable',
-                  },
-                  {
-                    icon: '◆',
-                    label: 'PYTHON',
-                    name: 'Python 环境',
-                    ok: backendDiag.python,
-                    detail: backendDiag.python_version || 'Not found',
-                  },
-                  {
-                    icon: '◆',
-                    label: 'FFMPEG',
-                    name: 'FFmpeg 引擎',
-                    ok: backendDiag.ffmpeg,
-                    detail: backendDiag.ffmpeg_version || 'Not found',
-                  },
-                  {
-                    icon: '◆',
-                    label: 'MEMORY',
-                    name: '内存',
-                    ok: backendDiag.memory,
-                    warn: !backendDiag.memory,
-                    detail: backendDiag.memory_info
-                      ? `${backendDiag.memory_info.available_gb.toFixed(1)}G free / ${backendDiag.memory_info.total_gb.toFixed(1)}G total`
-                      : 'Insufficient memory',
-                  },
-                  {
-                    icon: '◆',
-                    label: 'STORAGE',
-                    name: '磁盘存储',
-                    ok: backendDiag.storage,
-                    warn: !backendDiag.storage,
-                    detail: backendDiag.storage_info
-                      ? `${backendDiag.storage_info.available_gb.toFixed(1)}G free / ${backendDiag.storage_info.total_gb.toFixed(1)}G total`
-                      : 'Low disk space',
-                  },
-                  {
-                    icon: '◆',
-                    label: 'GPU',
-                    name: 'GPU 加速',
-                    ok: backendDiag.gpu,
-                    detail: backendDiag.gpu_info || 'N/A (CPU mode)',
-                  },
-                ].map(item => (
-                  <div key={item.label}>
-                    <div className="grid grid-cols-[auto_1fr_auto] gap-x-4 gap-y-1">
-                      <span className={item.ok ? (item.warn ? 'text-yellow-400' : 'text-emerald-400') : 'text-red-400'}>{item.icon}</span>
-                      <span className={item.ok ? 'text-gray-300' : 'text-gray-500'}>
-                        <span className="text-gray-600 mr-2">[{item.label}]</span>
-                        {item.name}
-                      </span>
-                      <span className={`text-right font-medium ${item.ok ? (item.warn ? 'text-yellow-400/80' : 'text-emerald-400/70') : 'text-red-400/70'}`}>
-                        {item.ok ? 'OK' : item.warn ? 'WARN' : 'FAIL'}
-                      </span>
-                      <span />
-                      <span className={`pl-5 text-[11px] ${item.ok ? 'text-gray-600' : 'text-gray-700'}`}>{item.detail}</span>
-                      <span />
-                    </div>
-                  </div>
-                ))}
+                {/* === 核心组件 === */}
+                <Section title="核心组件" items={[
+                  { label: 'BACKEND', name: '后端服务', ok: backendDiag.backend, detail: 'FastAPI running' },
+                  { label: 'PYTHON', name: 'Python 环境', ok: backendDiag.python, detail: backendDiag.python_version },
+                  { label: 'FFMPEG', name: 'FFmpeg 引擎', ok: backendDiag.ffmpeg, detail: backendDiag.ffmpeg_version },
+                  { label: 'MEMORY', name: '内存', ok: backendDiag.memory, warn: !backendDiag.memory, detail: backendDiag.memory_info ? `${backendDiag.memory_info.available_gb.toFixed(1)}G free / ${backendDiag.memory_info.total_gb.toFixed(1)}G (${backendDiag.memory_info.used_percent}%使用)` : null },
+                  { label: 'STORAGE', name: '磁盘存储', ok: backendDiag.storage, warn: !backendDiag.storage, detail: backendDiag.storage_info ? `${backendDiag.storage_info.available_gb.toFixed(1)}G free / ${backendDiag.storage_info.total_gb.toFixed(1)}G (${backendDiag.storage_info.used_percent}%使用)` : null },
+                  { label: 'GPU', name: 'GPU 加速', ok: backendDiag.gpu, detail: backendDiag.gpu_info },
+                ]} />
 
-                {/* 分隔线 */}
+                {/* === 系统信息 === */}
+                {backendDiag.system && (
+                  <>
+                    <div className="border-t border-white/5" />
+                    <Section title="系统信息" items={[
+                      { label: 'OS', name: '操作系统', ok: true, detail: backendDiag.system.os, dim: true },
+                      { label: 'ARCH', name: '架构', ok: true, detail: backendDiag.system.arch, dim: true },
+                      { label: 'HOST', name: '主机名', ok: true, detail: backendDiag.system.hostname, dim: true },
+                    ]} />
+                  </>
+                )}
+
+                {/* === 运行时 === */}
+                {backendDiag.runtime && (
+                  <>
+                    <div className="border-t border-white/5" />
+                    <Section title="运行时" items={[
+                      { label: 'PID', name: '进程ID', ok: true, detail: String(backendDiag.runtime.pid), dim: true },
+                      { label: 'MODE', name: '运行模式', ok: true, detail: backendDiag.runtime.mobile_mode ? '📱 移动端' : '🖥️ 桌面端', dim: true },
+                      { label: 'VER', name: '算法版本', ok: true, detail: (backendDiag.runtime.algorithm_versions || []).join(', '), dim: true },
+                      { label: 'UP', name: '运行时长', ok: true, detail: formatUptime(backendDiag.runtime.uptime_seconds), dim: true },
+                    ]} />
+                  </>
+                )}
+
+                {/* === 进程资源 === */}
+                {backendDiag.process && (
+                  <>
+                    <div className="border-t border-white/5" />
+                    <Section title="进程资源" items={[
+                      { label: 'CPU', name: 'CPU占用', ok: (backendDiag.process.cpu_percent || 0) < 80, warn: (backendDiag.process.cpu_percent || 0) >= 80, detail: `${backendDiag.process.cpu_percent}%`, dim: true },
+                      { label: 'RSS', name: '内存占用', ok: (backendDiag.process.memory_mb || 0) < 1024, warn: (backendDiag.process.memory_mb || 0) >= 1024, detail: `${backendDiag.process.memory_mb}MB`, dim: true },
+                      { label: 'THR', name: '线程数', ok: true, detail: String(backendDiag.process.threads), dim: true },
+                      ...(backendDiag.process.fd_count != null ? [{ label: 'FD', name: '文件描述符', ok: true, detail: String(backendDiag.process.fd_count), dim: true }] : []),
+                    ]} />
+                  </>
+                )}
+
+                {/* === 目录状态 === */}
+                {backendDiag.directories && (
+                  <>
+                    <div className="border-t border-white/5" />
+                    <Section title="目录状态" items={[
+                      { label: 'UPLOAD', name: '上传目录', ok: true, detail: `${backendDiag.directories.upload_files} 文件`, dim: true },
+                      { label: 'OUTPUT', name: '输出目录', ok: true, detail: `${backendDiag.directories.output_files} 文件`, dim: true },
+                      { label: 'DECODED', name: '解码缓存', ok: true, detail: `${backendDiag.directories.decoded_files} 文件`, dim: true },
+                    ]} />
+                  </>
+                )}
+
                 <div className="border-t border-white/5" />
 
-                {/* 底部时间戳 */}
                 <div className="flex items-center gap-2 text-gray-700 text-[11px]">
                   <span>#</span>
                   <span>completed at {new Date().toLocaleTimeString('zh-CN', { hour12: false })}</span>
                 </div>
 
-                {/* 底部安全区：内容区实际高度的200% */}
                 {safePadding > 0 && <div style={{ height: safePadding }} aria-hidden="true" />}
               </div>
             ) : (
