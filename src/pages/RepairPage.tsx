@@ -8,7 +8,7 @@ import { ErrorBoundary } from '../components/ErrorBoundary';
 import { DownloadModal, DownloadFileInfo } from '../components/DownloadModal';
 import { RepairCacheModal } from '../components/RepairCacheModal';
 import { useAudioProcessor, generateExportFilename } from '../hooks/useAudioProcessor';
-import { uploadDualAudio, repairDualAudio, repairDualFromHash, getTrackStatus, getDownloadUrl, VocalRepairParams, InstrumentRepairParams, defaultVocalRepairParams, defaultInstrumentRepairParams } from '../services/backendApi';
+import { uploadDualAudio, repairDualAudio, repairDualFromHash, getDownloadUrl, connectProgressWS, WSProgressControl, VocalRepairParams, InstrumentRepairParams, defaultVocalRepairParams, defaultInstrumentRepairParams } from '../services/backendApi';
 import { useBackend } from '../contexts/BackendContext';
 import { saveSettings, loadSettings } from '../utils/settingsStorage';
 import { computeFileHash } from '../utils/fileHash';
@@ -133,6 +133,7 @@ export default function RepairPage() {
     return saved.dualTrackMixRatio ?? 0.5;
   });
   const pollRef = useRef<NodeJS.Timeout | null>(null);
+  const wsDualTrackRef = useRef<WSProgressControl | null>(null);
 
   const dualTrackHasFiles = dualTrackFilesSelected || (!!dualTrackVocalFileHash && !!dualTrackAccompanimentFileHash);
 
@@ -141,52 +142,57 @@ export default function RepairPage() {
       clearTimeout(pollRef.current);
       pollRef.current = null;
     }
+    if (wsDualTrackRef.current) {
+      wsDualTrackRef.current.close();
+      wsDualTrackRef.current = null;
+    }
   }, []);
 
   const startDualTrackPolling = useCallback((taskId: string) => {
     stopDualTrackPolling();
 
-    const poll = async () => {
-      try {
-        const status = await getTrackStatus(taskId);
-        setProcessingProgress(status.progress);
-        setProcessingStep(status.step);
-
-        if (status.status === 'completed') {
-          setIsProcessing(false);
-          setDualTrackProcessed(true);
-          setDualTrackRepairResult(status);
-          const downloadUrl = getDownloadUrl(taskId);
-          setDualTrackDownloadUrl(downloadUrl);
-          setTaskId(taskId);
-          try {
-            const buffer = await loadAudioFromUrl(downloadUrl, processingOptions.sampleRate, true);
-            setBackendProcessedBuffer(buffer);
-            setBackendWaveformPeaks(null);
-          } catch (e) {
-            console.error('加载双轨处理结果失败:', e);
-          }
-          try {
-            await renderAndDownload();
-          } catch (e) {
-            console.error('双轨渲染交付失败:', e);
-          }
-          // 渲染完成后触发缓存刷新
-          setCacheTriggerKey(k => k + 1);
-        } else if (status.status === 'error') {
-          setIsProcessing(false);
-          setBackendError(status.step || '双轨处理失败');
-        } else {
-          pollRef.current = setTimeout(poll, 1000);
+    wsDualTrackRef.current = connectProgressWS(taskId, {
+      onProgress: (event) => {
+        setProcessingProgress(event.progress);
+        setProcessingStep(event.step);
+      },
+      onComplete: async (status) => {
+        setIsProcessing(false);
+        sessionActions.setDualTrackProcessed(true);
+        setDualTrackRepairResult(status);
+        const downloadUrl = getDownloadUrl(taskId);
+        setDualTrackDownloadUrl(downloadUrl);
+        setTaskId(taskId);
+        try {
+          const buffer = await loadAudioFromUrl(downloadUrl, processingOptions.sampleRate, true);
+          setBackendProcessedBuffer(buffer);
+          setBackendWaveformPeaks(null);
+        } catch (e) {
+          console.error('加载双轨处理结果失败:', e);
         }
-      } catch (error) {
-        console.error('轮询双轨状态失败:', error);
-        pollRef.current = setTimeout(poll, 2000);
-      }
-    };
-
-    poll();
-  }, [stopDualTrackPolling, setProcessingProgress, setProcessingStep, setIsProcessing, setBackendError, loadAudioFromUrl, setBackendProcessedBuffer, processingOptions.sampleRate, renderAndDownload, setTaskId, sessionActions]);
+        try {
+          await renderAndDownload();
+        } catch (e) {
+          console.error('双轨渲染交付失败:', e);
+        }
+        setCacheTriggerKey(k => k + 1);
+      },
+      onError: (error) => {
+        setIsProcessing(false);
+        setBackendError(error.message || '双轨处理失败');
+      },
+      onStuck: (info) => {
+        setIsTaskStuck(true);
+        setStuckInfo(info);
+      },
+      onUnstuck: () => {
+        setIsTaskStuck(false);
+      },
+      onQueueUpdate: (queue) => {
+        setQueueStatus(queue);
+      },
+    });
+  }, [stopDualTrackPolling, setProcessingProgress, setProcessingStep, setIsProcessing, setBackendError, loadAudioFromUrl, setBackendProcessedBuffer, setBackendWaveformPeaks, setIsTaskStuck, setStuckInfo, setQueueStatus, processingOptions.sampleRate, renderAndDownload, setTaskId, sessionActions]);
 
   const handleDualTrackUpload = useCallback(async (vocalFile: File, accompanimentFile: File) => {
     try {
