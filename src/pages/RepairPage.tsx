@@ -172,12 +172,12 @@ export default function RepairPage() {
         <Header />
 
         <main className="container mx-auto px-4 py-6 max-w-6xl">
-          <div className="flex items-center justify-between mb-6">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-6">
             <div>
               <h1 className="text-2xl font-bold text-white">音频修复</h1>
               <p className="text-gray-400 text-sm mt-1">使用 AI 技术修复音频中的瑕疵</p>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               {isDualTrackMode && (
                 <button
                   onClick={handleSwitchToSingleTrack}

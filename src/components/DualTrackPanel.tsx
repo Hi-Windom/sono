@@ -202,12 +202,18 @@ export const DualTrackPanel: React.FC<DualTrackPanelProps> = ({
   const hasAccompaniment = !!accompanimentFileName;
   const bothUploaded = hasVocal && hasAccompaniment;
   const canRepair = bothUploaded && repairStatus === 'idle' && !isProcessing;
+  const waitingForAccompaniment = !!pendingVocal && !pendingAccompaniment && uploadStatus === 'idle';
+  const waitingForVocal = !!pendingAccompaniment && !pendingVocal && uploadStatus === 'idle';
+
+  const getVocalFileName = pendingVocal?.name || vocalFileName || '';
+  const getAccompanimentFileName = pendingAccompaniment?.name || accompanimentFileName || '';
 
   const UploadZone = ({
     label,
     icon,
     fileName,
     fileInfo,
+    pending,
     onChange,
     disabled,
   }: {
@@ -215,38 +221,62 @@ export const DualTrackPanel: React.FC<DualTrackPanelProps> = ({
     icon: string;
     fileName?: string;
     fileInfo?: { duration: number; sample_rate: number; channels: number } | null;
+    pending?: boolean;
     onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
     disabled?: boolean;
-  }) => (
-    <label className={`flex flex-col items-center justify-center w-full h-28 border-2 border-dashed rounded-lg cursor-pointer transition
-      ${fileName ? 'border-emerald-500/40 bg-emerald-500/5' : 'border-gray-600 hover:border-secondary/50 bg-black/20'}
-      ${disabled ? 'opacity-50 cursor-not-allowed' : ''}
-    `}>
-      <div className="flex flex-col items-center justify-center py-2 px-3 w-full">
-        {fileName ? (
-          <div className="w-full">
-            <div className="flex items-center gap-2 mb-1">
-              <span className="text-lg">{icon}</span>
-              <span className="text-xs text-gray-500 uppercase tracking-wider">{label}</span>
-            </div>
-            <div className="text-sm text-white truncate">{fileName}</div>
-            {fileInfo && (
-              <div className="text-[10px] text-gray-400 mt-0.5">
-                {fileInfo.duration.toFixed(1)}s · {fileInfo.sample_rate / 1000}kHz · {fileInfo.channels}ch
+  }) => {
+    const hasFile = !!fileName;
+    return (
+      <div className="relative">
+        <label className={`flex flex-col items-center justify-center w-full h-28 border-2 border-dashed rounded-lg cursor-pointer transition
+          ${hasFile ? 'border-emerald-500/40 bg-emerald-500/5' : 'border-gray-600 hover:border-secondary/50 bg-black/20'}
+          ${disabled ? 'opacity-50 cursor-not-allowed' : ''}
+        `}>
+          <div className="flex flex-col items-center justify-center py-2 px-3 w-full h-full">
+            {hasFile ? (
+              <div className="w-full">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-lg">{icon}</span>
+                  <span className="text-xs text-gray-500 uppercase tracking-wider">{label}</span>
+                  {pending && <span className="text-[10px] text-amber-400 ml-auto">待上传</span>}
+                </div>
+                <div className="text-sm text-white truncate">{fileName}</div>
+                {fileInfo && (
+                  <div className="text-[10px] text-gray-400 mt-0.5">
+                    {fileInfo.duration.toFixed(1)}s · {fileInfo.sample_rate / 1000}kHz · {fileInfo.channels}ch
+                  </div>
+                )}
               </div>
+            ) : (
+              <>
+                <div className="text-2xl mb-1">{icon}</div>
+                <p className="text-xs text-gray-400">{label}</p>
+                <p className="text-[10px] text-gray-500 mt-0.5">点击选择音频文件</p>
+              </>
             )}
           </div>
-        ) : (
-          <>
-            <div className="text-2xl mb-1">{icon}</div>
-            <p className="text-xs text-gray-400">{label}</p>
-            <p className="text-[10px] text-gray-500 mt-0.5">点击选择音频文件</p>
-          </>
+          <input type="file" accept="audio/*" onChange={onChange} className="hidden" disabled={disabled} />
+        </label>
+        {hasFile && !disabled && (
+          <div className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-gray-700 hover:bg-gray-600 rounded-full flex items-center justify-center cursor-pointer"
+            onClick={(e) => {
+              e.preventDefault();
+              if (pending) {
+                setPendingVocal(null);
+                setPendingAccompaniment(null);
+              } else {
+                handleReset();
+              }
+            }}
+          >
+            <svg className="w-3 h-3 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </div>
         )}
       </div>
-      <input type="file" accept="audio/*" onChange={onChange} className="hidden" disabled={disabled} />
-    </label>
-  );
+    );
+  };
 
   return (
     <div className="bg-gradient-to-br from-primary/80 to-dark/80 rounded-xl p-5 border border-secondary/20">
@@ -267,20 +297,26 @@ export const DualTrackPanel: React.FC<DualTrackPanelProps> = ({
         )}
       </div>
 
-      {uploadStatus === 'idle' && (
-        <div className="grid grid-cols-2 gap-3 mb-4">
-          <UploadZone
-            label="人声轨"
-            icon="🎤"
-            onChange={handleVocalSelect}
-          />
-          <UploadZone
-            label="伴奏轨"
-            icon="🎹"
-            onChange={handleAccompanimentSelect}
-          />
-        </div>
-      )}
+      <div className="grid grid-cols-2 gap-3 mb-4">
+        <UploadZone
+          label="人声轨"
+          icon="🎤"
+          fileName={getVocalFileName}
+          fileInfo={vocalInfo}
+          pending={waitingForAccompaniment}
+          onChange={handleVocalSelect}
+          disabled={isProcessing}
+        />
+        <UploadZone
+          label="伴奏轨"
+          icon="🎹"
+          fileName={getAccompanimentFileName}
+          fileInfo={accompanimentInfo}
+          pending={waitingForVocal}
+          onChange={handleAccompanimentSelect}
+          disabled={isProcessing}
+        />
+      </div>
 
       {uploadStatus === 'uploading' && (
         <div className="mb-4">
@@ -297,39 +333,21 @@ export const DualTrackPanel: React.FC<DualTrackPanelProps> = ({
         </div>
       )}
 
-      {uploadStatus === 'done' && (
-        <div className="grid grid-cols-2 gap-3 mb-4">
-          <UploadZone
-            label="人声轨"
-            icon="🎤"
-            fileName={vocalFileName}
-            fileInfo={vocalInfo}
-            onChange={handleVocalSelect}
-          />
-          <UploadZone
-            label="伴奏轨"
-            icon="🎹"
-            fileName={accompanimentFileName}
-            fileInfo={accompanimentInfo}
-            onChange={handleAccompanimentSelect}
-          />
+      {uploadStatus === 'error' && !bothUploaded && (
+        <div className="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-sm text-red-400">
+          {repairError || '上传失败，请重试'}
         </div>
       )}
 
-      {uploadStatus === 'error' && (
-        <div className="grid grid-cols-2 gap-3 mb-4">
-          <UploadZone
-            label="人声轨"
-            icon="🎤"
-            fileName={vocalFileName}
-            onChange={handleVocalSelect}
-          />
-          <UploadZone
-            label="伴奏轨"
-            icon="🎹"
-            fileName={accompanimentFileName}
-            onChange={handleAccompanimentSelect}
-          />
+      {waitingForAccompaniment && (
+        <div className="mb-4 p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg text-sm text-amber-400 text-center">
+          人声轨已选择，请选择伴奏轨
+        </div>
+      )}
+
+      {waitingForVocal && (
+        <div className="mb-4 p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg text-sm text-amber-400 text-center">
+          伴奏轨已选择，请选择人声轨
         </div>
       )}
 
