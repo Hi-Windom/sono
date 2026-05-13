@@ -5,7 +5,7 @@ import { parseWavHeader, WavInfo } from '../utils/wavParser';
 import { saveSession, loadSession, clearSession, saveAnalysisCache } from '../utils/sessionDB';
 import { computeFileHash } from '../utils/fileHash';
 import { useAudioWorker } from '../workers/useAudioWorker';
-import { useRepairSessionStore } from '../store/repairSessionStore';
+import { useRepairSessionStore, hydrationComplete } from '../store/repairSessionStore';
 import {
   uploadAudio,
   repairAudio,
@@ -210,7 +210,8 @@ export function useAudioProcessor() {
   const sessionRestoredRef = useRef(false);
   const restoreSeqRef = useRef(0);
   const forceReRepairRef = useRef(false);
-  const forceRenderRef = useRef(false); // 全新修复后强制重新渲染，跳过旧渲染缓存
+  const forceRenderRef = useRef(false);
+  const renderActiveRef = useRef(false);
   const streamingAudioRef = useRef<HTMLAudioElement | null>(null);
   const mediaSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
   const playRef = useRef<(() => void) | null>(null);
@@ -448,7 +449,7 @@ export function useAudioProcessor() {
   useEffect(() => {
     if (sessionRestoredRef.current || !backendAvailable) return;
 
-    if (!useRepairSessionStore.persist.hasHydrated()) {
+    if (!hydrationComplete) {
       writeLog('[useAudioProcessor] 等待 session store 水合...');
       return;
     }
@@ -1298,16 +1299,20 @@ export function useAudioProcessor() {
 
       if (backendResult && taskIdRef.current) {
         forceRenderRef.current = true;
-        const currentOpts = { ...processingOptions };
-        renderAndDownload(currentOpts).then(result => {
-          if (result?.downloadUrl) {
-            setRenderDownloadUrl(result.downloadUrl);
-          }
-          setShowDownloadModal(true);
-        }).catch(err => {
-          writeLog(`[applySettings] 自动渲染失败: ${err}`);
-          setShowDownloadModal(true);
-        });
+        if (renderActiveRef.current) {
+          writeLog('[applySettings] renderAndDownload 已在进行，跳过');
+        } else {
+          const currentOpts = { ...processingOptions };
+          renderAndDownload(currentOpts).then(result => {
+            if (result?.downloadUrl) {
+              setRenderDownloadUrl(result.downloadUrl);
+            }
+            setShowDownloadModal(true);
+          }).catch(err => {
+            writeLog(`[applySettings] 自动渲染失败: ${err}`);
+            setShowDownloadModal(true);
+          });
+        }
       }
     }
 
@@ -1787,6 +1792,12 @@ export function useAudioProcessor() {
   }, [stopPlaying, getAudioContext]);
 
   const renderAndDownload = useCallback(async (overrideOptions?: ProcessingOptions) => {
+    if (renderActiveRef.current) {
+      writeLog('[renderAndDownload] 已有渲染在进行中，跳过');
+      return null;
+    }
+    renderActiveRef.current = true;
+
     const opts = overrideOptions || processingOptionsRef.current;
     const algoVer = algorithmVersionRef.current;
     const fileName = generateExportFilename(audioFile?.name, algoVer, opts.sampleRate, opts.bitDepth);
@@ -1806,6 +1817,7 @@ export function useAudioProcessor() {
             channels: 2,
           };
           setAutoRenderInfo(renderInfo);
+          renderActiveRef.current = false;
           return {
             downloadUrl: `/api/v1/download-file/${hit.filename}`,
             fileName,
@@ -1852,6 +1864,7 @@ export function useAudioProcessor() {
       setProcessingSource(null);
       setProcessingProgress(0);
       setIsProcessing(false);
+      renderActiveRef.current = false;
       return {
         downloadUrl: `/api/v1/download-file/${renderRes.render_filename}`,
         fileName,
@@ -1866,6 +1879,7 @@ export function useAudioProcessor() {
       setProcessingStep('');
       setProcessingSource(null);
       setProcessingProgress(0);
+      renderActiveRef.current = false;
       return null;
     }
   }, [audioFile]);

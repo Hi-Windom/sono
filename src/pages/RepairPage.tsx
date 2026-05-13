@@ -467,12 +467,14 @@ export default function RepairPage() {
 
   if (!sessionHydrated) {
     return (
+      <ErrorBoundary>
       <div className="min-h-screen bg-dark flex items-center justify-center">
         <div className="flex flex-col items-center gap-3">
           <div className="w-8 h-8 rounded-full border-2 border-cyan-400 border-t-transparent animate-spin" />
           <span className="text-gray-400 text-sm">恢复会话状态...</span>
         </div>
       </div>
+      </ErrorBoundary>
     );
   }
 

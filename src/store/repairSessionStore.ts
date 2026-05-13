@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 
 interface RepairSessionState {
   isDualTrackMode: boolean;
@@ -109,18 +109,30 @@ export const useRepairSessionStore = create<RepairSessionState>()(
   ),
 );
 
+export let hydrationComplete = false;
+
+useRepairSessionStore.persist.onFinishHydration(() => {
+  hydrationComplete = true;
+  hydrationListeners.forEach(l => l());
+});
+
 export function useRepairSessionHydrated(): boolean {
-  const [hydrated, setHydrated] = useState(() => useRepairSessionStore.persist.hasHydrated());
+  if (typeof window === 'undefined') return true;
+
+  const [hydrated, setHydrated] = useState(hydrationComplete);
 
   useEffect(() => {
-    if (useRepairSessionStore.persist.hasHydrated()) {
+    if (hydrationComplete) {
       setHydrated(true);
       return;
     }
-    const unsubFinish = useRepairSessionStore.persist.onFinishHydration(() => {
+    const listener = () => {
       setHydrated(true);
-    });
-    return unsubFinish;
+    };
+    hydrationListeners.add(listener);
+    return () => {
+      hydrationListeners.delete(listener);
+    };
   }, []);
 
   return hydrated;
