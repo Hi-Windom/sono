@@ -1,4 +1,4 @@
-import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
+import { createBrowserRouter, RouterProvider, Outlet } from "react-router-dom";
 import LandingPage from "@/pages/LandingPage";
 import RepairPage from "@/pages/RepairPage";
 import TrainingUploadPage from "@/pages/TrainingUploadPage";
@@ -93,33 +93,38 @@ function GlobalErrorHandler() {
   return null;
 }
 
-function AppRoutes() {
+function RootLayout() {
   return (
     <>
       <VConsoleInit />
       <GlobalErrorHandler />
-      <Routes>
-        <Route path="/" element={<LandingPage />} />
-        <Route path="/repair" element={<RepairPage />} />
-        <Route path="/training-upload" element={<TrainingUploadPage />} />
-        <Route path="/quality-tests" element={<QualityTestPage />} />
-        <Route path="/profile-manager" element={<ProfileManagerPage />} />
-        <Route path="/cache-manager" element={<CacheManagerPage />} />
-        <Route path="/compare" element={<ComparePage />} />
-        <Route path="/detect" element={<DetectPage />} />
-        <Route path="/flow" element={<FlowVisualizationPage />} />
-      </Routes>
+      <Outlet />
       <BuildInfo />
     </>
   );
 }
 
+const router = createBrowserRouter([
+  {
+    element: <RootLayout />,
+    children: [
+      { path: "/", element: <LandingPage /> },
+      { path: "/repair", element: <RepairPage /> },
+      { path: "/training-upload", element: <TrainingUploadPage /> },
+      { path: "/quality-tests", element: <QualityTestPage /> },
+      { path: "/profile-manager", element: <ProfileManagerPage /> },
+      { path: "/cache-manager", element: <CacheManagerPage /> },
+      { path: "/compare", element: <ComparePage /> },
+      { path: "/detect", element: <DetectPage /> },
+      { path: "/flow", element: <FlowVisualizationPage /> },
+    ],
+  },
+]);
+
 export default function App() {
   return (
     <BackendProvider>
-      <Router>
-        <AppRoutes />
-      </Router>
+      <RouterProvider router={router} />
     </BackendProvider>
   );
 }
