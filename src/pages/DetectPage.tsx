@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useBlocker } from 'react-router-dom';
 import { Header } from '../components/Header';
 import { ErrorBoundary } from '../components/ErrorBoundary';
+import { LeaveConfirmModal } from '../components/LeaveConfirmModal';
 import { AIDetectionCard } from '../components/AIDetectionComparison';
 import { AISongDetectionResult } from '../utils/aiSongChecker';
 import {
@@ -67,7 +68,7 @@ function getFileTypeLabel(t: string): string {
 }
 
 export default function DetectPage() {
-  const navigate = useNavigate();
+  const { backendAvailable: globalBackendAvailable } = useBackend();
   const [slotA, setSlotA] = useState<DetectSlotState>(createEmptySlot());
   const [slotB, setSlotB] = useState<DetectSlotState>(createEmptySlot());
   const [serverFiles, setServerFiles] = useState<AudioFileInfo[]>([]);
@@ -76,6 +77,31 @@ export default function DetectPage() {
   const [detectorVersion, setDetectorVersion] = useState('v1.1');
   const [detectorVersions, setDetectorVersions] = useState<DetectorVersion[]>([]);
   const wsControlRef = useRef<{ a: ReturnType<typeof connectProgressWS> | null; b: ReturnType<typeof connectProgressWS> | null }>({ a: null, b: null });
+  const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
+
+  const isDetecting = slotA.status === 'uploading' || slotA.status === 'detecting' || slotB.status === 'uploading' || slotB.status === 'detecting';
+
+  const blocker = useBlocker(
+    ({ currentLocation, nextLocation }) =>
+      isDetecting &&
+      currentLocation.pathname !== nextLocation.pathname
+  );
+
+  useEffect(() => {
+    if (blocker.state === 'blocked') {
+      setShowLeaveConfirm(true);
+    }
+  }, [blocker]);
+
+  useEffect(() => {
+    const handler = (e: BeforeUnloadEvent) => {
+      if (isDetecting) {
+        e.preventDefault();
+      }
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [isDetecting]);
 
   useEffect(() => {
     fetchDetectorVersions()
@@ -421,17 +447,6 @@ export default function DetectPage() {
         <Header />
 
         <div className="container mx-auto px-4 max-w-5xl mt-4">
-          <div className="flex items-center gap-3 mb-6">
-            <button
-              onClick={() => navigate('/')}
-              className="flex items-center gap-2 text-gray-400"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-              </svg>
-              <span>返回首页</span>
-            </button>
-          </div>
 
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-white font-bold text-xl">AI检测分析</h2>
@@ -476,6 +491,29 @@ export default function DetectPage() {
         </div>
 
         {renderServerPicker()}
+
+        {showLeaveConfirm && (
+          <LeaveConfirmModal
+            isOpen={showLeaveConfirm}
+            onConfirm={() => {
+              setShowLeaveConfirm(false);
+              blocker.proceed?.();
+            }}
+            onCancel={() => {
+              setShowLeaveConfirm(false);
+              blocker.reset?.();
+            }}
+            title="离开检测页面"
+            tasks={[
+              ...(slotA.status === 'uploading' || slotA.status === 'detecting'
+                ? [{ name: '音频 A 检测', step: slotA.step || '检测中', progress: slotA.progress }]
+                : []),
+              ...(slotB.status === 'uploading' || slotB.status === 'detecting'
+                ? [{ name: '音频 B 检测', step: slotB.step || '检测中', progress: slotB.progress }]
+                : []),
+            ]}
+          />
+        )}
       </div>
     </ErrorBoundary>
   );

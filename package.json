@@ -14,7 +14,9 @@
     "test:ui": "vitest"
   },
   "dependencies": {
+    "@types/dagre": "^0.7.54",
     "clsx": "^2.1.1",
+    "dagre": "^0.8.5",
     "lamejs": "^1.2.1",
     "lucide-react": "^0.511.0",
     "react": "^18.3.1",

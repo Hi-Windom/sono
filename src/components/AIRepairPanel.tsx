@@ -177,28 +177,28 @@ export function AIRepairPanel({
       setMemoryInfo(null);
       return;
     }
-    const fetchDuration = duration > 0 ? duration : 300;
-    const fetchChannels = channels > 0 ? channels : 2;
+    const fetchDuration = effectiveDuration > 0 ? effectiveDuration : 300;
+    const fetchChannels = effectiveChannels > 0 ? effectiveChannels : 2;
     if (memoryFetchRef.current) clearTimeout(memoryFetchRef.current);
     memoryFetchRef.current = setTimeout(() => {
       fetchMemoryInfo(fetchDuration, fetchChannels, processingOptions.sampleRate, algorithmVersion).then(setMemoryInfo);
     }, 300);
     return () => { if (memoryFetchRef.current) clearTimeout(memoryFetchRef.current); };
-  }, [duration, channels, processingOptions.sampleRate, algorithmVersion, backendAvailable]);
+  }, [effectiveDuration, effectiveChannels, processingOptions.sampleRate, algorithmVersion, backendAvailable]);
 
   useEffect(() => {
     if (!backendAvailable) {
       setStorageEstimate(null);
       return;
     }
-    const fetchDuration = duration > 0 ? duration : 300;
-    const fetchChannels = channels > 0 ? channels : 2;
+    const fetchDuration = effectiveDuration > 0 ? effectiveDuration : 300;
+    const fetchChannels = effectiveChannels > 0 ? effectiveChannels : 2;
     if (storageFetchRef.current) clearTimeout(storageFetchRef.current);
     storageFetchRef.current = setTimeout(() => {
       fetchStorageEstimate(fetchDuration, fetchChannels, processingOptions.sampleRate, processingOptions.bitDepth).then(setStorageEstimate);
     }, 300);
     return () => { if (storageFetchRef.current) clearTimeout(storageFetchRef.current); };
-  }, [duration, channels, processingOptions.sampleRate, processingOptions.bitDepth, backendAvailable]);
+  }, [effectiveDuration, effectiveChannels, processingOptions.sampleRate, processingOptions.bitDepth, backendAvailable]);
 
   // 查询渲染交付规格缓存（算法版本变化/修复完成时也会刷新）
   const refreshRenderCache = useCallback(async () => {
@@ -597,8 +597,10 @@ export function AIRepairPanel({
                 {allEstimates.length > 0 ? allEstimates.map((est) => {
                   const isCurrent = est.sampleRate === processingOptions.sampleRate && est.bitDepth === processingOptions.bitDepth;
                   const cacheKey = `${est.sampleRate}-${est.bitDepth}`;
-                  // 只匹配当前算法版本的缓存
-                  const renderCache = renderCaches.find(c => c.sample_rate === est.sampleRate && c.bit_depth === est.bitDepth && c.algorithm_version === algorithmVersion);
+                  const renderCachesForSrBd = renderCaches.filter(
+                    c => c.sample_rate === est.sampleRate && c.bit_depth === est.bitDepth && c.algorithm_version === algorithmVersion
+                  );
+                  const renderCache = renderCachesForSrBd.find(c => c.is_merged || c.track_type === 'both') || renderCachesForSrBd[0];
                   const isCached = !!renderCache;
                   return (
                     <div

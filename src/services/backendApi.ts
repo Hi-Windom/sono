@@ -778,6 +778,42 @@ export async function lookupRepairCache(fileHash: string, params: Record<string,
   }
 }
 
+export interface DualRepairCacheLookupResult {
+  found: boolean;
+  task_id?: string;
+  output_path?: string;
+  output_size?: number;
+  repair_result?: BackendRepairResult;
+  detection_result?: BackendDetectionResult;
+  repaired_detection_result?: BackendDetectionResult;
+}
+
+export async function lookupDualRepairCache(
+  vocalFileHash: string,
+  accompanimentFileHash: string,
+  params: Record<string, unknown>
+): Promise<DualRepairCacheLookupResult> {
+  const url = `${API_BASE}/cache/lookup-dual`;
+  log('cache-lookup-dual', `POST ${url} vocal_hash=${vocalFileHash.slice(0, 12)} acc_hash=${accompanimentFileHash.slice(0, 12)}`);
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ vocal_file_hash: vocalFileHash, accompaniment_file_hash: accompanimentFileHash, params }),
+    });
+    if (!res.ok) {
+      log('cache-lookup-dual', `ERROR HTTP ${res.status}`);
+      return { found: false };
+    }
+    const data = await res.json();
+    log('cache-lookup-dual', `result: found=${data.found} output_size=${data.output_size || 0}`);
+    return data;
+  } catch (e) {
+    log('cache-lookup-dual', `FAILED: ${e instanceof Error ? e.message : String(e)}`);
+    return { found: false };
+  }
+}
+
 const DEFAULT_TERMINAL_STATES = new Set(['completed', 'detected', 'error', 'timeout']);
 
 // 轮询配置
@@ -1130,6 +1166,8 @@ export interface RenderCacheEntry {
   size: number;
   mtime: string;
   algorithm_version: string;
+  is_merged?: boolean;
+  track_type?: string;
 }
 
 export async function fetchRenderCache(taskId: string): Promise<RenderCacheEntry[]> {

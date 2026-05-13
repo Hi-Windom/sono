@@ -1,23 +1,46 @@
+import dagre from 'dagre';
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { Header } from '../components/Header';
 import type { FlowData, FlowNode, FlowEdge } from '../types/flow';
 
-const LAYER_COLORS: Record<string, { bg: string; border: string; text: string }> = {
-  frontend: { bg: 'rgba(6,182,212,0.15)', border: 'rgba(6,182,212,0.5)', text: '#22d3ee' },
-  backend: { bg: 'rgba(52,211,153,0.15)', border: 'rgba(52,211,153,0.5)', text: '#34d399' },
-  shared: { bg: 'rgba(148,163,184,0.15)', border: 'rgba(148,163,184,0.5)', text: '#94a3b8' },
-};
-
 const NODE_W = 170;
 const NODE_H = 48;
-const H_GAP = 30;
-const V_GAP = 25;
-const LAYER_GAP = 80;
-const PADDING = 40;
+const LAYER_ORDER = ['frontend', 'shared', 'backend'];
 
-interface LayoutNode extends FlowNode {
-  x: number;
-  y: number;
+const LAYER_COLORS: Record<string, { bg: string; border: string; text: string; fill: string }> = {
+  frontend: { bg: 'rgba(6,182,212,0.15)', border: 'rgba(6,182,212,0.5)', text: '#22d3ee', fill: 'rgba(6,182,212,0.06)' },
+  backend: { bg: 'rgba(52,211,153,0.15)', border: 'rgba(52,211,153,0.5)', text: '#34d399', fill: 'rgba(52,211,153,0.06)' },
+  shared: { bg: 'rgba(148,163,184,0.15)', border: 'rgba(148,163,184,0.5)', text: '#94a3b8', fill: 'rgba(148,163,184,0.06)' },
+};
+
+const LAYER_LABELS: Record<string, string> = {
+  frontend: '前端层',
+  backend: '后端层',
+  shared: '共享层',
+};
+
+function orthogonalPath(points: Array<{ x: number; y: number }>, r = 4): string {
+  if (points.length < 2) return '';
+  let d = `M ${points[0].x} ${points[0].y}`;
+  for (let i = 1; i < points.length - 1; i++) {
+    const p = points[i - 1], c = points[i], n = points[i + 1];
+    const dx1 = c.x - p.x, dy1 = c.y - p.y;
+    const dx2 = n.x - c.x, dy2 = n.y - c.y;
+    const len1 = Math.sqrt(dx1 * dx1 + dy1 * dy1);
+    const len2 = Math.sqrt(dx2 * dx2 + dy2 * dy2);
+    if (len1 < 0.01 || len2 < 0.01) { d += ` L ${c.x} ${c.y}`; continue; }
+    const cr = Math.min(r, len1 / 2, len2 / 2);
+    const sx = c.x - (dx1 / len1) * cr, sy = c.y - (dy1 / len1) * cr;
+    const ex = c.x + (dx2 / len2) * cr, ey = c.y + (dy2 / len2) * cr;
+    d += ` L ${sx} ${sy} Q ${c.x} ${c.y} ${ex} ${ey}`;
+  }
+  const last = points[points.length - 1];
+  d += ` L ${last.x} ${last.y}`;
+  return d;
+}
+
+function getLayerColor(layer: string) {
+  return LAYER_COLORS[layer] || LAYER_COLORS.shared;
 }
 
 export default function FlowVisualizationPage() {
@@ -27,11 +50,16 @@ export default function FlowVisualizationPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [layerFilter, setLayerFilter] = useState<'all' | 'frontend' | 'backend' | 'shared'>('all');
   const [selectedNode, setSelectedNode] = useState<FlowNode | null>(null);
-  const [transform, setTransform] = useState({ x: 0, y: 0, scale: 1 });
+  const [expandedParents, setExpandedParents] = useState<Set<string>>(new Set());
+  const [transform, setTransform] = useState({ x: 40, y: 40, scale: 1 });
   const [isPanning, setIsPanning] = useState(false);
   const [panStart, setPanStart] = useState({ x: 0, y: 0 });
+
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const layoutVersionRef = useRef(0);
+  const [layoutVersion, setLayoutVersion] = useState(0);
+  const isInitialLayoutRef = useRef(true);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -41,6 +69,13 @@ export default function FlowVisualizationPage() {
         if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
         const data: FlowData = await res.json();
         setFlowData(data);
+        const parents = new Set<string>();
+        for (const node of data.nodes) {
+          if (node.children && node.children.length > 0) {
+            parents.add(node.id);
+          }
+        }
+        setExpandedParents(parents);
       } catch (err) {
         setError(err instanceof Error ? err.message : '加载流程数据失败');
       } finally {
@@ -80,75 +115,146 @@ export default function FlowVisualizationPage() {
     return nodes;
   }, [flowData, layerFilter, searchQuery]);
 
-  const layoutNodes = useMemo(() => {
-    const layers = ['frontend', 'shared', 'backend'];
-    const grouped: Record<string, FlowNode[]> = {};
-    for (const l of layers) {
-      grouped[l] = filteredNodes.filter(n => n.layer === l);
-    }
-
-    const result: LayoutNode[] = [];
-    let currentY = PADDING;
-
-    for (const layer of layers) {
-      const nodes = grouped[layer];
-      if (nodes.length === 0) continue;
-
-      let currentX = PADDING;
-      let rowMaxY = currentY;
-
-      for (const node of nodes) {
-        if (currentX + NODE_W > 1200 - PADDING) {
-          currentX = PADDING;
-          currentY = rowMaxY + V_GAP;
+  const visibleNodeIds = useMemo(() => {
+    const visible = new Set<string>();
+    for (const node of filteredNodes) {
+      visible.add(node.id);
+      if (node.children && node.children.length > 0 && !expandedParents.has(node.id)) {
+        for (const childId of node.children) {
+          visible.delete(childId);
         }
-        result.push({ ...node, x: currentX, y: currentY });
-        currentX += NODE_W + H_GAP;
-        rowMaxY = Math.max(rowMaxY, currentY + NODE_H);
       }
+    }
+    return visible;
+  }, [filteredNodes, expandedParents]);
 
-      currentY = rowMaxY + LAYER_GAP;
+  const visibleNodes = useMemo(() => {
+    return filteredNodes.filter(n => visibleNodeIds.has(n.id));
+  }, [filteredNodes, visibleNodeIds]);
+
+  const layoutData = useMemo(() => {
+    if (!flowData || visibleNodes.length === 0) {
+      return { nodePositions: new Map<string, { x: number; y: number }>(), edgePoints: [], layerBounds: new Map<string, { minX: number; minY: number; maxX: number; maxY: number }>() };
     }
 
-    return result;
-  }, [filteredNodes]);
+    const g = new dagre.graphlib.Graph({ directed: true, compound: true, multigraph: false });
+    g.setGraph({ rankdir: 'TB', nodesep: 40, ranksep: 100, marginx: 40, marginy: 40 });
+    g.setDefaultEdgeLabel(() => ({}));
 
-  const nodeMap = useMemo(() => {
-    const map = new Map<string, LayoutNode>();
-    for (const n of layoutNodes) {
-      map.set(n.id, n);
+    for (const layer of LAYER_ORDER) {
+      g.setNode(`layer-${layer}`, { width: 0, height: 0 });
     }
-    return map;
-  }, [layoutNodes]);
+
+    for (const node of visibleNodes) {
+      g.setNode(node.id, { width: NODE_W, height: NODE_H });
+      g.setParent(node.id, `layer-${node.layer}`);
+    }
+
+    for (const edge of flowData.edges) {
+      if (visibleNodeIds.has(edge.source) && visibleNodeIds.has(edge.target)) {
+        g.setEdge(edge.source, edge.target, {});
+      }
+    }
+
+    dagre.layout(g);
+
+    const nodePositions = new Map<string, { x: number; y: number }>();
+    for (const node of visibleNodes) {
+      const pos = g.node(node.id);
+      if (pos) {
+        nodePositions.set(node.id, {
+          x: pos.x - NODE_W / 2,
+          y: pos.y - NODE_H / 2,
+        });
+      }
+    }
+
+    const layerAvgY = new Map<string, number>();
+    const layerCount = new Map<string, number>();
+    for (const node of visibleNodes) {
+      const pos = nodePositions.get(node.id);
+      if (!pos) continue;
+      layerAvgY.set(node.layer, (layerAvgY.get(node.layer) || 0) + pos.y);
+      layerCount.set(node.layer, (layerCount.get(node.layer) || 0) + 1);
+    }
+    for (const layer of LAYER_ORDER) {
+      const count = layerCount.get(layer) || 0;
+      if (count > 0) {
+        layerAvgY.set(layer, (layerAvgY.get(layer) || 0) / count);
+      }
+    }
+    for (const node of visibleNodes) {
+      const pos = nodePositions.get(node.id);
+      if (!pos) continue;
+      const avgY = layerAvgY.get(node.layer);
+      if (avgY !== undefined) {
+        pos.y = avgY;
+      }
+    }
+
+    const edgePoints: Array<{ edge: FlowEdge; points: Array<{ x: number; y: number }> }> = [];
+    for (const edge of flowData.edges) {
+      if (visibleNodeIds.has(edge.source) && visibleNodeIds.has(edge.target)) {
+        const ep = g.edge(edge.source, edge.target);
+        if (ep && ep.points && ep.points.length >= 2) {
+          edgePoints.push({ edge, points: ep.points });
+        }
+      }
+    }
+
+    const layerBounds = new Map<string, { minX: number; minY: number; maxX: number; maxY: number }>();
+    for (const layer of LAYER_ORDER) {
+      const layerNodes = visibleNodes.filter(n => n.layer === layer);
+      if (layerNodes.length === 0) continue;
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (const node of layerNodes) {
+        const pos = nodePositions.get(node.id);
+        if (!pos) continue;
+        minX = Math.min(minX, pos.x);
+        minY = Math.min(minY, pos.y);
+        maxX = Math.max(maxX, pos.x + NODE_W);
+        maxY = Math.max(maxY, pos.y + NODE_H);
+      }
+      const pad = 24;
+      layerBounds.set(layer, {
+        minX: minX - pad,
+        minY: minY - pad,
+        maxX: maxX + pad,
+        maxY: maxY + pad,
+      });
+    }
+
+    layoutVersionRef.current += 1;
+
+    return { nodePositions, edgePoints, layerBounds };
+  }, [flowData, visibleNodes, visibleNodeIds]);
+
+  useEffect(() => {
+    if (layoutVersionRef.current > 0 && isInitialLayoutRef.current) {
+      isInitialLayoutRef.current = false;
+    }
+    setLayoutVersion(layoutVersionRef.current);
+  }, [layoutData]);
 
   const visibleEdges = useMemo(() => {
     if (!flowData) return [];
-    return flowData.edges.filter(e => nodeMap.has(e.source) && nodeMap.has(e.target));
-  }, [flowData, nodeMap]);
+    return flowData.edges.filter(e => visibleNodeIds.has(e.source) && visibleNodeIds.has(e.target));
+  }, [flowData, visibleNodeIds]);
 
-  const renderEdge = (edge: FlowEdge, idx: number) => {
-    const src = nodeMap.get(edge.source);
-    const tgt = nodeMap.get(edge.target);
-    if (!src || !tgt) return null;
-
-    const x1 = src.x + NODE_W / 2;
-    const y1 = src.y + NODE_H;
-    const x2 = tgt.x + NODE_W / 2;
-    const y2 = tgt.y;
-
-    const cy = (y1 + y2) / 2;
-    const path = `M ${x1} ${y1} Q ${x1} ${cy} ${(x1 + x2) / 2} ${cy} Q ${x2} ${cy} ${x2} ${y2}`;
-
-    return (
-      <g key={`edge-${idx}`}>
-        <path d={path} fill="none" stroke="rgba(148,163,184,0.25)" strokeWidth="1.5" />
-        <polygon
-          points={`${x2 - 4},${y2} ${x2 + 4},${y2} ${x2},${y2 + 6}`}
-          fill="rgba(148,163,184,0.35)"
-        />
-      </g>
-    );
-  };
+  const handleNodeClick = useCallback((node: FlowNode) => {
+    setSelectedNode(node);
+    if (node.children && node.children.length > 0) {
+      setExpandedParents(prev => {
+        const next = new Set(prev);
+        if (next.has(node.id)) {
+          next.delete(node.id);
+        } else {
+          next.add(node.id);
+        }
+        return next;
+      });
+    }
+  }, []);
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     if (e.button === 0) {
@@ -171,9 +277,29 @@ export default function FlowVisualizationPage() {
     setIsPanning(false);
   }, []);
 
-  const getNodeLayerColor = (node: FlowNode) => {
-    return LAYER_COLORS[node.layer] || LAYER_COLORS.shared;
-  };
+  const focusOnNode = useCallback((node: FlowNode) => {
+    const pos = layoutData.nodePositions.get(node.id);
+    if (!pos || !containerRef.current) return;
+    const containerRect = containerRef.current.getBoundingClientRect();
+    const cx = containerRect.width / 2;
+    const cy = containerRect.height / 2;
+    const targetX = cx - (pos.x + NODE_W / 2) * transform.scale;
+    const targetY = cy - (pos.y + NODE_H / 2) * transform.scale;
+    setTransform(prev => ({
+      ...prev,
+      x: targetX,
+      y: targetY,
+    }));
+  }, [layoutData, transform.scale]);
+
+  useEffect(() => {
+    if (selectedNode) {
+      const timer = setTimeout(() => {
+        focusOnNode(selectedNode);
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [selectedNode, focusOnNode]);
 
   if (loading) {
     return (
@@ -205,6 +331,15 @@ export default function FlowVisualizationPage() {
         </div>
       </div>
     );
+  }
+
+  const parentNodes = new Set<string>();
+  if (flowData) {
+    for (const node of flowData.nodes) {
+      if (node.children && node.children.length > 0) {
+        parentNodes.add(node.id);
+      }
+    }
   }
 
   return (
@@ -261,7 +396,7 @@ export default function FlowVisualizationPage() {
             </div>
 
             <div className="text-xs text-gray-500 whitespace-nowrap">
-              {filteredNodes.length} 节点 · {visibleEdges.length} 边
+              {visibleNodes.length} 节点 · {visibleEdges.length} 边
             </div>
           </div>
         </div>
@@ -278,47 +413,154 @@ export default function FlowVisualizationPage() {
             onMouseUp={handleMouseUp}
             onMouseLeave={handleMouseUp}
           >
-            <g transform={`translate(${transform.x},${transform.y}) scale(${transform.scale})`}>
-              {visibleEdges.map((edge, idx) => renderEdge(edge, idx))}
+            <defs>
+              <filter id="node-glow" x="-50%" y="-50%" width="200%" height="200%">
+                <feGaussianBlur in="SourceAlpha" stdDeviation="3" result="blur" />
+                <feFlood floodColor="currentColor" floodOpacity="0.35" result="color" />
+                <feComposite in="color" in2="blur" operator="in" result="glow" />
+                <feMerge>
+                  <feMergeNode in="glow" />
+                  <feMergeNode in="SourceGraphic" />
+                </feMerge>
+              </filter>
+              <filter id="node-hover-glow" x="-50%" y="-50%" width="200%" height="200%">
+                <feGaussianBlur in="SourceAlpha" stdDeviation="2" result="blur" />
+                <feFlood floodColor="currentColor" floodOpacity="0.2" result="color" />
+                <feComposite in="color" in2="blur" operator="in" result="glow" />
+                <feMerge>
+                  <feMergeNode in="glow" />
+                  <feMergeNode in="SourceGraphic" />
+                </feMerge>
+              </filter>
+            </defs>
 
-              {layoutNodes.map(node => {
-                const colors = getNodeLayerColor(node);
+            <g style={{ transition: isInitialLayoutRef.current ? 'none' : 'transform 0.5s ease' }} transform={`translate(${transform.x},${transform.y}) scale(${transform.scale})`}>
+              {LAYER_ORDER.map(layer => {
+                const bounds = layoutData.layerBounds.get(layer);
+                if (!bounds) return null;
+                const colors = getLayerColor(layer);
+                return (
+                  <g key={`layer-${layer}`}>
+                    <rect
+                      x={bounds.minX}
+                      y={bounds.minY}
+                      width={bounds.maxX - bounds.minX}
+                      height={bounds.maxY - bounds.minY}
+                      rx={10}
+                      ry={10}
+                      fill={colors.fill}
+                      stroke={colors.border}
+                      strokeWidth={1}
+                      strokeDasharray="6 3"
+                    />
+                    <text
+                      x={bounds.minX + 12}
+                      y={bounds.minY + 18}
+                      fill={colors.text}
+                      fontSize={13}
+                      fontWeight={700}
+                      opacity={0.7}
+                    >
+                      {LAYER_LABELS[layer]}
+                    </text>
+                  </g>
+                );
+              })}
+
+              {layoutData.edgePoints.map((ep, idx) => (
+                <g key={`edge-${idx}`}>
+                  <path
+                    d={orthogonalPath(ep.points)}
+                    fill="none"
+                    stroke="rgba(148,163,184,0.2)"
+                    strokeWidth="1.5"
+                  />
+                  {ep.points.length >= 2 && (() => {
+                    const last = ep.points[ep.points.length - 1];
+                    const prev = ep.points[ep.points.length - 2];
+                    const angle = Math.atan2(last.y - prev.y, last.x - prev.x) * 180 / Math.PI;
+                    const size = 5;
+                    return (
+                      <polygon
+                        points={`${last.x - size},${last.y - size * 0.5} ${last.x - size},${last.y + size * 0.5} ${last.x},${last.y}`}
+                        fill="rgba(148,163,184,0.3)"
+                        transform={`rotate(${angle}, ${last.x}, ${last.y})`}
+                      />
+                    );
+                  })()}
+                </g>
+              ))}
+
+              {visibleNodes.map(node => {
+                const pos = layoutData.nodePositions.get(node.id);
+                if (!pos) return null;
+                const colors = getLayerColor(node.layer);
                 const isSelected = selectedNode?.id === node.id;
+                const isParent = parentNodes.has(node.id);
+                const isExpanded = expandedParents.has(node.id);
+                const isCollapsed = isParent && !isExpanded;
+
+                const childIds = node.children || [];
+                const hasHiddenChildren = isCollapsed && childIds.some(cid => filteredNodes.some(fn => fn.id === cid));
+
                 return (
                   <g
                     key={node.id}
-                    onClick={() => setSelectedNode(node)}
-                    className="cursor-pointer"
+                    transform={`translate(${pos.x},${pos.y})`}
+                    style={{
+                      transition: isInitialLayoutRef.current ? 'none' : 'transform 0.4s ease, opacity 0.4s ease',
+                    }}
+                    onClick={() => handleNodeClick(node)}
+                    className="cursor-pointer flow-node"
                   >
                     <rect
-                      x={node.x}
-                      y={node.y}
+                      x={0}
+                      y={0}
                       width={NODE_W}
                       height={NODE_H}
                       rx={8}
                       ry={8}
                       fill={isSelected ? colors.bg : 'rgba(255,255,255,0.03)'}
                       stroke={isSelected ? colors.border : 'rgba(255,255,255,0.08)'}
-                      strokeWidth={isSelected ? 2 : 1}
+                      strokeWidth={isSelected ? 2.5 : 1}
+                      className="flow-node-rect"
+                      filter={isSelected ? 'url(#node-glow)' : undefined}
+                      style={{ color: colors.text, transition: 'all 0.2s ease' }}
                     />
-                    <circle cx={node.x + 12} cy={node.y + NODE_H / 2} r={4} fill={colors.text} />
+                    <circle cx={12} cy={NODE_H / 2} r={4} fill={colors.text} />
                     <text
-                      x={node.x + 22}
-                      y={node.y + NODE_H / 2 + 1}
+                      x={22}
+                      y={NODE_H / 2 + 1}
                       fill={colors.text}
                       fontSize={11}
                       dominantBaseline="middle"
                     >
-                      {node.label.length > 18 ? node.label.slice(0, 17) + '…' : node.label}
+                      {node.label.length > 18 ? node.label.slice(0, 17) + '\u2026' : node.label}
                     </text>
                     <text
-                      x={node.x + 22}
-                      y={node.y + NODE_H - 8}
+                      x={22}
+                      y={NODE_H - 8}
                       fill="rgba(148,163,184,0.5)"
                       fontSize={8}
                     >
                       {node.type}
                     </text>
+                    {isParent && (
+                      <g transform={`translate(${NODE_W - 18}, ${NODE_H / 2})`}>
+                        <circle r={7} fill="rgba(255,255,255,0.08)" stroke="rgba(255,255,255,0.15)" strokeWidth={1} />
+                        <text
+                          textAnchor="middle"
+                          dominantBaseline="central"
+                          fill="rgba(255,255,255,0.5)"
+                          fontSize={10}
+                        >
+                          {isExpanded ? '\u2212' : '+'}
+                        </text>
+                        {hasHiddenChildren && (
+                          <circle cx={5} cy={-5} r={3} fill={colors.text} />
+                        )}
+                      </g>
+                    )}
                   </g>
                 );
               })}
@@ -330,10 +572,10 @@ export default function FlowVisualizationPage() {
               onClick={() => setTransform(prev => ({ ...prev, scale: Math.max(0.2, prev.scale * 0.8) }))}
               className="w-8 h-8 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg flex items-center justify-center text-gray-400 hover:text-white transition cursor-pointer text-sm"
             >
-              −
+              \u2212
             </button>
             <button
-              onClick={() => setTransform(prev => ({ ...prev, x: 0, y: 0, scale: 1 }))}
+              onClick={() => setTransform(prev => ({ ...prev, x: 40, y: 40, scale: 1 }))}
               className="px-3 h-8 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg flex items-center justify-center text-gray-400 hover:text-white transition cursor-pointer text-xs"
             >
               {Math.round(transform.scale * 100)}%
@@ -356,7 +598,7 @@ export default function FlowVisualizationPage() {
                   onClick={() => setSelectedNode(null)}
                   className="w-6 h-6 flex items-center justify-center rounded text-gray-500 hover:text-white hover:bg-white/10 transition cursor-pointer text-sm"
                 >
-                  ✕
+                  \u2715
                 </button>
               </div>
 
@@ -439,7 +681,7 @@ export default function FlowVisualizationPage() {
                             className="text-xs text-gray-500 flex items-center gap-1 cursor-pointer hover:text-gray-300 transition"
                           >
                             <span className={edge.source === selectedNode.id ? 'text-cyan-400' : 'text-emerald-400'}>
-                              {edge.source === selectedNode.id ? '→' : '←'}
+                              {edge.source === selectedNode.id ? '\u2192' : '\u2190'}
                             </span>
                             <span className="text-gray-400 truncate">{other?.label || otherId}</span>
                             {edge.label && <span className="text-gray-600 shrink-0">({edge.label})</span>}

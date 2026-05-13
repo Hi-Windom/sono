@@ -2123,6 +2123,11 @@ class RepairCacheLookupRequest(BaseModel):
     file_hash: str
     params: dict
 
+class DualRepairCacheLookupRequest(BaseModel):
+    vocal_file_hash: str
+    accompaniment_file_hash: str
+    params: dict = {}
+
 @router.post("/cache/lookup")
 async def lookup_repair_cache(req: RepairCacheLookupRequest):
     from database import find_repair_cache
@@ -2143,6 +2148,23 @@ async def lookup_repair_cache(req: RepairCacheLookupRequest):
                 from database import update_task
                 update_task(cached["id"], repair_result=repair_result)
 
+    return {
+        "found": True,
+        "task_id": cached["id"],
+        "output_path": cached.get("output_path", ""),
+        "output_size": cached.get("output_size", 0),
+        "repair_result": repair_result,
+        "detection_result": cached.get("detection_result"),
+        "repaired_detection_result": cached.get("repaired_detection_result"),
+    }
+
+@router.post("/cache/lookup-dual")
+async def lookup_dual_repair_cache(req: DualRepairCacheLookupRequest):
+    from database import find_dual_repair_cache
+    cached = find_dual_repair_cache(req.vocal_file_hash, req.accompaniment_file_hash, req.params)
+    if not cached:
+        return {"found": False}
+    repair_result = cached.get("repair_result")
     return {
         "found": True,
         "task_id": cached["id"],

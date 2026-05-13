@@ -206,6 +206,77 @@ def find_repair_cache(file_hash: str, params: dict) -> TaskDict | None:
     logger.info(f"[cache-lookup] ❌ NO MATCH for hash={file_hash}")
     return None
 
+def find_dual_repair_cache(vocal_file_hash: str, accompaniment_file_hash: str, params: dict) -> TaskDict | None:
+    import logging
+    logger = logging.getLogger(__name__)
+
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT * FROM tasks WHERE json_extract(params, '$.processing_mode') = 'dual' ORDER BY updated_at DESC"
+    ).fetchall()
+    conn.close()
+    logger.info(f"[cache-lookup-dual] vocal_hash={vocal_file_hash} acc_hash={accompaniment_file_hash} found {len(rows)} dual tasks")
+
+    params_json = json.dumps(params, sort_keys=True, ensure_ascii=False)
+    logger.info(f"[cache-lookup-dual] input_params={params_json}")
+
+    for i, row in enumerate(rows):
+        result: TaskDict = dict(row)
+        output_path = result.get("output_path")
+        task_id = result.get("id", "?")
+        task_status = result.get("status", "?")
+
+        if not output_path:
+            logger.info(f"[cache-lookup-dual] task#{i} id={task_id} status={task_status} SKIP: no output_path")
+            continue
+        if not os.path.exists(output_path):
+            logger.info(f"[cache-lookup-dual] task#{i} id={task_id} status={task_status} SKIP: file not exists path={output_path}")
+            continue
+        try:
+            size = os.path.getsize(output_path)
+        except OSError as e:
+            logger.info(f"[cache-lookup-dual] task#{i} id={task_id} status={task_status} SKIP: getsize error {e}")
+            continue
+        if size < 10240:
+            logger.info(f"[cache-lookup-dual] task#{i} id={task_id} status={task_status} SKIP: too small {size}B")
+            continue
+
+        stored_params = result.get("params")
+        if stored_params and isinstance(stored_params, str):
+            try:
+                parsed = json.loads(stored_params)
+            except (json.JSONDecodeError, TypeError) as e:
+                logger.info(f"[cache-lookup-dual] task#{i} id={task_id} status={task_status} SKIP: json parse error {e}")
+                continue
+        elif isinstance(stored_params, dict):
+            parsed = stored_params
+        else:
+            logger.info(f"[cache-lookup-dual] task#{i} id={task_id} status={task_status} SKIP: params type={type(stored_params)}")
+            continue
+
+        stored_vocal_hash = parsed.get("vocal_file_hash", "")
+        stored_acc_hash = parsed.get("accompaniment_file_hash", "")
+        if stored_vocal_hash != vocal_file_hash or stored_acc_hash != accompaniment_file_hash:
+            logger.info(f"[cache-lookup-dual] task#{i} id={task_id} HASH MISMATCH stored_vocal={stored_vocal_hash} stored_acc={stored_acc_hash}")
+            continue
+
+        filter_keys = {"vocal_file_hash", "accompaniment_file_hash", "vocal_task_id", "accompaniment_task_id",
+                       "vocal_filename", "accompaniment_filename", "processing_mode",
+                       "vocal_path", "accompaniment_path", "vocal_output_path", "accompaniment_output_path"}
+        filtered_stored = {k: v for k, v in parsed.items() if k not in filter_keys}
+        stored_json = json.dumps(filtered_stored, sort_keys=True, ensure_ascii=False)
+
+        if stored_json == params_json:
+            logger.info(f"[cache-lookup-dual] task#{i} id={task_id} status={task_status} size={size}")
+            result["output_size"] = size
+            _parse_json_fields(result)
+            return result
+        else:
+            logger.info(f"[cache-lookup-dual] task#{i} id={task_id} MISMATCH stored={stored_json}")
+
+    logger.info(f"[cache-lookup-dual] NO MATCH for vocal_hash={vocal_file_hash} acc_hash={accompaniment_file_hash}")
+    return None
+
 def get_all_tasks_ordered() -> list[TaskDict]:
     conn = get_db()
     rows = conn.execute("SELECT id, original_path, output_path, file_size, created_at FROM tasks ORDER BY created_at ASC").fetchall()

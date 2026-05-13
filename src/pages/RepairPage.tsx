@@ -1,18 +1,19 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useBlocker } from 'react-router-dom';
 import { Header } from '../components/Header';
 import { AudioUploader } from '../components/AudioUploader';
 import { DualTrackUploader } from '../components/DualTrackUploader';
 import { AIRepairPanel } from '../components/AIRepairPanel';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import { DownloadModal, DownloadFileInfo } from '../components/DownloadModal';
-import { RepairCacheModal } from '../components/RepairCacheModal';
+import { RepairCacheModal, CacheHitInfo } from '../components/RepairCacheModal';
 import { useAudioProcessor, generateExportFilename } from '../hooks/useAudioProcessor';
-import { uploadDualAudio, repairDualAudio, repairDualFromHash, getDownloadUrl, connectProgressWS, WSProgressControl, VocalRepairParams, InstrumentRepairParams, defaultVocalRepairParams, defaultInstrumentRepairParams } from '../services/backendApi';
+import { uploadDualAudio, repairDualAudio, repairDualFromHash, getDownloadUrl, connectProgressWS, WSProgressControl, VocalRepairParams, InstrumentRepairParams, defaultVocalRepairParams, defaultInstrumentRepairParams, lookupDualRepairCache, mapParamsToBackend, fetchRenderCache, RenderCacheEntry } from '../services/backendApi';
 import { useBackend } from '../contexts/BackendContext';
 import { saveSettings, loadSettings } from '../utils/settingsStorage';
 import { computeFileHash } from '../utils/fileHash';
 import { useRepairSessionStore } from '../store/repairSessionStore';
+import { LeaveConfirmModal } from '../components/LeaveConfirmModal';
 
 export { useBackend };
 
@@ -94,6 +95,29 @@ export default function RepairPage() {
 
   const [showDiag, setShowDiag] = useState(false);
   const [instantDownloadInfo, setInstantDownloadInfo] = useState<DownloadFileInfo | null>(null);
+  const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
+
+  const blocker = useBlocker(
+    ({ currentLocation, nextLocation }) =>
+      (isProcessing || isRenderLoading) &&
+      currentLocation.pathname !== nextLocation.pathname
+  );
+
+  useEffect(() => {
+    if (blocker.state === 'blocked') {
+      setShowLeaveConfirm(true);
+    }
+  }, [blocker]);
+
+  useEffect(() => {
+    const handler = (e: BeforeUnloadEvent) => {
+      if (isProcessing || isRenderLoading) {
+        e.preventDefault();
+      }
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [isProcessing, isRenderLoading]);
 
   const isDualTrackMode = useRepairSessionStore(s => s.isDualTrackMode);
   const dualTrackVocalFileHash = useRepairSessionStore(s => s.dualTrackVocalFileHash);
@@ -135,6 +159,8 @@ export default function RepairPage() {
     const saved = loadSettings();
     return saved.dualTrackMixRatio ?? 0.5;
   });
+  const [dualTrackCacheHitInfo, setDualTrackCacheHitInfo] = useState<CacheHitInfo | null>(null);
+  const [showDualTrackCacheModal, setShowDualTrackCacheModal] = useState(false);
   const pollRef = useRef<NodeJS.Timeout | null>(null);
   const wsDualTrackRef = useRef<WSProgressControl | null>(null);
 
@@ -175,10 +201,11 @@ export default function RepairPage() {
         }
         try {
           await renderAndDownload();
+          setCacheTriggerKey(k => k + 1);
         } catch (e) {
           console.error('双轨渲染交付失败:', e);
+          setCacheTriggerKey(k => k + 1);
         }
-        setCacheTriggerKey(k => k + 1);
       },
       onError: (error) => {
         setIsProcessing(false);
@@ -353,6 +380,38 @@ export default function RepairPage() {
       return;
     }
 
+    if (dualTrackVocalFileHash && dualTrackAccompanimentFileHash) {
+      try {
+        const cacheResult = await lookupDualRepairCache(
+          dualTrackVocalFileHash,
+          dualTrackAccompanimentFileHash,
+          mapParamsToBackend(params, processingOptions, algorithmVersion)
+        );
+        if (cacheResult.found) {
+          const cachedTaskId = cacheResult.task_id || '';
+          let renderCaches: RenderCacheEntry[] = [];
+          if (cachedTaskId) {
+            try {
+              renderCaches = await fetchRenderCache(cachedTaskId);
+            } catch {}
+          }
+          setDualTrackCacheHitInfo({
+            repair: {
+              task_id: cachedTaskId,
+              output_size: cacheResult.output_size || 0,
+              repair_result: cacheResult.repair_result || undefined,
+              detection_result: cacheResult.detection_result,
+              repaired_detection_result: cacheResult.repaired_detection_result,
+            },
+            renderCaches,
+          });
+          setShowDualTrackCacheModal(true);
+          return;
+        }
+      } catch (e) {
+      }
+    }
+
     try {
       setIsProcessing(true);
       setProcessingStep('开始双轨修复...');
@@ -402,6 +461,26 @@ export default function RepairPage() {
       setIsProcessing(false);
     }
   }, [dualTrackVocalFile, dualTrackAccompanimentFile, dualTrackVocalFileHash, dualTrackAccompanimentFileHash, dualTrackVocalFileName, dualTrackAccompanimentFileName, dualTrackTaskId, dualTrackVocalTaskId, dualTrackAccompanimentTaskId, params, processingOptions, algorithmVersion, dualTrackVocalParams, dualTrackAccompanimentParams, mixRatio, setIsProcessing, setProcessingStep, setProcessingSource, setBackendError, startDualTrackPolling, sessionActions]);
+
+  const handleDualTrackUseRepairCache = useCallback((cachedTaskId: string) => {
+    setShowDualTrackCacheModal(false);
+    setTaskId(cachedTaskId);
+    setDualTrackTaskId(cachedTaskId);
+    sessionActions.setDualTrackProcessed(true);
+    const downloadUrl = getDownloadUrl(cachedTaskId);
+    setDualTrackDownloadUrl(downloadUrl);
+    renderAndDownload().then(() => {
+      setCacheTriggerKey(k => k + 1);
+    }).catch(e => {
+      console.error('双轨缓存渲染失败:', e);
+      setCacheTriggerKey(k => k + 1);
+    });
+  }, [setTaskId, renderAndDownload, sessionActions]);
+
+  const handleDualTrackReRepair = useCallback(() => {
+    setShowDualTrackCacheModal(false);
+    setDualTrackCacheHitInfo(null);
+  }, []);
 
   useEffect(() => {
     if (isDualTrackMode) {
@@ -572,29 +651,6 @@ export default function RepairPage() {
           )}
         </div>
       )}
-
-      <div className="container mx-auto px-4 max-w-7xl mt-4">
-        <button
-          onClick={() => {
-            if (isProcessing) {
-              const confirmed = window.confirm('当前有正在进行的修复任务，返回首页将中断任务。是否确认返回？');
-              if (!confirmed) return;
-            }
-            navigate('/');
-          }}
-          className="flex items-center gap-2 text-gray-400 hover:text-white transition-colors"
-        >
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-          </svg>
-          <span>返回首页</span>
-          {isProcessing && (
-            <span className="ml-2 px-1.5 py-0.5 bg-yellow-500/20 text-yellow-400 text-[10px] rounded">
-              处理中
-            </span>
-          )}
-        </button>
-      </div>
 
       <div className="container mx-auto px-4 py-6 max-w-7xl">
         <div className="w-full max-w-4xl mx-auto mb-6">
@@ -888,6 +944,38 @@ export default function RepairPage() {
           onRenderCacheDownload={handleRenderCacheDownload}
           onReRepair={handleReRepair}
           onClose={handleCloseRepairCacheModal}
+        />
+      )}
+
+      {showDualTrackCacheModal && dualTrackCacheHitInfo && (
+        <RepairCacheModal
+          isOpen={showDualTrackCacheModal}
+          cacheHit={dualTrackCacheHitInfo}
+          audioFileName={dualTrackVocalFileName || dualTrackAccompanimentFileName}
+          algorithmVersion={algorithmVersion}
+          onUseRepairCache={handleDualTrackUseRepairCache}
+          onRenderCacheDownload={handleRenderCacheDownload}
+          onReRepair={handleDualTrackReRepair}
+          onClose={() => setShowDualTrackCacheModal(false)}
+        />
+      )}
+
+      {showLeaveConfirm && (
+        <LeaveConfirmModal
+          isOpen={showLeaveConfirm}
+          onConfirm={() => {
+            setShowLeaveConfirm(false);
+            blocker.proceed?.();
+          }}
+          onCancel={() => {
+            setShowLeaveConfirm(false);
+            blocker.reset?.();
+          }}
+          title="离开修复页面"
+          tasks={[
+            ...(isProcessing ? [{ name: '音频修复', step: processingStep || '处理中', progress: processingProgress }] : []),
+            ...(isRenderLoading ? [{ name: '渲染导出', step: '渲染中...', progress: 0 }] : []),
+          ]}
         />
       )}
     </div>

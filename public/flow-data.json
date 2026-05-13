@@ -105,10 +105,18 @@
       "children": [
         "src-components-Header",
         "src-components-ErrorBoundary",
+        "src-components-LeaveConfirmModal",
         "src-components-AIDetectionComparison",
         "src-utils-aiSongChecker",
         "src-services-backendApi"
       ]
+    },
+    {
+      "id": "src-components-LeaveConfirmModal",
+      "label": "LeaveConfirmModal",
+      "type": "component",
+      "layer": "frontend",
+      "filePath": "/workspace/src/components/LeaveConfirmModal.tsx"
     },
     {
       "id": "src-components-AIDetectionComparison",
@@ -253,7 +261,8 @@
         "src-contexts-BackendContext",
         "src-utils-settingsStorage",
         "src-utils-fileHash",
-        "src-store-repairSessionStore"
+        "src-store-repairSessionStore",
+        "src-components-LeaveConfirmModal"
       ]
     },
     {
@@ -989,6 +998,14 @@
       "layer": "backend",
       "filePath": "/workspace/backend/api/routes.py",
       "description": "POST /cache/lookup"
+    },
+    {
+      "id": "route-POST--cache-lookup-dual",
+      "label": "POST /cache/lookup-dual",
+      "type": "api",
+      "layer": "backend",
+      "filePath": "/workspace/backend/api/routes.py",
+      "description": "POST /cache/lookup-dual"
     },
     {
       "id": "route-POST--cache-clean-invalid",
@@ -1729,6 +1746,12 @@
     },
     {
       "source": "src-pages-DetectPage",
+      "target": "src-components-LeaveConfirmModal",
+      "label": "渲染",
+      "type": "renders"
+    },
+    {
+      "source": "src-pages-DetectPage",
       "target": "src-components-AIDetectionComparison",
       "label": "渲染",
       "type": "renders"
@@ -1954,6 +1977,12 @@
       "target": "src-store-repairSessionStore",
       "label": "使用",
       "type": "import"
+    },
+    {
+      "source": "src-pages-RepairPage",
+      "target": "src-components-LeaveConfirmModal",
+      "label": "渲染",
+      "type": "renders"
     },
     {
       "source": "frontend",
@@ -2618,6 +2647,12 @@
     {
       "source": "backend-api-routes.py",
       "target": "route-POST--cache-lookup",
+      "label": "路由注册",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-api-routes.py",
+      "target": "route-POST--cache-lookup-dual",
       "label": "路由注册",
       "type": "data-flow"
     },

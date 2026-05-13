@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useBackend } from '../contexts/BackendContext';
 import { getFrontendDiag } from '../contexts/BackendContext';
 
@@ -87,6 +88,7 @@ const buildCopyText = (backendDiag: NonNullable<ReturnType<typeof useBackend>['b
 };
 
 export const Header = () => {
+  const navigate = useNavigate();
   const { connectionStatus, hasUpstreamActivity, hasDownstreamActivity, runBackendDiag, backendDiag } = useBackend();
   const [showDiagModal, setShowDiagModal] = useState(false);
   const [isDiagLoading, setIsDiagLoading] = useState(false);
@@ -163,7 +165,10 @@ export const Header = () => {
         <div className="header-container container mx-auto px-4 py-3 md:py-6 max-w-7xl">
           {/* 桌面端：左右布局 */}
           <div className="hidden md:flex items-center justify-between">
-            <div className="flex items-center gap-3">
+            <button
+              onClick={() => navigate('/')}
+              className="flex items-center gap-3 cursor-pointer hover:opacity-80 transition-opacity"
+            >
               <div className="relative">
                 <div className="w-12 h-12 bg-gradient-to-br from-cyan-500 via-purple-500 to-yellow-500 rounded-xl flex items-center justify-center shadow-[0_0_30px_rgba(107,70,193,0.4)]">
                   <svg className="w-7 h-7 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -179,7 +184,7 @@ export const Header = () => {
                   专业音频修复与AI检测分析
                 </p>
               </div>
-            </div>
+            </button>
 
             <div className="flex items-center gap-4">
               <div className="flex items-center gap-3 bg-primary/50 border border-white/10 rounded-lg px-4 py-2.5">
@@ -220,7 +225,10 @@ export const Header = () => {
 
           {/* 移动端：一行布局 */}
           <div className="md:hidden flex items-center justify-between h-11">
-            <div className="flex items-center gap-2 min-w-0 overflow-hidden">
+            <button
+              onClick={() => navigate('/')}
+              className="flex items-center gap-2 min-w-0 overflow-hidden cursor-pointer hover:opacity-80 transition-opacity"
+            >
               <div className="w-9 h-9 bg-gradient-to-br from-cyan-500 via-purple-500 to-yellow-500 rounded-xl flex items-center justify-center shadow-[0_0_20px_rgba(107,70,193,0.4)] flex-shrink-0">
                 <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
@@ -229,7 +237,7 @@ export const Header = () => {
               <h1 className="header-title text-sm font-bold bg-gradient-to-r from-cyan-400 via-purple-400 to-yellow-400 bg-clip-text text-transparent whitespace-nowrap overflow-hidden text-ellipsis min-w-0">
                 AI音乐修复工具
               </h1>
-            </div>
+            </button>
 
             <div className="flex flex-col gap-0.5 items-end flex-shrink-0">
               <div className="flex items-center gap-1.5 bg-primary/40 border border-white/10 rounded-md px-2 py-0.5">
