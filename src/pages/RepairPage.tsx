@@ -171,6 +171,8 @@ export default function RepairPage() {
           } catch (e) {
             console.error('双轨渲染交付失败:', e);
           }
+          // 渲染完成后触发缓存刷新
+          setCacheTriggerKey(k => k + 1);
         } else if (status.status === 'error') {
           setIsProcessing(false);
           setBackendError(status.step || '双轨处理失败');
@@ -278,9 +280,12 @@ export default function RepairPage() {
         computeFileHash(accompaniment),
       ]);
 
-      // 检查是否选择了相同的文件
+      // 检查是否选择了相同的文件（哈希未变则无需重新上传，但需清除旧task_id让修复走hash分支）
       if (type === 'vocal' && newVocalHash === dualTrackVocalFileHash) {
         console.log('人声音频未变化，跳过重新上传');
+        setDualTrackTaskId(null);
+        setDualTrackVocalTaskId(null);
+        setDualTrackAccompanimentTaskId(null);
         setIsProcessing(false);
         setProcessingStep('');
         setProcessingProgress(0);
@@ -288,6 +293,9 @@ export default function RepairPage() {
       }
       if (type === 'accompaniment' && newAccompanimentHash === dualTrackAccompanimentFileHash) {
         console.log('伴奏音频未变化，跳过重新上传');
+        setDualTrackTaskId(null);
+        setDualTrackVocalTaskId(null);
+        setDualTrackAccompanimentTaskId(null);
         setIsProcessing(false);
         setProcessingStep('');
         setProcessingProgress(0);

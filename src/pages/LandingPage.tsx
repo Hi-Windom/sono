@@ -360,7 +360,7 @@ export default function LandingPage() {
 
       <footer className="mt-12 pb-6 text-center">
         <a
-          href="https://github.com/anthropics/sono"
+          href="https://github.com/Hi-Windom/sono"
           target="_blank"
           rel="noopener noreferrer"
           className="inline-flex items-center gap-2 text-gray-500 hover:text-gray-300 transition text-sm"
