@@ -409,6 +409,7 @@ export default function RepairPage() {
           return;
         }
       } catch (e) {
+        console.error('双轨缓存查找失败:', e);
       }
     }
 

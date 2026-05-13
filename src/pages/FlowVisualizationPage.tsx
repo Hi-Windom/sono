@@ -292,14 +292,17 @@ export default function FlowVisualizationPage() {
     }));
   }, [layoutData, transform.scale]);
 
+  const focusOnNodeRef = useRef(focusOnNode);
+  focusOnNodeRef.current = focusOnNode;
+
   useEffect(() => {
     if (selectedNode) {
       const timer = setTimeout(() => {
-        focusOnNode(selectedNode);
+        focusOnNodeRef.current(selectedNode);
       }, 100);
       return () => clearTimeout(timer);
     }
-  }, [selectedNode, focusOnNode]);
+  }, [selectedNode]);
 
   if (loading) {
     return (
