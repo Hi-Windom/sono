@@ -413,18 +413,6 @@ export default function RepairPage() {
     }
   }, [isDualTrackMode, dualTrackVocalParams, dualTrackAccompanimentParams, mixRatio]);
 
-  useEffect(() => {
-    if (isDualTrackMode && availableAlgorithms.length > 0) {
-      const v30 = availableAlgorithms.find(a => a.name === 'v3.0');
-      const v30a = availableAlgorithms.find(a => a.name === 'v3.0a');
-      if (v30 && algorithmVersion !== 'v3.0' && algorithmVersion !== 'v3.0a') {
-        applyAlgorithmVersion('v3.0');
-      } else if (v30a && algorithmVersion !== 'v3.0' && algorithmVersion !== 'v3.0a') {
-        applyAlgorithmVersion('v3.0a');
-      }
-    }
-  }, [isDualTrackMode, availableAlgorithms, algorithmVersion, applyAlgorithmVersion]);
-
   const renderResultInfo = useMemo(() => {
     if (!autoRenderInfo) return null;
     return {

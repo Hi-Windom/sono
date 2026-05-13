@@ -157,11 +157,7 @@ export function AIRepairPanel({
     }
     return channels;
   }, [isDualTrackMode, channels, dualTrackVocalInfo, dualTrackAccompanimentInfo]);
-  // 双轨模式只显示 v3.0 和 v3.0a
-  const filteredAlgorithms = useMemo(() => {
-    if (!isDualTrackMode) return availableAlgorithms;
-    return availableAlgorithms.filter(algo => algo.name === 'v3.0' || algo.name === 'v3.0a');
-  }, [availableAlgorithms, isDualTrackMode]);
+  const filteredAlgorithms = availableAlgorithms;
   const [showParams, setShowParams] = useState<boolean | string>(false);
   const [memoryInfo, setMemoryInfo] = useState<MemoryInfoResult | null>(null);
   const [storageEstimate, setStorageEstimate] = useState<StorageEstimateResult | null>(null);
