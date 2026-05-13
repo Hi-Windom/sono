@@ -2,6 +2,12 @@ import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react'
 import { AIRepairParams, RepairMode } from '../utils/advancedAudioProcessing';
 import { ProcessingOptions, AlgorithmVersion, fetchMemoryInfo, MemoryInfoResult, fetchStorageEstimate, StorageEstimateResult, fetchRenderCache, RenderCacheEntry, VocalRepairParams, InstrumentRepairParams, defaultVocalRepairParams, defaultInstrumentRepairParams } from '../services/backendApi';
 
+interface DualTrackAudioInfo {
+  sample_rate: number;
+  channels: number;
+  duration: number;
+}
+
 interface AIRepairPanelProps {
   params: AIRepairParams;
   fileHash?: string | null;
@@ -40,6 +46,8 @@ interface AIRepairPanelProps {
   onAccompanimentParamChange?: (key: keyof InstrumentRepairParams, value: number) => void;
   onMixRatioChange?: (ratio: number) => void;
   onDualTrackRepair?: () => void;
+  dualTrackVocalInfo?: DualTrackAudioInfo | null;
+  dualTrackAccompanimentInfo?: DualTrackAudioInfo | null;
 }
 
 const sampleRateOptions = [
@@ -133,7 +141,22 @@ export function AIRepairPanel({
   onAccompanimentParamChange,
   onMixRatioChange,
   onDualTrackRepair,
+  dualTrackVocalInfo,
+  dualTrackAccompanimentInfo,
 }: AIRepairPanelProps) {
+  const effectiveDuration = useMemo(() => {
+    if (isDualTrackMode && dualTrackVocalInfo && dualTrackAccompanimentInfo) {
+      return Math.max(dualTrackVocalInfo.duration, dualTrackAccompanimentInfo.duration);
+    }
+    return duration;
+  }, [isDualTrackMode, duration, dualTrackVocalInfo, dualTrackAccompanimentInfo]);
+
+  const effectiveChannels = useMemo(() => {
+    if (isDualTrackMode && dualTrackVocalInfo && dualTrackAccompanimentInfo) {
+      return Math.max(dualTrackVocalInfo.channels, dualTrackAccompanimentInfo.channels);
+    }
+    return channels;
+  }, [isDualTrackMode, channels, dualTrackVocalInfo, dualTrackAccompanimentInfo]);
   // 双轨模式只显示 v3.0 和 v3.0a
   const filteredAlgorithms = useMemo(() => {
     if (!isDualTrackMode) return availableAlgorithms;
@@ -248,20 +271,28 @@ export function AIRepairPanel({
 
   const paramKeys = Object.keys(paramLabels) as (keyof AIRepairParams)[];
 
-  // 计算当前预估大小
+  // 计算当前预估大小（双轨模式下乘以2，因为有人声和伴奏两个轨道）
   const currentEstimate = useMemo(() => {
-    if (duration <= 0) return null;
-    return estimateFileSize(
-      duration,
+    if (effectiveDuration <= 0) return null;
+    const baseEst = estimateFileSize(
+      effectiveDuration,
       processingOptions.sampleRate,
       processingOptions.bitDepth,
-      channels
+      effectiveChannels
     );
-  }, [duration, processingOptions.sampleRate, processingOptions.bitDepth, channels]);
+    if (isDualTrackMode) {
+      return {
+        size: baseEst.size * 2,
+        sizeMiB: baseEst.sizeMiB * 2,
+        sizeMB: baseEst.sizeMB * 2,
+      };
+    }
+    return baseEst;
+  }, [effectiveDuration, effectiveChannels, processingOptions.sampleRate, processingOptions.bitDepth, isDualTrackMode]);
 
   // 计算所有组合的预估大小
   const allEstimates = useMemo(() => {
-    if (duration <= 0) return [];
+    if (effectiveDuration <= 0) return [];
     const estimates: Array<{
       sampleRate: number;
       bitDepth: number;
@@ -274,7 +305,14 @@ export function AIRepairPanel({
 
     for (const sr of sampleRateOptions) {
       for (const bd of bitDepthOptions) {
-        const est = estimateFileSize(duration, sr.value, bd.value, channels);
+        let est = estimateFileSize(effectiveDuration, sr.value, bd.value, effectiveChannels);
+        if (isDualTrackMode) {
+          est = {
+            size: est.size * 2,
+            sizeMiB: est.sizeMiB * 2,
+            sizeMB: est.sizeMB * 2,
+          };
+        }
         estimates.push({
           sampleRate: sr.value,
           bitDepth: bd.value,
@@ -285,7 +323,7 @@ export function AIRepairPanel({
       }
     }
     return estimates;
-  }, [duration, channels]);
+  }, [effectiveDuration, effectiveChannels, isDualTrackMode]);
 
   // 检查当前选择是否警告
   const isCurrentWarning = currentEstimate ? currentEstimate.size > WARNING_THRESHOLD_MB : false;

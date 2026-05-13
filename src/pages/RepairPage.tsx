@@ -117,6 +117,8 @@ export default function RepairPage() {
   const [dualTrackDownloadUrl, setDualTrackDownloadUrl] = useState<string | null>(null);
   const [dualTrackRepairResult, setDualTrackRepairResult] = useState<any>(null);
   const [dualTrackFilesSelected, setDualTrackFilesSelected] = useState(false);
+  const [dualTrackVocalInfo, setDualTrackVocalInfo] = useState<{ sample_rate: number; channels: number; duration: number } | null>(null);
+  const [dualTrackAccompanimentInfo, setDualTrackAccompanimentInfo] = useState<{ sample_rate: number; channels: number; duration: number } | null>(null);
 
   const [dualTrackVocalParams, setDualTrackVocalParams] = useState<VocalRepairParams>(() => {
     const saved = loadSettings();
@@ -220,6 +222,8 @@ export default function RepairPage() {
       setDualTrackVocalTaskId(uploadResult.vocal_task_id);
       setDualTrackAccompanimentTaskId(uploadResult.accompaniment_task_id);
       setDualTrackFilesSelected(true);
+      setDualTrackVocalInfo(uploadResult.vocal_info || null);
+      setDualTrackAccompanimentInfo(uploadResult.accompaniment_info || null);
       setIsProcessing(false);
       setProcessingStep('');
       setProcessingProgress(0);
@@ -292,6 +296,8 @@ export default function RepairPage() {
       setDualTrackTaskId(uploadResult.task_id);
       setDualTrackVocalTaskId(uploadResult.vocal_task_id);
       setDualTrackAccompanimentTaskId(uploadResult.accompaniment_task_id);
+      setDualTrackVocalInfo(uploadResult.vocal_info || null);
+      setDualTrackAccompanimentInfo(uploadResult.accompaniment_info || null);
       setIsProcessing(false);
       setProcessingStep('');
       setProcessingProgress(0);
@@ -798,6 +804,8 @@ export default function RepairPage() {
                 onAccompanimentParamChange={handleDualTrackAccompanimentParamChange}
                 onMixRatioChange={setMixRatio}
                 onDualTrackRepair={isDualTrackMode ? handleDualTrackRepair : undefined}
+                dualTrackVocalInfo={dualTrackVocalInfo}
+                dualTrackAccompanimentInfo={dualTrackAccompanimentInfo}
               />
 
               {profileSaveMsg && (

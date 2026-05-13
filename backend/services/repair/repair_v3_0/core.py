@@ -509,24 +509,34 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
             acc_out = acc_out.astype(np.float64)
         sf.write(accompaniment_output_path, acc_out.T if acc_out.ndim > 1 else acc_out, working_sr, subtype=subtype)
 
-    if progress_callback:
-        progress_callback(0.80, "v3.0 混音...")
+    auto_mix = params.get("auto_mix", True)
+    
+    if auto_mix:
+        if progress_callback:
+            progress_callback(0.80, "v3.0 混音...")
 
-    vocal_ratio = params.get("vocal_ratio", 1.0)
-    accompaniment_ratio = params.get("accompaniment_ratio", 1.0)
-    mixed = mix_tracks(vocal_y, accompaniment_y, vocal_ratio, accompaniment_ratio)
+        vocal_ratio = params.get("vocal_ratio", 1.0)
+        accompaniment_ratio = params.get("accompaniment_ratio", 1.0)
+        mixed = mix_tracks(vocal_y, accompaniment_y, vocal_ratio, accompaniment_ratio)
 
-    issues_found.append("混音完成")
+        issues_found.append("混音完成")
 
-    if progress_callback:
-        progress_callback(0.90, "v3.0 导出...")
+        if progress_callback:
+            progress_callback(0.90, "v3.0 导出...")
 
-    mixed = _soft_peak_limit(mixed, threshold=0.9)
+        mixed = _soft_peak_limit(mixed, threshold=0.9)
 
-    if mixed.dtype == np.float32:
-        mixed = mixed.astype(np.float64)
+        if mixed.dtype == np.float32:
+            mixed = mixed.astype(np.float64)
 
-    sf.write(output_path, mixed.T if mixed.ndim > 1 else mixed, working_sr, subtype=subtype)
+        sf.write(output_path, mixed.T if mixed.ndim > 1 else mixed, working_sr, subtype=subtype)
+
+        channels = mixed.shape[0] if mixed.ndim > 1 else 1
+    else:
+        if progress_callback:
+            progress_callback(0.90, "v3.0 导出...")
+        sf.write(output_path, vocal_y.T if vocal_y.ndim > 1 else vocal_y, working_sr, subtype=subtype)
+        channels = vocal_y.shape[0] if vocal_y.ndim > 1 else 1
 
     if progress_callback:
         progress_callback(1.0, "v3.0 修复完成")
@@ -537,7 +547,7 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
         "output_sample_rate": working_sr,
         "output_bit_depth": bit_depth,
         "duration": original_duration,
-        "channels": mixed.shape[0] if mixed.ndim > 1 else 1,
+        "channels": channels,
         "algorithm_version": "v3.0",
         "processing_mode": "dual",
     }

@@ -898,16 +898,14 @@ class RenderRequest(BaseModel):
     task_id: str
     sample_rate: int = 44100
     bit_depth: int = 24
+    merge: bool = False
+    track_type: str = "both"
 
 @router.post("/render")
 async def render_audio_endpoint(request: RenderRequest):
     task = get_task(request.task_id)
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
-
-    output_path = task.get("output_path")
-    if not output_path or not os.path.exists(output_path):
-        raise HTTPException(status_code=400, detail="修复结果不存在，请先完成修复")
 
     task_params = task.get("params", {})
     if isinstance(task_params, str):
@@ -916,13 +914,37 @@ async def render_audio_endpoint(request: RenderRequest):
             task_params = _json.loads(task_params)
         except Exception:
             task_params = {}
+    
+    is_dual_track = task_params.get("processing_mode") == "dual"
+    
+    if is_dual_track:
+        vocal_output_path = task_params.get("vocal_output_path")
+        accompaniment_output_path = task_params.get("accompaniment_output_path")
+        
+        if not vocal_output_path or not os.path.exists(vocal_output_path):
+            raise HTTPException(status_code=400, detail="人声修复结果不存在")
+        if not accompaniment_output_path or not os.path.exists(accompaniment_output_path):
+            raise HTTPException(status_code=400, detail="伴奏修复结果不存在")
+    else:
+        output_path = task.get("output_path")
+        if not output_path or not os.path.exists(output_path):
+            raise HTTPException(status_code=400, detail="修复结果不存在，请先完成修复")
+
     algo_ver = task_params.get("algorithm_version", "v2.0").replace(".", "p")
-    render_filename = f"{request.task_id}_rendered_{algo_ver}_{request.sample_rate}_{request.bit_depth}.wav"
+    
+    if is_dual_track and request.track_type != "both":
+        render_filename = f"{request.task_id}_rendered_{algo_ver}_{request.sample_rate}_{request.bit_depth}_{request.track_type}.wav"
+    else:
+        merge_suffix = "_merged" if request.merge else ""
+        render_filename = f"{request.task_id}_rendered_{algo_ver}_{request.sample_rate}_{request.bit_depth}{merge_suffix}.wav"
     render_path = os.path.join(OUTPUT_DIR, render_filename)
 
     update_task(request.task_id, status="rendering", step="渲染交付规格...", progress=0)
 
-    executor.submit(_run_render, request.task_id, output_path, render_path, request.sample_rate, request.bit_depth, render_filename)
+    if is_dual_track:
+        executor.submit(_run_render_dual, request.task_id, vocal_output_path, accompaniment_output_path, render_path, request.sample_rate, request.bit_depth, render_filename, request.merge, request.track_type)
+    else:
+        executor.submit(_run_render, request.task_id, output_path, render_path, request.sample_rate, request.bit_depth, render_filename)
 
     return {"task_id": request.task_id, "status": "rendering"}
 
@@ -967,6 +989,99 @@ def _run_render(task_id, input_path, output_path, target_sr, bit_depth, render_f
         })
     except Exception as e:
         logger.error(f"[render] 渲染失败 task_id={task_id}: {e}")
+        update_task(task_id, status="error", error=str(e), step="渲染失败")
+        _ws_send_final(task_id, {
+            "task_id": task_id,
+            "status": "error",
+            "error": str(e),
+            "step": "渲染失败",
+        })
+
+
+def _run_render_dual(task_id, vocal_path, accompaniment_path, output_path, target_sr, bit_depth, render_filename, merge=False, track_type="both"):
+    from services.render import render_output
+    from services.task_manager import _ws_send_progress, _ws_send_final
+    import numpy as np
+    import soundfile as sf
+
+    def progress_callback(pct, step):
+        update_task(task_id, progress=pct, step=step)
+        _ws_send_progress(task_id, {
+            "task_id": task_id,
+            "status": "rendering",
+            "progress": pct,
+            "step": step,
+        })
+
+    try:
+        from services.audio_loader import load_audio_with_fallback
+        
+        if track_type == "vocal":
+            progress_callback(0.2, "渲染人声轨...")
+            y, sr = load_audio_with_fallback(vocal_path, sr=None, mono=False)
+            source_bit_depth = None
+            try:
+                _, _, src_bd = load_audio_with_fallback(vocal_path, sr=None, mono=False, return_bit_depth=True)
+                source_bit_depth = src_bd
+            except Exception:
+                pass
+            result = render_output(vocal_path, output_path, target_sr, bit_depth, progress_callback=progress_callback, source_bit_depth=source_bit_depth)
+        elif track_type == "accompaniment":
+            progress_callback(0.2, "渲染伴奏轨...")
+            y, sr = load_audio_with_fallback(accompaniment_path, sr=None, mono=False)
+            source_bit_depth = None
+            try:
+                _, _, src_bd = load_audio_with_fallback(accompaniment_path, sr=None, mono=False, return_bit_depth=True)
+                source_bit_depth = src_bd
+            except Exception:
+                pass
+            result = render_output(accompaniment_path, output_path, target_sr, bit_depth, progress_callback=progress_callback, source_bit_depth=source_bit_depth)
+        else:
+            progress_callback(0.1, "加载人声轨...")
+            vocal_y, vocal_sr = load_audio_with_fallback(vocal_path, sr=None, mono=False)
+            progress_callback(0.2, "加载伴奏轨...")
+            accompaniment_y, accompaniment_sr = load_audio_with_fallback(accompaniment_path, sr=None, mono=False)
+            
+            progress_callback(0.3, "混音...")
+            max_len = max(vocal_y.shape[1], accompaniment_y.shape[1])
+            if vocal_y.shape[1] < max_len:
+                vocal_y = np.pad(vocal_y, ((0, 0), (0, max_len - vocal_y.shape[1])), mode='constant')
+            if accompaniment_y.shape[1] < max_len:
+                accompaniment_y = np.pad(accompaniment_y, ((0, 0), (0, max_len - accompaniment_y.shape[1])), mode='constant')
+            
+            mixed = (vocal_y + accompaniment_y) / 2
+            
+            progress_callback(0.5, "渲染输出...")
+            mixed = np.clip(mixed, -1.0, 1.0)
+            subtype_map = {16: "PCM_16", 24: "PCM_24", 32: "PCM_32"}
+            subtype = subtype_map.get(bit_depth, "PCM_24")
+            sf.write(output_path, mixed.T if mixed.ndim > 1 else mixed, target_sr, subtype=subtype)
+            
+            result = {
+                "input_sample_rate": vocal_sr,
+                "output_sample_rate": target_sr,
+                "output_bit_depth": bit_depth,
+                "channels": mixed.shape[0] if mixed.ndim > 1 else 1,
+            }
+
+        progress_callback(0.9, "完成")
+        update_task(task_id,
+            status="render_completed",
+            progress=1.0,
+            step="渲染完成",
+            render_filename=render_filename,
+            render_result=result,
+        )
+        _ws_send_final(task_id, {
+            "task_id": task_id,
+            "status": "render_completed",
+            "progress": 1.0,
+            "step": "渲染完成",
+            "render_filename": render_filename,
+            "render_result": result,
+        })
+    except Exception as e:
+        logger.error(f"[render_dual] 渲染失败 task_id={task_id}: {e}")
         update_task(task_id, status="error", error=str(e), step="渲染失败")
         _ws_send_final(task_id, {
             "task_id": task_id,
@@ -1259,15 +1374,33 @@ async def get_render_cache(task_id: str):
             if not fname.startswith(f"{task_id}_rendered_") or not fname.endswith(".wav"):
                 continue
             base = fname.replace(".wav", "")
-            # 新格式: {task_id}_rendered_{algo_ver}_{sr}_{bd}
-            # 旧格式: {task_id}_rendered_{sr}_{bd}
+            # 格式: {task_id}_rendered_{algo_ver}_{sr}_{bd}[_{track_type}][_merged]
             parts = base.split("_rendered_")
             if len(parts) != 2:
                 continue
             suffix = parts[1]
             segments = suffix.split("_")
             try:
-                if len(segments) >= 3:
+                track_type = "both"
+                is_merged = False
+                
+                if len(segments) >= 4:
+                    # 双轨模式格式: algo_ver / sr / bd / track_type 或 algo_ver / sr / bd / merged
+                    if segments[-1] == "merged":
+                        is_merged = True
+                        sr = int(segments[-3])
+                        bd = int(segments[-2])
+                        file_algo_ver = "_".join(segments[:-3])
+                    elif segments[-1] in ("vocal", "accompaniment"):
+                        track_type = segments[-1]
+                        sr = int(segments[-3])
+                        bd = int(segments[-2])
+                        file_algo_ver = "_".join(segments[:-3])
+                    else:
+                        sr = int(segments[-2])
+                        bd = int(segments[-1])
+                        file_algo_ver = "_".join(segments[:-2])
+                elif len(segments) >= 3:
                     # 新格式: algo_ver / sr / bd
                     sr = int(segments[-2])
                     bd = int(segments[-1])
@@ -1279,18 +1412,24 @@ async def get_render_cache(task_id: str):
                     file_algo_ver = ""
                 else:
                     continue
+                
                 fpath = os.path.join(OUTPUT_DIR, fname)
                 mtime = os.path.getmtime(fpath)
                 from datetime import datetime, timezone
                 mtime_str = datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat()
-                caches.append({
+                cache_entry = {
                     "sample_rate": sr,
                     "bit_depth": bd,
                     "filename": fname,
                     "size": os.path.getsize(fpath),
                     "mtime": mtime_str,
                     "algorithm_version": file_algo_ver.replace("p", ".") if file_algo_ver else algo_version,
-                })
+                }
+                if track_type != "both":
+                    cache_entry["track_type"] = track_type
+                if is_merged:
+                    cache_entry["is_merged"] = True
+                caches.append(cache_entry)
             except ValueError:
                 pass
     return {"caches": caches}
