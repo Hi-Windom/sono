@@ -217,8 +217,18 @@ def _run_detect(task_id: str, audio_path: str, detect_type: str, detector_versio
         label = "修复后" if detect_type == "repaired" else "原始"
         update_task(task_id, status="detecting", progress=0, step=f"开始{label}检测...")
 
-        if not os.path.exists(audio_path):
-            raise FileNotFoundError(f"音频文件不存在: {audio_path}")
+        processing_mode = params.get("processing_mode", "single")
+        if processing_mode == "dual":
+            vocal_path = params.get("vocal_path", "")
+            accompaniment_path = params.get("accompaniment_path", "")
+            if vocal_path and not os.path.exists(vocal_path):
+                raise FileNotFoundError(f"人声音频不存在: {vocal_path}")
+            if accompaniment_path and not os.path.exists(accompaniment_path):
+                raise FileNotFoundError(f"伴奏音频不存在: {accompaniment_path}")
+            audio_path = vocal_path
+        else:
+            if not os.path.exists(audio_path):
+                raise FileNotFoundError(f"音频文件不存在: {audio_path}")
 
         file_size = os.path.getsize(audio_path)
         logger.info(f"[detect] 音频文件 task_id={task_id} size={file_size/1024/1024:.2f}MB")

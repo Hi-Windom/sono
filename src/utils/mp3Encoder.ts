@@ -4,7 +4,6 @@ function getWorker(): Worker {
   if (!worker) {
     worker = new Worker(
       new URL('../workers/mp3EncoderWorker.ts', import.meta.url),
-      { type: 'module' },
     );
   }
   return worker;

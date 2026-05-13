@@ -38,6 +38,7 @@ interface AIRepairPanelProps {
   onRenderCacheRefresh?: (fn: () => Promise<void>) => void;
   cacheTriggerKey?: number;
   onInstantDownload?: (cacheEntry: RenderCacheEntry) => void;
+  onRenderCachesLoaded?: (caches: RenderCacheEntry[]) => void;
   isDualTrackMode?: boolean;
   vocalParams?: VocalRepairParams;
   accompanimentParams?: InstrumentRepairParams;
@@ -133,6 +134,7 @@ export function AIRepairPanel({
   onRenderCacheRefresh,
   cacheTriggerKey,
   onInstantDownload,
+  onRenderCachesLoaded,
   isDualTrackMode = false,
   vocalParams,
   accompanimentParams,
@@ -200,10 +202,12 @@ export function AIRepairPanel({
   const refreshRenderCache = useCallback(async () => {
     if (!taskId || !backendAvailable) {
       setRenderCaches([]);
+      onRenderCachesLoaded?.([]);
       return;
     }
     const caches = await fetchRenderCache(taskId);
     setRenderCaches(caches);
+    onRenderCachesLoaded?.(caches);
   }, [taskId, backendAvailable]);
 
   useEffect(() => {

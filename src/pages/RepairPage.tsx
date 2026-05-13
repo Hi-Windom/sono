@@ -5,10 +5,10 @@ import { AudioUploader } from '../components/AudioUploader';
 import { DualTrackUploader } from '../components/DualTrackUploader';
 import { AIRepairPanel } from '../components/AIRepairPanel';
 import { ErrorBoundary } from '../components/ErrorBoundary';
-import { DownloadModal, DownloadFileInfo } from '../components/DownloadModal';
+import { DownloadModal, DownloadFileInfo, DualTrackDownloadUrls } from '../components/DownloadModal';
 import { RepairCacheModal } from '../components/RepairCacheModal';
 import { useAudioProcessor, generateExportFilename } from '../hooks/useAudioProcessor';
-import { uploadDualAudio, repairDualAudio, repairDualFromHash, getDownloadUrl, connectProgressWS, WSProgressControl, VocalRepairParams, InstrumentRepairParams, defaultVocalRepairParams, defaultInstrumentRepairParams } from '../services/backendApi';
+import { uploadDualAudio, repairDualAudio, repairDualFromHash, getDownloadUrl, connectProgressWS, WSProgressControl, VocalRepairParams, InstrumentRepairParams, defaultVocalRepairParams, defaultInstrumentRepairParams, fetchRenderCache, RenderCacheEntry } from '../services/backendApi';
 import { useBackend } from '../contexts/BackendContext';
 import { saveSettings, loadSettings } from '../utils/settingsStorage';
 import { computeFileHash } from '../utils/fileHash';
@@ -135,6 +135,8 @@ export default function RepairPage() {
     const saved = loadSettings();
     return saved.dualTrackMixRatio ?? 0.5;
   });
+  const [dualTrackUrls, setDualTrackUrls] = useState<DualTrackDownloadUrls | null>(null);
+  const dualTrackRenderCachesRef = useRef<RenderCacheEntry[]>([]);
   const pollRef = useRef<NodeJS.Timeout | null>(null);
   const wsDualTrackRef = useRef<WSProgressControl | null>(null);
 
@@ -160,7 +162,6 @@ export default function RepairPage() {
         setProcessingStep(event.step);
       },
       onComplete: async (status) => {
-        setIsProcessing(false);
         sessionActions.setDualTrackProcessed(true);
         setDualTrackRepairResult(status);
         const downloadUrl = getDownloadUrl(taskId);
@@ -173,6 +174,8 @@ export default function RepairPage() {
         } catch (e) {
           console.error('加载双轨处理结果失败:', e);
         }
+        setProcessingStep('准备渲染交付...');
+        setProcessingProgress(0);
         try {
           await renderAndDownload();
         } catch (e) {
@@ -814,12 +817,10 @@ export default function RepairPage() {
                   const downloadUrl = `/api/v1/download-file/${cacheEntry.filename}`;
                   setRenderDownloadUrl(downloadUrl);
                   
-                  // 双轨模式下使用正确的文件名
                   const fileName = isDualTrackMode
                     ? (dualTrackVocalFileName || dualTrackAccompanimentFileName || 'audio')
                     : (audioFile?.name || 'audio');
                   
-                  // 双轨模式下使用正确的 duration
                   const fileDuration = isDualTrackMode
                     ? (dualTrackVocalInfo ? Math.max(dualTrackVocalInfo.duration, dualTrackAccompanimentInfo?.duration || 0) : 0)
                     : (duration || 0);
@@ -833,6 +834,23 @@ export default function RepairPage() {
                     duration: fileDuration,
                     algorithmVersion: cacheEntry.algorithm_version,
                   });
+                  
+                  if (isDualTrackMode) {
+                    const caches = dualTrackRenderCachesRef.current;
+                    const algoVer = cacheEntry.algorithm_version;
+                    const sr = cacheEntry.sample_rate;
+                    const bd = cacheEntry.bit_depth;
+                    const merged = caches.find(c => c.track_type === 'both' && c.algorithm_version === algoVer && c.sample_rate === sr && c.bit_depth === bd);
+                    const vocal = caches.find(c => c.track_type === 'vocal' && c.algorithm_version === algoVer && c.sample_rate === sr && c.bit_depth === bd);
+                    const accompaniment = caches.find(c => c.track_type === 'accompaniment' && c.algorithm_version === algoVer && c.sample_rate === sr && c.bit_depth === bd);
+                    setDualTrackUrls({
+                      merged: merged ? `/api/v1/download-file/${merged.filename}` : undefined,
+                      vocal: vocal ? `/api/v1/download-file/${vocal.filename}` : undefined,
+                      accompaniment: accompaniment ? `/api/v1/download-file/${accompaniment.filename}` : undefined,
+                    });
+                  } else {
+                    setDualTrackUrls(null);
+                  }
                   setShowDownloadModal(true);
                 }}
                 isDualTrackMode={isDualTrackMode}
@@ -845,6 +863,7 @@ export default function RepairPage() {
                 onDualTrackRepair={isDualTrackMode ? handleDualTrackRepair : undefined}
                 dualTrackVocalInfo={dualTrackVocalInfo}
                 dualTrackAccompanimentInfo={dualTrackAccompanimentInfo}
+                onRenderCachesLoaded={(caches) => { dualTrackRenderCachesRef.current = caches; }}
               />
 
               {profileSaveMsg && (
@@ -862,6 +881,7 @@ export default function RepairPage() {
           isOpen={showDownloadModal}
           backendInfo={instantDownloadInfo}
           backendDownloadUrl={renderDownloadUrl}
+          dualTrackUrls={dualTrackUrls}
           onClose={() => setShowDownloadModal(false)}
         />
       )}
