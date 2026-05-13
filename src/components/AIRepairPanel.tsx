@@ -392,7 +392,7 @@ export function AIRepairPanel({
               <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
               </svg>
-              双轨模式支持 v3.0/v3.0a/v3.1/v3.1a 算法
+              双轨模式支持 v3+ 算法
             </div>
           )}
           <div className="flex items-center justify-between gap-2">

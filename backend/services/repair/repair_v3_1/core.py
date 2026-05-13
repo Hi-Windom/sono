@@ -309,8 +309,9 @@ def _vocal_ai_repair_enhanced(y, sr, strength):
         spectral_floor = np.median(magnitude, axis=1, keepdims=True) + 1e-10
         artifact_mask = magnitude > (spectral_floor * threshold_factor)
 
-        gain_map = np.ones_like(magnitude)
-        gain_map[artifact_mask] = (spectral_floor[artifact_mask] * threshold_factor) / (magnitude[artifact_mask] + 1e-10)
+        gain_map = np.where(artifact_mask,
+                            (spectral_floor * threshold_factor) / (magnitude + 1e-10),
+                            1.0)
         gain_map = np.clip(gain_map, 1.0 - strength * 0.7, 1.0)
 
         kernel = np.ones(smoothing_frames) / smoothing_frames

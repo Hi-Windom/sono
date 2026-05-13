@@ -417,9 +417,9 @@ export default function RepairPage() {
     if (isDualTrackMode && availableAlgorithms.length > 0) {
       const v30 = availableAlgorithms.find(a => a.name === 'v3.0');
       const v30a = availableAlgorithms.find(a => a.name === 'v3.0a');
-      if (v30 && algorithmVersion !== 'v3.0' && algorithmVersion !== 'v3.0a') {
+      if (v30 && algorithmVersion !== 'v3.0' && algorithmVersion !== 'v3.0a' && algorithmVersion !== 'v3.1' && algorithmVersion !== 'v3.1a') {
         applyAlgorithmVersion('v3.0');
-      } else if (v30a && algorithmVersion !== 'v3.0' && algorithmVersion !== 'v3.0a') {
+      } else if (v30a && algorithmVersion !== 'v3.0' && algorithmVersion !== 'v3.0a' && algorithmVersion !== 'v3.1' && algorithmVersion !== 'v3.1a') {
         applyAlgorithmVersion('v3.0a');
       }
     }
