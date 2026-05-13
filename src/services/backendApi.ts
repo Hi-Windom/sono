@@ -1233,6 +1233,107 @@ export interface WSProgressControl {
   close: () => void;
 }
 
+export interface CacheUpdateEvent {
+  type: 'render_cache_updated';
+  task_id: string;
+  files: Array<{
+    filename: string;
+    sample_rate: number;
+    bit_depth: number;
+    track_type: string;
+  }>;
+}
+
+export function connectCacheWS(
+  onCacheUpdate?: (event: CacheUpdateEvent) => void,
+): WSProgressControl {
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  let wsHost: string;
+  const viteApiUrl = import.meta.env.VITE_API_URL;
+  if (viteApiUrl && import.meta.env.DEV) {
+    try {
+      const backendUrl = new URL(viteApiUrl);
+      wsHost = backendUrl.host;
+    } catch {
+      wsHost = window.location.host;
+    }
+  } else {
+    wsHost = window.location.host;
+  }
+  const wsUrl = `${protocol}//${wsHost}/api/v1/ws/cache-events`;
+
+  let ws: WebSocket | null = null;
+  let reconnectAttempts = 0;
+  const maxReconnectAttempts = 5;
+  let closed = false;
+
+  const connect = () => {
+    if (closed) return;
+
+    try {
+      ws = new WebSocket(wsUrl);
+    } catch (e) {
+      console.warn(`[CacheWS] 创建连接失败:`, e);
+      return;
+    }
+
+    const connectTimeout = setTimeout(() => {
+      if (ws && ws.readyState === WebSocket.CONNECTING) {
+        console.warn(`[CacheWS] 连接超时`);
+        ws.close();
+      }
+    }, 5000);
+
+    ws.onopen = () => {
+      clearTimeout(connectTimeout);
+      reconnectAttempts = 0;
+      console.log(`[CacheWS] 连接成功`);
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.type === 'render_cache_updated') {
+          onCacheUpdate?.(data as CacheUpdateEvent);
+        }
+      } catch (e) {
+        console.warn(`[CacheWS] 消息解析失败:`, e);
+      }
+    };
+
+    ws.onerror = (e) => {
+      clearTimeout(connectTimeout);
+      console.warn(`[CacheWS] 连接错误`, e);
+    };
+
+    ws.onclose = () => {
+      clearTimeout(connectTimeout);
+      if (closed) return;
+
+      if (reconnectAttempts < maxReconnectAttempts) {
+        reconnectAttempts++;
+        const delay = Math.pow(2, reconnectAttempts - 1) * 1000;
+        console.log(`[CacheWS] 重连 #${reconnectAttempts} 延迟=${delay}ms`);
+        setTimeout(connect, delay);
+      } else {
+        console.warn(`[CacheWS] 重连耗尽`);
+      }
+    };
+  };
+
+  connect();
+
+  return {
+    close: () => {
+      closed = true;
+      if (ws) {
+        ws.close();
+        ws = null;
+      }
+    },
+  };
+}
+
 export function connectProgressWS(
   taskId: string,
   callbacks: PollCallbacks,

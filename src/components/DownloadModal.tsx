@@ -1,5 +1,6 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { parseFilenameFromDisposition } from '../services/backendApi';
+import { encodeMp3, terminateMp3Encoder } from '../utils/mp3Encoder';
 
 export interface DownloadFileInfo {
   filename: string;
@@ -48,6 +49,8 @@ export function DownloadModal({
   const [dlLoaded, setDlLoaded] = useState(0);
   const [dlTotal, setDlTotal] = useState(0);
   const [dlSpeed, setDlSpeed] = useState(0);
+  const [mp3Loading, setMp3Loading] = useState(false);
+  const [mp3Error, setMp3Error] = useState<string | null>(null);
   const [editingBackendName, setEditingBackendName] = useState(false);
   const [backendFilename, setBackendFilename] = useState('');
   const abortRef = useRef<AbortController | null>(null);
@@ -62,11 +65,14 @@ export function DownloadModal({
         abortRef.current.abort();
         abortRef.current = null;
       }
+      terminateMp3Encoder();
       setDownloading(false);
       setDlProgress(0);
       setDlLoaded(0);
       setDlTotal(0);
       setDlSpeed(0);
+      setMp3Loading(false);
+      setMp3Error(null);
     }
   }, [isOpen]);
 
@@ -87,6 +93,59 @@ export function DownloadModal({
       document.body.removeChild(textArea);
       setCopySuccess(true);
       setTimeout(() => setCopySuccess(false), 2000);
+    }
+  }, []);
+
+  const handleDownloadMp3 = useCallback(async (url: string, fallbackFilename: string, channels: number) => {
+    setMp3Loading(true);
+    setMp3Error(null);
+    let audioCtx: AudioContext | null = null;
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`下载失败: HTTP ${res.status}`);
+      const arrayBuffer = await res.arrayBuffer();
+
+      audioCtx = new AudioContext();
+      const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+
+      const numChannels = Math.min(audioBuffer.numberOfChannels, channels || 2);
+      let interleaved: Float32Array;
+
+      if (numChannels === 2) {
+        const ch0 = audioBuffer.getChannelData(0);
+        const ch1 = audioBuffer.getChannelData(1);
+        interleaved = new Float32Array(ch0.length + ch1.length);
+        for (let i = 0; i < ch0.length; i++) {
+          interleaved[i * 2] = ch0[i];
+          interleaved[i * 2 + 1] = ch1[i];
+        }
+      } else {
+        interleaved = audioBuffer.getChannelData(0);
+      }
+
+      const sampleRate = audioBuffer.sampleRate;
+      const mp3Blob = await encodeMp3(interleaved, sampleRate, numChannels, 128);
+
+      const mp3Filename = fallbackFilename.replace(/\.wav$/i, '') + '.mp3';
+      const blobUrl = URL.createObjectURL(mp3Blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = mp3Filename;
+      a.style.display = 'none';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        URL.revokeObjectURL(blobUrl);
+        document.body.removeChild(a);
+      }, 5000);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setMp3Error(msg);
+    } finally {
+      if (audioCtx) {
+        audioCtx.close();
+      }
+      setMp3Loading(false);
     }
   }, []);
 
@@ -315,7 +374,14 @@ export function DownloadModal({
                     disabled={downloading || isBackendLoading}
                     className="flex-1 py-2 bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/30 rounded-lg text-cyan-400 text-xs font-medium transition disabled:opacity-50"
                   >
-                    {downloading ? `下载中 ${Math.round(dlProgress * 100)}%` : '⬇ 下载'}
+                    {downloading ? `下载中 ${Math.round(dlProgress * 100)}%` : '⬇ 下载 WAV'}
+                  </button>
+                  <button
+                    onClick={() => handleDownloadMp3(backendDownloadUrl, backendFilename, backendInfo?.channels || 2)}
+                    disabled={mp3Loading || downloading || isBackendLoading}
+                    className="flex-1 py-2 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 rounded-lg text-emerald-400 text-xs font-medium transition disabled:opacity-50"
+                  >
+                    {mp3Loading ? '编码中...' : '⬇ 下载 MP3 (128k)'}
                   </button>
                   <button
                     onClick={() => handleCopyLink(backendDownloadUrl)}
@@ -323,6 +389,11 @@ export function DownloadModal({
                   >
                     {copySuccess ? '✓ 已复制' : '📋 复制链接'}
                   </button>
+                </div>
+              )}
+              {mp3Error && (
+                <div className="mt-2 text-red-400 text-[10px] text-center">
+                  MP3 转换失败: {mp3Error}
                 </div>
               )}
               {!backendDownloadUrl && backendDownloadAction && (

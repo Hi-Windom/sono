@@ -1044,6 +1044,15 @@ def _run_render(task_id, input_path, output_path, target_sr, bit_depth, render_f
             "render_filename": render_filename,
             "render_result": result,
         })
+        from services.ws_manager import ws_manager
+        files = [{"filename": render_filename, "sample_rate": target_sr, "bit_depth": bit_depth, "track_type": "both"}]
+        try:
+            asyncio.run_coroutine_threadsafe(
+                ws_manager.broadcast_render_cache_update(task_id, files),
+                asyncio.get_event_loop()
+            )
+        except Exception:
+            pass
     except Exception as e:
         logger.error(f"[render] 渲染失败 task_id={task_id}: {e}")
         update_task(task_id, status="error", error=str(e), step="渲染失败")
@@ -1060,6 +1069,11 @@ def _run_render_dual(task_id, vocal_path, accompaniment_path, output_path, targe
     from services.task_manager import _ws_send_progress, _ws_send_final
     import numpy as np
     import soundfile as sf
+
+    vocal_rendered = False
+    accompaniment_rendered = False
+    vocal_render_filename = None
+    accompaniment_render_filename = None
 
     def progress_callback(pct, step):
         update_task(task_id, progress=pct, step=step)
@@ -1136,6 +1150,7 @@ def _run_render_dual(task_id, vocal_path, accompaniment_path, output_path, targe
                 pass
             try:
                 render_output(vocal_path, vocal_render_path, target_sr, bit_depth, progress_callback=progress_callback, source_bit_depth=vocal_source_bit_depth)
+                vocal_rendered = True
                 logger.info(f"[render_dual] 人声独立轨渲染完成: {vocal_render_filename}")
             except Exception as e:
                 logger.warning(f"[render_dual] 人声独立轨渲染失败: {e}")
@@ -1151,6 +1166,7 @@ def _run_render_dual(task_id, vocal_path, accompaniment_path, output_path, targe
                 pass
             try:
                 render_output(accompaniment_path, accompaniment_render_path, target_sr, bit_depth, progress_callback=progress_callback, source_bit_depth=accompaniment_source_bit_depth)
+                accompaniment_rendered = True
                 logger.info(f"[render_dual] 伴奏独立轨渲染完成: {accompaniment_render_filename}")
             except Exception as e:
                 logger.warning(f"[render_dual] 伴奏独立轨渲染失败: {e}")
@@ -1171,6 +1187,19 @@ def _run_render_dual(task_id, vocal_path, accompaniment_path, output_path, targe
             "render_filename": render_filename,
             "render_result": result,
         })
+        from services.ws_manager import ws_manager
+        files = [{"filename": render_filename, "sample_rate": target_sr, "bit_depth": bit_depth, "track_type": "both"}]
+        if vocal_rendered and vocal_render_filename:
+            files.append({"filename": vocal_render_filename, "sample_rate": target_sr, "bit_depth": bit_depth, "track_type": "vocal"})
+        if accompaniment_rendered and accompaniment_render_filename:
+            files.append({"filename": accompaniment_render_filename, "sample_rate": target_sr, "bit_depth": bit_depth, "track_type": "accompaniment"})
+        try:
+            asyncio.run_coroutine_threadsafe(
+                ws_manager.broadcast_render_cache_update(task_id, files),
+                asyncio.get_event_loop()
+            )
+        except Exception:
+            pass
     except Exception as e:
         logger.error(f"[render_dual] 渲染失败 task_id={task_id}: {e}")
         update_task(task_id, status="error", error=str(e), step="渲染失败")
@@ -1298,6 +1327,26 @@ async def websocket_task_status(websocket: WebSocket, task_id: str):
         pass
     finally:
         ws_manager.disconnect(task_id, websocket)
+
+
+@router.websocket("/ws/cache-events")
+async def websocket_cache_events(websocket: WebSocket):
+    await websocket.accept()
+    from services.ws_manager import ws_manager
+    CACHE_LISTENER_ID = "__cache_events__"
+    await ws_manager.connect(CACHE_LISTENER_ID, websocket)
+    try:
+        import asyncio
+        while True:
+            try:
+                await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
+            except asyncio.TimeoutError:
+                await websocket.send_json({"type": "heartbeat", "status": "alive"})
+    except WebSocketDisconnect:
+        pass
+    finally:
+        ws_manager.disconnect(CACHE_LISTENER_ID, websocket)
+
 
 @router.get("/download/{task_id}")
 async def download_audio(task_id: str):

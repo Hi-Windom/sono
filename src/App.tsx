@@ -7,6 +7,7 @@ import ProfileManagerPage from "@/pages/ProfileManagerPage";
 import CacheManagerPage from "@/pages/CacheManagerPage";
 import ComparePage from "@/pages/ComparePage";
 import DetectPage from "@/pages/DetectPage";
+import FlowVisualizationPage from "@/pages/FlowVisualizationPage";
 import { BuildInfo } from "@/components/BuildInfo";
 import { useEffect, useState } from "react";
 import { BackendProvider } from "@/contexts/BackendContext";
@@ -106,6 +107,7 @@ function AppRoutes() {
         <Route path="/cache-manager" element={<CacheManagerPage />} />
         <Route path="/compare" element={<ComparePage />} />
         <Route path="/detect" element={<DetectPage />} />
+        <Route path="/flow" element={<FlowVisualizationPage />} />
       </Routes>
       <BuildInfo />
     </>

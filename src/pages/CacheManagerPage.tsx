@@ -1,9 +1,9 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Header } from '../components/Header';
 import { loadSettings } from '../utils/settingsStorage';
-import { fetchDeliveryFiles, deleteDeliveryFile, deleteDeliveryParent } from '../services/backendApi';
-import type { DeliveryFile } from '../services/backendApi';
+import { fetchDeliveryFiles, deleteDeliveryFile, deleteDeliveryParent, connectCacheWS } from '../services/backendApi';
+import type { DeliveryFile, CacheUpdateEvent } from '../services/backendApi';
 
 interface CacheTask {
   id: string;
@@ -89,6 +89,8 @@ export default function CacheManagerPage() {
   const [deliveryLoading, setDeliveryLoading] = useState(false);
   const [deliveryError, setDeliveryError] = useState<string | null>(null);
   const [expandedParent, setExpandedParent] = useState<string | null>(null);
+  const [deliveryUpdateMsg, setDeliveryUpdateMsg] = useState<string | null>(null);
+  const wsControlRef = useRef<{ close: () => void } | null>(null);
 
   // 后端缓存操作
   const fetchCacheInfo = useCallback(async () => {
@@ -293,6 +295,21 @@ export default function CacheManagerPage() {
     fetchAnalysisCache();
     fetchDeliveryList();
   }, [fetchCacheInfo, fetchFrontendCacheInfo, fetchAnalysisCache, fetchDeliveryList]);
+
+  useEffect(() => {
+    wsControlRef.current = connectCacheWS((event: CacheUpdateEvent) => {
+      if (activeTab === 'delivery') {
+        fetchDeliveryList();
+      }
+      const fileCount = event.files?.length ?? 0;
+      setDeliveryUpdateMsg(`渲染缓存已更新: ${event.task_id.slice(0, 8)}... (${fileCount} 个文件)`);
+      setTimeout(() => setDeliveryUpdateMsg(null), 3000);
+    });
+    return () => {
+      wsControlRef.current?.close();
+      wsControlRef.current = null;
+    };
+  }, []);
 
   const tabs: { key: TabType; label: string; icon: string }[] = [
     { key: 'backend', label: '后端缓存', icon: '🖥️' },
@@ -649,6 +666,15 @@ export default function CacheManagerPage() {
                 刷新
               </button>
             </div>
+
+            {deliveryUpdateMsg && (
+              <div className="mb-4 p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-lg">
+                <div className="flex items-center gap-2">
+                  <span className="text-emerald-400 text-sm">✓</span>
+                  <span className="text-emerald-400 text-sm">{deliveryUpdateMsg}</span>
+                </div>
+              </div>
+            )}
 
             {deliveryLoading && (
               <div className="text-center py-12 text-gray-400">加载中...</div>
