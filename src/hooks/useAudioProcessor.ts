@@ -5,6 +5,7 @@ import { parseWavHeader, WavInfo } from '../utils/wavParser';
 import { saveSession, loadSession, clearSession, saveAnalysisCache } from '../utils/sessionDB';
 import { computeFileHash } from '../utils/fileHash';
 import { useAudioWorker } from '../workers/useAudioWorker';
+import { useRepairSessionStore } from '../store/repairSessionStore';
 import {
   uploadAudio,
   repairAudio,
@@ -447,6 +448,13 @@ export function useAudioProcessor() {
   useEffect(() => {
     if (sessionRestoredRef.current || !backendAvailable) return;
 
+    const sessionStore = useRepairSessionStore.getState();
+    if (sessionStore.isDualTrackMode) {
+      writeLog('[useAudioProcessor] 双轨模式，跳过单轨会话恢复');
+      sessionRestoredRef.current = true;
+      return;
+    }
+
     const seq = ++restoreSeqRef.current;
 
     (async () => {
@@ -780,6 +788,7 @@ export function useAudioProcessor() {
     pausedAtRef.current = 0;
     setHasBeenProcessed(false);
     setPlayMode('original');
+    useRepairSessionStore.getState().clearSingleTrack();
     setTaskId(null);
     taskIdRef.current = null;
     setRepairResult(null);
@@ -939,6 +948,7 @@ export function useAudioProcessor() {
         setTaskId(newTaskId);
         taskIdRef.current = newTaskId;
         setBackendAvailable(true);
+        useRepairSessionStore.getState().setSingleTrackFile(hash, file.name);
         if (uploadRes.cached) {
           writeLog(`[loadAudioFile] 文件已缓存，跳过上传 taskId=${newTaskId}`);
         } else {
@@ -1262,6 +1272,7 @@ export function useAudioProcessor() {
 
     if (anySuccess) {
       setHasBeenProcessed(true);
+      useRepairSessionStore.getState().setSingleTrackProcessed(true);
 
       if (audioFile && taskIdRef.current) {
         saveSession({

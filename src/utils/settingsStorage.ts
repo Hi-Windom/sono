@@ -59,11 +59,6 @@ export interface AppSettings {
   dualTrackVocalParams: VocalRepairParams;
   dualTrackInstrumentParams: InstrumentRepairParams;
   dualTrackMixRatio: number;
-  isDualTrackMode: boolean;
-  dualTrackVocalFileHash: string;
-  dualTrackAccompanimentFileHash: string;
-  dualTrackVocalFileName: string;
-  dualTrackAccompanimentFileName: string;
   exportOptions: {
     sampleRate: number;
     bitDepth: 16 | 24 | 32;
@@ -85,11 +80,6 @@ export const defaultSettings: AppSettings = {
   dualTrackVocalParams: defaultVocalRepairParams,
   dualTrackInstrumentParams: defaultInstrumentRepairParams,
   dualTrackMixRatio: 0.5,
-  isDualTrackMode: false,
-  dualTrackVocalFileHash: '',
-  dualTrackAccompanimentFileHash: '',
-  dualTrackVocalFileName: '',
-  dualTrackAccompanimentFileName: '',
   exportOptions: {
     sampleRate: 48000,
     bitDepth: 24,
@@ -125,11 +115,6 @@ export function loadSettings(): AppSettings {
           ...parsed.dualTrackInstrumentParams,
         },
         dualTrackMixRatio: parsed.dualTrackMixRatio ?? defaultSettings.dualTrackMixRatio,
-        isDualTrackMode: parsed.isDualTrackMode ?? defaultSettings.isDualTrackMode,
-        dualTrackVocalFileHash: parsed.dualTrackVocalFileHash ?? defaultSettings.dualTrackVocalFileHash,
-        dualTrackAccompanimentFileHash: parsed.dualTrackAccompanimentFileHash ?? defaultSettings.dualTrackAccompanimentFileHash,
-        dualTrackVocalFileName: parsed.dualTrackVocalFileName ?? defaultSettings.dualTrackVocalFileName,
-        dualTrackAccompanimentFileName: parsed.dualTrackAccompanimentFileName ?? defaultSettings.dualTrackAccompanimentFileName,
         exportOptions: {
           ...defaultSettings.exportOptions,
           ...parsed.exportOptions,

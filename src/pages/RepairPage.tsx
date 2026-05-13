@@ -10,11 +10,10 @@ import { RepairCacheModal } from '../components/RepairCacheModal';
 import { useAudioProcessor, generateExportFilename } from '../hooks/useAudioProcessor';
 import { uploadDualAudio, repairDualAudio, repairDualFromHash, getTrackStatus, getDownloadUrl, VocalRepairParams, InstrumentRepairParams, defaultVocalRepairParams, defaultInstrumentRepairParams } from '../services/backendApi';
 import { useBackend } from '../contexts/BackendContext';
-import { AIRepairParams, defaultAIRepairParams } from '../utils/advancedAudioProcessing';
 import { saveSettings, loadSettings } from '../utils/settingsStorage';
 import { computeFileHash } from '../utils/fileHash';
+import { useRepairSessionStore } from '../store/repairSessionStore';
 
-// 导出给其他页面使用
 export { useBackend };
 
 export default function RepairPage() {
@@ -92,37 +91,30 @@ export default function RepairPage() {
 
   const [showDiag, setShowDiag] = useState(false);
   const [instantDownloadInfo, setInstantDownloadInfo] = useState<DownloadFileInfo | null>(null);
-  const [isDualTrackMode, setIsDualTrackMode] = useState(() => {
-    const saved = loadSettings();
-    return saved.isDualTrackMode ?? false;
-  });
+
+  const isDualTrackMode = useRepairSessionStore(s => s.isDualTrackMode);
+  const dualTrackVocalFileHash = useRepairSessionStore(s => s.dualTrackVocalFileHash);
+  const dualTrackAccompanimentFileHash = useRepairSessionStore(s => s.dualTrackAccompanimentFileHash);
+  const dualTrackVocalFileName = useRepairSessionStore(s => s.dualTrackVocalFileName);
+  const dualTrackAccompanimentFileName = useRepairSessionStore(s => s.dualTrackAccompanimentFileName);
+  const dualTrackHasBeenProcessed = useRepairSessionStore(s => s.dualTrackHasBeenProcessed);
+  const sessionActions = useRepairSessionStore(s => ({
+    setDualTrackMode: s.setDualTrackMode,
+    setDualTrackFiles: s.setDualTrackFiles,
+    setDualTrackProcessed: s.setDualTrackProcessed,
+    clearDualTrack: s.clearDualTrack,
+    clearAll: s.clearAll,
+  }));
+
   const [dualTrackTaskId, setDualTrackTaskId] = useState<string | null>(null);
   const [dualTrackVocalTaskId, setDualTrackVocalTaskId] = useState<string | null>(null);
   const [dualTrackAccompanimentTaskId, setDualTrackAccompanimentTaskId] = useState<string | null>(null);
   const [dualTrackVocalFile, setDualTrackVocalFile] = useState<File | null>(null);
   const [dualTrackAccompanimentFile, setDualTrackAccompanimentFile] = useState<File | null>(null);
-  const [dualTrackHasBeenProcessed, setDualTrackHasBeenProcessed] = useState(false);
   const [dualTrackDownloadUrl, setDualTrackDownloadUrl] = useState<string | null>(null);
   const [dualTrackRepairResult, setDualTrackRepairResult] = useState<any>(null);
   const [dualTrackFilesSelected, setDualTrackFilesSelected] = useState(false);
 
-  const dualTrackHasFiles = dualTrackFilesSelected || (!!dualTrackVocalFileHash && !!dualTrackAccompanimentFileHash);
-  const [dualTrackVocalFileHash, setDualTrackVocalFileHash] = useState<string>(() => {
-    const saved = loadSettings();
-    return saved.dualTrackVocalFileHash ?? '';
-  });
-  const [dualTrackAccompanimentFileHash, setDualTrackAccompanimentFileHash] = useState<string>(() => {
-    const saved = loadSettings();
-    return saved.dualTrackAccompanimentFileHash ?? '';
-  });
-  const [dualTrackVocalFileName, setDualTrackVocalFileName] = useState<string>(() => {
-    const saved = loadSettings();
-    return saved.dualTrackVocalFileName ?? '';
-  });
-  const [dualTrackAccompanimentFileName, setDualTrackAccompanimentFileName] = useState<string>(() => {
-    const saved = loadSettings();
-    return saved.dualTrackAccompanimentFileName ?? '';
-  });
   const [dualTrackVocalParams, setDualTrackVocalParams] = useState<VocalRepairParams>(() => {
     const saved = loadSettings();
     return { ...defaultVocalRepairParams, ...saved.dualTrackVocalParams };
@@ -136,6 +128,8 @@ export default function RepairPage() {
     return saved.dualTrackMixRatio ?? 0.5;
   });
   const pollRef = useRef<NodeJS.Timeout | null>(null);
+
+  const dualTrackHasFiles = dualTrackFilesSelected || (!!dualTrackVocalFileHash && !!dualTrackAccompanimentFileHash);
 
   const stopDualTrackPolling = useCallback(() => {
     if (pollRef.current) {
@@ -155,7 +149,7 @@ export default function RepairPage() {
 
         if (status.status === 'completed') {
           setIsProcessing(false);
-          setDualTrackHasBeenProcessed(true);
+          sessionActions.setDualTrackProcessed(true);
           setDualTrackRepairResult(status);
           const downloadUrl = getDownloadUrl(taskId);
           setDualTrackDownloadUrl(downloadUrl);
@@ -185,7 +179,7 @@ export default function RepairPage() {
     };
 
     poll();
-  }, [stopDualTrackPolling, setProcessingProgress, setProcessingStep, setIsProcessing, setBackendError, loadAudioFromUrl, setBackendProcessedBuffer, processingOptions.sampleRate, renderAndDownload, setTaskId]);
+  }, [stopDualTrackPolling, setProcessingProgress, setProcessingStep, setIsProcessing, setBackendError, loadAudioFromUrl, setBackendProcessedBuffer, processingOptions.sampleRate, renderAndDownload, setTaskId, sessionActions]);
 
   const handleDualTrackUpload = useCallback(async (vocalFile: File, accompanimentFile: File) => {
     try {
@@ -200,18 +194,9 @@ export default function RepairPage() {
         computeFileHash(accompanimentFile),
       ]);
 
-      setDualTrackVocalFileHash(vocalHash);
-      setDualTrackAccompanimentFileHash(accompanimentHash);
-      setDualTrackVocalFileName(vocalFile.name);
-      setDualTrackAccompanimentFileName(accompanimentFile.name);
-
-      saveSettings({
-        isDualTrackMode: true,
-        dualTrackVocalFileHash: vocalHash,
-        dualTrackAccompanimentFileHash: accompanimentHash,
-        dualTrackVocalFileName: vocalFile.name,
-        dualTrackAccompanimentFileName: accompanimentFile.name,
-      });
+      sessionActions.setDualTrackMode(true);
+      sessionActions.setDualTrackFiles(vocalHash, vocalFile.name, accompanimentHash, accompanimentFile.name);
+      sessionActions.setDualTrackProcessed(false);
 
       setProcessingStep('上传双轨文件...');
 
@@ -241,31 +226,20 @@ export default function RepairPage() {
       setBackendError(error instanceof Error ? error.message : '双轨上传失败');
       setIsProcessing(false);
     }
-  }, [setIsProcessing, setProcessingStep, setProcessingProgress, setProcessingSource, setBackendError]);
+  }, [setIsProcessing, setProcessingStep, setProcessingProgress, setProcessingSource, setBackendError, sessionActions]);
 
   const handleSwitchToSingleTrack = useCallback(() => {
-    setIsDualTrackMode(false);
+    sessionActions.clearDualTrack();
     setDualTrackTaskId(null);
     setDualTrackVocalTaskId(null);
     setDualTrackAccompanimentTaskId(null);
     setDualTrackVocalFile(null);
     setDualTrackAccompanimentFile(null);
-    setDualTrackHasBeenProcessed(false);
     setDualTrackDownloadUrl(null);
     setDualTrackRepairResult(null);
-    setDualTrackVocalFileHash('');
-    setDualTrackAccompanimentFileHash('');
-    setDualTrackVocalFileName('');
-    setDualTrackAccompanimentFileName('');
-    saveSettings({
-      isDualTrackMode: false,
-      dualTrackVocalFileHash: '',
-      dualTrackAccompanimentFileHash: '',
-      dualTrackVocalFileName: '',
-      dualTrackAccompanimentFileName: '',
-    });
+    setDualTrackFilesSelected(false);
     stopDualTrackPolling();
-  }, [stopDualTrackPolling]);
+  }, [stopDualTrackPolling, sessionActions]);
 
   const handleDualTrackVocalParamChange = useCallback((key: keyof VocalRepairParams, value: number) => {
     setDualTrackVocalParams(prev => ({ ...prev, [key]: value }));
@@ -282,7 +256,7 @@ export default function RepairPage() {
     if (type === 'vocal') setDualTrackVocalFile(newFile);
     else setDualTrackAccompanimentFile(newFile);
 
-    setDualTrackHasBeenProcessed(false);
+    sessionActions.setDualTrackProcessed(false);
     setDualTrackDownloadUrl(null);
 
     if (!vocal || !accompaniment) return;
@@ -292,6 +266,13 @@ export default function RepairPage() {
       setProcessingStep('重新上传双轨文件...');
       setProcessingSource('backend');
 
+      const [vocalHash, accompanimentHash] = await Promise.all([
+        computeFileHash(vocal),
+        computeFileHash(accompaniment),
+      ]);
+
+      sessionActions.setDualTrackFiles(vocalHash, vocal.name, accompanimentHash, accompaniment.name);
+
       const uploadResult = await uploadDualAudio(
         vocal,
         accompaniment,
@@ -299,7 +280,10 @@ export default function RepairPage() {
           const progress = loaded / total;
           setProcessingProgress(progress * 0.1);
           setProcessingStep(`上传中 ${(progress * 100).toFixed(0)}%`);
-        }
+        },
+        undefined,
+        vocalHash,
+        accompanimentHash
       );
 
       setDualTrackTaskId(uploadResult.task_id);
@@ -316,7 +300,7 @@ export default function RepairPage() {
       setDualTrackAccompanimentTaskId(null);
       setIsProcessing(false);
     }
-  }, [dualTrackVocalFile, dualTrackAccompanimentFile, setIsProcessing, setProcessingStep, setProcessingProgress, setProcessingSource, setBackendError]);
+  }, [dualTrackVocalFile, dualTrackAccompanimentFile, setIsProcessing, setProcessingStep, setProcessingProgress, setProcessingSource, setBackendError, sessionActions]);
 
   const handleDualTrackRepair = useCallback(async () => {
     const hasFiles = dualTrackVocalFile && dualTrackAccompanimentFile;
@@ -331,7 +315,7 @@ export default function RepairPage() {
       setIsProcessing(true);
       setProcessingStep('开始双轨修复...');
       setProcessingSource('backend');
-      setDualTrackHasBeenProcessed(false);
+      sessionActions.setDualTrackProcessed(false);
       setDualTrackDownloadUrl(null);
 
       if (dualTrackTaskId && dualTrackVocalTaskId && dualTrackAccompanimentTaskId) {
@@ -375,23 +359,15 @@ export default function RepairPage() {
       setBackendError(error instanceof Error ? error.message : '双轨修复失败');
       setIsProcessing(false);
     }
-  }, [dualTrackVocalFile, dualTrackAccompanimentFile, dualTrackVocalFileHash, dualTrackAccompanimentFileHash, dualTrackVocalFileName, dualTrackAccompanimentFileName, dualTrackTaskId, dualTrackVocalTaskId, dualTrackAccompanimentTaskId, params, processingOptions, algorithmVersion, dualTrackVocalParams, dualTrackAccompanimentParams, mixRatio, setIsProcessing, setProcessingStep, setProcessingSource, setBackendError, startDualTrackPolling]);
-
-  useEffect(() => {
-    if (!isDualTrackMode && audioFile) {
-    }
-  }, [isDualTrackMode, audioFile]);
+  }, [dualTrackVocalFile, dualTrackAccompanimentFile, dualTrackVocalFileHash, dualTrackAccompanimentFileHash, dualTrackVocalFileName, dualTrackAccompanimentFileName, dualTrackTaskId, dualTrackVocalTaskId, dualTrackAccompanimentTaskId, params, processingOptions, algorithmVersion, dualTrackVocalParams, dualTrackAccompanimentParams, mixRatio, setIsProcessing, setProcessingStep, setProcessingSource, setBackendError, startDualTrackPolling, sessionActions]);
 
   useEffect(() => {
     if (isDualTrackMode) {
       saveSettings({
-        isDualTrackMode: true,
         dualTrackVocalParams: dualTrackVocalParams,
         dualTrackInstrumentParams: dualTrackAccompanimentParams,
         dualTrackMixRatio: mixRatio,
       });
-    } else {
-      saveSettings({ isDualTrackMode: false });
     }
   }, [isDualTrackMode, dualTrackVocalParams, dualTrackAccompanimentParams, mixRatio]);
 
@@ -596,7 +572,7 @@ export default function RepairPage() {
             <button
               onClick={() => {
                 if (!isDualTrackMode) {
-                  setIsDualTrackMode(true);
+                  sessionActions.setDualTrackMode(true);
                 }
               }}
               className={`flex-1 py-2.5 px-6 rounded-lg font-medium transition ${
@@ -704,95 +680,57 @@ export default function RepairPage() {
                   <div className="flex items-center gap-3 min-w-0 flex-1">
                     <div className="w-12 h-12 bg-gradient-to-br from-cyan-500/20 to-purple-500/20 rounded-lg flex items-center justify-center border border-cyan-400/20 shrink-0">
                       <svg className="w-6 h-6 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        {isDualTrackMode ? (
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
-                        ) : (
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2z" />
-                        )}
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
                       </svg>
                     </div>
                     <div className="min-w-0">
                       <h3 className="text-white font-semibold text-lg truncate">
-                        {isDualTrackMode 
-                          ? `${dualTrackVocalFile?.name} + ${dualTrackAccompanimentFile?.name}` 
-                          : audioFile?.name}
+                        {audioFile?.name}
                       </h3>
                       <p className="text-gray-400 text-sm">
-                        {isDualTrackMode ? (
-                          <>
-                            🎤 人声: {((dualTrackVocalFile?.size || 0) / (1024 * 1024)).toFixed(2)} MB
-                            {' • '}
-                            🎵 伴奏: {((dualTrackAccompanimentFile?.size || 0) / (1024 * 1024)).toFixed(2)} MB
-                            {dualTrackHasBeenProcessed && <span className="text-green-400 ml-2">✓ 已修复</span>}
-                          </>
-                        ) : (
-                          <>
-                            {((audioFile?.size || 0) / (1024 * 1024)).toFixed(2)} MB
-                            {' • '}
-                            {(wavInfo ? wavInfo.sampleRate : originalSampleRate) / 1000} kHz
-                            {wavInfo && ` • ${wavInfo.bitDepth}bit`}
-                            {' • '}
-                            {wavInfo ? (wavInfo.channels === 1 ? '单声道' : '立体声') : (audioBuffer ? (audioBuffer.numberOfChannels === 1 ? '单声道' : '立体声') : '')}
-                            {hasBeenProcessed && (
-                              <span className="text-green-400 ml-2">✓ 已修复</span>
-                            )}
-                          </>
-                        )}
+                        <>
+                          {((audioFile?.size || 0) / (1024 * 1024)).toFixed(2)} MB
+                          {' • '}
+                          {(wavInfo ? wavInfo.sampleRate : originalSampleRate) / 1000} kHz
+                          {wavInfo && ` • ${wavInfo.bitDepth}bit`}
+                          {' • '}
+                          {wavInfo ? (wavInfo.channels === 1 ? '单声道' : '立体声') : (audioBuffer ? (audioBuffer.numberOfChannels === 1 ? '单声道' : '立体声') : '')}
+                          {hasBeenProcessed && (
+                            <span className="text-green-400 ml-2">✓ 已修复</span>
+                          )}
+                        </>
                       </p>
                     </div>
                   </div>
-                  {isDualTrackMode ? (
-                    <label className="flex items-center gap-1.5 px-3 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg cursor-pointer transition text-gray-400 hover:text-white text-sm shrink-0">
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                      </svg>
-                      替换文件
-                      <input
-                        type="file"
-                        accept="audio/*"
-                        className="hidden"
-                        onChange={(e) => {
-                          const file = e.target.files?.[0];
-                          if (file) {
-                            setDualTrackVocalFile(file);
-                            setDualTrackHasBeenProcessed(false);
-                            setDualTrackDownloadUrl(null);
-                          }
-                          e.target.value = '';
-                        }}
-                      />
-                    </label>
-                  ) : (
-                    <label className="flex items-center gap-1.5 px-3 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg cursor-pointer transition text-gray-400 hover:text-white text-sm shrink-0">
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                      </svg>
-                      替换文件
-                      <input
-                        type="file"
-                        accept="audio/*"
-                        className="hidden"
-                        onChange={(e) => {
-                          const file = e.target.files?.[0];
-                          if (file) loadAudioFile(file);
-                          e.target.value = '';
-                        }}
-                      />
-                    </label>
-                  )}
+                  <label className="flex items-center gap-1.5 px-3 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg cursor-pointer transition text-gray-400 hover:text-white text-sm shrink-0">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    替换文件
+                    <input
+                      type="file"
+                      accept="audio/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) loadAudioFile(file);
+                        e.target.value = '';
+                      }}
+                    />
+                  </label>
                 </div>
 
-                {((isDualTrackMode && dualTrackHasBeenProcessed && dualTrackTaskId) || (!isDualTrackMode && taskId && hasBeenProcessed)) && (
+                {taskId && hasBeenProcessed && (
                   <div className="mt-4 space-y-2">
                     <button
-                      onClick={() => navigate(`/compare?taskId=${isDualTrackMode ? dualTrackTaskId : taskId}${isDualTrackMode ? '&mode=dual' : ''}`)}
+                      onClick={() => navigate(`/compare?taskId=${taskId}`)}
                       className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-cyan-500/20 to-purple-500/20 hover:from-cyan-500/30 hover:to-purple-500/30 border border-cyan-400/30 hover:border-cyan-400/50 rounded-lg text-cyan-400 text-sm font-medium transition-all w-full justify-center"
                     >
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
                       </svg>
                       <span>前往 AB 对比</span>
-                      <span className="text-xs opacity-60 ml-1">{isDualTrackMode ? '人声 / 伴奏 / 合并' : '原始 / 修复后'}</span>
+                      <span className="text-xs opacity-60 ml-1">原始 / 修复后</span>
                     </button>
                   </div>
                 )}
