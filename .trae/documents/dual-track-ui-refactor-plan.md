@@ -2,114 +2,92 @@
 
 ## 概述
 
-当前 `DualTrackPanel.tsx` 内嵌了一个简陋的 `UploadZone` 组件（无拖放支持），而项目中已存在完整的 `DualTrackUploader.tsx` 组件（有拖放支持）却未被使用。本计划将启用 `DualTrackUploader` 并重构双轨上传流程。
+重构前，`AIRepairPanel.tsx` 同时处理单轨和双轨模式，通过 props 传入 `isDualTrackMode`、`vocalParams`、`accompanimentParams` 等参数，复用预估大小、算法选择、参数滑块等 UI 组件。
 
-## 当前问题
+当前版本把这些 props 都删了，导致需要单独的 `DualTrackPanel.tsx`（604 行），代码重复且 UI 不一致。
 
-1. **DualTrackUploader.tsx 未被使用** — 已有完整的拖放上传组件，但被忽略
-2. **DualTrackPanel 内嵌 UploadZone 无拖放** — 只能点击选择，体验差
-3. **组件职责混乱** — DualTrackPanel 同时包含上传、参数、进度、缓存等所有逻辑（604 行）
-4. **UI 不够醒目** — 上传区域视觉设计不如单轨的 AudioUploader
+本计划恢复重构前的设计：**AIRepairPanel 复用于单轨和双轨**。
+
+## 重构前 vs 当前
+
+| 方面 | 重构前 (0fd22a6) | 当前 (ceeb210) |
+|------|------------------|----------------|
+| AIRepairPanel props | 包含 isDualTrackMode, vocalParams, accompanimentParams, mixRatio, onDualTrackRepair 等 | 全部删除 |
+| 双轨 UI | AIRepairPanel 内部条件渲染 | 独立 DualTrackPanel.tsx (604 行) |
+| 预估大小 | 复用 AIRepairPanel 的 allEstimates | DualTrackPanel 重新实现 |
+| 算法选择 | 复用 AIRepairPanel 的下拉框 | DualTrackPanel 重新实现 |
+| 参数滑块 | 复用 AIRepairPanel 的滑块 | DualTrackPanel 重新实现 |
 
 ## 修改方案
 
-### 修改 1：RepairPage.tsx — 启用 DualTrackUploader
+### 修改 1：恢复 AIRepairPanel.tsx 的双轨 props
 
-**当前代码**（第 202-217 行）：
+从 `0fd22a6` 提交恢复以下 props：
+
 ```tsx
-{(!audioFile && !isDualTrackMode) ? (
-  <div className="flex flex-col items-center py-10">
-    <AudioUploader onFileSelect={loadAudioFile} />
-  </div>
-) : (
-  <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-    <div className="lg:col-span-7 space-y-6">
-      {isDualTrackMode ? (
-        <DualTrackPanel ... />
-      ) : (
-        // 单轨 UI
-      )}
-    </div>
-  </div>
-)}
+interface AIRepairPanelProps {
+  // ... 现有 props ...
+
+  // 双轨模式相关
+  isDualTrackMode?: boolean;
+  vocalParams?: VocalRepairParams;
+  accompanimentParams?: InstrumentRepairParams;
+  mixRatio?: number;
+  onVocalParamChange?: (key: keyof VocalRepairParams, value: number) => void;
+  onAccompanimentParamChange?: (key: keyof InstrumentRepairParams, value: number) => void;
+  onMixRatioChange?: (ratio: number) => void;
+  onDualTrackRepair?: () => void;
+  dualTrackVocalInfo?: { sample_rate: number; channels: number; duration: number } | null;
+  dualTrackAccompanimentInfo?: { sample_rate: number; channels: number; duration: number } | null;
+}
 ```
 
-**修改为**：
+### 修改 2：AIRepairPanel 内部条件渲染
+
+当 `isDualTrackMode=true` 时：
+- 算法下拉框只显示 v3.0/v3.0a
+- 参数区显示人声参数 + 伴奏参数 + 混音比例
+- 修复按钮文字改为"双轨修复"
+- 预估大小使用 `dualTrackVocalInfo` 和 `dualTrackAccompanimentInfo` 计算
+
+### 修改 3：RepairPage.tsx 传入双轨 props
+
 ```tsx
-{!audioFile && !isDualTrackMode && (
-  <div className="flex flex-col items-center py-10">
-    <AudioUploader onFileSelect={loadAudioFile} />
-  </div>
-)}
-
-{!audioFile && isDualTrackMode && (
-  <div className="flex flex-col items-center py-6">
-    <DualTrackUploader
-      onFilesSelect={handleDualTrackFilesSelect}
-      isLoading={isDualTrackUploading}
-    />
-  </div>
-)}
-
-{audioFile && (
-  <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-    // 现有逻辑
-  </div>
-)}
+<AIRepairPanel
+  // ... 现有 props ...
+  isDualTrackMode={isDualTrackMode}
+  vocalParams={dualTrackVocalParams}
+  accompanimentParams={dualTrackAccompanimentParams}
+  mixRatio={mixRatio}
+  onVocalParamChange={handleVocalParamChange}
+  onAccompanimentParamChange={handleAccompanimentParamChange}
+  onMixRatioChange={setMixRatio}
+  onDualTrackRepair={handleDualTrackRepair}
+  dualTrackVocalInfo={dualTrackVocalInfo}
+  dualTrackAccompanimentInfo={dualTrackAccompanimentInfo}
+/>
 ```
 
-### 修改 2：RepairPage.tsx — 添加双轨上传处理函数
+### 修改 4：删除 DualTrackPanel.tsx
 
-添加状态和处理函数：
-```tsx
-const [dualTrackUploading, setDualTrackUploading] = useState(false);
+不再需要独立的 DualTrackPanel 组件。
 
-const handleDualTrackFilesSelect = useCallback(async (vocalFile: File, accompanimentFile: File) => {
-  setDualTrackUploading(true);
-  try {
-    // 调用双轨上传逻辑
-    await dualTrackUpload(vocalFile, accompanimentFile);
-  } catch (e) {
-    console.error('双轨上传失败:', e);
-  } finally {
-    setDualTrackUploading(false);
-  }
-}, []);
-```
+### 修改 5：保留 DualTrackUploader.tsx
 
-### 修改 3：DualTrackPanel.tsx — 移除上传 UI
-
-将 DualTrackPanel 简化为只负责：
-- 显示已上传文件信息（文件名、时长、采样率）
-- 算法选择
-- 高级参数
-- 预估输出
-- 修复进度
-- 缓存弹窗
-
-移除内嵌的 `UploadZone` 组件。
-
-### 修改 4：DualTrackUploader.tsx — 增强视觉设计
-
-参考 AudioUploader 的样式，增强双轨上传区域的视觉效果：
-- 更大的图标和更醒目的标题
-- 更清晰的步骤指示（人声轨 → 伴奏轨）
-- 文件选中后显示详细信息（大小、类型）
+用于双轨模式的文件上传 UI（拖放支持）。
 
 ## 文件修改清单
 
-| 文件 | 修改内容 |
-|------|---------|
-| `src/pages/RepairPage.tsx` | 添加 DualTrackUploader 渲染逻辑和上传处理函数 |
-| `src/components/DualTrackPanel.tsx` | 移除内嵌 UploadZone，简化为参数面板 |
-| `src/components/DualTrackUploader.tsx` | 增强视觉设计，可选 |
+| 文件 | 操作 |
+|------|------|
+| `src/components/AIRepairPanel.tsx` | 恢复双轨 props，添加条件渲染逻辑 |
+| `src/pages/RepairPage.tsx` | 传入双轨 props，使用 DualTrackUploader |
+| `src/components/DualTrackPanel.tsx` | 删除 |
+| `src/store/dualTrackStore.ts` | 可选保留或删除 |
+| `src/hooks/useDualTrackProcessor.ts` | 可选保留或删除 |
 
 ## 验证步骤
 
-1. 运行 `npm run check` 确认类型无误
-2. 运行 `npm run build` 确认构建成功
-3. 手动测试：
-   - 点击"双轨上传 (v3.0)"进入双轨模式
-   - 拖放或点击选择人声轨文件
-   - 拖放或点击选择伴奏轨文件
-   - 确认两个文件都选中后自动触发上传
+1. `npm run check` 类型检查
+2. `npm run build` 构建验证
+3. 手动测试单轨/双轨模式切换
