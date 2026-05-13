@@ -67,7 +67,6 @@ export default function RepairPage() {
     handleCloseRepairCacheModal,
   } = useAudioProcessor();
 
-  const [showDiag, setShowDiag] = useState(false);
   const [instantDownloadInfo, setInstantDownloadInfo] = useState<DownloadFileInfo | null>(null);
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
   const [profileSaveMsg, setProfileSaveMsg] = useState('');
@@ -188,9 +187,9 @@ export default function RepairPage() {
                 </button>
               )}
               <button
-                onClick={() => setShowDiag(!showDiag)}
+                onClick={() => useRepairSessionStore.getState().setDualTrackMode(true)}
                 className={`px-3 py-1.5 text-sm rounded-lg transition ${
-                  showDiag
+                  isDualTrackMode
                     ? 'bg-gradient-to-r from-secondary/80 to-primary/80 text-white'
                     : 'text-gray-400 hover:text-white'
                 }`}
@@ -199,34 +198,6 @@ export default function RepairPage() {
               </button>
             </div>
           </div>
-
-          {showDiag && (
-            <div className="mb-6 p-4 bg-gradient-to-r from-pink-500/10 to-purple-500/10 border border-pink-500/20 rounded-xl">
-              <div className="flex items-start gap-3">
-                <div className="w-8 h-8 bg-pink-500/20 rounded-lg flex items-center justify-center shrink-0">
-                  <svg className="w-4 h-4 text-pink-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                </div>
-                <div>
-                  <h3 className="text-pink-400 font-medium text-sm">双轨修复模式说明</h3>
-                  <p className="text-gray-400 text-xs mt-1">
-                    双轨模式允许您分别上传人声轨和伴奏轨，使用 v3.0+ 算法进行独立修复，
-                    并支持实时混音控制。适合需要对人声和伴奏进行差异化处理的场景。
-                  </p>
-                  <button
-                    onClick={() => {
-                    setShowDiag(false);
-                    useRepairSessionStore.getState().setDualTrackMode(true);
-                  }}
-                    className="mt-2 px-3 py-1 text-xs bg-pink-500/20 hover:bg-pink-500/30 text-pink-400 rounded-lg transition"
-                  >
-                    切换到双轨模式
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
 
           {(!audioFile && !isDualTrackMode) ? (
             <div className="flex flex-col items-center py-10">

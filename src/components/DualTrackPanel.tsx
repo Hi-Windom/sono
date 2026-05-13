@@ -66,6 +66,8 @@ export const DualTrackPanel: React.FC<DualTrackPanelProps> = ({
   const [accompanimentParams, setAccompanimentParams] = useState<InstrumentRepairParams>(defaultInstrumentRepairParams);
   const [mixRatio, setMixRatio] = useState(50);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [pendingVocal, setPendingVocal] = useState<File | null>(null);
+  const [pendingAccompaniment, setPendingAccompaniment] = useState<File | null>(null);
 
   const {
     uploadStatus,
@@ -83,6 +85,8 @@ export const DualTrackPanel: React.FC<DualTrackPanelProps> = ({
     renderProgress,
     renderStep,
     renderCaches,
+    cacheHit,
+    showCacheModal,
   } = store;
 
   const effectiveDuration = useMemo(() => {
@@ -135,25 +139,33 @@ export const DualTrackPanel: React.FC<DualTrackPanelProps> = ({
     const file = event.target.files?.[0];
     if (!file) return;
 
-    try {
-      await processor.uploadSingle('vocal', file);
-      await processor.checkCache(params, processingOptions, algorithmVersion);
-    } catch (e) {
-      console.error('人声轨上传失败:', e);
+    setPendingVocal(file);
+
+    if (pendingAccompaniment) {
+      try {
+        await processor.upload(file, pendingAccompaniment);
+        await processor.checkCache(params, processingOptions, algorithmVersion);
+      } catch (e) {
+        console.error('双轨上传失败:', e);
+      }
     }
-  }, [processor, params, processingOptions, algorithmVersion]);
+  }, [processor, params, processingOptions, algorithmVersion, pendingAccompaniment]);
 
   const handleAccompanimentSelect = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
-    try {
-      await processor.uploadSingle('accompaniment', file);
-      await processor.checkCache(params, processingOptions, algorithmVersion);
-    } catch (e) {
-      console.error('伴奏轨上传失败:', e);
+    setPendingAccompaniment(file);
+
+    if (pendingVocal) {
+      try {
+        await processor.upload(pendingVocal, file);
+        await processor.checkCache(params, processingOptions, algorithmVersion);
+      } catch (e) {
+        console.error('双轨上传失败:', e);
+      }
     }
-  }, [processor, params, processingOptions, algorithmVersion]);
+  }, [processor, params, processingOptions, algorithmVersion, pendingVocal]);
 
   const handleRepair = useCallback(async () => {
     try {
@@ -175,7 +187,15 @@ export const DualTrackPanel: React.FC<DualTrackPanelProps> = ({
     setVocalParams(defaultVocalRepairParams);
     setAccompanimentParams(defaultInstrumentRepairParams);
     setMixRatio(50);
+    setPendingVocal(null);
+    setPendingAccompaniment(null);
   }, [processor]);
+
+  const handleUseCache = useCallback(async () => {
+    if (cacheHit?.task_id) {
+      await processor.useRepairCache(cacheHit.task_id);
+    }
+  }, [processor, cacheHit]);
 
   const isProcessing = repairStatus === 'repairing' || renderStatus === 'rendering';
   const hasVocal = !!vocalFileName;
@@ -478,6 +498,43 @@ export const DualTrackPanel: React.FC<DualTrackPanelProps> = ({
               开始双轨修复
             </button>
           )}
+        </div>
+      )}
+
+      {showCacheModal && cacheHit && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+          <div className="bg-gray-800 rounded-xl p-5 max-w-sm w-full">
+            <div className="text-lg font-bold text-white mb-3">🗄️ 发现修复缓存</div>
+            <div className="text-sm text-gray-400 mb-4">
+              检测到相同文件的修复结果，是否直接使用缓存？
+            </div>
+            <div className="space-y-2 text-xs text-gray-500">
+              <div className="flex justify-between">
+                <span>缓存任务ID</span>
+                <span className="text-gray-300">{cacheHit.task_id?.slice(0, 8)}...</span>
+              </div>
+              {cacheHit.output_size && (
+                <div className="flex justify-between">
+                  <span>输出大小</span>
+                  <span className="text-gray-300">{(cacheHit.output_size / (1024 * 1024)).toFixed(1)} MiB</span>
+                </div>
+              )}
+            </div>
+            <div className="flex gap-2 mt-4">
+              <button
+                onClick={() => store.setShowCacheModal(false)}
+                className="flex-1 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg text-sm transition"
+              >
+                重新修复
+              </button>
+              <button
+                onClick={handleUseCache}
+                className="flex-1 py-2 bg-secondary hover:bg-secondary/80 text-white rounded-lg text-sm transition"
+              >
+                使用缓存
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
