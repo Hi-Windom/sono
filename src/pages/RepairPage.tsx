@@ -87,6 +87,9 @@ export default function RepairPage() {
     setBackendWaveformPeaks,
     loadAudioFromUrl,
     setTaskId,
+    setIsTaskStuck,
+    setStuckInfo,
+    setQueueStatus,
   } = useAudioProcessor();
 
   const [showDiag, setShowDiag] = useState(false);

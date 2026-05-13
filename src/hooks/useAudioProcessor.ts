@@ -2066,6 +2066,9 @@ export function useAudioProcessor() {
     setBackendWaveformPeaks,
     loadAudioFromUrl,
     setTaskId,
+    setIsTaskStuck,
+    setStuckInfo,
+    setQueueStatus,
   };
 }
 
