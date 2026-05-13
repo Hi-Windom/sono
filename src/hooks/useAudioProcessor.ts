@@ -448,6 +448,11 @@ export function useAudioProcessor() {
   useEffect(() => {
     if (sessionRestoredRef.current || !backendAvailable) return;
 
+    if (!useRepairSessionStore.persist.hasHydrated()) {
+      writeLog('[useAudioProcessor] 等待 session store 水合...');
+      return;
+    }
+
     const sessionStore = useRepairSessionStore.getState();
     if (sessionStore.isDualTrackMode) {
       writeLog('[useAudioProcessor] 双轨模式，跳过单轨会话恢复');
@@ -656,7 +661,7 @@ export function useAudioProcessor() {
         sessionRestoredRef.current = true;
       }
     })();
-  }, [backendAvailable, getAudioContext]);
+  }, [backendAvailable, getAudioContext, useRepairSessionStore.persist.hasHydrated()]);
 
   const stopAllModeNodes = useCallback((immediate = true) => {
     const context = audioContextRef.current;

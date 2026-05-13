@@ -12,12 +12,13 @@ import { uploadDualAudio, repairDualAudio, repairDualFromHash, getTrackStatus, g
 import { useBackend } from '../contexts/BackendContext';
 import { saveSettings, loadSettings } from '../utils/settingsStorage';
 import { computeFileHash } from '../utils/fileHash';
-import { useRepairSessionStore } from '../store/repairSessionStore';
+import { useRepairSessionStore, useRepairSessionHydrated } from '../store/repairSessionStore';
 
 export { useBackend };
 
 export default function RepairPage() {
   const navigate = useNavigate();
+  const sessionHydrated = useRepairSessionHydrated();
   const { backendAvailable: globalBackendAvailable } = useBackend();
   const {
     audioFile,
@@ -463,6 +464,17 @@ export default function RepairPage() {
   }, [stopDualTrackPolling]);
 
   const hasBackendResult = !!backendProcessedBuffer || !!repairResult;
+
+  if (!sessionHydrated) {
+    return (
+      <div className="min-h-screen bg-dark flex items-center justify-center">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-8 h-8 rounded-full border-2 border-cyan-400 border-t-transparent animate-spin" />
+          <span className="text-gray-400 text-sm">恢复会话状态...</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <ErrorBoundary>

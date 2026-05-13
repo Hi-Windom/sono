@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { useState, useEffect } from 'react';
 
 interface RepairSessionState {
   isDualTrackMode: boolean;
@@ -77,6 +78,16 @@ export const useRepairSessionStore = create<RepairSessionState>()(
     {
       name: 'repair-session',
       version: 1,
+      onRehydrateStorage: () => {
+        return (_state, error) => {
+          if (error) {
+            console.error('[repairSessionStore] 水合失败，清除损坏数据:', error);
+            try {
+              localStorage.removeItem('repair-session');
+            } catch {}
+          }
+        };
+      },
       migrate: (persisted, version) => {
         if (version === 0) {
           const old = persisted as Record<string, unknown>;
@@ -85,7 +96,7 @@ export const useRepairSessionStore = create<RepairSessionState>()(
             singleTrackFileHash: (old.singleTrackFileHash as string) ?? '',
             singleTrackFileName: (old.singleTrackFileName as string) ?? '',
             singleTrackHasBeenProcessed: (old.singleTrackHasBeenProcessed as boolean) ?? false,
-            dualTrackVocalFileHash: (old.dualTrackVocalFileHash as string) ?? (old.dualTrackVocalFileHash as string) ?? '',
+            dualTrackVocalFileHash: (old.dualTrackVocalFileHash as string) ?? '',
             dualTrackAccompanimentFileHash: (old.dualTrackAccompanimentFileHash as string) ?? '',
             dualTrackVocalFileName: (old.dualTrackVocalFileName as string) ?? '',
             dualTrackAccompanimentFileName: (old.dualTrackAccompanimentFileName as string) ?? '',
@@ -97,3 +108,20 @@ export const useRepairSessionStore = create<RepairSessionState>()(
     },
   ),
 );
+
+export function useRepairSessionHydrated(): boolean {
+  const [hydrated, setHydrated] = useState(() => useRepairSessionStore.persist.hasHydrated());
+
+  useEffect(() => {
+    if (useRepairSessionStore.persist.hasHydrated()) {
+      setHydrated(true);
+      return;
+    }
+    const unsubFinish = useRepairSessionStore.persist.onFinishHydration(() => {
+      setHydrated(true);
+    });
+    return unsubFinish;
+  }, []);
+
+  return hydrated;
+}
