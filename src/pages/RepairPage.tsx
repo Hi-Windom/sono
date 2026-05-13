@@ -98,13 +98,16 @@ export default function RepairPage() {
   const dualTrackVocalFileName = useRepairSessionStore(s => s.dualTrackVocalFileName);
   const dualTrackAccompanimentFileName = useRepairSessionStore(s => s.dualTrackAccompanimentFileName);
   const dualTrackHasBeenProcessed = useRepairSessionStore(s => s.dualTrackHasBeenProcessed);
-  const sessionActions = useRepairSessionStore(s => ({
-    setDualTrackMode: s.setDualTrackMode,
-    setDualTrackFiles: s.setDualTrackFiles,
-    setDualTrackProcessed: s.setDualTrackProcessed,
-    clearDualTrack: s.clearDualTrack,
-    clearAll: s.clearAll,
-  }));
+  const sessionActions = useMemo(() => {
+    const { setDualTrackMode, setDualTrackFiles, setDualTrackProcessed, clearDualTrack, clearAll } = useRepairSessionStore.getState();
+    return {
+      setDualTrackMode,
+      setDualTrackFiles,
+      setDualTrackProcessed,
+      clearDualTrack,
+      clearAll,
+    };
+  }, []);
 
   const [dualTrackTaskId, setDualTrackTaskId] = useState<string | null>(null);
   const [dualTrackVocalTaskId, setDualTrackVocalTaskId] = useState<string | null>(null);
@@ -149,7 +152,7 @@ export default function RepairPage() {
 
         if (status.status === 'completed') {
           setIsProcessing(false);
-          sessionActions.setDualTrackProcessed(true);
+          setDualTrackProcessed(true);
           setDualTrackRepairResult(status);
           const downloadUrl = getDownloadUrl(taskId);
           setDualTrackDownloadUrl(downloadUrl);
