@@ -5,7 +5,7 @@ import { parseWavHeader, WavInfo } from '../utils/wavParser';
 import { saveSession, loadSession, clearSession, saveAnalysisCache } from '../utils/sessionDB';
 import { computeFileHash } from '../utils/fileHash';
 import { useAudioWorker } from '../workers/useAudioWorker';
-import { useRepairSessionStore, hydrationComplete } from '../store/repairSessionStore';
+import { useRepairSessionStore } from '../store/repairSessionStore';
 import {
   uploadAudio,
   repairAudio,
@@ -449,11 +449,6 @@ export function useAudioProcessor() {
   useEffect(() => {
     if (sessionRestoredRef.current || !backendAvailable) return;
 
-    if (!hydrationComplete) {
-      writeLog('[useAudioProcessor] 等待 session store 水合...');
-      return;
-    }
-
     const sessionStore = useRepairSessionStore.getState();
     if (sessionStore.isDualTrackMode) {
       writeLog('[useAudioProcessor] 双轨模式，跳过单轨会话恢复');
@@ -662,7 +657,7 @@ export function useAudioProcessor() {
         sessionRestoredRef.current = true;
       }
     })();
-  }, [backendAvailable, getAudioContext, useRepairSessionStore.persist.hasHydrated()]);
+  }, [backendAvailable, getAudioContext]);
 
   const stopAllModeNodes = useCallback((immediate = true) => {
     const context = audioContextRef.current;

@@ -12,13 +12,12 @@ import { uploadDualAudio, repairDualAudio, repairDualFromHash, getTrackStatus, g
 import { useBackend } from '../contexts/BackendContext';
 import { saveSettings, loadSettings } from '../utils/settingsStorage';
 import { computeFileHash } from '../utils/fileHash';
-import { useRepairSessionStore, useRepairSessionHydrated } from '../store/repairSessionStore';
+import { useRepairSessionStore } from '../store/repairSessionStore';
 
 export { useBackend };
 
 export default function RepairPage() {
   const navigate = useNavigate();
-  const sessionHydrated = useRepairSessionHydrated();
   const { backendAvailable: globalBackendAvailable } = useBackend();
   const {
     audioFile,
@@ -445,16 +444,11 @@ export default function RepairPage() {
 
   const [profileSaveMsg, setProfileSaveMsg] = useState('');
 
-  const handleSaveProfile = useCallback(async (name: string) => {
+  const handleSaveProfile = useCallback((name: string) => {
     if (!name.trim()) return;
-    const result = await saveProfile(name.trim());
-    if (result.success) {
-      setProfileSaveMsg('配置已保存');
-      setTimeout(() => setProfileSaveMsg(''), 2000);
-    } else {
-      setProfileSaveMsg(result.message || '保存失败');
-      setTimeout(() => setProfileSaveMsg(''), 3000);
-    }
+    saveProfile(name.trim());
+    setProfileSaveMsg('配置已保存');
+    setTimeout(() => setProfileSaveMsg(''), 2000);
   }, [saveProfile]);
 
   useEffect(() => {
@@ -464,19 +458,6 @@ export default function RepairPage() {
   }, [stopDualTrackPolling]);
 
   const hasBackendResult = !!backendProcessedBuffer || !!repairResult;
-
-  if (!sessionHydrated) {
-    return (
-      <ErrorBoundary>
-      <div className="min-h-screen bg-dark flex items-center justify-center">
-        <div className="flex flex-col items-center gap-3">
-          <div className="w-8 h-8 rounded-full border-2 border-cyan-400 border-t-transparent animate-spin" />
-          <span className="text-gray-400 text-sm">恢复会话状态...</span>
-        </div>
-      </div>
-      </ErrorBoundary>
-    );
-  }
 
   return (
     <ErrorBoundary>
@@ -801,7 +782,7 @@ export default function RepairPage() {
                     sampleRate: `${cacheEntry.sample_rate / 1000} kHz`,
                     bitDepth: cacheEntry.bit_depth,
                     channels: 2,
-                    duration: cacheEntry.duration || 0,
+                    duration: duration || 0,
                     algorithmVersion: cacheEntry.algorithm_version,
                   });
                   setShowDownloadModal(true);
@@ -828,19 +809,23 @@ export default function RepairPage() {
 
       {showDownloadModal && instantDownloadInfo && (
         <DownloadModal
-          downloadUrl={renderDownloadUrl || ''}
-          fileInfo={instantDownloadInfo}
+          isOpen={showDownloadModal}
+          backendInfo={instantDownloadInfo}
+          backendDownloadUrl={renderDownloadUrl}
           onClose={() => setShowDownloadModal(false)}
         />
       )}
 
       {showRepairCacheModal && cacheHitInfo && (
         <RepairCacheModal
-          cacheInfo={cacheHitInfo}
-          onUseCache={handleUseRepairCache}
+          isOpen={showRepairCacheModal}
+          cacheHit={cacheHitInfo}
+          audioFileName={audioFile?.name}
+          algorithmVersion={algorithmVersion}
+          onUseRepairCache={handleUseRepairCache}
+          onRenderCacheDownload={handleRenderCacheDownload}
           onReRepair={handleReRepair}
           onClose={handleCloseRepairCacheModal}
-          onDownload={handleRenderCacheDownload}
         />
       )}
     </div>
