@@ -109,6 +109,7 @@ export const useRepairSessionStore = create<RepairSessionState>()(
   ),
 );
 
+const hydrationListeners: Set<() => void> = new Set();
 export let hydrationComplete = false;
 
 useRepairSessionStore.persist.onFinishHydration(() => {
