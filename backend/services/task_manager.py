@@ -12,15 +12,55 @@ from concurrent.futures import Future, ThreadPoolExecutor, TimeoutError as Futur
 import numpy as np
 from typing import Any
 
-from config import MAX_WORKERS, MOBILE_MODE, OUTPUT_DIR
+from config import MAX_WORKERS, MAX_CONCURRENT_TASKS, MOBILE_MODE, OUTPUT_DIR
 from database import TaskDict, create_task, get_task, update_task
 from services.ai_detector import detect_ai_audio
 from services.audio_repair import ALGORITHM_VERSIONS, DEFAULT_VERSION, repair_audio
+from services.memory_guard import get_available_memory_bytes
 from services.ws_manager import ws_manager
 
 logger = logging.getLogger(__name__)
 
 WAVEFORM_PEAKS_COUNT = 2000
+
+_active_tasks: set[str] = set()
+_active_tasks_lock = threading.Lock()
+
+MIN_MEMORY_FOR_TASK = 512 * 1024 * 1024
+
+
+def get_active_task_count() -> int:
+    with _active_tasks_lock:
+        return len(_active_tasks)
+
+
+def get_active_tasks() -> list[str]:
+    with _active_tasks_lock:
+        return list(_active_tasks)
+
+
+def can_accept_task() -> tuple[bool, str]:
+    active = get_active_task_count()
+    if active >= MAX_CONCURRENT_TASKS:
+        return False, f"系统繁忙（{active}/{MAX_CONCURRENT_TASKS} 任务运行中），请稍后重试"
+    available_mem = get_available_memory_bytes()
+    if available_mem is not None and available_mem < MIN_MEMORY_FOR_TASK:
+        mem_mb = available_mem / 1024 / 1024
+        return False, f"系统内存不足（仅剩 {mem_mb:.0f}MB），请稍后重试"
+    return True, ""
+
+
+def _track_task_start(task_id: str) -> bool:
+    with _active_tasks_lock:
+        if len(_active_tasks) >= MAX_CONCURRENT_TASKS:
+            return False
+        _active_tasks.add(task_id)
+        return True
+
+
+def _track_task_end(task_id: str) -> None:
+    with _active_tasks_lock:
+        _active_tasks.discard(task_id)
 
 
 def _generate_waveform_peaks(output_path: str, num_peaks: int = WAVEFORM_PEAKS_COUNT) -> list[list[float]] | None:
@@ -108,6 +148,11 @@ def generate_task_id() -> str:
 
 def submit_detect_task(task_id: str, audio_path: str, detect_type: str = "original", detector_version: str = "v1.1"):
     logger.info(f"[submit_detect_task] task_id={task_id} type={detect_type} version={detector_version}")
+    if not _track_task_start(task_id):
+        active = get_active_task_count()
+        logger.warning(f"[submit_detect_task] 拒绝任务 task_id={task_id}: 系统繁忙 ({active}/{MAX_CONCURRENT_TASKS})")
+        update_task(task_id, status="error", error=f"系统繁忙（{active}/{MAX_CONCURRENT_TASKS} 任务运行中），请稍后重试", step="系统繁忙")
+        return
     future = executor.submit(_run_detect, task_id, audio_path, detect_type, detector_version)
     future.add_done_callback(lambda f: _handle_future_exception(f, task_id, "detect"))
 
@@ -115,6 +160,11 @@ def submit_detect_task(task_id: str, audio_path: str, detect_type: str = "origin
 def submit_repair_task(task_id: str, audio_path: str, params: dict[str, Any]) -> None:
     logger.info(f"[submit_repair_task] task_id={task_id} params_keys={list(params.keys())}")
     update_task(task_id, params=params)
+    if not _track_task_start(task_id):
+        active = get_active_task_count()
+        logger.warning(f"[submit_repair_task] 拒绝任务 task_id={task_id}: 系统繁忙 ({active}/{MAX_CONCURRENT_TASKS})")
+        update_task(task_id, status="error", error=f"系统繁忙（{active}/{MAX_CONCURRENT_TASKS} 任务运行中），请稍后重试", step="系统繁忙")
+        return
     future = executor.submit(_run_repair, task_id, audio_path, params, MOBILE_MODE)
     future.add_done_callback(lambda f: _handle_future_exception(f, task_id, "repair"))
 
@@ -214,8 +264,7 @@ def _run_detect(task_id: str, audio_path: str, detect_type: str, detector_versio
         raise
     finally:
         stop_monitor[0] = True
-        with _cancelled_lock:
-            _cancelled_tasks.discard(task_id)
+        _track_task_end(task_id)
         with _cancelled_lock:
             _cancelled_tasks.discard(task_id)
 
@@ -354,6 +403,7 @@ def _run_repair(task_id: str, audio_path: str, params: dict[str, Any], mobile_mo
         raise
     finally:
         stop_monitor[0] = True
+        _track_task_end(task_id)
 
 
 def get_task_status(task_id: str) -> TaskDict | None:

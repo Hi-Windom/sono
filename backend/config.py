@@ -16,6 +16,7 @@ MAX_UPLOAD_SIZE = 1 * 1024 * 1024 * 1024
 ALLOWED_EXTENSIONS = {".wav", ".mp3", ".flac", ".ogg", ".aac", ".m4a", ".wma"}
 
 MAX_WORKERS = int(os.getenv("MAX_WORKERS", "4"))
+MAX_CONCURRENT_TASKS = int(os.getenv("MAX_CONCURRENT_TASKS", str(max(1, MAX_WORKERS - 1))))
 
 SOURCE_FILE_CACHE_LIMIT = int(os.getenv("SOURCE_FILE_CACHE_LIMIT", str(1024 * 1024 * 1024)))
 

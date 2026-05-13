@@ -92,8 +92,18 @@ def create_app() -> FastAPI:
 
     @app.get("/health")
     async def health():
-        logger.info("Health check OK")
-        return {"status": "ok", "version": "2.0.0", "mobile": MOBILE_MODE}
+        from services.task_manager import get_active_task_count, can_accept_task
+        from config import MAX_CONCURRENT_TASKS
+        active = get_active_task_count()
+        can_accept, _ = can_accept_task()
+        return {
+            "status": "ok" if can_accept else "busy",
+            "version": "2.0.0",
+            "mobile": MOBILE_MODE,
+            "active_tasks": active,
+            "max_concurrent_tasks": MAX_CONCURRENT_TASKS,
+            "load_percent": round(active / MAX_CONCURRENT_TASKS * 100, 1) if MAX_CONCURRENT_TASKS > 0 else 0,
+        }
 
     @app.get("/api/v1/logs")
     async def download_logs(lines: int = 2000):

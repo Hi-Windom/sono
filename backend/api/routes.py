@@ -8,7 +8,7 @@ from pydantic import BaseModel
 
 from config import ALLOWED_EXTENSIONS, MAX_UPLOAD_SIZE, MOBILE_MODE, OUTPUT_DIR, UPLOAD_DIR, DECODED_DIR, DEPLOY_TIME_FILE
 from database import create_task, find_task_by_hash, get_queue_status, get_task, update_task
-from services.task_manager import generate_task_id, submit_detect_task, submit_repair_task, cancel_task, executor
+from services.task_manager import generate_task_id, submit_detect_task, submit_repair_task, cancel_task, executor, can_accept_task, get_active_task_count, get_active_tasks
 from services.audio_repair import get_available_versions
 from services.ai_detector import get_detector_versions
 from services.memory_guard import get_available_memory_bytes, estimate_repair_memory_bytes, should_use_float32, get_total_memory_bytes
@@ -145,6 +145,21 @@ async def deploy_info():
     except (FileNotFoundError, ValueError, OSError):
         pass
     return {"deploy_time": deploy_time, "deploy_days": deploy_days}
+
+@router.get("/system/load")
+async def system_load():
+    active_count = get_active_task_count()
+    active_tasks = get_active_tasks()
+    available_mem = get_available_memory_bytes()
+    from config import MAX_CONCURRENT_TASKS
+    return {
+        "active_tasks": active_count,
+        "max_concurrent_tasks": MAX_CONCURRENT_TASKS,
+        "available_memory_mb": round(available_mem / 1024 / 1024, 1) if available_mem else None,
+        "can_accept": active_count < MAX_CONCURRENT_TASKS,
+        "load_percent": round(active_count / MAX_CONCURRENT_TASKS * 100, 1) if MAX_CONCURRENT_TASKS > 0 else 0,
+        "active_task_ids": active_tasks,
+    }
 
 @router.get("/diag")
 async def diagnostics():
@@ -480,6 +495,10 @@ class DetectRequest(BaseModel):
 async def detect_audio(request: DetectRequest):
     logger.info(f"[/detect] 收到请求: task_id={request.task_id}, type={request.type}, detector_version={request.detector_version}, skip_cache={request.skip_cache}")
 
+    can_accept, reject_reason = can_accept_task()
+    if not can_accept:
+        raise HTTPException(status_code=503, detail=reject_reason)
+
     task = get_task(request.task_id)
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
@@ -527,6 +546,10 @@ async def detect_audio(request: DetectRequest):
 
 @router.post("/detect-file")
 async def detect_file(file: UploadFile = File(...), detector_version: str = Form("v1.1")):
+    can_accept, reject_reason = can_accept_task()
+    if not can_accept:
+        raise HTTPException(status_code=503, detail=reject_reason)
+
     ext = os.path.splitext(file.filename or '')[1].lower()
     if ext not in ALLOWED_EXTENSIONS:
         raise HTTPException(status_code=400, detail=f"不支持的文件格式: {ext}")
@@ -604,6 +627,10 @@ class DetectPathRequest(BaseModel):
 
 @router.post("/detect-path")
 async def detect_by_path(request: DetectPathRequest):
+    can_accept, reject_reason = can_accept_task()
+    if not can_accept:
+        raise HTTPException(status_code=503, detail=reject_reason)
+
     import hashlib
 
     target_id = request.file_id
@@ -642,6 +669,10 @@ class RepairRequest(BaseModel):
 
 @router.post("/repair")
 async def repair_audio_endpoint(request: RepairRequest):
+    can_accept, reject_reason = can_accept_task()
+    if not can_accept:
+        raise HTTPException(status_code=503, detail=reject_reason)
+
     task = get_task(request.task_id)
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
@@ -667,6 +698,10 @@ class DualRepairRequest(BaseModel):
 
 @router.post("/repair-dual")
 async def repair_dual_audio_endpoint(request: DualRepairRequest):
+    can_accept, reject_reason = can_accept_task()
+    if not can_accept:
+        raise HTTPException(status_code=503, detail=reject_reason)
+
     vocal_task = get_task(request.vocal_task_id)
     accompaniment_task = get_task(request.accompaniment_task_id)
 
@@ -755,6 +790,10 @@ class DualRepairFromHashRequest(BaseModel):
 
 @router.post("/repair-dual-from-hash")
 async def repair_dual_from_hash(request: DualRepairFromHashRequest):
+    can_accept, reject_reason = can_accept_task()
+    if not can_accept:
+        raise HTTPException(status_code=503, detail=reject_reason)
+
     vocal_task = find_task_by_hash(request.vocal_file_hash)
     if not vocal_task or not vocal_task.get("original_path") or not os.path.exists(vocal_task["original_path"]):
         raise HTTPException(status_code=404, detail="人声音频不存在，请重新上传")
@@ -1092,10 +1131,16 @@ def _run_render_dual(task_id, vocal_path, accompaniment_path, output_path, targe
 
 @router.get("/status/{task_id}")
 async def get_task_status(task_id: str):
-    task = get_task(task_id)
-    if not task:
-        raise HTTPException(status_code=404, detail="任务不存在")
-    return task
+    try:
+        task = get_task(task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail="任务不存在")
+        return task
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[/status/{task_id}] 获取任务状态失败: {e}", exc_info=True)
+        raise HTTPException(status_code=503, detail=f"获取任务状态失败: {str(e)[:100]}")
 
 @router.get("/queue-status")
 async def get_queue():
@@ -2286,7 +2331,6 @@ def _run_quality_tests_background(task_id: str, loop):
 
 @router.post("/quality-tests/start")
 async def start_quality_tests():
-    import threading
     import uuid
     import asyncio
     global _quality_test_cache
@@ -2295,8 +2339,7 @@ async def start_quality_tests():
                                      "tests": [], "baseline": [], "per_step": [], "iron_rule": [],
                                      "summary": "", "raw_output": "", "exit_code": -1}
     loop = asyncio.get_event_loop()
-    thread = threading.Thread(target=_run_quality_tests_background, args=(task_id, loop), daemon=True)
-    thread.start()
+    executor.submit(_run_quality_tests_background, task_id, loop)
     return {"task_id": task_id, "status": "running"}
 
 
