@@ -273,12 +273,28 @@ export default function RepairPage() {
       setProcessingStep('重新上传双轨文件...');
       setProcessingSource('backend');
 
-      const [vocalHash, accompanimentHash] = await Promise.all([
+      const [newVocalHash, newAccompanimentHash] = await Promise.all([
         computeFileHash(vocal),
         computeFileHash(accompaniment),
       ]);
 
-      sessionActions.setDualTrackFiles(vocalHash, vocal.name, accompanimentHash, accompaniment.name);
+      // 检查是否选择了相同的文件
+      if (type === 'vocal' && newVocalHash === dualTrackVocalFileHash) {
+        console.log('人声音频未变化，跳过重新上传');
+        setIsProcessing(false);
+        setProcessingStep('');
+        setProcessingProgress(0);
+        return;
+      }
+      if (type === 'accompaniment' && newAccompanimentHash === dualTrackAccompanimentFileHash) {
+        console.log('伴奏音频未变化，跳过重新上传');
+        setIsProcessing(false);
+        setProcessingStep('');
+        setProcessingProgress(0);
+        return;
+      }
+
+      sessionActions.setDualTrackFiles(newVocalHash, vocal.name, newAccompanimentHash, accompaniment.name);
 
       const uploadResult = await uploadDualAudio(
         vocal,
@@ -289,8 +305,8 @@ export default function RepairPage() {
           setProcessingStep(`上传中 ${(progress * 100).toFixed(0)}%`);
         },
         undefined,
-        vocalHash,
-        accompanimentHash
+        newVocalHash,
+        newAccompanimentHash
       );
 
       setDualTrackTaskId(uploadResult.task_id);
@@ -309,7 +325,7 @@ export default function RepairPage() {
       setDualTrackAccompanimentTaskId(null);
       setIsProcessing(false);
     }
-  }, [dualTrackVocalFile, dualTrackAccompanimentFile, setIsProcessing, setProcessingStep, setProcessingProgress, setProcessingSource, setBackendError, sessionActions]);
+  }, [dualTrackVocalFile, dualTrackAccompanimentFile, dualTrackVocalFileHash, dualTrackAccompanimentFileHash, setIsProcessing, setProcessingStep, setProcessingProgress, setProcessingSource, setBackendError, sessionActions]);
 
   const handleDualTrackRepair = useCallback(async () => {
     const hasFiles = dualTrackVocalFile && dualTrackAccompanimentFile;
@@ -426,6 +442,13 @@ export default function RepairPage() {
     }
     prevRenderLoadingRef.current = isRenderLoading;
   }, [isRenderLoading]);
+
+  // 双轨模式修复完成时也触发缓存刷新
+  useEffect(() => {
+    if (dualTrackHasBeenProcessed) {
+      setCacheTriggerKey(k => k + 1);
+    }
+  }, [dualTrackHasBeenProcessed]);
 
   const [stuckDuration, setStuckDuration] = useState(0);
   const stuckTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -785,13 +808,24 @@ export default function RepairPage() {
                 onInstantDownload={(cacheEntry) => {
                   const downloadUrl = `/api/v1/download-file/${cacheEntry.filename}`;
                   setRenderDownloadUrl(downloadUrl);
+                  
+                  // 双轨模式下使用正确的文件名
+                  const fileName = isDualTrackMode
+                    ? (dualTrackVocalFileName || dualTrackAccompanimentFileName || 'audio')
+                    : (audioFile?.name || 'audio');
+                  
+                  // 双轨模式下使用正确的 duration
+                  const fileDuration = isDualTrackMode
+                    ? (dualTrackVocalInfo ? Math.max(dualTrackVocalInfo.duration, dualTrackAccompanimentInfo?.duration || 0) : 0)
+                    : (duration || 0);
+                  
                   setInstantDownloadInfo({
-                    filename: generateExportFilename(audioFile?.name, cacheEntry.algorithm_version, cacheEntry.sample_rate, cacheEntry.bit_depth),
+                    filename: generateExportFilename(fileName, cacheEntry.algorithm_version, cacheEntry.sample_rate, cacheEntry.bit_depth),
                     fileSize: `${(cacheEntry.size / (1024 * 1024)).toFixed(2)} MB`,
                     sampleRate: `${cacheEntry.sample_rate / 1000} kHz`,
                     bitDepth: cacheEntry.bit_depth,
                     channels: 2,
-                    duration: duration || 0,
+                    duration: fileDuration,
                     algorithmVersion: cacheEntry.algorithm_version,
                   });
                   setShowDownloadModal(true);

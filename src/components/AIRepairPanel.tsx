@@ -271,24 +271,16 @@ export function AIRepairPanel({
 
   const paramKeys = Object.keys(paramLabels) as (keyof AIRepairParams)[];
 
-  // 计算当前预估大小（双轨模式下乘以2，因为有人声和伴奏两个轨道）
+  // 计算当前预估大小
   const currentEstimate = useMemo(() => {
     if (effectiveDuration <= 0) return null;
-    const baseEst = estimateFileSize(
+    return estimateFileSize(
       effectiveDuration,
       processingOptions.sampleRate,
       processingOptions.bitDepth,
       effectiveChannels
     );
-    if (isDualTrackMode) {
-      return {
-        size: baseEst.size * 2,
-        sizeMiB: baseEst.sizeMiB * 2,
-        sizeMB: baseEst.sizeMB * 2,
-      };
-    }
-    return baseEst;
-  }, [effectiveDuration, effectiveChannels, processingOptions.sampleRate, processingOptions.bitDepth, isDualTrackMode]);
+  }, [effectiveDuration, effectiveChannels, processingOptions.sampleRate, processingOptions.bitDepth]);
 
   // 计算所有组合的预估大小
   const allEstimates = useMemo(() => {
@@ -305,14 +297,7 @@ export function AIRepairPanel({
 
     for (const sr of sampleRateOptions) {
       for (const bd of bitDepthOptions) {
-        let est = estimateFileSize(effectiveDuration, sr.value, bd.value, effectiveChannels);
-        if (isDualTrackMode) {
-          est = {
-            size: est.size * 2,
-            sizeMiB: est.sizeMiB * 2,
-            sizeMB: est.sizeMB * 2,
-          };
-        }
+        const est = estimateFileSize(effectiveDuration, sr.value, bd.value, effectiveChannels);
         estimates.push({
           sampleRate: sr.value,
           bitDepth: bd.value,
@@ -323,7 +308,7 @@ export function AIRepairPanel({
       }
     }
     return estimates;
-  }, [effectiveDuration, effectiveChannels, isDualTrackMode]);
+  }, [effectiveDuration, effectiveChannels]);
 
   // 检查当前选择是否警告
   const isCurrentWarning = currentEstimate ? currentEstimate.size > WARNING_THRESHOLD_MB : false;
@@ -550,11 +535,11 @@ export function AIRepairPanel({
             </div>
 
             {/* 各组合大小参考 */}
-            {allEstimates.length > 0 ? (
+            {allEstimates.length > 0 || isDualTrackMode ? (
             <div className="mt-3 pt-2 border-t border-gray-700/50">
               <div className="text-[10px] text-gray-500 mb-1.5">各组合预估大小参考（🟢 = 可秒下）：</div>
               <div className="grid grid-cols-3 gap-1 text-[10px]">
-                {allEstimates.map((est) => {
+                {allEstimates.length > 0 ? allEstimates.map((est) => {
                   const isCurrent = est.sampleRate === processingOptions.sampleRate && est.bitDepth === processingOptions.bitDepth;
                   const cacheKey = `${est.sampleRate}-${est.bitDepth}`;
                   // 只匹配当前算法版本的缓存
@@ -591,14 +576,25 @@ export function AIRepairPanel({
                       {isCached && <div className="text-[8px] text-emerald-400">可秒下</div>}
                     </div>
                   );
-                })}
+                }) : (
+                  // 双轨模式但还没有预估数据，显示占位格子
+                  <>
+                    {sampleRateOptions.flatMap((sr) =>
+                      bitDepthOptions.map((bd) => (
+                        <div
+                          key={`${sr.value}-${bd.value}`}
+                          className="px-1.5 py-1 rounded text-center bg-gray-800/30 text-gray-600"
+                        >
+                          <div className="font-medium">{sr.value / 1000}k/{bd.value}bit</div>
+                          <div>—</div>
+                        </div>
+                      ))
+                    )}
+                  </>
+                )}
               </div>
             </div>
-            ) : (
-              <div className="mt-3 pt-2 border-t border-gray-700/50 text-center text-gray-500 text-[10px] py-2">
-                加载音频后显示预估大小
-              </div>
-            )}
+            ) : null}
 
             {/* 缓存详情弹窗 */}
             {selectedCache && (
