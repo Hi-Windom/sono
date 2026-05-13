@@ -1,12 +1,6 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { AIRepairParams, RepairMode } from '../utils/advancedAudioProcessing';
-import { ProcessingOptions, AlgorithmVersion, fetchMemoryInfo, MemoryInfoResult, fetchStorageEstimate, StorageEstimateResult, fetchRenderCache, RenderCacheEntry, VocalRepairParams, InstrumentRepairParams, defaultVocalRepairParams, defaultInstrumentRepairParams } from '../services/backendApi';
-
-interface DualTrackAudioInfo {
-  sample_rate: number;
-  channels: number;
-  duration: number;
-}
+import { ProcessingOptions, AlgorithmVersion, fetchMemoryInfo, MemoryInfoResult, fetchStorageEstimate, StorageEstimateResult, fetchRenderCache, RenderCacheEntry } from '../services/backendApi';
 
 interface AIRepairPanelProps {
   params: AIRepairParams;
@@ -33,21 +27,11 @@ interface AIRepairPanelProps {
   duration?: number;
   channels?: number;
   backendAvailable?: boolean;
-  onSaveProfile?: () => void;
+  onSaveProfile?: (name: string) => void;
   taskId?: string | null;
   onRenderCacheRefresh?: (fn: () => Promise<void>) => void;
   cacheTriggerKey?: number;
   onInstantDownload?: (cacheEntry: RenderCacheEntry) => void;
-  isDualTrackMode?: boolean;
-  vocalParams?: VocalRepairParams;
-  accompanimentParams?: InstrumentRepairParams;
-  mixRatio?: number;
-  onVocalParamChange?: (key: keyof VocalRepairParams, value: number) => void;
-  onAccompanimentParamChange?: (key: keyof InstrumentRepairParams, value: number) => void;
-  onMixRatioChange?: (ratio: number) => void;
-  onDualTrackRepair?: () => void;
-  dualTrackVocalInfo?: DualTrackAudioInfo | null;
-  dualTrackAccompanimentInfo?: DualTrackAudioInfo | null;
 }
 
 const sampleRateOptions = [
@@ -133,35 +117,10 @@ export function AIRepairPanel({
   onRenderCacheRefresh,
   cacheTriggerKey,
   onInstantDownload,
-  isDualTrackMode = false,
-  vocalParams,
-  accompanimentParams,
-  mixRatio = 0.5,
-  onVocalParamChange,
-  onAccompanimentParamChange,
-  onMixRatioChange,
-  onDualTrackRepair,
-  dualTrackVocalInfo,
-  dualTrackAccompanimentInfo,
 }: AIRepairPanelProps) {
-  const effectiveDuration = useMemo(() => {
-    if (isDualTrackMode && dualTrackVocalInfo && dualTrackAccompanimentInfo) {
-      return Math.max(dualTrackVocalInfo.duration, dualTrackAccompanimentInfo.duration);
-    }
-    return duration;
-  }, [isDualTrackMode, duration, dualTrackVocalInfo, dualTrackAccompanimentInfo]);
+  const effectiveDuration = duration;
+  const effectiveChannels = channels;
 
-  const effectiveChannels = useMemo(() => {
-    if (isDualTrackMode && dualTrackVocalInfo && dualTrackAccompanimentInfo) {
-      return Math.max(dualTrackVocalInfo.channels, dualTrackAccompanimentInfo.channels);
-    }
-    return channels;
-  }, [isDualTrackMode, channels, dualTrackVocalInfo, dualTrackAccompanimentInfo]);
-  // 双轨模式只显示 v3.0/v3.0a/v3.1/v3.1a
-  const filteredAlgorithms = useMemo(() => {
-    if (!isDualTrackMode) return availableAlgorithms;
-    return availableAlgorithms.filter(algo => algo.name === 'v3.0' || algo.name === 'v3.0a' || algo.name === 'v3.1' || algo.name === 'v3.1a');
-  }, [availableAlgorithms, isDualTrackMode]);
   const [showParams, setShowParams] = useState<boolean | string>(false);
   const [memoryInfo, setMemoryInfo] = useState<MemoryInfoResult | null>(null);
   const [storageEstimate, setStorageEstimate] = useState<StorageEstimateResult | null>(null);
@@ -226,57 +185,6 @@ export function AIRepairPanel({
   useEffect(() => {
     if (onRenderCacheRefresh) onRenderCacheRefresh(refreshRenderCache);
   }, [refreshRenderCache, onRenderCacheRefresh]);
-
-  const vocalParamLabels: Record<keyof VocalRepairParams, string> = {
-    deClipping: '去削波',
-    dePop: '去爆音',
-    formantRepair: '口型修复',
-    deEssing: '齿音抑制',
-    breathEnhance: '气息增强',
-    aiRepair: 'AI 修复',
-    bassEnhance: '低音增强',
-    airTexture: '空气质感',
-    loudness: '响度优化',
-    exciter: '激励器',
-    compressor: '压缩器',
-    spatial: '空间感',
-    warmth: '温暖度',
-  };
-  const vocalParamKeys = Object.keys(vocalParamLabels) as (keyof VocalRepairParams)[];
-  const vocalV31ParamKeys: (keyof VocalRepairParams)[] = ['exciter', 'compressor', 'spatial', 'warmth'];
-
-  const isV31Algorithm = algorithmVersion === 'v3.1' || algorithmVersion === 'v3.1a';
-
-  const instParamLabels: Record<keyof InstrumentRepairParams, string> = {
-    deClipping: '去削波',
-    dePop: '去爆音',
-    timbreProtect: '音色保护',
-    dynamicRange: '动态控制',
-    noiseReduction: '降噪',
-    spatialEnhance: '空间增强',
-    warmth: '温暖度',
-    loudness: '响度优化',
-    stereo_enhance: '立体声增强',
-  };
-  const instParamKeys = Object.keys(instParamLabels) as (keyof InstrumentRepairParams)[];
-  const instV31ParamKeys: (keyof InstrumentRepairParams)[] = ['stereo_enhance'];
-
-  const displayVocalKeys = useMemo(() => {
-    if (!isV31Algorithm) return vocalParamKeys;
-    const result: (keyof VocalRepairParams)[] = [];
-    for (const key of vocalParamKeys) {
-      result.push(key);
-      if (key === 'aiRepair') {
-        result.push(...vocalV31ParamKeys);
-      }
-    }
-    return result;
-  }, [isV31Algorithm]);
-
-  const displayInstKeys = useMemo(() => {
-    if (!isV31Algorithm) return instParamKeys;
-    return [...instParamKeys, ...instV31ParamKeys];
-  }, [isV31Algorithm]);
 
   const paramLabels: Record<keyof AIRepairParams, string> = {
     deClipping: '去削波',
@@ -385,16 +293,8 @@ export function AIRepairPanel({
         </div>
       )}
 
-      {filteredAlgorithms.length > 0 ? (
+      {availableAlgorithms.length > 0 ? (
         <div className="mb-4 p-3 bg-gradient-to-r from-cyan-900/30 to-purple-900/30 rounded-lg border border-cyan-500/20">
-          {isDualTrackMode && (
-            <div className="mb-2 text-xs text-cyan-300 flex items-center gap-1">
-              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-              </svg>
-              双轨模式支持 v3+ 算法
-            </div>
-          )}
           <div className="flex items-center justify-between gap-2">
             <h4 className="text-cyan-400 text-sm font-medium flex items-center gap-1.5 shrink-0">
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -409,7 +309,7 @@ export function AIRepairPanel({
                 disabled={disabled}
                 className="appearance-none bg-cyan-500/20 text-white text-sm font-medium py-1.5 pl-3 pr-8 rounded-lg border border-cyan-400/40 focus:outline-none focus:border-cyan-400 cursor-pointer hover:bg-cyan-500/30 transition disabled:opacity-50 disabled:cursor-not-allowed w-full truncate"
               >
-                {[...filteredAlgorithms].reverse().map((algo) => (
+                {[...availableAlgorithms].reverse().map((algo) => (
                   <option key={algo.name} value={algo.name} className="bg-gray-900 text-white">
                     {algo.label} — {algo.description}
                   </option>
@@ -590,7 +490,7 @@ export function AIRepairPanel({
             </div>
 
             {/* 各组合大小参考 */}
-            {allEstimates.length > 0 || isDualTrackMode ? (
+            {allEstimates.length > 0 ? (
             <div className="mt-3 pt-2 border-t border-gray-700/50">
               <div className="text-[10px] text-gray-500 mb-1.5">各组合预估大小参考（🟢 = 可秒下）：</div>
               <div className="grid grid-cols-3 gap-1 text-[10px]">
@@ -870,163 +770,55 @@ export function AIRepairPanel({
         <p className="text-gray-500 text-xs mt-2">交付规格在导出时应用，修改后即时渲染无需重新修复</p>
       </div>
 
-      {isDualTrackMode ? (
-        <div className="mb-4 space-y-3">
-          <div>
-            <button
-              onClick={() => setShowParams(showParams === 'vocal' ? false : 'vocal')}
-              className="w-full flex items-center justify-between py-2 px-3 bg-pink-500/10 rounded-lg hover:bg-pink-500/15 transition border border-pink-500/20"
-            >
-              <span className="text-pink-400 text-sm font-medium flex items-center gap-1.5">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
-                人声参数
-              </span>
-              <svg
-                className={`w-4 h-4 text-pink-400/60 transition-transform ${showParams === 'vocal' ? 'rotate-180' : ''}`}
-                fill="none" stroke="currentColor" viewBox="0 0 24 24"
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-              </svg>
-            </button>
-            {showParams === 'vocal' && vocalParams && onVocalParamChange && (
-              <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3">
-                {displayVocalKeys.map((key) => (
-                  <div key={key}>
-                    <div className="flex justify-between items-center mb-1">
-                      <label className="text-pink-300 text-xs font-medium">
-                        {vocalParamLabels[key]}
-                      </label>
-                      <span className="text-pink-400 text-xs">
-                        {(vocalParams[key] ?? 0).toFixed(2)}
-                      </span>
-                    </div>
-                    <input
-                      type="range" min="0" max="1" step="0.01"
-                      value={vocalParams[key] ?? 0}
-                      onChange={(e) => onVocalParamChange(key, parseFloat(e.target.value))}
-                      disabled={disabled}
-                      className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer slider-accent"
-                    />
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div>
-            <button
-              onClick={() => setShowParams(showParams === 'accompaniment' ? false : 'accompaniment')}
-              className="w-full flex items-center justify-between py-2 px-3 bg-purple-500/10 rounded-lg hover:bg-purple-500/15 transition border border-purple-500/20"
-            >
-              <span className="text-purple-400 text-sm font-medium flex items-center gap-1.5">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" /></svg>
-                伴奏参数
-              </span>
-              <svg
-                className={`w-4 h-4 text-purple-400/60 transition-transform ${showParams === 'accompaniment' ? 'rotate-180' : ''}`}
-                fill="none" stroke="currentColor" viewBox="0 0 24 24"
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-              </svg>
-            </button>
-            {showParams === 'accompaniment' && accompanimentParams && onAccompanimentParamChange && (
-              <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3">
-                {displayInstKeys.map((key) => (
-                  <div key={key}>
-                    <div className="flex justify-between items-center mb-1">
-                      <label className="text-purple-300 text-xs font-medium">
-                        {instParamLabels[key]}
-                      </label>
-                      <span className="text-purple-400 text-xs">
-                        {(accompanimentParams[key] ?? 0).toFixed(2)}
-                      </span>
-                    </div>
-                    <input
-                      type="range" min="0" max="1" step="0.01"
-                      value={accompanimentParams[key] ?? 0}
-                      onChange={(e) => onAccompanimentParamChange(key, parseFloat(e.target.value))}
-                      disabled={disabled}
-                      className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer slider-accent"
-                    />
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div className="p-3 bg-gradient-to-r from-pink-500/5 to-purple-500/5 rounded-lg border border-white/5">
-            <div className="flex justify-between items-center mb-2">
-              <span className="text-gray-300 text-xs font-medium">混合比例</span>
-              <span className="text-xs text-gray-400">
-                {mixRatio < 0.3 ? '偏伴奏' : mixRatio > 0.7 ? '偏人声' : '均衡'}
-                <span className="ml-1 text-white font-medium">{(mixRatio * 100).toFixed(0)}%</span>
-              </span>
-            </div>
-            <input
-              type="range"
-              min="0"
-              max="1"
-              step="0.01"
-              value={mixRatio}
-              onChange={(e) => onMixRatioChange?.(parseFloat(e.target.value))}
-              disabled={disabled}
-              className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer slider-accent"
-            />
-            <div className="flex justify-between text-[10px] text-gray-500 mt-1">
-              <span>纯伴奏</span>
-              <span>均衡</span>
-              <span>纯人声</span>
-            </div>
-          </div>
-        </div>
-      ) : (
-        <div className="mb-4">
-          <button
-            onClick={() => setShowParams(!showParams)}
-            className="w-full flex items-center justify-between py-2 px-3 bg-black/20 rounded-lg hover:bg-black/30 transition"
+      <div className="mb-4">
+        <button
+          onClick={() => setShowParams(!showParams)}
+          className="w-full flex items-center justify-between py-2 px-3 bg-black/20 rounded-lg hover:bg-black/30 transition"
+        >
+          <span className="text-secondary text-sm font-medium">修复参数</span>
+          <svg
+            className={`w-4 h-4 text-gray-400 transition-transform ${showParams ? 'rotate-180' : ''}`}
+            fill="none" stroke="currentColor" viewBox="0 0 24 24"
           >
-            <span className="text-secondary text-sm font-medium">修复参数</span>
-            <svg
-              className={`w-4 h-4 text-gray-400 transition-transform ${showParams ? 'rotate-180' : ''}`}
-              fill="none" stroke="currentColor" viewBox="0 0 24 24"
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-            </svg>
-          </button>
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+          </svg>
+        </button>
 
-          {showParams && (
-            <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3">
-              {paramKeys.map((key) => (
-                <div key={key}>
-                  <div className="flex justify-between items-center mb-1">
-                    <label className="text-gray-300 text-xs font-medium">
-                      {paramLabels[key]}
-                    </label>
-                    <span className="text-secondary text-xs">
-                      {(params[key] ?? 0).toFixed(2)}
-                    </span>
-                  </div>
-                  <input
-                    type="range"
-                    min="0"
-                    max="1"
-                    step="0.01"
-                    value={params[key] ?? 0}
-                    onChange={(e) => onParamChange(key, parseFloat(e.target.value))}
-                    disabled={disabled}
-                    className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer slider-accent"
-                  />
+        {showParams && (
+          <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3">
+            {paramKeys.map((key) => (
+              <div key={key}>
+                <div className="flex justify-between items-center mb-1">
+                  <label className="text-gray-300 text-xs font-medium">
+                    {paramLabels[key]}
+                  </label>
+                  <span className="text-secondary text-xs">
+                    {(params[key] ?? 0).toFixed(2)}
+                  </span>
                 </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.01"
+                  value={params[key] ?? 0}
+                  onChange={(e) => onParamChange(key, parseFloat(e.target.value))}
+                  disabled={disabled}
+                  className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer slider-accent"
+                />
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
 
       {/* 保存当前参数为配置 */}
       {onSaveProfile && showParams && (
         <button
-          onClick={onSaveProfile}
+          onClick={() => {
+            const name = prompt('请输入配置名称：');
+            if (name) onSaveProfile(name);
+          }}
           className="w-full mb-3 py-2 rounded-lg bg-purple-500/20 hover:bg-purple-500/30 text-purple-400 text-sm font-medium transition"
         >
           💾 保存当前参数为配置
@@ -1044,13 +836,13 @@ export function AIRepairPanel({
           重置
         </button>
         <button
-          onClick={isDualTrackMode ? onDualTrackRepair : onApply}
-          disabled={disabled || (isDualTrackMode && !onDualTrackRepair)}
-          className={`px-4 py-2.5 bg-gradient-to-r ${isDualTrackMode ? 'from-pink-500 to-purple-500 hover:from-pink-400 hover:to-purple-400 shadow-pink-500/20' : 'from-cyan-500 to-purple-500 hover:from-cyan-400 hover:to-purple-400 shadow-cyan-500/20'} text-white rounded-lg transition shadow-lg text-sm font-medium
-            ${disabled || (isDualTrackMode && !onDualTrackRepair) ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
+          onClick={onApply}
+          disabled={disabled || !onApply}
+          className={`px-4 py-2.5 bg-gradient-to-r from-cyan-500 to-purple-500 hover:from-cyan-400 hover:to-purple-400 shadow-cyan-500/20 text-white rounded-lg transition shadow-lg text-sm font-medium
+            ${disabled || !onApply ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
           `}
         >
-          {isDualTrackMode ? '双轨修复' : '开始修复'}
+          开始修复
         </button>
       </div>
     </div>

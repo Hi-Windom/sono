@@ -251,26 +251,24 @@
       "children": [
         "src-components-Header",
         "src-components-AudioUploader",
-        "src-components-DualTrackUploader",
         "src-components-AIRepairPanel",
+        "src-components-DualTrackPanel",
         "src-components-ErrorBoundary",
         "src-components-DownloadModal",
         "src-components-RepairCacheModal",
         "src-hooks-useAudioProcessor",
-        "src-services-backendApi",
         "src-contexts-BackendContext",
         "src-utils-settingsStorage",
-        "src-utils-fileHash",
         "src-store-repairSessionStore",
         "src-components-LeaveConfirmModal"
       ]
     },
     {
-      "id": "src-components-DualTrackUploader",
-      "label": "DualTrackUploader",
+      "id": "src-components-DualTrackPanel",
+      "label": "DualTrackPanel",
       "type": "component",
       "layer": "frontend",
-      "filePath": "/workspace/src/components/DualTrackUploader.tsx"
+      "filePath": "/workspace/src/components/DualTrackPanel.tsx"
     },
     {
       "id": "src-components-RepairCacheModal",
@@ -278,13 +276,6 @@
       "type": "component",
       "layer": "frontend",
       "filePath": "/workspace/src/components/RepairCacheModal.tsx"
-    },
-    {
-      "id": "src-utils-fileHash",
-      "label": "fileHash",
-      "type": "utils",
-      "layer": "frontend",
-      "filePath": "/workspace/src/utils/fileHash.ts"
     },
     {
       "id": "src-store-repairSessionStore",
@@ -326,6 +317,27 @@
       "filePath": "/workspace/src/utils/mp3Encoder.ts"
     },
     {
+      "id": "src-store-dualTrackStore",
+      "label": "dualTrackStore",
+      "type": "store",
+      "layer": "frontend",
+      "filePath": "/workspace/src/store/dualTrackStore.ts"
+    },
+    {
+      "id": "src-hooks-useDualTrackProcessor",
+      "label": "useDualTrackProcessor",
+      "type": "hook",
+      "layer": "frontend",
+      "filePath": "/workspace/src/hooks/useDualTrackProcessor.ts"
+    },
+    {
+      "id": "src-components-DualTrackUploader",
+      "label": "DualTrackUploader",
+      "type": "component",
+      "layer": "frontend",
+      "filePath": "/workspace/src/components/DualTrackUploader.tsx"
+    },
+    {
       "id": "src-components-EffectsPanel",
       "label": "EffectsPanel",
       "type": "component",
@@ -358,6 +370,12 @@
       "label": "utils",
       "type": "frontend",
       "layer": "/workspace/src/utils/wavParser.ts"
+    },
+    {
+      "id": "src-utils-fileHash",
+      "label": "utils",
+      "type": "frontend",
+      "layer": "/workspace/src/utils/fileHash.ts"
     },
     {
       "id": "src-workers-useAudioWorker",
@@ -1914,13 +1932,13 @@
     },
     {
       "source": "src-pages-RepairPage",
-      "target": "src-components-DualTrackUploader",
+      "target": "src-components-AIRepairPanel",
       "label": "渲染",
       "type": "renders"
     },
     {
       "source": "src-pages-RepairPage",
-      "target": "src-components-AIRepairPanel",
+      "target": "src-components-DualTrackPanel",
       "label": "渲染",
       "type": "renders"
     },
@@ -1950,12 +1968,6 @@
     },
     {
       "source": "src-pages-RepairPage",
-      "target": "src-services-backendApi",
-      "label": "使用",
-      "type": "import"
-    },
-    {
-      "source": "src-pages-RepairPage",
       "target": "src-contexts-BackendContext",
       "label": "使用",
       "type": "import"
@@ -1963,12 +1975,6 @@
     {
       "source": "src-pages-RepairPage",
       "target": "src-utils-settingsStorage",
-      "label": "使用",
-      "type": "import"
-    },
-    {
-      "source": "src-pages-RepairPage",
-      "target": "src-utils-fileHash",
       "label": "使用",
       "type": "import"
     },
@@ -2041,6 +2047,30 @@
     {
       "source": "src-components-DownloadModal",
       "target": "src-utils-mp3Encoder",
+      "label": "导入",
+      "type": "import"
+    },
+    {
+      "source": "src-components-DualTrackPanel",
+      "target": "src-store-dualTrackStore",
+      "label": "导入",
+      "type": "import"
+    },
+    {
+      "source": "src-components-DualTrackPanel",
+      "target": "src-hooks-useDualTrackProcessor",
+      "label": "导入",
+      "type": "import"
+    },
+    {
+      "source": "src-components-DualTrackPanel",
+      "target": "src-utils-advancedAudioProcessing",
+      "label": "导入",
+      "type": "import"
+    },
+    {
+      "source": "src-components-DualTrackPanel",
+      "target": "src-services-backendApi",
       "label": "导入",
       "type": "import"
     },
@@ -2143,6 +2173,30 @@
     {
       "source": "src-hooks-useAudioProcessor",
       "target": "src-utils-settingsStorage",
+      "label": "调用",
+      "type": "call"
+    },
+    {
+      "source": "src-hooks-useDualTrackProcessor",
+      "target": "src-store-dualTrackStore",
+      "label": "调用",
+      "type": "call"
+    },
+    {
+      "source": "src-hooks-useDualTrackProcessor",
+      "target": "src-utils-fileHash",
+      "label": "调用",
+      "type": "call"
+    },
+    {
+      "source": "src-hooks-useDualTrackProcessor",
+      "target": "src-utils-advancedAudioProcessing",
+      "label": "调用",
+      "type": "call"
+    },
+    {
+      "source": "src-hooks-useDualTrackProcessor",
+      "target": "src-services-backendApi",
       "label": "调用",
       "type": "call"
     },

@@ -74,7 +74,7 @@ function log(tag: string, ...args: unknown[]) {
   console.log(msg);
 }
 
-interface AudioInfo {
+export interface AudioInfo {
   sample_rate: number;
   channels: number;
   duration: number;
