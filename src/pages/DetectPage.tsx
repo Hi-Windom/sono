@@ -3,6 +3,7 @@ import { useBlocker } from 'react-router-dom';
 import { Header } from '../components/Header';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import { LeaveConfirmModal } from '../components/LeaveConfirmModal';
+import { useBackend } from '../contexts/BackendContext';
 import { AIDetectionCard } from '../components/AIDetectionComparison';
 import { AISongDetectionResult } from '../utils/aiSongChecker';
 import {
@@ -189,6 +190,7 @@ export default function DetectPage() {
       progress: 0,
       step: '',
       result: null,
+      detectTime: '',
       error: '',
     });
   }, []);
@@ -206,6 +208,7 @@ export default function DetectPage() {
       progress: 0,
       step: '',
       result: null,
+      detectTime: '',
       error: '',
     });
     setShowServerPicker(null);

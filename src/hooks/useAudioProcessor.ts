@@ -29,6 +29,7 @@ import {
   fetchRenderCache,
   RenderCacheEntry,
   parseFilenameFromDisposition,
+  BackendRepairResult,
 } from '../services/backendApi';
 import { CacheHitInfo } from '../components/RepairCacheModal';
 

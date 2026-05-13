@@ -1,14 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { RenderCacheEntry, fetchRenderCache } from '../services/backendApi';
+import { RenderCacheEntry, fetchRenderCache, BackendRepairResult } from '../services/backendApi';
 import { generateExportFilename } from '../hooks/useAudioProcessor';
 
 interface RepairCacheInfo {
   task_id: string;
   output_size: number;
-  repair_result?: {
-    issues_found?: string[];
-    [key: string]: unknown;
-  };
+  repair_result?: BackendRepairResult;
   detection_result?: unknown;
   repaired_detection_result?: unknown;
 }

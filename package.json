@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "dev:full": "bash scripts/start_dev.sh",
-    "build": "node scripts/analyze-flow.mjs && vite build",
+    "build": "tsc -b --noEmit && node scripts/analyze-flow.mjs && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
     "check": "tsc -b --noEmit",

@@ -106,6 +106,7 @@
         "src-components-Header",
         "src-components-ErrorBoundary",
         "src-components-LeaveConfirmModal",
+        "src-contexts-BackendContext",
         "src-components-AIDetectionComparison",
         "src-utils-aiSongChecker",
         "src-services-backendApi"
@@ -117,6 +118,13 @@
       "type": "component",
       "layer": "frontend",
       "filePath": "/workspace/src/components/LeaveConfirmModal.tsx"
+    },
+    {
+      "id": "src-contexts-BackendContext",
+      "label": "BackendContext",
+      "type": "context",
+      "layer": "frontend",
+      "filePath": "/workspace/src/contexts/BackendContext.tsx"
     },
     {
       "id": "src-components-AIDetectionComparison",
@@ -204,13 +212,6 @@
         "src-components-Header",
         "src-contexts-BackendContext"
       ]
-    },
-    {
-      "id": "src-contexts-BackendContext",
-      "label": "BackendContext",
-      "type": "context",
-      "layer": "frontend",
-      "filePath": "/workspace/src/contexts/BackendContext.tsx"
     },
     {
       "id": "src-pages-ProfileManagerPage",
@@ -1767,6 +1768,12 @@
       "target": "src-components-LeaveConfirmModal",
       "label": "渲染",
       "type": "renders"
+    },
+    {
+      "source": "src-pages-DetectPage",
+      "target": "src-contexts-BackendContext",
+      "label": "使用",
+      "type": "import"
     },
     {
       "source": "src-pages-DetectPage",
