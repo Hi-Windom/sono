@@ -157,10 +157,10 @@ export function AIRepairPanel({
     }
     return channels;
   }, [isDualTrackMode, channels, dualTrackVocalInfo, dualTrackAccompanimentInfo]);
-  // 双轨模式只显示 v3.0 和 v3.0a
+  // 双轨模式只显示 v3.0/v3.0a/v3.1/v3.1a
   const filteredAlgorithms = useMemo(() => {
     if (!isDualTrackMode) return availableAlgorithms;
-    return availableAlgorithms.filter(algo => algo.name === 'v3.0' || algo.name === 'v3.0a');
+    return availableAlgorithms.filter(algo => algo.name === 'v3.0' || algo.name === 'v3.0a' || algo.name === 'v3.1' || algo.name === 'v3.1a');
   }, [availableAlgorithms, isDualTrackMode]);
   const [showParams, setShowParams] = useState<boolean | string>(false);
   const [memoryInfo, setMemoryInfo] = useState<MemoryInfoResult | null>(null);
@@ -237,8 +237,15 @@ export function AIRepairPanel({
     bassEnhance: '低音增强',
     airTexture: '空气质感',
     loudness: '响度优化',
+    exciter: '激励器',
+    compressor: '压缩器',
+    spatial: '空间感',
+    warmth: '温暖度',
   };
   const vocalParamKeys = Object.keys(vocalParamLabels) as (keyof VocalRepairParams)[];
+  const vocalV31ParamKeys: (keyof VocalRepairParams)[] = ['exciter', 'compressor', 'spatial', 'warmth'];
+
+  const isV31Algorithm = algorithmVersion === 'v3.1' || algorithmVersion === 'v3.1a';
 
   const instParamLabels: Record<keyof InstrumentRepairParams, string> = {
     deClipping: '去削波',
@@ -249,8 +256,27 @@ export function AIRepairPanel({
     spatialEnhance: '空间增强',
     warmth: '温暖度',
     loudness: '响度优化',
+    stereo_enhance: '立体声增强',
   };
   const instParamKeys = Object.keys(instParamLabels) as (keyof InstrumentRepairParams)[];
+  const instV31ParamKeys: (keyof InstrumentRepairParams)[] = ['stereo_enhance'];
+
+  const displayVocalKeys = useMemo(() => {
+    if (!isV31Algorithm) return vocalParamKeys;
+    const result: (keyof VocalRepairParams)[] = [];
+    for (const key of vocalParamKeys) {
+      result.push(key);
+      if (key === 'aiRepair') {
+        result.push(...vocalV31ParamKeys);
+      }
+    }
+    return result;
+  }, [isV31Algorithm]);
+
+  const displayInstKeys = useMemo(() => {
+    if (!isV31Algorithm) return instParamKeys;
+    return [...instParamKeys, ...instV31ParamKeys];
+  }, [isV31Algorithm]);
 
   const paramLabels: Record<keyof AIRepairParams, string> = {
     deClipping: '去削波',
@@ -366,7 +392,7 @@ export function AIRepairPanel({
               <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
               </svg>
-              双轨模式仅支持 v3.0/v3.0a 算法
+              双轨模式支持 v3.0/v3.0a/v3.1/v3.1a 算法
             </div>
           )}
           <div className="flex items-center justify-between gap-2">
@@ -513,6 +539,35 @@ export function AIRepairPanel({
                 );
               })}
             </div>
+          </div>
+        </div>
+
+        {/* 母带风格 */}
+        <div className="mt-3">
+          <label className="text-gray-400 text-xs mb-2 block">母带风格</label>
+          <div className="flex gap-1">
+            {[
+              { value: 'standard', label: '标准' },
+              { value: 'powerful', label: '强劲' },
+              { value: 'warm', label: '温暖' },
+            ].map((style) => {
+              const isSelected = (processingOptions.masteringStyle || 'standard') === style.value;
+              return (
+                <button
+                  key={style.value}
+                  onClick={() => onOptionsChange?.({ ...processingOptions, masteringStyle: style.value as 'standard' | 'powerful' | 'warm' })}
+                  disabled={disabled}
+                  className={`flex-1 py-1.5 px-2 rounded-lg text-xs transition-all
+                    ${isSelected
+                      ? 'bg-secondary/30 text-white border border-secondary/50'
+                      : 'bg-primary/30 text-gray-400 border border-gray-700 hover:border-secondary/30'
+                    } ${disabled ? 'opacity-50' : ''}
+                  `}
+                >
+                  {style.label}
+                </button>
+              );
+            })}
           </div>
         </div>
 
@@ -833,7 +888,7 @@ export function AIRepairPanel({
             </button>
             {showParams === 'vocal' && vocalParams && onVocalParamChange && (
               <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3">
-                {vocalParamKeys.map((key) => (
+                {displayVocalKeys.map((key) => (
                   <div key={key}>
                     <div className="flex justify-between items-center mb-1">
                       <label className="text-pink-300 text-xs font-medium">
@@ -874,7 +929,7 @@ export function AIRepairPanel({
             </button>
             {showParams === 'accompaniment' && accompanimentParams && onAccompanimentParamChange && (
               <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3">
-                {instParamKeys.map((key) => (
+                {displayInstKeys.map((key) => (
                   <div key={key}>
                     <div className="flex justify-between items-center mb-1">
                       <label className="text-purple-300 text-xs font-medium">

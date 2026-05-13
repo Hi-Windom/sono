@@ -11,6 +11,10 @@ export interface VocalRepairParams {
   bassEnhance: number;
   airTexture: number;
   loudness: number;
+  exciter?: number;
+  compressor?: number;
+  spatial?: number;
+  warmth?: number;
 }
 
 export interface InstrumentRepairParams {
@@ -22,6 +26,7 @@ export interface InstrumentRepairParams {
   spatialEnhance: number;
   warmth: number;
   loudness: number;
+  stereo_enhance?: number;
 }
 
 export const defaultVocalRepairParams: VocalRepairParams = {
@@ -34,6 +39,10 @@ export const defaultVocalRepairParams: VocalRepairParams = {
   bassEnhance: 0.1,
   airTexture: 0.2,
   loudness: 0.5,
+  exciter: 0.5,
+  compressor: 0.5,
+  spatial: 0.5,
+  warmth: 0.5,
 };
 
 export const defaultInstrumentRepairParams: InstrumentRepairParams = {
@@ -45,11 +54,13 @@ export const defaultInstrumentRepairParams: InstrumentRepairParams = {
   spatialEnhance: 0.15,
   warmth: 0.25,
   loudness: 0.5,
+  stereo_enhance: 0.5,
 };
 
 export interface ProcessingOptions {
   sampleRate: number;
   bitDepth: 16 | 24 | 32;
+  masteringStyle?: 'standard' | 'powerful' | 'warm';
 }
 
 const API_BASE = '/api/v1';
@@ -191,6 +202,10 @@ export function mapVocalParamsToBackend(params: VocalRepairParams, _options?: Pr
     bass_enhance: params.bassEnhance,
     air_texture: params.airTexture,
     loudness_optimize: params.loudness,
+    exciter: params.exciter ?? 0.5,
+    compressor: params.compressor ?? 0.5,
+    spatial: params.spatial ?? 0.5,
+    warmth: params.warmth ?? 0.5,
     algorithm_version: algorithmVersion || 'v3.0',
   };
 }
@@ -205,6 +220,7 @@ export function mapInstrumentParamsToBackend(params: InstrumentRepairParams, _op
     spatial_enhance: params.spatialEnhance,
     warmth: params.warmth,
     loudness_optimize: params.loudness,
+    stereo_enhance: params.stereo_enhance ?? 0.5,
     algorithm_version: algorithmVersion || 'v3.0',
   };
 }
@@ -1446,17 +1462,22 @@ export async function renderAudio(
   taskId: string,
   sampleRate: number,
   bitDepth: number,
+  masteringStyle?: string,
 ): Promise<RenderResult> {
   const url = `${API_BASE}/render`;
-  log('render', `POST ${url} task_id=${taskId} sr=${sampleRate} bd=${bitDepth}`);
+  log('render', `POST ${url} task_id=${taskId} sr=${sampleRate} bd=${bitDepth} style=${masteringStyle || 'standard'}`);
+  const body: Record<string, unknown> = {
+    task_id: taskId,
+    sample_rate: sampleRate,
+    bit_depth: bitDepth,
+  };
+  if (masteringStyle) {
+    body.mastering_style = masteringStyle;
+  }
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      task_id: taskId,
-      sample_rate: sampleRate,
-      bit_depth: bitDepth,
-    }),
+    body: JSON.stringify(body),
   });
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
@@ -1514,6 +1535,21 @@ export interface AudioFileInfo {
   modified_at: number;
 }
 
+export interface DeliveryFile {
+  filename: string;
+  size: number;
+  mtime: string;
+  task_id?: string;
+  track_type?: string;
+  is_parent: boolean;
+  parent_filename?: string;
+  children?: DeliveryFile[];
+}
+
+export interface DeliveryFilesResponse {
+  files: DeliveryFile[];
+}
+
 export async function detectFile(file: File, detectorVersion: string = 'v1.1'): Promise<{ task_id: string; status: string }> {
   const formData = new FormData();
   formData.append('file', file);
@@ -1567,3 +1603,35 @@ export function parseFilenameFromDisposition(disposition: string | null): string
   if (plain?.[1]) return plain[1].trim();
   return null;
 }
+
+export async function fetchDeliveryFiles(): Promise<DeliveryFilesResponse> {
+  const res = await fetch(`${API_BASE}/delivery-files`);
+  if (!res.ok) throw new Error('获取交付文件列表失败');
+  return res.json();
+}
+
+export async function deleteDeliveryFile(filename: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/delivery-files/${encodeURIComponent(filename)}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.detail || '删除交付文件失败');
+  }
+}
+
+export async function deleteDeliveryParent(filename: string): Promise<{deleted: string[]}> {
+  const res = await fetch(`${API_BASE}/delivery-files/parent/${encodeURIComponent(filename)}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.detail || '删除交付文件组失败');
+  }
+  return res.json();
+}
+
+export const ALGORITHM_VERSIONS = [
+  { id: 'v3.1', label: 'v3.1 (桌面增强)', description: 'AI人声修复增强 + 人声效果器' },
+  { id: 'v3.1a', label: 'v3.1a (移动增强)', description: '精简版人声效果器' },
+];

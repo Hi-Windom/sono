@@ -1,7 +1,9 @@
 import os
 import asyncio
 import logging
+import stat
 import time
+from datetime import datetime, timezone
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -735,6 +737,13 @@ async def repair_dual_audio_endpoint(request: DualRepairRequest):
         "formant_repair": "vocal_formant_repair",
         "breath_enhance": "vocal_breath_enhance",
         "ai_repair": "vocal_ai_repair",
+        "exciter": "vocal_exciter",
+        "compressor": "vocal_compressor",
+        "spatial": "vocal_spatial",
+        "warmth": "vocal_warmth",
+        "de_esser_advanced": "vocal_de_esser_advanced",
+        "ai_repair_enhanced": "vocal_ai_repair_enhanced",
+        "ai_repair_enhanced_lite": "vocal_ai_repair_enhanced_lite",
         "loudness_optimize": "vocal_loudness",
     }
 
@@ -746,6 +755,7 @@ async def repair_dual_audio_endpoint(request: DualRepairRequest):
         "spatial_enhance": "inst_spatial",
         "warmth": "inst_warmth",
         "timbre_protect": "inst_timbre_protect",
+        "stereo_enhance": "inst_stereo_enhance",
         "loudness_optimize": "inst_loudness",
     }
 
@@ -846,6 +856,13 @@ async def repair_dual_from_hash(request: DualRepairFromHashRequest):
         "formant_repair": "vocal_formant_repair",
         "breath_enhance": "vocal_breath_enhance",
         "ai_repair": "vocal_ai_repair",
+        "exciter": "vocal_exciter",
+        "compressor": "vocal_compressor",
+        "spatial": "vocal_spatial",
+        "warmth": "vocal_warmth",
+        "de_esser_advanced": "vocal_de_esser_advanced",
+        "ai_repair_enhanced": "vocal_ai_repair_enhanced",
+        "ai_repair_enhanced_lite": "vocal_ai_repair_enhanced_lite",
         "loudness_optimize": "vocal_loudness",
     }
 
@@ -857,6 +874,7 @@ async def repair_dual_from_hash(request: DualRepairFromHashRequest):
         "spatial_enhance": "inst_spatial",
         "warmth": "inst_warmth",
         "timbre_protect": "inst_timbre_protect",
+        "stereo_enhance": "inst_stereo_enhance",
         "loudness_optimize": "inst_loudness",
     }
 
@@ -1102,6 +1120,40 @@ def _run_render_dual(task_id, vocal_path, accompaniment_path, output_path, targe
                 "output_bit_depth": bit_depth,
                 "channels": mixed.shape[0] if mixed.ndim > 1 else 1,
             }
+
+            base_name = render_filename.rsplit(".", 1)[0]
+            if base_name.endswith("_merged"):
+                base_name = base_name[:-7]
+
+            progress_callback(0.6, "渲染人声独立轨...")
+            vocal_render_filename = f"{base_name}_vocal.wav"
+            vocal_render_path = os.path.join(os.path.dirname(output_path), vocal_render_filename)
+            vocal_source_bit_depth = None
+            try:
+                _, _, src_bd = load_audio_with_fallback(vocal_path, sr=None, mono=False, return_bit_depth=True)
+                vocal_source_bit_depth = src_bd
+            except Exception:
+                pass
+            try:
+                render_output(vocal_path, vocal_render_path, target_sr, bit_depth, progress_callback=progress_callback, source_bit_depth=vocal_source_bit_depth)
+                logger.info(f"[render_dual] 人声独立轨渲染完成: {vocal_render_filename}")
+            except Exception as e:
+                logger.warning(f"[render_dual] 人声独立轨渲染失败: {e}")
+
+            progress_callback(0.8, "渲染伴奏独立轨...")
+            accompaniment_render_filename = f"{base_name}_accompaniment.wav"
+            accompaniment_render_path = os.path.join(os.path.dirname(output_path), accompaniment_render_filename)
+            accompaniment_source_bit_depth = None
+            try:
+                _, _, src_bd = load_audio_with_fallback(accompaniment_path, sr=None, mono=False, return_bit_depth=True)
+                accompaniment_source_bit_depth = src_bd
+            except Exception:
+                pass
+            try:
+                render_output(accompaniment_path, accompaniment_render_path, target_sr, bit_depth, progress_callback=progress_callback, source_bit_depth=accompaniment_source_bit_depth)
+                logger.info(f"[render_dual] 伴奏独立轨渲染完成: {accompaniment_render_filename}")
+            except Exception as e:
+                logger.warning(f"[render_dual] 伴奏独立轨渲染失败: {e}")
 
         progress_callback(0.9, "完成")
         update_task(task_id,
@@ -1490,6 +1542,132 @@ async def delete_render_cache(filename: str):
     released = os.path.getsize(file_path)
     os.remove(file_path)
     return {"released_bytes": released, "filename": filename}
+
+
+_DELIVERY_AUDIO_EXTENSIONS = {".wav", ".mp3", ".flac", ".ogg", ".m4a"}
+
+
+@router.get("/delivery-files")
+async def list_delivery_files():
+    if not os.path.isdir(OUTPUT_DIR):
+        return {"files": []}
+
+    files = []
+    for fname in os.listdir(OUTPUT_DIR):
+        ext = os.path.splitext(fname)[1].lower()
+        if ext not in _DELIVERY_AUDIO_EXTENSIONS:
+            continue
+        fp = os.path.join(OUTPUT_DIR, fname)
+        if not os.path.isfile(fp):
+            continue
+        try:
+            st = os.stat(fp)
+        except OSError:
+            continue
+
+        entry = {
+            "filename": fname,
+            "size": st.st_size,
+            "mtime": datetime.fromtimestamp(st.st_mtime, tz=timezone.utc).isoformat(),
+            "is_parent": False,
+        }
+
+        if "_rendered_" in fname:
+            base = fname.replace(".wav", "")
+            parts = base.split("_rendered_")
+            if len(parts) == 2:
+                task_id = parts[0]
+                suffix = parts[1]
+                segments = suffix.split("_")
+                track_type = "both"
+                if segments[-1] == "vocal":
+                    track_type = "vocal"
+                elif segments[-1] == "accompaniment":
+                    track_type = "accompaniment"
+                elif segments[-1] == "merged":
+                    track_type = "both"
+                entry["task_id"] = task_id
+                if track_type != "both":
+                    entry["track_type"] = track_type
+
+        files.append(entry)
+
+    task_groups = {}
+    for f in files:
+        tid = f.get("task_id")
+        if tid:
+            task_groups.setdefault(tid, []).append(f)
+
+    for task_id, group in task_groups.items():
+        parent = None
+        children = []
+        for f in group:
+            if f.get("track_type") in ("vocal", "accompaniment"):
+                children.append(f)
+            else:
+                parent = f
+        if parent and children:
+            parent["is_parent"] = True
+            parent["children"] = [c["filename"] for c in children]
+            for c in children:
+                c["parent_filename"] = parent["filename"]
+
+    return {"files": files}
+
+
+@router.delete("/delivery-files/{filename}")
+async def delete_delivery_file(filename: str):
+    file_path = os.path.join(OUTPUT_DIR, filename)
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="文件不存在")
+    if not os.path.isfile(file_path):
+        raise HTTPException(status_code=400, detail="不是文件")
+    try:
+        os.remove(file_path)
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="权限不足，无法删除")
+    logger.info(f"[/delivery-files] deleted: {filename}")
+    return {"status": "ok"}
+
+
+@router.delete("/delivery-files/parent/{filename}")
+async def delete_delivery_parent(filename: str):
+    file_path = os.path.join(OUTPUT_DIR, filename)
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="文件不存在")
+
+    parent_task_id = None
+    if "_rendered_" in filename:
+        base = filename.replace(".wav", "")
+        parts = base.split("_rendered_")
+        if len(parts) == 2:
+            parent_task_id = parts[0]
+
+    if not parent_task_id:
+        try:
+            os.remove(file_path)
+        except PermissionError:
+            raise HTTPException(status_code=403, detail="权限不足，无法删除")
+        return {"status": "ok", "deleted": [filename]}
+
+    deleted = []
+    if os.path.isdir(OUTPUT_DIR):
+        for fname in os.listdir(OUTPUT_DIR):
+            if fname.startswith(f"{parent_task_id}_rendered_") and fname.endswith(".wav"):
+                fp = os.path.join(OUTPUT_DIR, fname)
+                if os.path.isfile(fp):
+                    try:
+                        os.remove(fp)
+                        deleted.append(fname)
+                    except PermissionError:
+                        logger.warning(f"无法删除文件: {fp}")
+
+    if not deleted:
+        raise HTTPException(status_code=404, detail="未找到相关文件")
+
+    logger.info(f"[/delivery-files/parent] deleted: {deleted}")
+    return {"status": "ok", "deleted": deleted}
+
 
 # ===== 分析缓存 API =====
 

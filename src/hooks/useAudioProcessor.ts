@@ -1829,7 +1829,7 @@ export function useAudioProcessor() {
       setProcessingStep('渲染交付规格...');
       setProcessingProgress(0);
       setIsRenderLoading(true);
-      await renderAudio(taskIdRef.current, opts.sampleRate, opts.bitDepth);
+      await renderAudio(taskIdRef.current, opts.sampleRate, opts.bitDepth, opts.masteringStyle);
       const { promise, close } = waitRenderWithWS(taskIdRef.current, (progress, step) => {
         writeLog(`[renderAndDownload] 渲染进度: ${progress} step=${step}`);
         setProcessingProgress(progress);
