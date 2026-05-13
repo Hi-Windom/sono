@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import { useDualTrackStore } from '../store/dualTrackStore';
 import { useDualTrackProcessor } from '../hooks/useDualTrackProcessor';
 import { AIRepairParams } from '../utils/advancedAudioProcessing';
@@ -61,7 +61,7 @@ export const DualTrackPanel: React.FC<DualTrackPanelProps> = ({
 }) => {
   const store = useDualTrackStore();
   const processor = useDualTrackProcessor();
-  
+
   const [vocalParams, setVocalParams] = useState<VocalRepairParams>(defaultVocalRepairParams);
   const [accompanimentParams, setAccompanimentParams] = useState<InstrumentRepairParams>(defaultInstrumentRepairParams);
   const [mixRatio, setMixRatio] = useState(50);
@@ -83,9 +83,6 @@ export const DualTrackPanel: React.FC<DualTrackPanelProps> = ({
     renderProgress,
     renderStep,
     renderCaches,
-    cacheHit,
-    showCacheModal,
-    mainTaskId,
   } = store;
 
   const effectiveDuration = useMemo(() => {
@@ -134,47 +131,44 @@ export const DualTrackPanel: React.FC<DualTrackPanelProps> = ({
     );
   }, [effectiveDuration, effectiveChannels, processingOptions.sampleRate, processingOptions.bitDepth]);
 
-  const handleFileSelect = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const files = event.target.files;
-    if (!files || files.length !== 2) {
-      alert('请选择两个文件：人声轨和伴奏轨');
-      return;
-    }
-    
-    const vocalFile = files[0];
-    const accompanimentFile = files[1];
-    
+  const handleVocalSelect = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
     try {
-      await processor.upload(vocalFile, accompanimentFile);
+      await processor.uploadSingle('vocal', file);
       await processor.checkCache(params, processingOptions, algorithmVersion);
     } catch (e) {
-      console.error('双轨上传失败:', e);
+      console.error('人声轨上传失败:', e);
+    }
+  }, [processor, params, processingOptions, algorithmVersion]);
+
+  const handleAccompanimentSelect = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    try {
+      await processor.uploadSingle('accompaniment', file);
+      await processor.checkCache(params, processingOptions, algorithmVersion);
+    } catch (e) {
+      console.error('伴奏轨上传失败:', e);
     }
   }, [processor, params, processingOptions, algorithmVersion]);
 
   const handleRepair = useCallback(async () => {
     try {
-      await processor.checkCache(params, processingOptions, algorithmVersion);
-      if (!store.cacheHit?.found) {
-        await processor.repair(
-          params,
-          processingOptions,
-          algorithmVersion,
-          vocalParams,
-          accompanimentParams,
-          mixRatio / 100
-        );
-      }
+      await processor.repair(
+        params,
+        processingOptions,
+        algorithmVersion,
+        vocalParams,
+        accompanimentParams,
+        mixRatio / 100
+      );
     } catch (e) {
       console.error('双轨修复失败:', e);
     }
-  }, [processor, params, processingOptions, algorithmVersion, vocalParams, accompanimentParams, mixRatio, store.cacheHit?.found]);
-
-  const handleUseCache = useCallback(async () => {
-    if (cacheHit?.task_id) {
-      await processor.useRepairCache(cacheHit.task_id);
-    }
-  }, [processor, cacheHit]);
+  }, [processor, params, processingOptions, algorithmVersion, vocalParams, accompanimentParams, mixRatio]);
 
   const handleReset = useCallback(() => {
     processor.reset();
@@ -184,6 +178,55 @@ export const DualTrackPanel: React.FC<DualTrackPanelProps> = ({
   }, [processor]);
 
   const isProcessing = repairStatus === 'repairing' || renderStatus === 'rendering';
+  const hasVocal = !!vocalFileName;
+  const hasAccompaniment = !!accompanimentFileName;
+  const bothUploaded = hasVocal && hasAccompaniment;
+  const canRepair = bothUploaded && repairStatus === 'idle' && !isProcessing;
+
+  const UploadZone = ({
+    label,
+    icon,
+    fileName,
+    fileInfo,
+    onChange,
+    disabled,
+  }: {
+    label: string;
+    icon: string;
+    fileName?: string;
+    fileInfo?: { duration: number; sample_rate: number; channels: number } | null;
+    onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+    disabled?: boolean;
+  }) => (
+    <label className={`flex flex-col items-center justify-center w-full h-28 border-2 border-dashed rounded-lg cursor-pointer transition
+      ${fileName ? 'border-emerald-500/40 bg-emerald-500/5' : 'border-gray-600 hover:border-secondary/50 bg-black/20'}
+      ${disabled ? 'opacity-50 cursor-not-allowed' : ''}
+    `}>
+      <div className="flex flex-col items-center justify-center py-2 px-3 w-full">
+        {fileName ? (
+          <div className="w-full">
+            <div className="flex items-center gap-2 mb-1">
+              <span className="text-lg">{icon}</span>
+              <span className="text-xs text-gray-500 uppercase tracking-wider">{label}</span>
+            </div>
+            <div className="text-sm text-white truncate">{fileName}</div>
+            {fileInfo && (
+              <div className="text-[10px] text-gray-400 mt-0.5">
+                {fileInfo.duration.toFixed(1)}s · {fileInfo.sample_rate / 1000}kHz · {fileInfo.channels}ch
+              </div>
+            )}
+          </div>
+        ) : (
+          <>
+            <div className="text-2xl mb-1">{icon}</div>
+            <p className="text-xs text-gray-400">{label}</p>
+            <p className="text-[10px] text-gray-500 mt-0.5">点击选择音频文件</p>
+          </>
+        )}
+      </div>
+      <input type="file" accept="audio/*" onChange={onChange} className="hidden" disabled={disabled} />
+    </label>
+  );
 
   return (
     <div className="bg-gradient-to-br from-primary/80 to-dark/80 rounded-xl p-5 border border-secondary/20">
@@ -205,67 +248,72 @@ export const DualTrackPanel: React.FC<DualTrackPanelProps> = ({
       </div>
 
       {uploadStatus === 'idle' && (
-        <div className="mb-4">
-          <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-gray-600 rounded-lg cursor-pointer hover:border-secondary/50 transition">
-            <div className="flex flex-col items-center justify-center py-4">
-              <svg className="w-10 h-10 text-gray-500 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-              </svg>
-              <p className="text-sm text-gray-400">点击或拖拽上传文件</p>
-              <p className="text-xs text-gray-500 mt-1">请选择两个文件：人声轨 + 伴奏轨</p>
-            </div>
-            <input
-              type="file"
-              multiple
-              accept="audio/*"
-              onChange={handleFileSelect}
-              className="hidden"
-            />
-          </label>
+        <div className="grid grid-cols-2 gap-3 mb-4">
+          <UploadZone
+            label="人声轨"
+            icon="🎤"
+            onChange={handleVocalSelect}
+          />
+          <UploadZone
+            label="伴奏轨"
+            icon="🎹"
+            onChange={handleAccompanimentSelect}
+          />
         </div>
       )}
 
-      {(uploadStatus === 'uploading' || uploadStatus === 'done') && (
+      {uploadStatus === 'uploading' && (
         <div className="mb-4">
-          {uploadStatus === 'uploading' && (
-            <div className="mb-3">
-              <div className="flex justify-between text-xs text-gray-400 mb-1">
-                <span>{uploadStep}</span>
-                <span>{(uploadProgress * 100).toFixed(0)}%</span>
-              </div>
-              <div className="w-full h-1.5 bg-gray-700 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-secondary transition-all duration-300"
-                  style={{ width: `${uploadProgress * 100}%` }}
-                />
-              </div>
-            </div>
-          )}
-
-          <div className="grid grid-cols-2 gap-2">
-            <div className="p-3 bg-black/30 rounded-lg">
-              <div className="text-[10px] text-gray-500 mb-1">🎤 人声轨</div>
-              <div className="text-sm text-white truncate">{vocalFileName}</div>
-              {vocalInfo && (
-                <div className="text-xs text-gray-400 mt-1">
-                  {vocalInfo.duration.toFixed(1)}s · {vocalInfo.sample_rate / 1000}kHz · {vocalInfo.channels}ch
-                </div>
-              )}
-            </div>
-            <div className="p-3 bg-black/30 rounded-lg">
-              <div className="text-[10px] text-gray-500 mb-1">🎹 伴奏轨</div>
-              <div className="text-sm text-white truncate">{accompanimentFileName}</div>
-              {accompanimentInfo && (
-                <div className="text-xs text-gray-400 mt-1">
-                  {accompanimentInfo.duration.toFixed(1)}s · {accompanimentInfo.sample_rate / 1000}kHz · {accompanimentInfo.channels}ch
-                </div>
-              )}
-            </div>
+          <div className="flex justify-between text-xs text-gray-400 mb-1">
+            <span>{uploadStep}</span>
+            <span>{(uploadProgress * 100).toFixed(0)}%</span>
+          </div>
+          <div className="w-full h-1.5 bg-gray-700 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-secondary transition-all duration-300"
+              style={{ width: `${uploadProgress * 100}%` }}
+            />
           </div>
         </div>
       )}
 
-      {(uploadStatus === 'done' || uploadStatus === 'error') && (
+      {uploadStatus === 'done' && (
+        <div className="grid grid-cols-2 gap-3 mb-4">
+          <UploadZone
+            label="人声轨"
+            icon="🎤"
+            fileName={vocalFileName}
+            fileInfo={vocalInfo}
+            onChange={handleVocalSelect}
+          />
+          <UploadZone
+            label="伴奏轨"
+            icon="🎹"
+            fileName={accompanimentFileName}
+            fileInfo={accompanimentInfo}
+            onChange={handleAccompanimentSelect}
+          />
+        </div>
+      )}
+
+      {uploadStatus === 'error' && (
+        <div className="grid grid-cols-2 gap-3 mb-4">
+          <UploadZone
+            label="人声轨"
+            icon="🎤"
+            fileName={vocalFileName}
+            onChange={handleVocalSelect}
+          />
+          <UploadZone
+            label="伴奏轨"
+            icon="🎹"
+            fileName={accompanimentFileName}
+            onChange={handleAccompanimentSelect}
+          />
+        </div>
+      )}
+
+      {bothUploaded && (
         <div className="space-y-4">
           <div className="flex gap-2">
             <select
@@ -357,7 +405,7 @@ export const DualTrackPanel: React.FC<DualTrackPanelProps> = ({
 
             {allEstimates.length > 0 && (
               <div className="mt-2 pt-2 border-t border-gray-700/50">
-                <div className="text-[10px] text-gray-500 mb-1.5">各组合预估大小（🟢 = 可秒下）：</div>
+                <div className="text-[10px] text-gray-500 mb-1.5">各组合预估大小：</div>
                 <div className="grid grid-cols-3 gap-1 text-[10px]">
                   {allEstimates.map((est) => {
                     const isCurrent = est.sampleRate === processingOptions.sampleRate && est.bitDepth === processingOptions.bitDepth;
@@ -421,52 +469,15 @@ export const DualTrackPanel: React.FC<DualTrackPanelProps> = ({
             </div>
           )}
 
-          {uploadStatus === 'done' && repairStatus === 'idle' && (
+          {canRepair && (
             <button
               onClick={handleRepair}
               disabled={isProcessing}
               className="w-full py-3 bg-gradient-to-r from-secondary to-primary text-white font-medium rounded-lg hover:from-secondary/80 hover:to-primary/80 transition disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {isProcessing ? '处理中...' : '开始双轨修复'}
+              开始双轨修复
             </button>
           )}
-        </div>
-      )}
-
-      {showCacheModal && cacheHit && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
-          <div className="bg-gray-800 rounded-xl p-5 max-w-sm w-full">
-            <div className="text-lg font-bold text-white mb-3">🗄️ 发现修复缓存</div>
-            <div className="text-sm text-gray-400 mb-4">
-              检测到相同文件的修复结果，是否直接使用缓存？
-            </div>
-            <div className="space-y-2 text-xs text-gray-500">
-              <div className="flex justify-between">
-                <span>缓存任务ID</span>
-                <span className="text-gray-300">{cacheHit.task_id?.slice(0, 8)}...</span>
-              </div>
-              {cacheHit.output_size && (
-                <div className="flex justify-between">
-                  <span>输出大小</span>
-                  <span className="text-gray-300">{(cacheHit.output_size / (1024 * 1024)).toFixed(1)} MiB</span>
-                </div>
-              )}
-            </div>
-            <div className="flex gap-2 mt-4">
-              <button
-                onClick={() => store.setShowCacheModal(false)}
-                className="flex-1 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg text-sm transition"
-              >
-                重新修复
-              </button>
-              <button
-                onClick={handleUseCache}
-                className="flex-1 py-2 bg-secondary hover:bg-secondary/80 text-white rounded-lg text-sm transition"
-              >
-                使用缓存
-              </button>
-            </div>
-          </div>
         </div>
       )}
     </div>
