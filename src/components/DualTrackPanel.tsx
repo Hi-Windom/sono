@@ -51,6 +51,34 @@ function isRecommendedCombo(sampleRate: number, bitDepth: number): boolean {
   return sampleRate === 48000 && bitDepth === 24;
 }
 
+const vocalParamLabels: Record<keyof VocalRepairParams, string> = {
+  deClipping: '去削波',
+  dePop: '去爆音',
+  formantRepair: '口型修复',
+  deEssing: '齿音抑制',
+  breathEnhance: '气息增强',
+  aiRepair: 'AI 修复',
+  bassEnhance: '低音增强',
+  airTexture: '空气质感',
+  loudness: '响度优化',
+  exciter: '激励器',
+  compressor: '压缩器',
+  spatial: '空间感',
+  warmth: '温暖度',
+};
+
+const instParamLabels: Record<keyof InstrumentRepairParams, string> = {
+  deClipping: '去削波',
+  dePop: '去爆音',
+  timbreProtect: '音色保护',
+  dynamicRange: '动态控制',
+  noiseReduction: '降噪',
+  spatialEnhance: '空间增强',
+  warmth: '温暖度',
+  loudness: '响度优化',
+  stereo_enhance: '立体声增强',
+};
+
 export const DualTrackPanel: React.FC<DualTrackPanelProps> = ({
   params,
   processingOptions,
@@ -228,19 +256,19 @@ export const DualTrackPanel: React.FC<DualTrackPanelProps> = ({
     const hasFile = !!fileName;
     return (
       <div className="relative">
-        <label className={`flex flex-col items-center justify-center w-full h-28 border-2 border-dashed rounded-lg cursor-pointer transition
+        <label className={`flex flex-col items-center justify-center w-full min-h-[7rem] border-2 border-dashed rounded-lg cursor-pointer transition
           ${hasFile ? 'border-emerald-500/40 bg-emerald-500/5' : 'border-gray-600 hover:border-secondary/50 bg-black/20'}
           ${disabled ? 'opacity-50 cursor-not-allowed' : ''}
         `}>
-          <div className="flex flex-col items-center justify-center py-2 px-3 w-full h-full">
+          <div className="flex flex-col items-center justify-center py-2 px-2 w-full">
             {hasFile ? (
-              <div className="w-full">
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="text-lg">{icon}</span>
-                  <span className="text-xs text-gray-500 uppercase tracking-wider">{label}</span>
-                  {pending && <span className="text-[10px] text-amber-400 ml-auto">待上传</span>}
+              <div className="w-full text-center">
+                <div className="flex items-center justify-center gap-1.5 mb-1">
+                  <span className="text-base">{icon}</span>
+                  <span className="text-[10px] text-gray-500 uppercase tracking-wider">{label}</span>
+                  {pending && <span className="text-[9px] text-amber-400 bg-amber-500/20 px-1 rounded">待上传</span>}
                 </div>
-                <div className="text-sm text-white truncate">{fileName}</div>
+                <div className="text-xs text-white truncate max-w-full px-1">{fileName}</div>
                 {fileInfo && (
                   <div className="text-[10px] text-gray-400 mt-0.5">
                     {fileInfo.duration.toFixed(1)}s · {fileInfo.sample_rate / 1000}kHz · {fileInfo.channels}ch
@@ -249,18 +277,20 @@ export const DualTrackPanel: React.FC<DualTrackPanelProps> = ({
               </div>
             ) : (
               <>
-                <div className="text-2xl mb-1">{icon}</div>
-                <p className="text-xs text-gray-400">{label}</p>
-                <p className="text-[10px] text-gray-500 mt-0.5">点击选择音频文件</p>
+                <div className="text-xl mb-0.5">{icon}</div>
+                <p className="text-[11px] text-gray-400">{label}</p>
+                <p className="text-[9px] text-gray-500 mt-0.5">点击选择</p>
               </>
             )}
           </div>
           <input type="file" accept="audio/*" onChange={onChange} className="hidden" disabled={disabled} />
         </label>
         {hasFile && !disabled && (
-          <div className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-gray-700 hover:bg-gray-600 rounded-full flex items-center justify-center cursor-pointer"
+          <button
+            className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-gray-700 hover:bg-red-500/70 rounded-full flex items-center justify-center cursor-pointer transition"
             onClick={(e) => {
               e.preventDefault();
+              e.stopPropagation();
               if (pending) {
                 setPendingVocal(null);
                 setPendingAccompaniment(null);
@@ -272,32 +302,55 @@ export const DualTrackPanel: React.FC<DualTrackPanelProps> = ({
             <svg className="w-3 h-3 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
-          </div>
+          </button>
         )}
       </div>
     );
   };
 
+  const ParamSlider = ({
+    label,
+    value,
+    onChange,
+  }: {
+    label: string;
+    value: number;
+    onChange: (v: number) => void;
+  }) => (
+    <div className="flex items-center gap-2">
+      <span className="text-[10px] text-gray-500 w-16 truncate">{label}</span>
+      <input
+        type="range"
+        min="0"
+        max="100"
+        value={value}
+        onChange={(e) => onChange(parseInt(e.target.value))}
+        className="flex-1 h-1 bg-gray-700 rounded-full appearance-none cursor-pointer accent-secondary"
+      />
+      <span className="text-[10px] text-gray-400 w-6 text-right">{value}</span>
+    </div>
+  );
+
   return (
-    <div className="bg-gradient-to-br from-primary/80 to-dark/80 rounded-xl p-5 border border-secondary/20">
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="text-white font-bold flex items-center gap-2">
-          <svg className="w-5 h-5 text-secondary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <div className="bg-gradient-to-br from-primary/80 to-dark/80 rounded-xl p-4 sm:p-5 border border-secondary/20">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-white font-bold flex items-center gap-2 text-sm sm:text-base">
+          <svg className="w-4 h-4 sm:w-5 sm:h-5 text-secondary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
           </svg>
-          双轨修复模式
+          双轨修复
         </h3>
         {uploadStatus !== 'idle' && (
           <button
             onClick={handleReset}
-            className="text-xs text-gray-400 hover:text-white transition"
+            className="text-[10px] sm:text-xs text-gray-400 hover:text-white transition"
           >
             重置
           </button>
         )}
       </div>
 
-      <div className="grid grid-cols-2 gap-3 mb-4">
+      <div className="grid grid-cols-2 gap-2 sm:gap-3 mb-3">
         <UploadZone
           label="人声轨"
           icon="🎤"
@@ -319,8 +372,8 @@ export const DualTrackPanel: React.FC<DualTrackPanelProps> = ({
       </div>
 
       {uploadStatus === 'uploading' && (
-        <div className="mb-4">
-          <div className="flex justify-between text-xs text-gray-400 mb-1">
+        <div className="mb-3">
+          <div className="flex justify-between text-[10px] sm:text-xs text-gray-400 mb-1">
             <span>{uploadStep}</span>
             <span>{(uploadProgress * 100).toFixed(0)}%</span>
           </div>
@@ -334,92 +387,80 @@ export const DualTrackPanel: React.FC<DualTrackPanelProps> = ({
       )}
 
       {uploadStatus === 'error' && !bothUploaded && (
-        <div className="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-sm text-red-400">
+        <div className="mb-3 p-2 sm:p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-xs sm:text-sm text-red-400">
           {repairError || '上传失败，请重试'}
         </div>
       )}
 
       {waitingForAccompaniment && (
-        <div className="mb-4 p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg text-sm text-amber-400 text-center">
+        <div className="mb-3 p-2 sm:p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg text-xs sm:text-sm text-amber-400 text-center">
           人声轨已选择，请选择伴奏轨
         </div>
       )}
 
       {waitingForVocal && (
-        <div className="mb-4 p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg text-sm text-amber-400 text-center">
+        <div className="mb-3 p-2 sm:p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg text-xs sm:text-sm text-amber-400 text-center">
           伴奏轨已选择，请选择人声轨
         </div>
       )}
 
       {bothUploaded && (
-        <div className="space-y-4">
-          <div className="flex gap-2">
-            <select
-              value={algorithmVersion}
-              onChange={(e) => onAlgorithmChange(e.target.value)}
-              disabled={isProcessing}
-              className="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:border-secondary focus:outline-none"
-            >
-              {filteredAlgorithms.map((algo) => (
-                <option key={algo.name} value={algo.name}>
-                  {algo.name} {algo.description}
-                </option>
-              ))}
-            </select>
-          </div>
+        <div className="space-y-3">
+          <select
+            value={algorithmVersion}
+            onChange={(e) => onAlgorithmChange(e.target.value)}
+            disabled={isProcessing}
+            className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-xs sm:text-sm focus:border-secondary focus:outline-none"
+          >
+            {filteredAlgorithms.map((algo) => (
+              <option key={algo.name} value={algo.name}>
+                {algo.name} {algo.description}
+              </option>
+            ))}
+          </select>
 
           <button
             onClick={() => setShowAdvanced(!showAdvanced)}
-            className="w-full py-2 text-left text-sm text-gray-400 hover:text-white transition flex items-center justify-between"
+            className="w-full py-1.5 text-left text-xs sm:text-sm text-gray-400 hover:text-white transition flex items-center justify-between"
           >
             <span>⚙️ 高级参数</span>
-            <span>{showAdvanced ? '▼' : '▶'}</span>
+            <span className="text-gray-500">{showAdvanced ? '收起' : '展开'}</span>
           </button>
 
           {showAdvanced && (
-            <div className="space-y-4">
-              <div className="p-3 bg-black/30 rounded-lg">
-                <div className="text-xs text-gray-400 mb-2">🎤 人声轨参数</div>
-                <div className="grid grid-cols-2 gap-2">
-                  {Object.entries(vocalParams).map(([key, value]) => (
-                    <div key={key}>
-                      <div className="text-[10px] text-gray-500 mb-1">{key}</div>
-                      <input
-                        type="range"
-                        min="0"
-                        max="100"
-                        value={value}
-                        onChange={(e) => setVocalParams({ ...vocalParams, [key]: parseInt(e.target.value) })}
-                        className="w-full h-1.5 bg-gray-700 rounded-full appearance-none cursor-pointer"
-                      />
-                    </div>
+            <div className="space-y-3">
+              <div className="p-2 sm:p-3 bg-black/30 rounded-lg">
+                <div className="text-[10px] sm:text-xs text-gray-400 mb-2">🎤 人声轨参数</div>
+                <div className="space-y-1.5">
+                  {(Object.keys(vocalParams) as (keyof VocalRepairParams)[]).map((key) => (
+                    <ParamSlider
+                      key={key}
+                      label={vocalParamLabels[key] || key}
+                      value={vocalParams[key]}
+                      onChange={(v) => setVocalParams({ ...vocalParams, [key]: v })}
+                    />
                   ))}
                 </div>
               </div>
 
-              <div className="p-3 bg-black/30 rounded-lg">
-                <div className="text-xs text-gray-400 mb-2">🎹 伴奏轨参数</div>
-                <div className="grid grid-cols-2 gap-2">
-                  {Object.entries(accompanimentParams).map(([key, value]) => (
-                    <div key={key}>
-                      <div className="text-[10px] text-gray-500 mb-1">{key}</div>
-                      <input
-                        type="range"
-                        min="0"
-                        max="100"
-                        value={value}
-                        onChange={(e) => setAccompanimentParams({ ...accompanimentParams, [key]: parseInt(e.target.value) })}
-                        className="w-full h-1.5 bg-gray-700 rounded-full appearance-none cursor-pointer"
-                      />
-                    </div>
+              <div className="p-2 sm:p-3 bg-black/30 rounded-lg">
+                <div className="text-[10px] sm:text-xs text-gray-400 mb-2">🎹 伴奏轨参数</div>
+                <div className="space-y-1.5">
+                  {(Object.keys(accompanimentParams) as (keyof InstrumentRepairParams)[]).map((key) => (
+                    <ParamSlider
+                      key={key}
+                      label={instParamLabels[key] || key}
+                      value={accompanimentParams[key]}
+                      onChange={(v) => setAccompanimentParams({ ...accompanimentParams, [key]: v })}
+                    />
                   ))}
                 </div>
               </div>
 
-              <div className="p-3 bg-black/30 rounded-lg">
+              <div className="p-2 sm:p-3 bg-black/30 rounded-lg">
                 <div className="flex justify-between items-center mb-2">
-                  <span className="text-xs text-gray-400">🎚️ 混音比例</span>
-                  <span className="text-xs text-white">{mixRatio}% 人声 / {100 - mixRatio}% 伴奏</span>
+                  <span className="text-[10px] sm:text-xs text-gray-400">🎚️ 混音比例</span>
+                  <span className="text-[10px] sm:text-xs text-white">{mixRatio}% 人声</span>
                 </div>
                 <input
                   type="range"
@@ -427,24 +468,28 @@ export const DualTrackPanel: React.FC<DualTrackPanelProps> = ({
                   max="100"
                   value={mixRatio}
                   onChange={(e) => setMixRatio(parseInt(e.target.value))}
-                  className="w-full h-2 bg-gray-700 rounded-full appearance-none cursor-pointer"
+                  className="w-full h-2 bg-gray-700 rounded-full appearance-none cursor-pointer accent-secondary"
                 />
+                <div className="flex justify-between text-[9px] text-gray-500 mt-1">
+                  <span>纯伴奏</span>
+                  <span>纯人声</span>
+                </div>
               </div>
             </div>
           )}
 
-          <div className="p-3 bg-black/30 rounded-lg">
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-sm font-medium text-gray-300">预估输出大小</span>
-              <span className="text-sm font-bold text-white">
+          <div className="p-2 sm:p-3 bg-black/30 rounded-lg">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs sm:text-sm font-medium text-gray-300">预估输出</span>
+              <span className="text-xs sm:text-sm font-bold text-white">
                 {currentEstimate ? `${currentEstimate.sizeMB.toFixed(1)} MB` : '—'}
               </span>
             </div>
 
             {allEstimates.length > 0 && (
               <div className="mt-2 pt-2 border-t border-gray-700/50">
-                <div className="text-[10px] text-gray-500 mb-1.5">各组合预估大小：</div>
-                <div className="grid grid-cols-3 gap-1 text-[10px]">
+                <div className="text-[9px] sm:text-[10px] text-gray-500 mb-1.5">各规格预估：</div>
+                <div className="grid grid-cols-3 gap-1 text-[9px] sm:text-[10px]">
                   {allEstimates.map((est) => {
                     const isCurrent = est.sampleRate === processingOptions.sampleRate && est.bitDepth === processingOptions.bitDepth;
                     const cacheKey = `${est.sampleRate}-${est.bitDepth}`;
@@ -456,7 +501,7 @@ export const DualTrackPanel: React.FC<DualTrackPanelProps> = ({
                     return (
                       <div
                         key={cacheKey}
-                        className={`px-1.5 py-1 rounded text-center ${
+                        className={`px-1.5 py-1 rounded text-center relative ${
                           isCurrent
                             ? `border border-secondary/50 ${est.isWarning ? 'bg-red-500/10 text-red-400' : est.isRecommended ? 'bg-emerald-500/10 text-emerald-400' : 'bg-gray-800/50 text-white'}`
                             : est.isWarning
@@ -467,11 +512,10 @@ export const DualTrackPanel: React.FC<DualTrackPanelProps> = ({
                         }`}
                       >
                         {isCached && (
-                          <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-emerald-400 rounded-full" />
+                          <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 bg-emerald-400 rounded-full" />
                         )}
-                        <div className="font-medium">{est.sampleRate / 1000}k/{est.bitDepth}bit</div>
-                        <div>{est.sizeMiB.toFixed(0)} MiB</div>
-                        {isCached && <div className="text-[8px] text-emerald-400">可秒下</div>}
+                        <div>{est.sampleRate / 1000}k/{est.bitDepth}</div>
+                        <div>{est.sizeMiB.toFixed(0)}M</div>
                       </div>
                     );
                   })}
@@ -481,8 +525,8 @@ export const DualTrackPanel: React.FC<DualTrackPanelProps> = ({
           </div>
 
           {(repairStatus === 'repairing' || renderStatus === 'rendering') && (
-            <div className="p-3 bg-black/30 rounded-lg">
-              <div className="flex justify-between text-xs text-gray-400 mb-1">
+            <div className="p-2 sm:p-3 bg-black/30 rounded-lg">
+              <div className="flex justify-between text-[10px] sm:text-xs text-gray-400 mb-1">
                 <span>{repairStep || renderStep}</span>
                 <span>{((repairProgress + renderProgress) / 2 * 100).toFixed(0)}%</span>
               </div>
@@ -496,13 +540,13 @@ export const DualTrackPanel: React.FC<DualTrackPanelProps> = ({
           )}
 
           {repairError && (
-            <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-sm text-red-400">
+            <div className="p-2 sm:p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-xs sm:text-sm text-red-400">
               ❌ {repairError}
             </div>
           )}
 
           {uploadStatus === 'done' && repairStatus === 'done' && (
-            <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-lg text-sm text-emerald-400">
+            <div className="p-2 sm:p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-lg text-xs sm:text-sm text-emerald-400">
               ✅ 双轨修复完成！
             </div>
           )}
@@ -511,7 +555,7 @@ export const DualTrackPanel: React.FC<DualTrackPanelProps> = ({
             <button
               onClick={handleRepair}
               disabled={isProcessing}
-              className="w-full py-3 bg-gradient-to-r from-secondary to-primary text-white font-medium rounded-lg hover:from-secondary/80 hover:to-primary/80 transition disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full py-2.5 sm:py-3 bg-gradient-to-r from-secondary to-primary text-white font-medium rounded-lg hover:from-secondary/80 hover:to-primary/80 transition disabled:opacity-50 disabled:cursor-not-allowed text-sm"
             >
               开始双轨修复
             </button>
@@ -521,12 +565,12 @@ export const DualTrackPanel: React.FC<DualTrackPanelProps> = ({
 
       {showCacheModal && cacheHit && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
-          <div className="bg-gray-800 rounded-xl p-5 max-w-sm w-full">
-            <div className="text-lg font-bold text-white mb-3">🗄️ 发现修复缓存</div>
-            <div className="text-sm text-gray-400 mb-4">
+          <div className="bg-gray-800 rounded-xl p-4 sm:p-5 max-w-sm w-full">
+            <div className="text-base sm:text-lg font-bold text-white mb-2 sm:mb-3">🗄️ 发现修复缓存</div>
+            <div className="text-xs sm:text-sm text-gray-400 mb-3 sm:mb-4">
               检测到相同文件的修复结果，是否直接使用缓存？
             </div>
-            <div className="space-y-2 text-xs text-gray-500">
+            <div className="space-y-2 text-[10px] sm:text-xs text-gray-500">
               <div className="flex justify-between">
                 <span>缓存任务ID</span>
                 <span className="text-gray-300">{cacheHit.task_id?.slice(0, 8)}...</span>
@@ -538,16 +582,16 @@ export const DualTrackPanel: React.FC<DualTrackPanelProps> = ({
                 </div>
               )}
             </div>
-            <div className="flex gap-2 mt-4">
+            <div className="flex gap-2 mt-3 sm:mt-4">
               <button
                 onClick={() => store.setShowCacheModal(false)}
-                className="flex-1 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg text-sm transition"
+                className="flex-1 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg text-xs sm:text-sm transition"
               >
                 重新修复
               </button>
               <button
                 onClick={handleUseCache}
-                className="flex-1 py-2 bg-secondary hover:bg-secondary/80 text-white rounded-lg text-sm transition"
+                className="flex-1 py-2 bg-secondary hover:bg-secondary/80 text-white rounded-lg text-xs sm:text-sm transition"
               >
                 使用缓存
               </button>
