@@ -38,7 +38,7 @@ pkg update -y 2>/dev/null || true
 
 MISSING_PKGS=""
 for pkg in python clang make pkg-config libc++ libffi openssl curl ca-certificates \
-    python-numpy python-scipy rust; do
+    python-numpy python-scipy rust lame; do
     if ! dpkg -s "$pkg" &>/dev/null 2>&1; then
         MISSING_PKGS="$MISSING_PKGS $pkg"
     fi
@@ -80,7 +80,7 @@ python -c "import fastapi; print(f'  fastapi {fastapi.__version__} OK')" 2>/dev/
 python -c "import miniaudio; print(f'  miniaudio {miniaudio.__version__} OK')" 2>/dev/null || echo -e "${RED}  miniaudio 未安装！音频加载将不可用${NC}"
 python -c "import soundfile; print(f'  soundfile {soundfile.__version__} OK')" 2>/dev/null || echo -e "${RED}  soundfile 未安装！${NC}"
 python -c "import pytest; print(f'  pytest {pytest.__version__} OK')" 2>/dev/null || echo -e "${RED}  pytest 未安装！质量测试将不可用${NC}"
-python -c "import lameenc; print(f'  lameenc OK')" 2>/dev/null || echo -e "${RED}  lameenc 未安装！MP3编码将不可用${NC}"
+command -v lame &>/dev/null && echo "  lame OK (MP3编码器)" || echo -e "${RED}  lame 未安装！MP3编码将不可用${NC}"
 
 echo -e "${YELLOW}  编译 DSP 原生加速库...${NC}"
 if [ -d "services/dsp_native" ] && command -v make &>/dev/null && command -v gcc &>/dev/null; then

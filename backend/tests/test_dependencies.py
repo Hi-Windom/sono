@@ -9,6 +9,7 @@ REQUIREMENTS_FILE = Path(__file__).resolve().parent.parent / "requirements_andro
 OPTIONAL_PACKAGES = {
     "noisereduce",
     "pedalboard",
+    "lameenc",
 }
 
 EXTRA_VALIDATIONS = {
@@ -83,3 +84,13 @@ def test_psutil_available():
     import psutil
     mem = psutil.virtual_memory()
     assert mem.total > 0
+
+
+def test_lame_cli_available():
+    import shutil
+    lame_path = shutil.which("lame")
+    assert lame_path is not None, "lame CLI not found in PATH"
+    import subprocess
+    result = subprocess.run([lame_path, "--version"], capture_output=True, text=True, timeout=10)
+    assert result.returncode == 0
+    assert "LAME" in result.stdout

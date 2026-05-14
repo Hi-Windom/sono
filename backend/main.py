@@ -38,11 +38,19 @@ def check_dependencies():
     except ImportError:
         print("  pedalboard 未安装，将使用 scipy 降级算法 (可选: pip install pedalboard)")
 
+    _has_lameenc = False
     try:
         import lameenc
+        _has_lameenc = True
         print("  lameenc 已安装 (MP3编码)")
     except ImportError:
-        print("  lameenc 未安装，MP3下载不可用 (pip install lameenc)")
+        pass
+    if not _has_lameenc:
+        import shutil
+        if shutil.which("lame"):
+            print("  lame CLI 已安装 (MP3编码回退)")
+        else:
+            print("  lameenc 未安装，lame CLI 未找到，MP3下载不可用")
 
 def main():
     check_dependencies()

@@ -4,6 +4,5 @@ python-multipart>=0.0,<0.1
 soundfile>=0.13,<0.14
 aiofiles>=24,<25
 miniaudio>=0.5
-lameenc>=1.8
 psutil>=5,<7
 pytest>=8.0
