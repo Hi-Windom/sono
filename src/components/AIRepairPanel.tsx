@@ -49,6 +49,7 @@ interface AIRepairPanelProps {
   onDualTrackRepair?: () => void;
   dualTrackVocalInfo?: DualTrackAudioInfo | null;
   dualTrackAccompanimentInfo?: DualTrackAudioInfo | null;
+  persistedRenderCaches?: RenderCacheEntry[];
 }
 
 const sampleRateOptions = [
@@ -145,6 +146,7 @@ export function AIRepairPanel({
   onDualTrackRepair,
   dualTrackVocalInfo,
   dualTrackAccompanimentInfo,
+  persistedRenderCaches,
 }: AIRepairPanelProps) {
   const effectiveDuration = useMemo(() => {
     if (isDualTrackMode && dualTrackVocalInfo && dualTrackAccompanimentInfo) {
@@ -166,7 +168,7 @@ export function AIRepairPanel({
   const memoryFetchRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const storageFetchRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // 渲染缓存状态
-  const [renderCaches, setRenderCaches] = useState<RenderCacheEntry[]>([]);
+  const [renderCaches, setRenderCaches] = useState<RenderCacheEntry[]>(persistedRenderCaches || []);
   const [selectedCache, setSelectedCache] = useState<RenderCacheEntry | null>(null);
   const cacheCheckRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -366,14 +368,6 @@ export function AIRepairPanel({
 
       {filteredAlgorithms.length > 0 ? (
         <div className="mb-4 p-3 bg-gradient-to-r from-cyan-900/30 to-purple-900/30 rounded-lg border border-cyan-500/20">
-          {isDualTrackMode && (
-            <div className="mb-2 text-xs text-cyan-300 flex items-center gap-1">
-              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-              </svg>
-              双轨模式仅支持 v3.0/v3.0a 算法
-            </div>
-          )}
           <div className="flex items-center justify-between gap-2">
             <h4 className="text-cyan-400 text-sm font-medium flex items-center gap-1.5 shrink-0">
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

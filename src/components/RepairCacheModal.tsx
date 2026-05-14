@@ -21,9 +21,11 @@ interface RepairCacheModalProps {
   audioFileName?: string;
   algorithmVersion: string;
   onUseRepairCache: (taskId: string) => void;
+  onUseDualCache?: (taskId: string) => void;
   onRenderCacheDownload: (cache: RenderCacheEntry, downloadUrl: string, filename: string) => void;
   onReRepair: () => void;
   onClose: () => void;
+  isDualTrack?: boolean;
 }
 
 function formatBytes(bytes: number): string {
@@ -37,9 +39,11 @@ export function RepairCacheModal({
   audioFileName,
   algorithmVersion,
   onUseRepairCache,
+  onUseDualCache,
   onRenderCacheDownload,
   onReRepair,
   onClose,
+  isDualTrack,
 }: RepairCacheModalProps) {
   if (!isOpen || !cacheHit) return null;
 
@@ -110,7 +114,7 @@ export function RepairCacheModal({
               )}
             </div>
             <button
-              onClick={() => onUseRepairCache(repair.task_id)}
+              onClick={() => isDualTrack && onUseDualCache ? onUseDualCache(repair.task_id) : onUseRepairCache(repair.task_id)}
               className="w-full py-2 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 rounded-lg text-emerald-400 text-xs font-medium transition"
             >
               ✓ 使用已有修复结果
