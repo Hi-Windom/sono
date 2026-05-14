@@ -115,8 +115,12 @@ export function DownloadModal({
     setMp3Loading(true);
     setMp3Error(null);
     try {
-      const res = await fetch(`/api/v1/download-mp3/${taskId}`, { method: 'HEAD' });
-      if (!res.ok) throw new Error(`MP3 下载失败: HTTP ${res.status}`);
+      const res = await fetch(`/api/v1/download-mp3/${taskId}`);
+      if (!res.ok) {
+        if (res.status === 404) throw new Error('WAV音频文件不存在，请先完成修复');
+        if (res.status === 500) throw new Error('MP3编码失败，请检查服务器日志');
+        throw new Error(`服务器错误 (HTTP ${res.status})`);
+      }
       const contentType = res.headers.get('content-type') || '';
       if (!contentType.includes('audio/')) {
         throw new Error(`服务器返回了非音频内容 (${contentType})，请重试`);
@@ -129,8 +133,12 @@ export function DownloadModal({
       a.click();
       document.body.removeChild(a);
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      setMp3Error(msg);
+      if (e instanceof TypeError) {
+        setMp3Error('网络连接失败，请检查网络后重试');
+      } else {
+        const msg = e instanceof Error ? e.message : String(e);
+        setMp3Error(msg);
+      }
     } finally {
       setMp3Loading(false);
     }

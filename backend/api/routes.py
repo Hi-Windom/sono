@@ -20,19 +20,35 @@ from services.memory_guard import get_available_memory_bytes, estimate_repair_me
 logger = logging.getLogger(__name__)
 
 def _wav_to_mp3(wav_path: str, mp3_path: str, bitrate: int = 128):
-    import lameenc
-    import wave
-    with wave.open(wav_path, 'rb') as wav:
-        framerate = wav.getframerate()
-        channels = wav.getnchannels()
-        sampwidth = wav.getsampwidth()
-        pcm_data = wav.readframes(wav.getnframes())
+    if not os.path.exists(wav_path):
+        raise FileNotFoundError(f"WAV文件不存在: {wav_path}")
+    try:
+        import lameenc
+    except ImportError:
+        raise RuntimeError("lameenc 未安装，无法编码 MP3")
+    import soundfile as sf
+    import numpy as np
+    data, sr = sf.read(wav_path)
+    if data.size == 0:
+        raise ValueError("WAV文件为空")
+    if data.ndim == 1:
+        channels = 1
+    else:
+        channels = data.shape[1]
+    if sr not in (8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000):
+        raise ValueError(f"不支持的采样率 {sr}Hz，lameenc 不支持")
+    if data.dtype != np.int16:
+        if np.issubdtype(data.dtype, np.floating):
+            data = (data * 32767).clip(-32768, 32767).astype(np.int16)
+        else:
+            data = data.astype(np.int16)
+    pcm_bytes = data.tobytes()
     encoder = lameenc.Encoder()
     encoder.set_bit_rate(bitrate)
-    encoder.set_in_sample_rate(framerate)
+    encoder.set_in_sample_rate(sr)
     encoder.set_channels(channels)
     encoder.set_quality(2)
-    mp3_data = encoder.encode(pcm_data)
+    mp3_data = encoder.encode(pcm_bytes)
     mp3_data += encoder.flush()
     with open(mp3_path, 'wb') as f:
         f.write(mp3_data)
@@ -1551,9 +1567,15 @@ async def download_mp3(task_id: str, request: Request):
     if not os.path.exists(mp3_path):
         try:
             _wav_to_mp3(wav_path, mp3_path)
+        except FileNotFoundError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+        except (ImportError, RuntimeError) as e:
+            raise HTTPException(status_code=500, detail=f"MP3编码库未安装: {e}")
+        except ValueError as e:
+            raise HTTPException(status_code=500, detail=f"音频格式不支持: {e}")
         except Exception as e:
-            logger.error(f"[DOWNLOAD-MP3] lameenc 转码失败 task_id={task_id}: {e}")
-            raise HTTPException(status_code=500, detail="MP3 转码失败")
+            logger.error(f"[DOWNLOAD-MP3] 转码失败 task_id={task_id}: {e}")
+            raise HTTPException(status_code=500, detail=f"MP3转码失败: {e}")
     file_size = os.path.getsize(mp3_path)
     from urllib.parse import quote
     download_name = f"{task_id}.mp3"
