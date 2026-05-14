@@ -247,7 +247,7 @@ def _soft_peak_limit(y, threshold=0.9):
 
 def _hf_protect(y, sr):
     nyq = sr / 2
-    cutoff = 4100
+    cutoff = 4000
     if cutoff >= nyq:
         return y
     sos = butter(6, cutoff / nyq, btype='low', output='sos')
