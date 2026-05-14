@@ -115,20 +115,19 @@ export function DownloadModal({
     setMp3Loading(true);
     setMp3Error(null);
     try {
-      const res = await fetch(`/api/v1/download-mp3/${taskId}`);
+      const res = await fetch(`/api/v1/download-mp3/${taskId}`, { method: 'HEAD' });
       if (!res.ok) throw new Error(`MP3 下载失败: HTTP ${res.status}`);
-      const blob = await res.blob();
-      const blobUrl = URL.createObjectURL(blob);
+      const contentType = res.headers.get('content-type') || '';
+      if (!contentType.includes('audio/')) {
+        throw new Error(`服务器返回了非音频内容 (${contentType})，请重试`);
+      }
       const a = document.createElement('a');
-      a.href = blobUrl;
+      a.href = `/api/v1/download-mp3/${taskId}`;
       a.download = `${taskId}.mp3`;
       a.style.display = 'none';
       document.body.appendChild(a);
       a.click();
-      setTimeout(() => {
-        URL.revokeObjectURL(blobUrl);
-        document.body.removeChild(a);
-      }, 5000);
+      document.body.removeChild(a);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       setMp3Error(msg);
