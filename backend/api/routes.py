@@ -20,55 +20,8 @@ from services.memory_guard import get_available_memory_bytes, estimate_repair_me
 logger = logging.getLogger(__name__)
 
 def _wav_to_mp3(wav_path: str, mp3_path: str, bitrate: int = 128):
-    if not os.path.exists(wav_path):
-        raise FileNotFoundError(f"WAV文件不存在: {wav_path}")
-
-    try:
-        import lameenc
-    except ImportError:
-        pass
-    else:
-        import soundfile as sf
-        import numpy as np
-        data, sr = sf.read(wav_path)
-        if data.size == 0:
-            raise ValueError("WAV文件为空")
-        if data.ndim == 1:
-            channels = 1
-        else:
-            channels = data.shape[1]
-        if sr not in (8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000):
-            raise ValueError(f"不支持的采样率 {sr}Hz，lameenc 不支持")
-        if data.dtype != np.int16:
-            if np.issubdtype(data.dtype, np.floating):
-                data = (data * 32767).clip(-32768, 32767).astype(np.int16)
-            else:
-                data = data.astype(np.int16)
-        pcm_bytes = data.tobytes()
-        encoder = lameenc.Encoder()
-        encoder.set_bit_rate(bitrate)
-        encoder.set_in_sample_rate(sr)
-        encoder.set_channels(channels)
-        encoder.set_quality(2)
-        mp3_data = encoder.encode(pcm_bytes)
-        mp3_data += encoder.flush()
-        with open(mp3_path, 'wb') as f:
-            f.write(mp3_data)
-        return
-
-    import shutil
-    lame_path = shutil.which("lame")
-    if not lame_path:
-        raise RuntimeError("未找到 MP3 编码器（lameenc 未安装，lame 命令不存在）")
-    import subprocess
-    result = subprocess.run(
-        [lame_path, "-b", str(bitrate), "--quiet", wav_path, mp3_path],
-        capture_output=True, text=True, timeout=120,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(f"lame 编码失败: {result.stderr.strip()}")
-    if not os.path.exists(mp3_path) or os.path.getsize(mp3_path) == 0:
-        raise RuntimeError("lame 编码输出为空")
+    from services.mp3_encoder import encode_mp3
+    encode_mp3(wav_path, mp3_path, bitrate)
 
 router = APIRouter(prefix="/api/v1")
 

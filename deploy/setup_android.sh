@@ -35,6 +35,7 @@ echo "  Termux 环境确认。"
 
 echo -e "${YELLOW}[3/5] 安装系统依赖（含预编译 C/Rust 扩展包）...${NC}"
 pkg update -y 2>/dev/null || true
+apt --fix-broken install -y 2>/dev/null || true
 
 MISSING_PKGS=""
 for pkg in python clang make pkg-config libc++ libffi openssl curl ca-certificates \

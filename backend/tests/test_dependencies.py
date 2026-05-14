@@ -9,7 +9,6 @@ REQUIREMENTS_FILE = Path(__file__).resolve().parent.parent / "requirements_andro
 OPTIONAL_PACKAGES = {
     "noisereduce",
     "pedalboard",
-    "lameenc",
 }
 
 EXTRA_VALIDATIONS = {
@@ -86,11 +85,25 @@ def test_psutil_available():
     assert mem.total > 0
 
 
-def test_lame_cli_available():
-    import shutil
-    lame_path = shutil.which("lame")
-    assert lame_path is not None, "lame CLI not found in PATH"
-    import subprocess
-    result = subprocess.run([lame_path, "--version"], capture_output=True, text=True, timeout=10)
-    assert result.returncode == 0
-    assert "LAME" in result.stdout
+def test_libmp3lame_available():
+    from services.mp3_encoder import is_available, get_version, encode_mp3
+    assert is_available(), "libmp3lame not available via ctypes"
+    version = get_version()
+    assert isinstance(version, str) and len(version) > 0
+    import tempfile, soundfile as sf, numpy as np
+    sr = 44100
+    data = (np.sin(2 * np.pi * 440 * np.linspace(0, 0.1, int(sr * 0.1), endpoint=False)) * 32767 * 0.5).astype(np.int16)
+    wav = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+    mp3 = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
+    try:
+        sf.write(wav.name, data, sr)
+        encode_mp3(wav.name, mp3.name, bitrate=128)
+        with open(mp3.name, "rb") as f:
+            raw = f.read()
+        assert len(raw) > 0, "MP3 output is empty"
+        has_sync = any(raw[i] == 0xff and (raw[i+1] & 0xe0) == 0xe0 for i in range(min(200, len(raw)-1)))
+        assert has_sync, "No MPEG frame sync found in output"
+    finally:
+        import os
+        os.unlink(wav.name)
+        os.unlink(mp3.name)

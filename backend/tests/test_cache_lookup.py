@@ -294,8 +294,13 @@ class TestMp3Encoding:
             mp3_size = os.path.getsize(mp3_path)
             assert mp3_size > 1000, f"MP3 文件太小: {mp3_size}B"
             with open(mp3_path, 'rb') as f:
-                header = f.read(3)
-            assert header == b'ID3' or header[:2] == b'\xff\xfb', f"MP3 头部异常: {header.hex()}"
+                head = f.read(200)
+            sync_found = False
+            for i in range(len(head) - 1):
+                if head[i] == 0xFF and (head[i+1] & 0xE0) == 0xE0:
+                    sync_found = True
+                    break
+            assert sync_found, f"未找到 MP3 帧同步头 (前200字节: {head[:32].hex()})"
         finally:
             try:
                 os.unlink(wav_path)
