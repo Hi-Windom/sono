@@ -244,6 +244,15 @@ def _soft_peak_limit(y, threshold=0.9):
     return y
 
 
+def _hf_protect(y, sr):
+    nyq = sr / 2
+    cutoff = 6000
+    if cutoff >= nyq:
+        return y
+    sos = butter(6, cutoff / nyq, btype='low', output='sos')
+    return sosfiltfilt(sos, y, axis=-1)
+
+
 def _adaptive_loudness_normalize(y, sr, target_loudness_lu=-14.0):
     if y.ndim == 1:
         y = y.reshape(1, -1)
@@ -306,6 +315,7 @@ def process_vocal_track(y, sr, params):
     if params.get("loudness", 0) > 0:
         y = _adaptive_loudness_normalize(y, sr, -14.0)
 
+    y = _hf_protect(y, sr)
     y = _soft_peak_limit(y, threshold=0.9)
     return y
 
