@@ -72,7 +72,8 @@
         "src-components-Header",
         "src-components-SpectrumVisualizer",
         "src-components-WaveformVisualizer",
-        "src-components-ErrorBoundary"
+        "src-components-ErrorBoundary",
+        "src-services-backendApi"
       ]
     },
     {
@@ -1254,13 +1255,6 @@
       "description": "算法版本 v3.1a"
     },
     {
-      "id": "repair-module-__pycache__",
-      "label": "__pycache__",
-      "type": "module",
-      "layer": "backend",
-      "filePath": "/workspace/backend/services/repair/__pycache__"
-    },
-    {
       "id": "repair-module-repair_v2_0",
       "label": "repair_v2_0",
       "type": "module",
@@ -1733,6 +1727,12 @@
       "target": "src-components-ErrorBoundary",
       "label": "渲染",
       "type": "renders"
+    },
+    {
+      "source": "src-pages-ComparePage",
+      "target": "src-services-backendApi",
+      "label": "使用",
+      "type": "import"
     },
     {
       "source": "frontend",
@@ -2861,12 +2861,6 @@
       "target": "algo-v3.1a",
       "label": "算法版本",
       "type": "data-flow"
-    },
-    {
-      "source": "backend-services-audio_repair.py",
-      "target": "repair-module-__pycache__",
-      "label": "动态加载",
-      "type": "call"
     },
     {
       "source": "backend-services-audio_repair.py",

@@ -575,17 +575,21 @@ export default function RepairPage() {
     return () => { cancelled = true; };
   }, [isDualTrackMode, dualTrackVocalFileHash, dualTrackAccompanimentFileHash, dualTrackTaskId]);
 
+  // 持久 WebSocket 连接：监听缓存更新事件，同时服务于单轨和双轨模式
+  const wsControlRef = useRef<{ close: () => void } | null>(null);
+  const taskIdRef = useRef(taskId);
+  const dualTrackTaskIdRef = useRef(dualTrackTaskId);
+  taskIdRef.current = taskId;
+  dualTrackTaskIdRef.current = dualTrackTaskId;
   useEffect(() => {
-    if (!isDualTrackMode) return;
-
-    const wsControl = connectCacheWS((event: CacheUpdateEvent) => {
-      if (event.task_id === dualTrackTaskId || !dualTrackTaskId) {
+    if (wsControlRef.current) return;
+    wsControlRef.current = connectCacheWS((event: CacheUpdateEvent) => {
+      const currentTaskId = taskIdRef.current || dualTrackTaskIdRef.current;
+      if (event.task_id === currentTaskId || !currentTaskId) {
         setCacheTriggerKey(k => k + 1);
       }
     });
-
-    return () => wsControl.close();
-  }, [isDualTrackMode, dualTrackTaskId]);
+  }, []);
 
   useEffect(() => {
     if (isDualTrackMode) {

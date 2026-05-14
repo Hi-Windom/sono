@@ -312,34 +312,57 @@ export function DownloadModal({
                     <span className="text-white truncate max-w-[200px]" title={dualTrackFilename}>{dualTrackFilename}</span>
                   </div>
                   <div className="flex justify-between">
+                    <span className="text-gray-400">文件大小</span>
+                    <span className="text-white">{backendInfo?.fileSize || '—'}</span>
+                  </div>
+                  <div className="flex justify-between">
                     <span className="text-gray-400">音频格式</span>
-                    <span className="text-cyan-400">{backendInfo.sampleRate} / {backendInfo.bitDepth} bit</span>
+                    <span className="text-cyan-400">{backendInfo?.sampleRate || '—'} / {backendInfo?.bitDepth || '—'} bit</span>
                   </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-400">声道</span>
+                    <span className="text-white">{backendInfo?.channels === 1 ? '单声道' : backendInfo?.channels === 2 ? '立体声' : (backendInfo?.channels ? `${backendInfo.channels} 声道` : '—')}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-400">时长</span>
+                    <span className="text-white">{backendInfo?.duration ? `${backendInfo.duration.toFixed(1)}s` : '—'}</span>
+                  </div>
+                  {backendInfo?.algorithmVersion && (
+                    <div className="flex justify-between">
+                      <span className="text-gray-400">算法版本</span>
+                      <span className="text-purple-400">{backendInfo.algorithmVersion}</span>
+                    </div>
+                  )}
+                  {backendInfo?.completedAt && (
+                    <div className="flex justify-between">
+                      <span className="text-gray-400">完成时间</span>
+                      <span className="text-gray-300">{backendInfo.completedAt}</span>
+                    </div>
+                  )}
                 </div>
-                {dualTrackUrls.merged && (
-                  <div className="mt-3 flex gap-2">
-                    <button
-                      onClick={() => handleDownload(dualTrackUrls.merged!, dualTrackFilename)}
-                      disabled={downloading || isBackendLoading}
-                      className="flex-1 py-2 bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/30 rounded-lg text-cyan-400 text-xs font-medium transition disabled:opacity-50"
-                    >
-                      {downloading ? `下载中 ${Math.round(dlProgress * 100)}%` : '⬇ 下载 WAV'}
-                    </button>
-                    <button
-                      onClick={() => handleDownloadMp3(dualTrackUrls.merged!, dualTrackFilename, backendInfo?.channels || 2)}
-                      disabled={mp3Loading || downloading || isBackendLoading}
-                      className="flex-1 py-2 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 rounded-lg text-emerald-400 text-xs font-medium transition disabled:opacity-50"
-                    >
-                      {mp3Loading ? '编码中...' : '⬇ 下载 MP3 (128k)'}
-                    </button>
-                    <button
-                      onClick={() => handleCopyLink(dualTrackUrls.merged!)}
-                      className="px-3 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-gray-400 text-xs transition"
-                    >
-                      {copySuccess ? '✓ 已复制' : '📋 复制链接'}
-                    </button>
-                  </div>
-                )}
+                <div className="mt-3 flex gap-2">
+                  <button
+                    onClick={() => handleDownload(dualTrackUrls.merged || backendDownloadUrl!, dualTrackFilename)}
+                    disabled={(!dualTrackUrls.merged && !backendDownloadUrl) || downloading || isBackendLoading}
+                    className="flex-1 py-2 bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/30 rounded-lg text-cyan-400 text-xs font-medium transition disabled:opacity-50"
+                  >
+                    {downloading ? `下载中 ${Math.round(dlProgress * 100)}%` : '⬇ 下载 WAV'}
+                  </button>
+                  <button
+                    onClick={() => handleDownloadMp3(dualTrackUrls.merged || backendDownloadUrl!, dualTrackFilename, backendInfo?.channels || 2)}
+                    disabled={(!dualTrackUrls.merged && !backendDownloadUrl) || mp3Loading || downloading || isBackendLoading}
+                    className="flex-1 py-2 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 rounded-lg text-emerald-400 text-xs font-medium transition disabled:opacity-50"
+                  >
+                    {mp3Loading ? '编码中...' : '⬇ 下载 MP3 (128k)'}
+                  </button>
+                  <button
+                    onClick={() => handleCopyLink(dualTrackUrls.merged || backendDownloadUrl!)}
+                    disabled={!dualTrackUrls.merged && !backendDownloadUrl}
+                    className="px-3 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-gray-400 text-xs transition disabled:opacity-50"
+                  >
+                    {copySuccess ? '✓ 已复制' : '📋 复制链接'}
+                  </button>
+                </div>
               </div>
               {dualTrackUrls.vocal && (
                 <div className="bg-purple-500/5 border border-purple-500/20 rounded-lg p-4">

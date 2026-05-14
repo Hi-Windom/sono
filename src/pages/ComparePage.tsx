@@ -4,6 +4,8 @@ import { Header } from '../components/Header';
 import { SpectrumVisualizer } from '../components/SpectrumVisualizer';
 import { WaveformVisualizer } from '../components/WaveformVisualizer';
 import { ErrorBoundary } from '../components/ErrorBoundary';
+import { connectCacheWS } from '../services/backendApi';
+import type { CacheUpdateEvent } from '../services/backendApi';
 
 type CompareMode = 'original' | 'repaired';
 type DualTrackMode = 'vocal' | 'accompaniment' | 'merged';
@@ -115,22 +117,38 @@ export default function ComparePage() {
 
   const activeBuffer = compareMode === 'original' ? originalBuffer : repairedBuffer;
 
+  const fetchTaskList = useCallback(async () => {
+    setTasksLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/cache/info`);
+      if (res.ok) {
+        const data = await res.json();
+        const completed = (data.tasks || []).filter((t: CacheTask) => t.output_exists);
+        setTasks(completed);
+      }
+    } catch {
+      // ignore
+    } finally {
+      setTasksLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (taskId) return;
-    let cancelled = false;
-    setTasksLoading(true);
-    fetch(`${API_BASE}/cache/info`)
-      .then(res => res.ok ? res.json() : Promise.reject(new Error('获取缓存信息失败')))
-      .then(data => {
-        if (!cancelled) {
-          const completed = (data.tasks || []).filter((t: CacheTask) => t.output_exists);
-          setTasks(completed);
-        }
-      })
-      .catch(() => {})
-      .finally(() => { if (!cancelled) setTasksLoading(false); });
-    return () => { cancelled = true };
-  }, [taskId]);
+    fetchTaskList();
+  }, [taskId, fetchTaskList]);
+
+  const wsControlRef = useRef<{ close: () => void } | null>(null);
+  const taskIdRef = useRef(taskId);
+  taskIdRef.current = taskId;
+  useEffect(() => {
+    if (wsControlRef.current) return;
+    wsControlRef.current = connectCacheWS(() => {
+      if (!taskIdRef.current) {
+        fetchTaskList();
+      }
+    });
+  }, []);
 
   const dualTrackSubIds = useMemo<{ vocalTaskId: string | null; accompanimentTaskId: string | null }>(() => {
     if (!taskInfo) return { vocalTaskId: null, accompanimentTaskId: null };

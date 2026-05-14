@@ -876,8 +876,15 @@ export function useAudioProcessor() {
       } catch { /* 解码缓存不可用，继续正常流程 */ }
 
       if (!usedDecodedCache) {
-        buffer = await context.decodeAudioData(arrayBuf);
-        writeLog(`[loadAudioFile] 浏览器解码完成`);
+        try {
+          buffer = await context.decodeAudioData(arrayBuf);
+          writeLog(`[loadAudioFile] 浏览器解码完成`);
+        } catch (decodeErr) {
+          console.warn('[loadAudioFile] 浏览器解码失败:', decodeErr);
+          setIsDecodingAudio(false);
+          setBackendError('音频解码失败：不支持的格式或文件已损坏');
+          return;
+        }
       }
     }
     if (seq !== loadAudioSeqRef.current) return;
