@@ -123,6 +123,7 @@ def encode_mp3(wav_path: str, mp3_path: str, bitrate: int = 128):
         _lib.lame_set_VBR(lame, 0)
         _lib.lame_init_params(lame)
 
+        mp3_bytes = bytearray()
         if channels == 1:
             pcm = data.ctypes.data_as(ctypes.POINTER(ctypes.c_short))
             nsamples = len(data)
@@ -140,12 +141,24 @@ def encode_mp3(wav_path: str, mp3_path: str, bitrate: int = 128):
         if encoded < 0:
             raise RuntimeError(f"MP3编码失败 (lame return code: {encoded})")
 
-        flushed = _lib.lame_encode_flush(lame, buf, buf_size)
+        if encoded > 0:
+            mp3_bytes.extend(buf[:encoded])
+
+        flush_buf = ctypes.create_string_buffer(8192)
+        flushed = _lib.lame_encode_flush(lame, flush_buf, len(flush_buf))
+
+        if flushed < 0:
+            raise RuntimeError(f"MP3刷新编码失败 (lame return code: {flushed})")
+
+        if flushed > 0:
+            mp3_bytes.extend(flush_buf[:flushed])
+
         total = encoded + flushed
+        logger.info("MP3编码完成: %d 样本 -> %d bytes (%d encoded + %d flushed)", nsamples, total, encoded, flushed)
 
         mp3_path.parent.mkdir(parents=True, exist_ok=True)
         with open(str(mp3_path), 'wb') as f:
-            f.write(buf[:total])
+            f.write(mp3_bytes)
     finally:
         _lib.lame_close(lame)
 

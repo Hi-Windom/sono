@@ -86,18 +86,33 @@ def test_libmp3lame_available():
     assert isinstance(version, str) and len(version) > 0
     import tempfile, soundfile as sf, numpy as np
     sr = 44100
-    data = (np.sin(2 * np.pi * 440 * np.linspace(0, 0.1, int(sr * 0.1), endpoint=False)) * 32767 * 0.5).astype(np.int16)
+    t = np.linspace(0, 1.0, int(sr * 1.0), endpoint=False)
+    data = np.sin(2 * np.pi * 440 * t) * 0.3
     wav = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
     mp3 = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
     try:
-        sf.write(wav.name, data, sr)
+        sf.write(wav.name, data, sr, subtype="PCM_16")
         encode_mp3(wav.name, mp3.name, bitrate=128)
         with open(mp3.name, "rb") as f:
             raw = f.read()
         assert len(raw) > 0, "MP3 output is empty"
         has_sync = any(raw[i] == 0xff and (raw[i+1] & 0xe0) == 0xe0 for i in range(min(200, len(raw)-1)))
         assert has_sync, "No MPEG frame sync found in output"
+
+        import scipy.io.wavfile as wavfile
+        import subprocess
+        subprocess.run(["lame", "--decode", mp3.name, wav.name + "_decoded.wav"], capture_output=True)
+        sr_dec, data_dec = wavfile.read(wav.name + "_decoded.wav")
+        data_dec_float = data_dec.astype(np.float64) / 32768.0
+        skip = 529
+        aligned = data_dec_float[skip:]
+        n = min(len(data), len(aligned))
+        corr = np.corrcoef(data[:n], aligned[:n])[0, 1]
+        assert corr > 0.95, f"MP3 encoding quality too low: correlation={corr:.4f} (expected >0.95)"
     finally:
         import os
         os.unlink(wav.name)
         os.unlink(mp3.name)
+        decoded_path = wav.name + "_decoded.wav"
+        if os.path.exists(decoded_path):
+            os.unlink(decoded_path)
