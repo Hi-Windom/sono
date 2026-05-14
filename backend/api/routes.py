@@ -19,6 +19,34 @@ from services.memory_guard import get_available_memory_bytes, estimate_repair_me
 
 logger = logging.getLogger(__name__)
 
+def _get_audio_info(path: str) -> dict | None:
+    try:
+        import soundfile as sf
+        info = sf.info(path)
+        return {
+            "sample_rate": info.samplerate,
+            "channels": info.channels,
+            "duration": info.duration,
+            "num_frames": info.frames,
+            "format": info.format,
+            "subtype": info.subtype,
+        }
+    except Exception:
+        pass
+    try:
+        import miniaudio
+        info = miniaudio.get_file_info(path)
+        return {
+            "sample_rate": info.sample_rate,
+            "channels": info.nchannels,
+            "duration": info.duration,
+            "num_frames": info.num_frames,
+            "format": str(info.file_format),
+            "sample_width": info.sample_width,
+        }
+    except Exception:
+        return None
+
 def _wav_to_mp3(wav_path: str, mp3_path: str, bitrate: int = 128):
     from services.mp3_encoder import encode_mp3
     encode_mp3(wav_path, mp3_path, bitrate)
@@ -393,20 +421,7 @@ async def upload_audio(file: UploadFile = File(...), file_hash: str = Form("")):
     create_task(task_id, file.filename or "audio", upload_path, {}, file_hash, file_size)
     logger.info(f"[/upload] task_id={task_id} file_hash={file_hash or 'none'}")
 
-    audio_info = None
-    try:
-        import miniaudio
-        info = miniaudio.get_file_info(upload_path)
-        audio_info = {
-            "sample_rate": info.sample_rate,
-            "channels": info.nchannels,
-            "duration": info.duration,
-            "num_frames": info.num_frames,
-            "format": str(info.file_format),
-            "sample_width": info.sample_width,
-        }
-    except Exception:
-        pass
+    audio_info = _get_audio_info(upload_path)
 
     return {
         "task_id": task_id,
@@ -455,18 +470,8 @@ async def upload_dual_audio(
     vocal_hash = vocal_file_hash or file_hash
     accompaniment_hash = accompaniment_file_hash or file_hash
 
-    def get_audio_info(path):
-        try:
-            import miniaudio
-            info = miniaudio.get_file_info(path)
-            logger.info(f"[/upload-dual] audio_info for {path}: sr={info.sample_rate} ch={info.nchannels} dur={info.duration}")
-            return {"sample_rate": info.sample_rate, "channels": info.nchannels, "duration": info.duration}
-        except Exception as e:
-            logger.warning(f"[/upload-dual] get_audio_info failed for {path}: {e}")
-            return None
-
-    vocal_audio_info = get_audio_info(vocal_upload_path)
-    acc_audio_info = get_audio_info(accompaniment_upload_path)
+    vocal_audio_info = _get_audio_info(vocal_upload_path)
+    acc_audio_info = _get_audio_info(accompaniment_upload_path)
 
     create_task(vocal_task_id, f"vocal_{vocal_file.filename or 'audio'}", vocal_upload_path,
                 {"audio_info": vocal_audio_info} if vocal_audio_info else {},
@@ -485,17 +490,8 @@ async def upload_dual_audio(
 
     logger.info(f"[/upload-dual] main_task_id={main_task_id} vocal={vocal_task_id} acc={accompaniment_task_id} vocal_hash={vocal_hash[:12] if vocal_hash else 'none'} acc_hash={accompaniment_hash[:12] if accompaniment_hash else 'none'}")
 
-    def get_audio_info(path):
-        try:
-            info = miniaudio.get_file_info(path)
-            return {
-                "sample_rate": info.sample_rate,
-                "channels": info.nchannels,
-                "duration": info.duration,
-                "num_frames": info.num_frames,
-            }
-        except Exception:
-            return None
+    vocal_info = _get_audio_info(vocal_upload_path)
+    acc_info = _get_audio_info(accompaniment_upload_path)
 
     return {
         "task_id": main_task_id,
@@ -2075,16 +2071,10 @@ async def get_audio_info(file_hash: str):
         raise HTTPException(status_code=404, detail="音频文件不存在")
 
     try:
-        import miniaudio
-        info = miniaudio.get_file_info(original_path)
-        return {
-            "sample_rate": info.sample_rate,
-            "channels": info.nchannels,
-            "duration": info.duration,
-            "num_frames": info.num_frames,
-            "format": str(info.file_format),
-            "sample_width": info.sample_width,
-        }
+        audio_info = _get_audio_info(original_path)
+        if audio_info is None:
+            raise HTTPException(status_code=500, detail="获取音频信息失败")
+        return audio_info
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"获取音频信息失败: {e}")
 
@@ -2434,9 +2424,9 @@ async def get_file_info_by_hash(request: FileInfoByHashRequest):
             path = task.get("original_path")
             if path and os.path.exists(path):
                 try:
-                    info = miniaudio.get_file_info(path)
-                    audio_info = {"sample_rate": info.sample_rate, "channels": info.nchannels, "duration": info.duration}
-                    result[file_hash] = audio_info
+                    audio_info = _get_audio_info(path)
+                    if audio_info:
+                        result[file_hash] = audio_info
                     logger.info(f"[file-info-by-hash] hash={file_hash[:12]} read from file: {audio_info}")
                 except Exception as e:
                     logger.info(f"[file-info-by-hash] hash={file_hash[:12]} read file error: {e}")

@@ -39,7 +39,7 @@ apt --fix-broken install -y 2>/dev/null || true
 
 MISSING_PKGS=""
 for pkg in python clang make pkg-config libc++ libffi openssl curl ca-certificates \
-    python-numpy python-scipy rust lame; do
+    python-numpy python-scipy rust lame libsndfile; do
     if ! dpkg -s "$pkg" &>/dev/null 2>&1; then
         MISSING_PKGS="$MISSING_PKGS $pkg"
     fi

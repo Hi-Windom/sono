@@ -901,7 +901,182 @@ def mix_tracks(vocal, accompaniment, vocal_ratio=1.0, accompaniment_ratio=1.0):
     return mixed
 
 
+def _repair_single_track(input_path: str, output_path: str, params: dict, progress_callback=None) -> dict:
+    if progress_callback:
+        progress_callback(0.05, "v3.1 加载音频...")
+
+    y, sr = load_audio_with_fallback(input_path, sr=None, mono=False)
+    if y.ndim == 1:
+        y = y.reshape(1, -1)
+
+    original_sr = sr
+    original_duration = round(y.shape[1] / sr, 2)
+    issues_found = ["单轨处理"]
+
+    working_sr = DESKTOP_WORKING_SR
+
+    from services.memory_guard import check_memory_before_repair, should_use_float32
+    working_sr = check_memory_before_repair(
+        n_samples=y.shape[1],
+        n_channels=y.shape[0],
+        sr=sr,
+        working_sr=working_sr,
+        algorithm_version="v3.1",
+    )
+
+    if should_use_float32(y.shape[1], y.shape[0]):
+        y = y.astype(np.float32)
+
+    if sr != working_sr:
+        target_len = int(y.shape[1] * working_sr / sr)
+        new_y = np.zeros((y.shape[0], target_len), dtype=y.dtype)
+        for ch in range(y.shape[0]):
+            resampled = resample_poly(y[ch], working_sr, sr)
+            copy_len = min(target_len, len(resampled))
+            new_y[ch, :copy_len] = resampled[:copy_len]
+        y = new_y
+        sr = working_sr
+
+    gc.collect()
+
+    single_params = dict(params)
+    single_params["_issues"] = issues_found
+
+    if progress_callback:
+        progress_callback(0.10, "v3.1 处理音频...")
+
+    if single_params.get("declip", 0) > 0:
+        y = _tanh_declip(y, single_params["declip"])
+
+    if single_params.get("depop", 0) > 0:
+        y = _diff_clamp_depop(y, sr, single_params["depop"])
+
+    if single_params.get("formant_repair", 0) > 0:
+        y = _vocal_formant_repair(y, sr, single_params["formant_repair"])
+
+    if single_params.get("de_ess", 0) > 0:
+        y = _apply_vocal_de_ess(y, sr, single_params["de_ess"])
+
+    if single_params.get("de_esser_advanced", 0) > 0:
+        y = _vocal_de_esser_advanced(y, sr, single_params["de_esser_advanced"])
+
+    if single_params.get("noise_reduction", 0) > 0:
+        from services.repair.repair_v2_2.spectral_group_a import apply_spectral_group_a
+        try:
+            y = apply_spectral_group_a(y, sr, single_params, N_FFT, HOP_LENGTH, issues_found, "generic")
+        except Exception:
+            pass
+
+    if single_params.get("ai_repair", 0) > 0:
+        from services.repair.repair_v2_4.hifi_ai_repair import apply_hifi_ai_repair
+        from services.repair.repair_v2_2.music_type_detector import detect_music_type
+        try:
+            music_type, _, _ = detect_music_type(y, sr)
+            y = apply_hifi_ai_repair(y, sr, single_params["ai_repair"], {})
+            if "AI频谱修复" not in issues_found:
+                issues_found.append("AI频谱修复")
+        except Exception:
+            pass
+
+    if single_params.get("ai_repair_enhanced", 0) > 0:
+        y = _vocal_ai_repair_enhanced(y, sr, single_params["ai_repair_enhanced"])
+
+    if single_params.get("breath_enhance", 0) > 0:
+        y = _vocal_breath_enhance(y, sr, single_params["breath_enhance"])
+
+    if single_params.get("bass_enhance", 0) > 0:
+        from services.repair.repair_v3_0.core import _harmonic_bass_enhance
+        try:
+            y = _harmonic_bass_enhance(y, sr, single_params["bass_enhance"], "generic")
+        except Exception:
+            pass
+
+    if single_params.get("air_texture", 0) > 0:
+        from services.repair.repair_v3_0.core import _air_texture_reconstruct
+        try:
+            y = _air_texture_reconstruct(y, sr, single_params["air_texture"], "generic")
+        except Exception:
+            pass
+
+    if single_params.get("exciter", 0) > 0:
+        y = _vocal_exciter(y, sr, single_params["exciter"])
+
+    if single_params.get("dynamic", 0) > 0:
+        from services.repair.repair_v2_2.dynamics import apply_softness_v5
+        try:
+            y = apply_softness_v5(y, sr, single_params["dynamic"])
+        except Exception:
+            pass
+
+    if single_params.get("compressor", 0) > 0:
+        y = _vocal_compressor(y, sr, single_params["compressor"])
+
+    if single_params.get("warmth", 0) > 0:
+        y = _vocal_warmth(y, sr, single_params["warmth"])
+
+    if single_params.get("spatial", 0) > 0:
+        y = _vocal_spatial(y, sr, single_params["spatial"])
+
+    if single_params.get("stereo_enhance", 0) > 0 and y.shape[0] >= 2:
+        y = _instrument_stereo_enhance(y, sr, single_params["stereo_enhance"])
+
+    if single_params.get("loudness", 0) > 0:
+        y = _adaptive_loudness_normalize(y, sr, -14.0)
+
+    if progress_callback:
+        progress_callback(0.80, "v3.1 母带处理...")
+
+    mastering_style = single_params.get("mastering_style", "standard")
+    y = _soft_peak_limit(y, threshold=0.95)
+    if mastering_style == "powerful":
+        y = _mastering_powerful(y, working_sr)
+        issues_found.append("强力母带")
+    elif mastering_style == "warm":
+        y = _mastering_warm(y, working_sr)
+        issues_found.append("温暖母带")
+    else:
+        y = _mastering_standard(y, working_sr)
+        issues_found.append("标准母带")
+
+    if progress_callback:
+        progress_callback(0.90, "v3.1 导出...")
+
+    y = _soft_peak_limit(y, threshold=0.9)
+    y = _spectral_hf_gate(y, working_sr)
+    y = _hf_protect(y, working_sr)
+
+    bit_depth = single_params.get("bit_depth", 24)
+    subtype_map = {16: "PCM_16", 24: "PCM_24", 32: "PCM_32"}
+    subtype = subtype_map.get(bit_depth, "PCM_24")
+
+    if y.dtype == np.float32:
+        y = y.astype(np.float64)
+
+    sf.write(output_path, y.T if y.ndim > 1 else y, working_sr, subtype=subtype)
+
+    channels = y.shape[0] if y.ndim > 1 else 1
+
+    if progress_callback:
+        progress_callback(1.0, "v3.1 修复完成")
+
+    return {
+        "issues_found": issues_found,
+        "original_sample_rate": original_sr,
+        "output_sample_rate": working_sr,
+        "output_bit_depth": bit_depth,
+        "duration": original_duration,
+        "channels": channels,
+        "algorithm_version": "v3.1",
+        "processing_mode": "single",
+    }
+
+
 def repair_audio(input_path: str, output_path: str, params: dict, progress_callback=None) -> dict:
+    processing_mode = params.get("processing_mode", "single")
+
+    if processing_mode == "single":
+        return _repair_single_track(input_path, output_path, params, progress_callback)
+
     vocal_path = params.get("vocal_path", input_path)
     accompaniment_path = params.get("accompaniment_path", input_path)
 

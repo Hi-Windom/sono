@@ -456,7 +456,120 @@ def mix_tracks(vocal, accompaniment, vocal_ratio=1.0, accompaniment_ratio=1.0):
     return mixed
 
 
+def _repair_single_track(input_path: str, output_path: str, params: dict, progress_callback=None) -> dict:
+    if progress_callback:
+        progress_callback(0.05, "v3.0a 加载音频...")
+
+    y, sr = load_audio_with_fallback(input_path, sr=None, mono=False)
+    if y.ndim == 1:
+        y = y.reshape(1, -1)
+
+    original_sr = sr
+    original_duration = round(y.shape[1] / sr, 2)
+    issues_found = ["单轨处理"]
+
+    working_sr = MOBILE_WORKING_SR
+
+    from services.memory_guard import check_memory_before_repair, should_use_float32
+    working_sr = check_memory_before_repair(
+        n_samples=y.shape[1],
+        n_channels=y.shape[0],
+        sr=sr,
+        working_sr=working_sr,
+        algorithm_version="v3.0a",
+    )
+
+    if should_use_float32(y.shape[1], y.shape[0]):
+        y = y.astype(np.float32)
+
+    if sr != working_sr:
+        target_len = int(y.shape[1] * working_sr / sr)
+        new_y = np.zeros((y.shape[0], target_len), dtype=y.dtype)
+        for ch in range(y.shape[0]):
+            resampled = resample_poly(y[ch], working_sr, sr)
+            copy_len = min(target_len, len(resampled))
+            new_y[ch, :copy_len] = resampled[:copy_len]
+        y = new_y
+        sr = working_sr
+
+    gc.collect()
+
+    single_params = dict(params)
+
+    if progress_callback:
+        progress_callback(0.10, "v3.0a 处理音频...")
+
+    if single_params.get("declip", 0) > 0:
+        y = _simple_declip(y, single_params["declip"])
+
+    if single_params.get("depop", 0) > 0:
+        y = _simple_depop(y, sr, single_params["depop"])
+
+    if single_params.get("de_ess", 0) > 0:
+        y = _de_ess(y, sr, single_params["de_ess"])
+
+    if single_params.get("noise_reduction", 0) > 0:
+        y = _spectral_denoise(y, sr, single_params["noise_reduction"])
+
+    if single_params.get("ai_repair", 0) > 0:
+        from services.repair.repair_v2_3a.core import _spectral_denoise as _ai_denoise
+        try:
+            y = _ai_denoise(y, sr, single_params["ai_repair"])
+        except Exception:
+            pass
+
+    if single_params.get("bass_enhance", 0) > 0:
+        y = _apply_bass_enhance_lite(y, sr, single_params["bass_enhance"])
+
+    if single_params.get("air_texture", 0) > 0:
+        y = _apply_air_texture_lite(y, sr, single_params["air_texture"])
+
+    if single_params.get("dynamic", 0) > 0:
+        y = _transparent_compress(y, sr, single_params["dynamic"])
+
+    if single_params.get("loudness", 0) > 0:
+        y = _loudness_normalize(y, sr, -14.0)
+
+    if progress_callback:
+        progress_callback(0.80, "v3.0a 母带处理...")
+
+    y = _mastering_standard_lite(y, working_sr)
+    y = _soft_peak_limit(y, threshold=0.9)
+    y = _spectral_hf_gate(y, working_sr)
+    y = _hf_protect(y, working_sr)
+
+    bit_depth = single_params.get("bit_depth", 24)
+    subtype_map = {16: "PCM_16", 24: "PCM_24", 32: "PCM_32"}
+    subtype = subtype_map.get(bit_depth, "PCM_24")
+
+    if y.dtype == np.float32:
+        y = y.astype(np.float64)
+
+    sf.write(output_path, y.T if y.ndim > 1 else y, working_sr, subtype=subtype)
+
+    channels = y.shape[0] if y.ndim > 1 else 1
+
+    if progress_callback:
+        progress_callback(1.0, "v3.0a 修复完成")
+
+    return {
+        "issues_found": issues_found,
+        "original_sample_rate": original_sr,
+        "output_sample_rate": working_sr,
+        "output_bit_depth": bit_depth,
+        "duration": original_duration,
+        "channels": channels,
+        "algorithm_version": "v3.0a",
+        "processing_mode": "single",
+    }
+
+
 def repair_audio(input_path: str, output_path: str, params: dict, progress_callback=None) -> dict:
+    processing_mode = params.get("processing_mode", "single")
+
+    if processing_mode == "single":
+        return _repair_single_track(input_path, output_path, params, progress_callback)
+
     vocal_path = params.get("vocal_path", input_path)
     accompaniment_path = params.get("accompaniment_path", input_path)
 
