@@ -2,14 +2,12 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { AlgorithmVersion } from '../services/backendApi';
 
 const TAG_CONFIG: Record<string, { label: string; className: string }> = {
-  'mobile':      { label: '移动', className: 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' },
-  'desktop':     { label: '桌面', className: 'bg-blue-500/20 text-blue-400 border border-blue-500/30' },
   'stable':      { label: '稳定', className: 'bg-amber-500/20 text-amber-400 border border-amber-500/30' },
   'recommended': { label: '推荐', className: 'bg-purple-500/20 text-purple-400 border border-purple-500/30' },
   'dual-track':  { label: '双轨', className: 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30' },
 };
 
-const TAG_ORDER = ['recommended', 'stable', 'dual-track', 'desktop', 'mobile'];
+const TAG_ORDER = ['recommended', 'stable', 'dual-track'];
 
 interface AlgorithmSelectorProps {
   value: string;
