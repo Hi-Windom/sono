@@ -266,8 +266,7 @@ export default function CacheManagerPage() {
   const handleDownloadDelivery = (filename: string) => {
     const a = document.createElement('a');
     a.href = '/api/v1/download/' + encodeURIComponent(filename);
-    a.target = '_blank';
-    a.rel = 'noopener noreferrer';
+    a.download = filename;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);

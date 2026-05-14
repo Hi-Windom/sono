@@ -123,6 +123,9 @@ def get_task(task_id: str) -> TaskDict | None:
     if row is None:
         return None
     result: TaskDict = dict(row)
+    for ts_field in ("created_at", "updated_at", "completed_at"):
+        if ts_field in result:
+            result[ts_field] = _format_timestamp(result[ts_field])
     _parse_json_fields(result)
     return result
 
@@ -421,6 +424,15 @@ def clear_all_analysis_cache() -> int:
     conn.commit()
     conn.close()
     return count
+
+
+def _format_timestamp(ts: str | None) -> str | None:
+    if ts is None:
+        return None
+    ts_str = str(ts).replace(" ", "T")
+    if not ts_str.endswith("Z") and "+" not in ts_str and "Z" not in ts_str:
+        ts_str += "Z"
+    return ts_str
 
 
 def _parse_json_fields(result: TaskDict) -> None:

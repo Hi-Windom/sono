@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from config import ALLOWED_EXTENSIONS, MAX_UPLOAD_SIZE, MOBILE_MODE, OUTPUT_DIR, UPLOAD_DIR, DECODED_DIR, DEPLOY_TIME_FILE
-from database import create_task, find_task_by_hash, get_queue_status, get_task, update_task
+from database import create_task, find_task_by_hash, get_queue_status, get_task, update_task, _format_timestamp
 from services.task_manager import generate_task_id, submit_detect_task, submit_repair_task, cancel_task, executor, can_accept_task, get_active_task_count, get_active_tasks
 from services.audio_repair import get_available_versions
 from services.ai_detector import get_detector_versions
@@ -1402,7 +1402,8 @@ async def download_audio(task_id: str):
     file_size = os.path.getsize(output_path)
     from urllib.parse import quote
     encoded_name = quote(download_name)
-    disposition = f"attachment; filename*=UTF-8''{encoded_name}"
+    ascii_name = download_name.encode("ascii", "ignore").decode("ascii") or "audio_repaired.wav"
+    disposition = f'attachment; filename="{ascii_name}"; filename*=UTF-8\'\'{encoded_name}'
 
     def iter_full_file():
         with open(output_path, "rb") as f:
@@ -1476,7 +1477,8 @@ async def download_file(filename: str, request: Request):
     # 统一使用 RFC 5987 编码 Content-Disposition，确保中文文件名正确
     from urllib.parse import quote
     encoded_name = quote(download_name)
-    disposition = f"attachment; filename*=UTF-8''{encoded_name}"
+    ascii_name = download_name.encode("ascii", "ignore").decode("ascii") or "audio.wav"
+    disposition = f'attachment; filename="{ascii_name}"; filename*=UTF-8\'\'{encoded_name}'
 
     if range_header:
         # 解析 Range: bytes=start-end
@@ -1560,7 +1562,8 @@ async def download_mp3(task_id: str, request: Request):
         original_basename = os.path.splitext(task["original_filename"])[0]
         download_name = f"{original_basename}.mp3"
     encoded_name = quote(download_name)
-    disposition = f"attachment; filename*=UTF-8''{encoded_name}"
+    ascii_name = download_name.encode("ascii", "ignore").decode("ascii") or "audio.mp3"
+    disposition = f'attachment; filename="{ascii_name}"; filename*=UTF-8\'\'{encoded_name}'
     range_header = request.headers.get("range")
     if range_header:
         range_match = __import__("re").match(r"bytes=(\d+)-(\d*)", range_header)
@@ -2203,7 +2206,7 @@ async def get_cache_info():
             "id": row["id"],
             "filename": row["original_filename"] or "unknown",
             "status": row["status"],
-            "created_at": row["created_at"],
+            "created_at": _format_timestamp(row["created_at"]),
             "original_exists": orig_exists,
             "output_exists": out_exists,
             "original_size": orig_size,
