@@ -61,9 +61,18 @@ cp -r backend "$PKG_DIR/"
 cp -r dist "$PKG_DIR/backend/dist"
 cp deploy/setup_android.sh "$PKG_DIR/"
 
-rm -rf "$PKG_DIR/backend/__pycache__"
-rm -rf "$PKG_DIR/backend/api/__pycache__"
-rm -rf "$PKG_DIR/backend/services/__pycache__"
+# 保留 __pycache__（.pyc 编译文件），删除 .py 源文件（保留 main.py 入口）
+find "$PKG_DIR/backend" -name '*.py' -not -name 'main.py' -delete
+# 删除测试文件（设备上不需要）
+rm -rf "$PKG_DIR/backend/tests"
+# 删除开发数据库（设备上会重新创建）
+rm -f "$PKG_DIR/backend/sono.db"
+# 删除非必要的开发文件
+rm -f "$PKG_DIR/backend/services/dsp_native/Makefile"
+rm -f "$PKG_DIR/backend/services/dsp_native/dsp_core.c"
+rm -f "$PKG_DIR/backend/services/repair/QUALITY_RULES.md"
+rm -f "$PKG_DIR/backend/watchdog.sh"
+# 删除运行时不需要的目录和文件
 rm -rf "$PKG_DIR/backend/storage"
 rm -rf "$PKG_DIR/backend/training"
 rm -f "$PKG_DIR/backend/server.log"

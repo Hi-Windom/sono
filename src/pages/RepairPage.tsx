@@ -8,7 +8,7 @@ import { ErrorBoundary } from '../components/ErrorBoundary';
 import { DownloadModal, DownloadFileInfo, DualTrackDownloadUrls } from '../components/DownloadModal';
 import { RepairCacheModal, CacheHitInfo } from '../components/RepairCacheModal';
 import { useAudioProcessor, generateExportFilename } from '../hooks/useAudioProcessor';
-import { uploadDualAudio, repairDualAudio, repairDualFromHash, getDownloadUrl, getPreviewUrl, connectProgressWS, WSProgressControl, VocalRepairParams, InstrumentRepairParams, defaultVocalRepairParams, defaultInstrumentRepairParams, fetchRenderCache, lookupDualRepairCache, mapParamsToBackend, mapVocalParamsToBackend, mapInstrumentParamsToBackend, connectCacheWS, CacheUpdateEvent, RenderCacheEntry, fetchFileInfoByHash } from '../services/backendApi';
+import { uploadDualAudio, repairDualAudio, repairDualFromHash, getDownloadUrl, getPreviewUrl, connectProgressWS, WSProgressControl, VocalRepairParams, InstrumentRepairParams, defaultVocalRepairParams, defaultInstrumentRepairParams, fetchRenderCache, lookupDualRepairCache, mapParamsToBackend, mapVocalParamsToBackend, mapInstrumentParamsToBackend, connectCacheWS, CacheUpdateEvent, RenderCacheEntry, fetchFileInfoByHash, checkFileHash } from '../services/backendApi';
 import { useBackend } from '../contexts/BackendContext';
 import { saveSettings, loadSettings } from '../utils/settingsStorage';
 import { computeFileHash } from '../utils/fileHash';
@@ -307,26 +307,38 @@ export default function RepairPage() {
         computeFileHash(accompaniment),
       ]);
 
-      // 检查是否选择了相同的文件（哈希未变则无需重新上传，但需清除旧task_id让修复走hash分支）
+      // 检查是否选择了相同的文件：哈希未变且后端仍有记录则跳过上传
       if (type === 'vocal' && newVocalHash === dualTrackVocalFileHash) {
-        console.log('人声音频未变化，跳过重新上传');
-        setDualTrackTaskId(null);
-        setDualTrackVocalTaskId(null);
-        setDualTrackAccompanimentTaskId(null);
-        setIsProcessing(false);
-        setProcessingStep('');
-        setProcessingProgress(0);
-        return;
+        try {
+          const hashStatus = await checkFileHash(newVocalHash);
+          if (hashStatus.exists) {
+            console.log('人声音频未变化且后端仍有记录，跳过重新上传');
+            setDualTrackTaskId(null);
+            setDualTrackVocalTaskId(null);
+            setDualTrackAccompanimentTaskId(null);
+            setIsProcessing(false);
+            setProcessingStep('');
+            setProcessingProgress(0);
+            return;
+          }
+        } catch {}
+        console.log('人声音频未变化但后端无记录，重新上传');
       }
       if (type === 'accompaniment' && newAccompanimentHash === dualTrackAccompanimentFileHash) {
-        console.log('伴奏音频未变化，跳过重新上传');
-        setDualTrackTaskId(null);
-        setDualTrackVocalTaskId(null);
-        setDualTrackAccompanimentTaskId(null);
-        setIsProcessing(false);
-        setProcessingStep('');
-        setProcessingProgress(0);
-        return;
+        try {
+          const hashStatus = await checkFileHash(newAccompanimentHash);
+          if (hashStatus.exists) {
+            console.log('伴奏音频未变化且后端仍有记录，跳过重新上传');
+            setDualTrackTaskId(null);
+            setDualTrackVocalTaskId(null);
+            setDualTrackAccompanimentTaskId(null);
+            setIsProcessing(false);
+            setProcessingStep('');
+            setProcessingProgress(0);
+            return;
+          }
+        } catch {}
+        console.log('伴奏音频未变化但后端无记录，重新上传');
       }
 
       sessionActions.setDualTrackFiles(newVocalHash, vocal.name, newAccompanimentHash, accompaniment.name);
@@ -434,23 +446,34 @@ export default function RepairPage() {
         setProcessingStep('等待处理完成...');
         startDualTrackPolling(dualTrackTaskId);
       } else if (hasHashes) {
-        const result = await repairDualFromHash(
-          dualTrackVocalFileHash,
-          dualTrackAccompanimentFileHash,
-          dualTrackVocalFileName,
-          dualTrackAccompanimentFileName,
-          params,
-          processingOptions,
-          algorithmVersion,
-          dualTrackVocalParams,
-          dualTrackAccompanimentParams,
-          mixRatio
-        );
-        setDualTrackTaskId(result.task_id);
-        setDualTrackVocalTaskId(result.vocal_task_id);
-        setDualTrackAccompanimentTaskId(result.accompaniment_task_id);
-        setProcessingStep('等待处理完成...');
-        startDualTrackPolling(result.task_id);
+        try {
+          const result = await repairDualFromHash(
+            dualTrackVocalFileHash,
+            dualTrackAccompanimentFileHash,
+            dualTrackVocalFileName,
+            dualTrackAccompanimentFileName,
+            params,
+            processingOptions,
+            algorithmVersion,
+            dualTrackVocalParams,
+            dualTrackAccompanimentParams,
+            mixRatio
+          );
+          setDualTrackTaskId(result.task_id);
+          setDualTrackVocalTaskId(result.vocal_task_id);
+          setDualTrackAccompanimentTaskId(result.accompaniment_task_id);
+          setProcessingStep('等待处理完成...');
+          startDualTrackPolling(result.task_id);
+        } catch (error: any) {
+          if (error?.message?.includes('人声音频不存在') || error?.message?.includes('404')) {
+            setBackendError('后端缓存已清除，请重新上传音频文件');
+            sessionActions.clearDualTrack();
+          } else {
+            setBackendError(error instanceof Error ? error.message : '双轨修复失败');
+          }
+          setIsProcessing(false);
+          return;
+        }
       } else {
         setBackendError('请先上传人声和伴奏文件');
         setIsProcessing(false);
@@ -547,6 +570,20 @@ export default function RepairPage() {
         }
       } catch (e) {
         console.warn('[双轨] mount 文件信息查询失败', e);
+      }
+
+      try {
+        const [vocalOk, accOk] = await Promise.all([
+          checkFileHash(dualTrackVocalFileHash),
+          checkFileHash(dualTrackAccompanimentFileHash),
+        ]);
+        if (cancelled) return;
+        if (!vocalOk.exists || !accOk.exists) {
+          console.warn('[双轨] mount 检测到后端文件已失效，清除持久化状态');
+          sessionActions.clearDualTrack();
+        }
+      } catch (e) {
+        console.warn('[双轨] mount 哈希检查失败', e);
       }
     })();
     return () => { cancelled = true; };
