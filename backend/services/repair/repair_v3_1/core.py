@@ -246,7 +246,7 @@ def _soft_peak_limit(y, threshold=0.9):
 
 def _hf_protect(y, sr):
     nyq = sr / 2
-    cutoff = 6000
+    cutoff = 3500
     if cutoff >= nyq:
         return y
     sos = butter(6, cutoff / nyq, btype='low', output='sos')
@@ -350,14 +350,14 @@ def _vocal_exciter(y, sr, amount):
 
     nyq = sr / 2
     sos_bandpass = butter(4, [2000/nyq, min(5000, nyq*0.95)/nyq], btype='band', output='sos')
+    sos_hf_lp = butter(4, min(6000, nyq*0.95) / nyq, btype='low', output='sos')
 
     for ch in range(y.shape[0]):
         dry = y[ch].astype(np.float64)
 
-        wet = dry * 1.5
-        wet = np.clip(wet, -1.0, 1.0)
-        wet = 1.5 * wet - 0.5 * wet**3
+        wet = np.tanh(dry * 2.0) * 0.7
         wet = wet / (np.max(np.abs(wet)) + 1e-10)
+        wet = sosfiltfilt(sos_hf_lp, wet)
 
         wet_band = sosfiltfilt(sos_bandpass, wet)
         wet_band = wet_band * 0.7
@@ -621,9 +621,9 @@ def _mastering_standard(y, sr):
     sos_hp = butter(4, 20 / nyq, btype='high', output='sos')
     y = sosfiltfilt(sos_hp, y, axis=-1)
 
-    sos_presence = butter(4, [3000/nyq, min(6000, nyq*0.95)/nyq], btype='band', output='sos')
+    sos_presence = butter(4, [3000/nyq, min(5000, nyq*0.95)/nyq], btype='band', output='sos')
     presence_band = sosfiltfilt(sos_presence, y, axis=-1)
-    y = y.astype(np.float64) + presence_band * 0.15
+    y = y.astype(np.float64) + presence_band * 0.12
 
     peak = np.max(np.abs(y))
     if peak > 0.99:
@@ -757,8 +757,8 @@ def process_vocal_track(y, sr, params):
     if params.get("loudness", 0) > 0:
         y = _adaptive_loudness_normalize(y, sr, -14.0)
 
-    y = _hf_protect(y, sr)
     y = _soft_peak_limit(y, threshold=0.9)
+    y = _hf_protect(y, sr)
     return y
 
 
@@ -807,6 +807,7 @@ def process_instrument_track(y, sr, params):
         y = _adaptive_loudness_normalize(y, sr, -14.0)
 
     y = _soft_peak_limit(y, threshold=0.9)
+    y = _hf_protect(y, sr)
     return y
 
 
@@ -968,6 +969,7 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
             progress_callback(0.90, "v3.1 导出...")
 
         mixed = _soft_peak_limit(mixed, threshold=0.9)
+        mixed = _hf_protect(mixed, working_sr)
 
         if mixed.dtype == np.float32:
             mixed = mixed.astype(np.float64)

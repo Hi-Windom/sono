@@ -246,7 +246,7 @@ def _soft_peak_limit(y, threshold=0.9):
 
 def _hf_protect(y, sr):
     nyq = sr / 2
-    cutoff = 6000
+    cutoff = 3200
     if cutoff >= nyq:
         return y
     sos = butter(6, cutoff / nyq, btype='low', output='sos')
@@ -315,8 +315,8 @@ def process_vocal_track(y, sr, params):
     if params.get("loudness", 0) > 0:
         y = _adaptive_loudness_normalize(y, sr, -14.0)
 
-    y = _hf_protect(y, sr)
     y = _soft_peak_limit(y, threshold=0.9)
+    y = _hf_protect(y, sr)
     return y
 
 
@@ -343,6 +343,23 @@ def _apply_vocal_de_ess(y, sr, amount):
     gain = max(gain, 0.1)
 
     y = (low_band + high_band * gain).astype(y.dtype)
+    return y
+
+
+def _mastering_standard(y, sr):
+    nyq = sr / 2
+
+    sos_hp = butter(4, 20 / nyq, btype='high', output='sos')
+    y = sosfiltfilt(sos_hp, y, axis=-1)
+
+    sos_presence = butter(4, [3000/nyq, min(5000, nyq*0.95)/nyq], btype='band', output='sos')
+    presence_band = sosfiltfilt(sos_presence, y, axis=-1)
+    y = y.astype(np.float64) + presence_band * 0.08
+
+    peak = np.max(np.abs(y))
+    if peak > 0.99:
+        y *= 0.99 / peak
+
     return y
 
 
@@ -388,6 +405,7 @@ def process_instrument_track(y, sr, params):
         y = _adaptive_loudness_normalize(y, sr, -14.0)
 
     y = _soft_peak_limit(y, threshold=0.9)
+    y = _hf_protect(y, sr)
     return y
 
 
@@ -534,7 +552,9 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
         if progress_callback:
             progress_callback(0.90, "v3.0 导出...")
 
+        mixed = _mastering_standard(mixed, working_sr)
         mixed = _soft_peak_limit(mixed, threshold=0.9)
+        mixed = _hf_protect(mixed, working_sr)
 
         if mixed.dtype == np.float32:
             mixed = mixed.astype(np.float64)

@@ -266,7 +266,7 @@ def process_vocal_track(y, sr, params):
 
 def _hf_protect(y, sr):
     nyq = sr / 2
-    cutoff = 6000
+    cutoff = 4200
     if cutoff >= nyq:
         return y
     sos = butter(6, cutoff / nyq, btype='low', output='sos')
@@ -319,6 +319,38 @@ def _apply_air_texture_lite(y, sr, amount):
             y[ch] = (y[ch].astype(np.float64) + noise * amount * 0.1).astype(y.dtype)
 
     return y
+
+
+def _mastering_standard_lite(y, sr):
+    if y.ndim == 1:
+        y = y.reshape(1, -1)
+        _mastering_standard_lite(y, sr)
+        return y[0]
+
+    nyq = sr / 2
+
+    sos_low = butter(2, 60 / nyq, btype='high', output='sos')
+    sos_high = butter(2, 12000 / nyq, btype='low', output='sos')
+    sos_presence = butter(2, [3000 / nyq, 5000 / nyq], btype='band', output='sos')
+
+    for ch in range(y.shape[0]):
+        data = y[ch].astype(np.float64)
+        data = sosfiltfilt(sos_low, data)
+        data = sosfiltfilt(sos_high, data)
+
+        presence = sosfiltfilt(sos_presence, data)
+        data = data + presence * 0.15
+
+        rms = np.sqrt(np.mean(data ** 2))
+        if rms > 1e-10:
+            target = 0.12
+            gain = target / rms
+            gain = np.clip(gain, 0.2, 3.0)
+            data = data * gain
+
+        y[ch] = data.astype(y.dtype)
+
+    return _soft_peak_limit(y, threshold=0.95)
 
 
 def process_instrument_track(y, sr, params):
@@ -478,7 +510,9 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
     if progress_callback:
         progress_callback(0.90, "v3.0a 导出...")
 
+    mixed = _mastering_standard_lite(mixed, working_sr)
     mixed = _soft_peak_limit(mixed, threshold=0.9)
+    mixed = _hf_protect(mixed, working_sr)
 
     if mixed.dtype == np.float32:
         mixed = mixed.astype(np.float64)
