@@ -125,14 +125,14 @@ def encode_mp3(wav_path: str, mp3_path: str, bitrate: int = 128):
 
         mp3_bytes = bytearray()
         if channels == 1:
-            pcm = data.ctypes.data_as(ctypes.POINTER(ctypes.c_short))
+            pcm = np.ascontiguousarray(data).ctypes.data_as(ctypes.POINTER(ctypes.c_short))
             nsamples = len(data)
             buf_size = nsamples * 5 // 4 + 7200
             buf = ctypes.create_string_buffer(buf_size)
             encoded = _lib.lame_encode_buffer(lame, pcm, pcm, nsamples, buf, buf_size)
         else:
-            pcm_left = data[:, 0].ctypes.data_as(ctypes.POINTER(ctypes.c_short))
-            pcm_right = data[:, 1].ctypes.data_as(ctypes.POINTER(ctypes.c_short))
+            pcm_left = np.ascontiguousarray(data[:, 0]).ctypes.data_as(ctypes.POINTER(ctypes.c_short))
+            pcm_right = np.ascontiguousarray(data[:, 1]).ctypes.data_as(ctypes.POINTER(ctypes.c_short))
             nsamples = len(data)
             buf_size = nsamples * 5 // 4 + 7200
             buf = ctypes.create_string_buffer(buf_size)

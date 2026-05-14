@@ -17,6 +17,18 @@ def load_audio_with_fallback(file_path: str, sr=None, mono=False, return_bit_dep
     else:
         raw = raw.reshape(1, -1)
 
+    if nchannels > 1:
+        try:
+            import soundfile as sf
+            info = sf.info(file_path)
+            if info.channels == 1 and nchannels > 1:
+                raw = raw[:1, :]
+                if raw.shape[0] > 1 and np.allclose(raw[0], raw[1], atol=1e-6):
+                    raw = raw[:1, :]
+        except Exception:
+            if raw.shape[0] == 2 and np.allclose(raw[0], raw[1], atol=1e-6):
+                raw = raw[:1, :]
+
     if mono and raw.shape[0] > 1:
         raw = raw.mean(axis=0)
     elif mono and raw.shape[0] == 1:
