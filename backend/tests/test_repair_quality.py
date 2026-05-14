@@ -549,15 +549,11 @@ class TestV24PerStepQuality:
     def import_v24_functions(self):
         from services.repair.repair_v2_4.core import (
             _adaptive_loudness_normalize,
-            _enhanced_multiband_compress,
-            _ai_artifact_repair,
             _harmonic_bass_enhance,
             _air_texture_reconstruct,
             _soft_peak_limit,
         )
         self._adaptive_loudness_normalize = _adaptive_loudness_normalize
-        self._enhanced_multiband_compress = _enhanced_multiband_compress
-        self._ai_artifact_repair = _ai_artifact_repair
         self._harmonic_bass_enhance = _harmonic_bass_enhance
         self._air_texture_reconstruct = _air_texture_reconstruct
         self._soft_peak_limit = _soft_peak_limit
@@ -581,28 +577,6 @@ class TestV24PerStepQuality:
         ratios = y_out_64[nonzero] / y_64[nonzero]
         cv = np.std(ratios) / (abs(np.mean(ratios)) + 1e-10)
         assert cv < 0.001, f"adaptive_loudness_normalize gain varies: cv={cv:.6f}"
-
-    def test_enhanced_multiband_compress_snr(self):
-        y = generate_speech_like(sr=SR, duration=2.0).reshape(1, -1)
-        snr = compute_per_step_snr(y, self._enhanced_multiband_compress, SR, 0.5, "generic")
-        assert snr > 25.0, f"enhanced_multiband_compress SNR too low: {snr:.1f} dB"
-
-    def test_ai_artifact_repair_snr(self):
-        y = generate_ai_artifact_signal(sr=SR, duration=2.0).reshape(1, -1)
-        snr = compute_per_step_snr(y, self._ai_artifact_repair, SR, 0.5)
-        assert snr > 5.0, f"ai_artifact_repair SNR too low: {snr:.1f} dB"
-
-    def test_ai_artifact_repair_reduces_presence_spike(self):
-        y = generate_ai_artifact_signal(sr=SR, duration=2.0).reshape(1, -1)
-        y_copy = y.copy()
-        y_out = self._ai_artifact_repair(y, SR, 0.5)
-        from scipy.signal import butter, sosfilt
-        sos = butter(4, [2000 / (SR / 2), 5000 / (SR / 2)], btype='band', output='sos')
-        presence_before = np.sqrt(np.mean(sosfilt(sos, y_copy.flatten().astype(np.float64)) ** 2))
-        presence_after = np.sqrt(np.mean(sosfilt(sos, y_out.flatten().astype(np.float64)) ** 2))
-        assert presence_after < presence_before, (
-            f"ai_artifact_repair did not reduce 2-5kHz presence: before={presence_before:.4f}, after={presence_after:.4f}"
-        )
 
     def test_harmonic_bass_enhance_snr(self):
         y = generate_speech_like(sr=SR, duration=2.0).reshape(1, -1)

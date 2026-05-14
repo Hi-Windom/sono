@@ -571,20 +571,6 @@ export default function RepairPage() {
       } catch (e) {
         console.warn('[双轨] mount 文件信息查询失败', e);
       }
-
-      try {
-        const [vocalOk, accOk] = await Promise.all([
-          checkFileHash(dualTrackVocalFileHash),
-          checkFileHash(dualTrackAccompanimentFileHash),
-        ]);
-        if (cancelled) return;
-        if (!vocalOk.exists || !accOk.exists) {
-          console.warn('[双轨] mount 检测到后端文件已失效，清除持久化状态');
-          sessionActions.clearDualTrack();
-        }
-      } catch (e) {
-        console.warn('[双轨] mount 哈希检查失败', e);
-      }
     })();
     return () => { cancelled = true; };
   }, [isDualTrackMode, dualTrackVocalFileHash, dualTrackAccompanimentFileHash, dualTrackTaskId]);
@@ -829,7 +815,7 @@ export default function RepairPage() {
             <div className="lg:col-span-7 space-y-6">
               {isDualTrackMode ? (
                 <>
-                  <div className="bg-gradient-to-br from-pink-500/10 to-dark/60 border border-pink-500/20 rounded-xl p-4">
+                  <div className={`bg-gradient-to-br from-pink-500/10 to-dark/60 border border-pink-500/20 rounded-xl p-4${isProcessing ? ' audio-card-loading' : ''}`}>
                     <div className="flex items-center justify-between gap-3">
                       <div className="flex items-center gap-3 min-w-0 flex-1">
                         <div className="w-9 h-9 bg-pink-500/20 rounded-lg flex items-center justify-center border border-pink-400/20 shrink-0">
@@ -861,7 +847,7 @@ export default function RepairPage() {
                       </label>
                     </div>
                   </div>
-                  <div className="bg-gradient-to-br from-purple-500/10 to-dark/60 border border-purple-500/20 rounded-xl p-4">
+                  <div className={`bg-gradient-to-br from-purple-500/10 to-dark/60 border border-purple-500/20 rounded-xl p-4${isProcessing ? ' audio-card-loading' : ''}`}>
                     <div className="flex items-center justify-between gap-3">
                       <div className="flex items-center gap-3 min-w-0 flex-1">
                         <div className="w-9 h-9 bg-purple-500/20 rounded-lg flex items-center justify-center border border-purple-400/20 shrink-0">
