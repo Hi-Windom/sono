@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { AIRepairParams, RepairMode } from '../utils/advancedAudioProcessing';
 import { ProcessingOptions, AlgorithmVersion, fetchMemoryInfo, MemoryInfoResult, fetchStorageEstimate, StorageEstimateResult, fetchRenderCache, RenderCacheEntry, VocalRepairParams, InstrumentRepairParams, defaultVocalRepairParams, defaultInstrumentRepairParams } from '../services/backendApi';
+import AlgorithmSelector from './AlgorithmSelector';
 
 interface DualTrackAudioInfo {
   sample_rate: number;
@@ -377,22 +378,13 @@ export function AIRepairPanel({
               </svg>
               算法版本
             </h4>
-            <div className="relative max-w-[200px] sm:max-w-none">
-              <select
+            <div className="max-w-[240px] sm:max-w-none">
+              <AlgorithmSelector
                 value={algorithmVersion}
-                onChange={(e) => onAlgorithmChange(e.target.value)}
+                algorithms={filteredAlgorithms}
+                onChange={onAlgorithmChange}
                 disabled={disabled}
-                className="appearance-none bg-cyan-500/20 text-white text-sm font-medium py-1.5 pl-3 pr-8 rounded-lg border border-cyan-400/40 focus:outline-none focus:border-cyan-400 cursor-pointer hover:bg-cyan-500/30 transition disabled:opacity-50 disabled:cursor-not-allowed w-full truncate"
-              >
-                {[...filteredAlgorithms].reverse().map((algo) => (
-                  <option key={algo.name} value={algo.name} className="bg-gray-900 text-white">
-                    {algo.label} — {algo.description}
-                  </option>
-                ))}
-              </select>
-              <svg className="w-4 h-4 text-cyan-400 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-              </svg>
+              />
             </div>
           </div>
         </div>

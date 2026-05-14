@@ -306,6 +306,13 @@
       ]
     },
     {
+      "id": "src-components-AlgorithmSelector",
+      "label": "AlgorithmSelector",
+      "type": "external",
+      "layer": "frontend",
+      "filePath": "/workspace/src/components/AlgorithmSelector.tsx"
+    },
+    {
       "id": "src-utils-audioUtils",
       "label": "audioUtils",
       "type": "utils",
@@ -1256,6 +1263,13 @@
       "description": "算法版本 v3.1a"
     },
     {
+      "id": "repair-module-__pycache__",
+      "label": "__pycache__",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/repair/__pycache__"
+    },
+    {
       "id": "repair-module-repair_v2_0",
       "label": "repair_v2_0",
       "type": "module",
@@ -2025,6 +2039,18 @@
     },
     {
       "source": "src-components-AIRepairPanel",
+      "target": "src-services-backendApi",
+      "label": "导入",
+      "type": "import"
+    },
+    {
+      "source": "src-components-AIRepairPanel",
+      "target": "src-components-AlgorithmSelector",
+      "label": "导入",
+      "type": "import"
+    },
+    {
+      "source": "src-components-AlgorithmSelector",
       "target": "src-services-backendApi",
       "label": "导入",
       "type": "import"
@@ -2862,6 +2888,12 @@
       "target": "algo-v3.1a",
       "label": "算法版本",
       "type": "data-flow"
+    },
+    {
+      "source": "backend-services-audio_repair.py",
+      "target": "repair-module-__pycache__",
+      "label": "动态加载",
+      "type": "call"
     },
     {
       "source": "backend-services-audio_repair.py",
