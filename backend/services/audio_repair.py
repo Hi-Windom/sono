@@ -95,6 +95,7 @@ ALGORITHM_VERSIONS = {
         "label": "v1.0",
         "description": "基础修复算法，稳定可靠",
         "mobile_compatible": False,
+        "supports_dual_track": False,
         "repair_version": "v1.0",
         "default_params": {
             "de_clipping": 0.25, "noise_reduction": 0.18, "de_essing": 0.22,
@@ -154,6 +155,7 @@ ALGORITHM_VERSIONS = {
         "label": "v1.1",
         "description": "多频段压缩、自适应降噪、响度归一化",
         "mobile_compatible": False,
+        "supports_dual_track": False,
         "repair_version": "v1.1",
         "default_params": {
             "de_clipping": 0.3, "noise_reduction": 0.22, "de_essing": 0.2,
@@ -213,6 +215,7 @@ ALGORITHM_VERSIONS = {
         "label": "v1.2",
         "description": "深度学习辅助修复，智能谐波增强",
         "mobile_compatible": False,
+        "supports_dual_track": False,
         "repair_version": "v1.2",
         "default_params": {
             "de_clipping": 0.35, "noise_reduction": 0.25, "de_essing": 0.25,
@@ -277,6 +280,7 @@ ALGORITHM_VERSIONS = {
         "label": "v2.0",
         "description": "移动端友好，自适应采样率，频域合并优化",
         "mobile_compatible": True,
+        "supports_dual_track": False,
         "repair_version": "v2.0",
         "default_params": {
             "de_clipping": 0.4, "noise_reduction": 0.3, "de_essing": 0.3,
@@ -341,6 +345,7 @@ ALGORITHM_VERSIONS = {
         "label": "v2.1",
         "description": "移动端优化升级版，增强降噪和清晰度",
         "mobile_compatible": True,
+        "supports_dual_track": False,
         "repair_version": "v2.1",
         "default_params": {
             "de_clipping": 0.45, "noise_reduction": 0.35, "de_essing": 0.35,
@@ -405,6 +410,7 @@ ALGORITHM_VERSIONS = {
         "label": "v2.2 桌面版",
         "description": "最佳音质，流式分块处理（仅桌面端）",
         "mobile_compatible": False,
+        "supports_dual_track": False,
         "repair_version": "v2.2",
         "default_params": {
             "de_clipping": 0.35, "noise_reduction": 0.25, "de_essing": 0.25,
@@ -500,6 +506,7 @@ ALGORITHM_VERSIONS = {
         "label": "v2.2a 移动版",
         "description": "速度优先，精简处理（移动端专用）",
         "mobile_compatible": True,
+        "supports_dual_track": False,
         "repair_version": "v2.2a",
         "default_params": {
             "de_clipping": 0.3, "noise_reduction": 0.2, "de_essing": 0.2,
@@ -554,6 +561,7 @@ ALGORITHM_VERSIONS = {
         "label": "v2.3 桌面版",
         "description": "零AM伪影，流式分块+低内存（仅桌面端）",
         "mobile_compatible": False,
+        "supports_dual_track": False,
         "repair_version": "v2.3",
         "default_params": {
             "de_clipping": 0.35, "noise_reduction": 0.25, "de_essing": 0.25,
@@ -649,6 +657,7 @@ ALGORITHM_VERSIONS = {
         "label": "v2.3a 移动版",
         "description": "零AM伪影，流式降噪+低内存（移动端）",
         "mobile_compatible": True,
+        "supports_dual_track": False,
         "repair_version": "v2.3a",
         "default_params": {
             "de_clipping": 0.3, "noise_reduction": 0.15, "de_essing": 0.15,
@@ -703,6 +712,7 @@ ALGORITHM_VERSIONS = {
         "label": "v2.4 桌面版",
         "description": "HiFi优化+BPM自适应+节奏感知处理（仅桌面端）",
         "mobile_compatible": False,
+        "supports_dual_track": False,
         "repair_version": "v2.4",
         "default_params": {
             "de_clipping": 0.30, "noise_reduction": 0.20, "de_essing": 0.22,
@@ -798,6 +808,7 @@ ALGORITHM_VERSIONS = {
         "label": "v2.4a 移动版",
         "description": "AI频谱修复+次谐波低频+空气质感重建（移动端）",
         "mobile_compatible": True,
+        "supports_dual_track": False,
         "repair_version": "v2.4a",
         "default_params": {
             "de_clipping": 0.3, "noise_reduction": 0.15, "de_essing": 0.15,
@@ -857,6 +868,7 @@ ALGORITHM_VERSIONS = {
         "label": "v3.0 桌面版",
         "description": "双轨处理，人声+伴奏分别优化后混音",
         "mobile_compatible": False,
+        "supports_dual_track": True,
         "repair_version": "v3.0",
         "default_params": {
             "de_clipping": 0.30, "de_pop": 0.18,
@@ -985,6 +997,7 @@ ALGORITHM_VERSIONS = {
         "label": "v3.0a 移动版",
         "description": "双轨处理，移动端优化",
         "mobile_compatible": True,
+        "supports_dual_track": True,
         "repair_version": "v3.0a",
         "default_params": {
             "de_clipping": 0.3, "de_pop": 0.15,
@@ -1067,6 +1080,7 @@ ALGORITHM_VERSIONS = {
         "label": "v3.1 桌面增强版",
         "description": "增强型AI人声修复 + 人声效果器（激励/压缩/空间/温暖）+ 三种母带风格",
         "mobile_compatible": False,
+        "supports_dual_track": True,
         "repair_version": "v3.1",
         "default_params": {
             "de_clipping": 0.3, "de_pop": 0.15,
@@ -1116,6 +1130,7 @@ ALGORITHM_VERSIONS = {
         "label": "v3.1a 移动增强版",
         "description": "轻量级人声激励+压缩+母带风格，移动端优化",
         "mobile_compatible": True,
+        "supports_dual_track": True,
         "repair_version": "v3.1a",
         "default_params": {
             "de_clipping": 0.3, "de_pop": 0.15,
@@ -1239,6 +1254,7 @@ def get_available_versions(mobile_mode: bool = False) -> list[dict[str, Any]]:
             "name": v["name"],
             "label": v["label"],
             "description": v["description"],
+            "supportsDualTrack": v.get("supports_dual_track", False),
             "defaultParams": _filter_params(v["default_params"]),
             "paramRanges": param_ranges,
             "modes": [

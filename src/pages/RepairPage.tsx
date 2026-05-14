@@ -8,7 +8,7 @@ import { ErrorBoundary } from '../components/ErrorBoundary';
 import { DownloadModal, DownloadFileInfo, DualTrackDownloadUrls } from '../components/DownloadModal';
 import { RepairCacheModal, CacheHitInfo } from '../components/RepairCacheModal';
 import { useAudioProcessor, generateExportFilename } from '../hooks/useAudioProcessor';
-import { uploadDualAudio, repairDualAudio, repairDualFromHash, getDownloadUrl, getPreviewUrl, connectProgressWS, WSProgressControl, VocalRepairParams, InstrumentRepairParams, defaultVocalRepairParams, defaultInstrumentRepairParams, fetchRenderCache, lookupDualRepairCache, mapParamsToBackend, mapVocalParamsToBackend, mapInstrumentParamsToBackend, RenderCacheEntry } from '../services/backendApi';
+import { uploadDualAudio, repairDualAudio, repairDualFromHash, getDownloadUrl, getPreviewUrl, connectProgressWS, WSProgressControl, VocalRepairParams, InstrumentRepairParams, defaultVocalRepairParams, defaultInstrumentRepairParams, fetchRenderCache, lookupDualRepairCache, mapParamsToBackend, mapVocalParamsToBackend, mapInstrumentParamsToBackend, connectCacheWS, CacheUpdateEvent, RenderCacheEntry } from '../services/backendApi';
 import { useBackend } from '../contexts/BackendContext';
 import { saveSettings, loadSettings } from '../utils/settingsStorage';
 import { computeFileHash } from '../utils/fileHash';
@@ -268,15 +268,12 @@ export default function RepairPage() {
   }, [setIsProcessing, setProcessingStep, setProcessingProgress, setProcessingSource, setBackendError, sessionActions]);
 
   const handleSwitchToSingleTrack = useCallback(() => {
-    sessionActions.clearDualTrack();
+    sessionActions.setDualTrackMode(false);
     setDualTrackTaskId(null);
     setDualTrackVocalTaskId(null);
     setDualTrackAccompanimentTaskId(null);
-    setDualTrackVocalFile(null);
-    setDualTrackAccompanimentFile(null);
     setDualTrackDownloadUrl(null);
     setDualTrackRepairResult(null);
-    setDualTrackFilesSelected(false);
     stopDualTrackPolling();
   }, [stopDualTrackPolling, sessionActions]);
 
@@ -504,6 +501,48 @@ export default function RepairPage() {
   const handleCloseDualRepairCache = useCallback(() => {
     setShowDualRepairCacheModal(false);
   }, []);
+
+  useEffect(() => {
+    if (!isDualTrackMode || !dualTrackVocalFileHash || !dualTrackAccompanimentFileHash) return;
+    if (dualTrackTaskId) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const mainParams = mapParamsToBackend(params, processingOptions, algorithmVersion);
+        const vParams = mapVocalParamsToBackend(dualTrackVocalParams, processingOptions, algorithmVersion);
+        const aParams = mapInstrumentParamsToBackend(dualTrackAccompanimentParams, processingOptions, algorithmVersion);
+        const cacheResult = await lookupDualRepairCache(dualTrackVocalFileHash, dualTrackAccompanimentFileHash, {
+          params: mainParams,
+          vocal_params: vParams,
+          accompaniment_params: aParams,
+          mix_ratio: mixRatio,
+        });
+        if (cancelled) return;
+        if (cacheResult.found && cacheResult.task_id) {
+          setDualTrackTaskId(cacheResult.task_id);
+          setTaskId(cacheResult.task_id);
+          if (cacheResult.repair_result) {
+            setDualTrackRepairResult(cacheResult.repair_result);
+            sessionActions.setDualTrackProcessed(true);
+          }
+        }
+      } catch {}
+    })();
+    return () => { cancelled = true; };
+  }, [isDualTrackMode, dualTrackVocalFileHash, dualTrackAccompanimentFileHash, dualTrackTaskId]);
+
+  useEffect(() => {
+    if (!isDualTrackMode) return;
+
+    const wsControl = connectCacheWS((event: CacheUpdateEvent) => {
+      if (event.task_id === dualTrackTaskId || !dualTrackTaskId) {
+        setCacheTriggerKey(k => k + 1);
+      }
+    });
+
+    return () => wsControl.close();
+  }, [isDualTrackMode, dualTrackTaskId]);
 
   useEffect(() => {
     if (isDualTrackMode) {

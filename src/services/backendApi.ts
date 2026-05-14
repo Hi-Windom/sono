@@ -150,6 +150,7 @@ export interface AlgorithmVersion {
   name: string;
   label: string;
   description: string;
+  supportsDualTrack?: boolean;
   defaultParams: Record<string, number>;
   paramRanges: Record<string, {
     min: number;
