@@ -208,6 +208,10 @@ def find_repair_cache(file_hash: str, params: dict) -> TaskDict | None:
             "harmonic_enhance", "dynamic_range", "softness", "presence_boost",
             "bass_enhance", "spatial_enhance", "transient_repair", "warmth", "clarity",
             "algorithm_version",
+            "declip", "depop", "de_ess", "formant_repair", "breath_enhance",
+            "ai_repair", "air_texture", "dynamic", "spatial", "loudness",
+            "exciter", "compressor", "stereo_enhance", "mastering_style",
+            "de_esser_advanced", "ai_repair_enhanced", "ai_repair_enhanced_lite",
         }
         stored_subset = {k: v for k, v in parsed.items() if k in repair_param_keys}
         input_subset = {k: v for k, v in params.items() if k in repair_param_keys}
@@ -296,6 +300,9 @@ def find_dual_repair_cache(vocal_file_hash: str, accompaniment_file_hash: str, p
             "vocal_de_ess", "vocal_breath_enhance", "vocal_ai_repair",
             "vocal_bass_enhance", "vocal_air_texture", "vocal_loudness",
             "vocal_exciter", "vocal_compressor", "vocal_clarity",
+            "vocal_de_esser_advanced", "vocal_ai_repair_enhanced",
+            "vocal_ai_repair_enhanced_lite", "vocal_exciter_lite",
+            "vocal_compressor_lite", "vocal_spatial", "vocal_warmth",
             "inst_declip", "inst_depop", "inst_noise_reduction",
             "inst_dynamic", "inst_spatial", "inst_warmth",
             "inst_timbre_protect", "inst_stereo_enhance", "inst_loudness",

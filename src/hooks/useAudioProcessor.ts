@@ -244,6 +244,15 @@ export function useAudioProcessor() {
   const applyAlgorithmVersion = useCallback((version: string) => {
     setAlgorithmVersionState(version);
     setRenderDownloadUrl(null);
+    setCacheHitInfo(null);
+    setShowRepairCacheModal(false);
+    setShowDownloadModal(false);
+    setAutoRenderInfo(null);
+    setBackendProcessedBuffer(null);
+    setRepairResult(null);
+    setHasBeenProcessed(false);
+    setBackendPreviewUrl(null);
+    setBackendWaveformPeaks(null);
     const algoInfo = availableAlgorithms.find(a => a.name === version);
     if (!algoInfo) return;
 
@@ -1340,7 +1349,7 @@ export function useAudioProcessor() {
         setProcessingProgress(0);
       }, 2000);
     }
-  }, [audioBuffer, audioFile, params, processingOptions, loadAudioFromUrl, wavInfo]);
+  }, [audioBuffer, audioFile, params, processingOptions, loadAudioFromUrl, wavInfo, algorithmVersion, availableAlgorithms]);
 
   const resetParams = useCallback(() => {
     setParams(defaultAIRepairParams);
@@ -1845,7 +1854,7 @@ export function useAudioProcessor() {
       setProcessingStep('渲染交付规格...');
       setProcessingProgress(0);
       setIsRenderLoading(true);
-      await renderAudio(taskIdRef.current, opts.sampleRate, opts.bitDepth, opts.masteringStyle);
+      await renderAudio(taskIdRef.current, opts.sampleRate, opts.bitDepth, opts.masteringStyle, algoVer);
       const { promise, close } = waitRenderWithWS(taskIdRef.current, (progress, step) => {
         writeLog(`[renderAndDownload] 渲染进度: ${progress} step=${step}`);
         setProcessingProgress(progress);
@@ -1876,6 +1885,7 @@ export function useAudioProcessor() {
       setProcessingProgress(0);
       setIsProcessing(false);
       renderActiveRef.current = false;
+      forceRenderRef.current = false;
       return {
         downloadUrl: `/api/v1/download-file/${renderRes.render_filename}`,
         fileName,

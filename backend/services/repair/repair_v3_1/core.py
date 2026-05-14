@@ -245,80 +245,6 @@ def _soft_peak_limit(y, threshold=0.9):
     return y
 
 
-def _hf_protect(y, sr):
-    # WARNING: cutoff must be >= 80% of nyquist (e.g. >=19200Hz @ 48kHz).
-    # Lower values destroy high frequencies and make audio sound muffled.
-    # Previously set to 4000Hz which killed all content above 4kHz.
-    nyq = sr / 2
-    cutoff = 4000
-    if cutoff >= nyq:
-        return y
-    sos = butter(6, cutoff / nyq, btype='low', output='sos')
-    return sosfiltfilt(sos, y, axis=-1)
-
-
-def _spectral_hf_gate(y, sr, cutoff_hz=5000, strength=2.0):
-    if y.ndim == 1:
-        y = y.reshape(1, -1)
-        _spectral_hf_gate(y, sr, cutoff_hz, strength)
-        return y[0]
-
-    n_samples = y.shape[1]
-    if n_samples < 2048:
-        return _hf_protect(y, sr)
-
-    gate_n_fft = 1024
-    gate_hop = 256
-
-    for ch in range(y.shape[0]):
-        data = y[ch].astype(np.float64)
-        S = stft(data, n_fft=gate_n_fft, hop_length=gate_hop)
-        magnitude = np.abs(S)
-        phase = np.angle(S)
-
-        freqs = np.arange(magnitude.shape[0]) * sr / gate_n_fft
-        hf_mask = freqs >= cutoff_hz
-
-        if not np.any(hf_mask):
-            continue
-
-        frame_energy = np.sum(magnitude ** 2, axis=0)
-        n_quiet = max(1, len(frame_energy) // 5)
-        quiet_idx = np.argsort(frame_energy)[:n_quiet]
-        noise_floor = np.median(magnitude[:, quiet_idx], axis=1, keepdims=True) + 1e-10
-
-        threshold = noise_floor * strength
-        threshold_bc = np.broadcast_to(threshold, magnitude.shape)
-
-        gate = np.ones_like(magnitude)
-        noise_bins = magnitude < threshold
-        gate[noise_bins] = magnitude[noise_bins] / threshold_bc[noise_bins]
-        gate = np.maximum(gate, 0.001)
-
-        gate[~hf_mask] = 1.0
-
-        smooth_kernel_freq = np.ones(3) / 3
-        gate_smooth = np.zeros_like(gate)
-        for f in range(gate.shape[1]):
-            gate_smooth[:, f] = np.convolve(gate[:, f], smooth_kernel_freq, mode='same')
-
-        smooth_kernel_time = np.ones(3) / 3
-        for b in range(gate_smooth.shape[0]):
-            gate_smooth[b] = np.convolve(gate_smooth[b], smooth_kernel_time, mode='same')
-
-        S_processed = magnitude * gate_smooth * np.exp(1j * phase)
-        y_out = istft(S_processed, hop_length=gate_hop, length=n_samples)
-
-        if len(y_out) > n_samples:
-            y_out = y_out[:n_samples]
-        elif len(y_out) < n_samples:
-            y_out = np.pad(y_out, (0, n_samples - len(y_out)))
-
-        y[ch] = y_out.astype(y.dtype)
-
-    return y
-
-
 def _adaptive_loudness_normalize(y, sr, target_loudness_lu=-14.0):
     if y.ndim == 1:
         y = y.reshape(1, -1)
@@ -932,6 +858,14 @@ def _repair_single_track(input_path: str, output_path: str, params: dict, progre
     gc.collect()
 
     single_params = dict(params)
+    _SINGLE_KEY_MAP = {
+        "de_clipping": "declip", "de_pop": "depop", "de_essing": "de_ess",
+        "dynamic_range": "dynamic", "spatial_enhance": "spatial",
+        "loudness_optimize": "loudness",
+    }
+    for _sk, _dk in _SINGLE_KEY_MAP.items():
+        if _sk in single_params and _dk not in single_params:
+            single_params[_dk] = single_params[_sk]
     single_params["_issues"] = issues_found
 
     if progress_callback:

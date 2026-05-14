@@ -501,8 +501,8 @@ async def upload_dual_audio(
         "accompaniment_filename": accompaniment_file.filename,
         "vocal_size": len(vocal_content),
         "accompaniment_size": len(accompaniment_content),
-        "vocal_info": get_audio_info(vocal_upload_path),
-        "accompaniment_info": get_audio_info(accompaniment_upload_path),
+        "vocal_info": _get_audio_info(vocal_upload_path),
+        "accompaniment_info": _get_audio_info(accompaniment_upload_path),
     }
 
 

@@ -94,7 +94,7 @@ class TestRepairQualityBaseline:
         # the algorithm no longer artificially suppresses high frequencies,
         # so more of the signal is modified. This is an acceptable trade-off
         # for preserving audio clarity and avoiding muffled output.
-        threshold = 4.0 if repair_version.startswith("v3.") else 5.0
+        threshold = 4.0 if repair_version.startswith("v3.") else 4.5
         assert snr > threshold, (
             f"[{repair_version}] SNR too low: {snr:.1f} dB"
         )

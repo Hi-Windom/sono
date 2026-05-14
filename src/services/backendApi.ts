@@ -1642,9 +1642,10 @@ export async function renderAudio(
   sampleRate: number,
   bitDepth: number,
   masteringStyle?: string,
+  algorithmVersion?: string,
 ): Promise<RenderResult> {
   const url = `${API_BASE}/render`;
-  log('render', `POST ${url} task_id=${taskId} sr=${sampleRate} bd=${bitDepth} style=${masteringStyle || 'standard'}`);
+  log('render', `POST ${url} task_id=${taskId} sr=${sampleRate} bd=${bitDepth} style=${masteringStyle || 'standard'} ver=${algorithmVersion || 'unknown'}`);
   const body: Record<string, unknown> = {
     task_id: taskId,
     sample_rate: sampleRate,
@@ -1652,6 +1653,9 @@ export async function renderAudio(
   };
   if (masteringStyle) {
     body.mastering_style = masteringStyle;
+  }
+  if (algorithmVersion) {
+    body.algorithm_version = algorithmVersion;
   }
   const res = await fetch(url, {
     method: 'POST',
