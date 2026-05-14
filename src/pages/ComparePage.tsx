@@ -133,9 +133,8 @@ export default function ComparePage() {
   }, []);
 
   useEffect(() => {
-    if (taskId) return;
     fetchTaskList();
-  }, [taskId, fetchTaskList]);
+  }, [fetchTaskList]);
 
   const wsControlRef = useRef<{ close: () => void } | null>(null);
   const taskIdRef = useRef(taskId);

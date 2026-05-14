@@ -517,6 +517,40 @@ export function AIRepairPanel({
           </div>
         </div>
 
+        {/* 母带风格 */}
+        <div className="mt-3">
+          <label className="text-gray-400 text-xs mb-2 block">母带风格</label>
+          <div className="flex gap-2">
+            {[
+              { value: 'standard' as const, label: '标准母带', recommended: true },
+              { value: 'powerful' as const, label: '强力母带' },
+              { value: 'warm' as const, label: '温暖母带' },
+            ].map((option) => {
+              const isSelected = (processingOptions.masteringStyle || 'standard') === option.value;
+              return (
+                <button
+                  key={option.value}
+                  onClick={() => onOptionsChange?.({ ...processingOptions, masteringStyle: option.value })}
+                  disabled={disabled}
+                  className={`flex-1 py-1.5 px-2 rounded-lg text-xs transition-all relative
+                    ${isSelected
+                      ? 'bg-secondary/30 text-white border border-secondary/50'
+                      : option.recommended
+                        ? 'bg-primary/30 text-gray-300 border border-emerald-500/30 hover:border-emerald-400/50'
+                        : 'bg-primary/30 text-gray-400 border border-gray-700 hover:border-secondary/30'
+                    } ${disabled ? 'opacity-50' : ''}
+                  `}
+                >
+                  {option.label}
+                  {!isSelected && option.recommended && (
+                    <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-emerald-500 rounded-full" />
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
         {/* 预估输出大小 */}
         <div className="mt-3 p-2.5 rounded-lg border bg-gray-800/50 border-gray-700">
             <div className="flex items-center justify-between">

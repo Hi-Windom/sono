@@ -271,9 +271,8 @@ def find_dual_repair_cache(vocal_file_hash: str, accompaniment_file_hash: str, p
                        "waveform_peaks", "source_sample_rate", "source_channels"}
         filtered_stored = {k: v for k, v in parsed.items() if k not in filter_keys}
 
-        # 只比较影响修复结果的参数子集
+        # 只比较影响修复结果的参数子集（交集比较，避免两边key集合不一致导致漏匹配）
         repair_param_keys = {
-            "algorithm_version", "sample_rate", "bit_depth",
             "vocal_declip", "vocal_depop", "vocal_formant_repair",
             "vocal_de_ess", "vocal_breath_enhance", "vocal_ai_repair",
             "vocal_bass_enhance", "vocal_air_texture", "vocal_loudness",
@@ -282,12 +281,13 @@ def find_dual_repair_cache(vocal_file_hash: str, accompaniment_file_hash: str, p
             "inst_dynamic", "inst_spatial", "inst_warmth",
             "inst_timbre_protect", "inst_stereo_enhance", "inst_loudness",
             "vocal_ratio", "accompaniment_ratio",
-            "mastering_style", "processing_mode",
+            "mastering_style",
         }
         stored_subset = {k: v for k, v in filtered_stored.items() if k in repair_param_keys}
         input_subset = {k: v for k, v in params.items() if k in repair_param_keys}
 
-        if stored_subset == input_subset:
+        common_keys = stored_subset.keys() & input_subset.keys()
+        if common_keys and all(stored_subset[k] == input_subset[k] for k in common_keys):
             logger.info(f"[cache-lookup-dual] task#{i} id={task_id} status={task_status} size={size}")
             result["output_size"] = size
             _parse_json_fields(result)

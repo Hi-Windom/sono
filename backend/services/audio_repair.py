@@ -1180,7 +1180,7 @@ ALGORITHM_VERSIONS = {
                     "inst_declip": 0.2, "inst_depop": 0.1,
                     "inst_dynamic": 0.1, "inst_loudness": 0.4,
                     "vocal_ratio": 1.0, "accompaniment_ratio": 1.0,
-                    "mastering_style": "none",
+                    "mastering_style": "standard",
                     "processing_mode": "dual",
                 },
             },

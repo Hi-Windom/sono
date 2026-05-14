@@ -54,6 +54,7 @@ export type { ProcessingOptions };
 export const defaultProcessingOptions: ProcessingOptions = {
   sampleRate: 48000,
   bitDepth: 24,
+  masteringStyle: 'standard',
 };
 
 function formatSpeed(bytesPerSec: number): string {
