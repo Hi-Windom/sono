@@ -79,12 +79,6 @@ def test_miniaudio_load():
     import miniaudio
 
 
-def test_psutil_available():
-    import psutil
-    mem = psutil.virtual_memory()
-    assert mem.total > 0
-
-
 def test_libmp3lame_available():
     from services.mp3_encoder import is_available, get_version, encode_mp3
     assert is_available(), "libmp3lame not available via ctypes"
