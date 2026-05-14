@@ -194,14 +194,23 @@ def find_repair_cache(file_hash: str, params: dict) -> TaskDict | None:
             continue
         
         stored_json = json.dumps(parsed, sort_keys=True, ensure_ascii=False)
-        
-        if stored_json == params_json:
-            logger.info(f"[cache-lookup] ✅ MATCH task#{i} id={task_id} status={task_status} size={size}")
+
+        repair_param_keys = {
+            "de_clipping", "noise_reduction", "de_essing", "de_crackle", "de_pop",
+            "harmonic_enhance", "dynamic_range", "softness", "presence_boost",
+            "bass_enhance", "spatial_enhance", "transient_repair", "warmth", "clarity",
+            "algorithm_version",
+        }
+        stored_subset = {k: v for k, v in parsed.items() if k in repair_param_keys}
+        input_subset = {k: v for k, v in params.items() if k in repair_param_keys}
+        common_keys = stored_subset.keys() & input_subset.keys()
+        if common_keys and all(stored_subset[k] == input_subset[k] for k in common_keys):
+            logger.info(f"[cache-lookup] ✅ MATCH task#{i} id={task_id} status={task_status} size={size} keys={sorted(common_keys)}")
             result["output_size"] = size
             _parse_json_fields(result)
             return result
         else:
-            logger.info(f"[cache-lookup] task#{i} id={task_id} status={task_status} MISMATCH stored={stored_json}")
+            logger.info(f"[cache-lookup] task#{i} id={task_id} status={task_status} MISMATCH stored_keys={sorted(stored_subset.keys())} input_keys={sorted(input_subset.keys())}")
     
     logger.info(f"[cache-lookup] ❌ NO MATCH for hash={file_hash}")
     return None

@@ -19,6 +19,24 @@ from services.memory_guard import get_available_memory_bytes, estimate_repair_me
 
 logger = logging.getLogger(__name__)
 
+def _wav_to_mp3(wav_path: str, mp3_path: str, bitrate: int = 128):
+    import lameenc
+    import wave
+    with wave.open(wav_path, 'rb') as wav:
+        framerate = wav.getframerate()
+        channels = wav.getnchannels()
+        sampwidth = wav.getsampwidth()
+        pcm_data = wav.readframes(wav.getnframes())
+    encoder = lameenc.Encoder()
+    encoder.set_bit_rate(bitrate)
+    encoder.set_in_sample_rate(framerate)
+    encoder.set_channels(channels)
+    encoder.set_quality(2)
+    mp3_data = encoder.encode(pcm_data)
+    mp3_data += encoder.flush()
+    with open(mp3_path, 'wb') as f:
+        f.write(mp3_data)
+
 router = APIRouter(prefix="/api/v1")
 
 class LogRequest(BaseModel):
@@ -1530,15 +1548,9 @@ async def download_mp3(task_id: str, request: Request):
     mp3_path = os.path.join(OUTPUT_DIR, f"{task_id}_repaired.mp3")
     if not os.path.exists(mp3_path):
         try:
-            subprocess.run(
-                ["ffmpeg", "-y", "-i", wav_path, "-codec:a", "libmp3lame", "-b:a", "128k", mp3_path],
-                capture_output=True, timeout=120, check=True
-            )
-        except subprocess.CalledProcessError as e:
-            logger.error(f"[DOWNLOAD-MP3] ffmpeg 转码失败 task_id={task_id}: {e.stderr.decode(errors='replace')}")
-            raise HTTPException(status_code=500, detail="MP3 转码失败")
+            _wav_to_mp3(wav_path, mp3_path)
         except Exception as e:
-            logger.error(f"[DOWNLOAD-MP3] 转码异常 task_id={task_id}: {e}")
+            logger.error(f"[DOWNLOAD-MP3] lameenc 转码失败 task_id={task_id}: {e}")
             raise HTTPException(status_code=500, detail="MP3 转码失败")
     file_size = os.path.getsize(mp3_path)
     from urllib.parse import quote
