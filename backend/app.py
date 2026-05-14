@@ -150,6 +150,9 @@ def create_app() -> FastAPI:
 
         @app.get("/{full_path:path}")
         async def serve_spa(full_path: str):
+            if full_path.startswith("api/") or full_path.startswith("health"):
+                from fastapi.responses import JSONResponse
+                return JSONResponse(status_code=404, content={"detail": "API endpoint not found"})
             file_path = dist_dir / full_path
             if full_path and file_path.is_file():
                 response = FileResponse(str(file_path))

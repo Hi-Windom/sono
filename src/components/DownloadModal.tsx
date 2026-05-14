@@ -125,13 +125,18 @@ export function DownloadModal({
       if (!contentType.includes('audio/')) {
         throw new Error(`服务器返回了非音频内容 (${contentType})，请重试`);
       }
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
       const a = document.createElement('a');
-      a.href = `/api/v1/download-mp3/${taskId}`;
+      a.href = blobUrl;
       a.download = `${taskId}.mp3`;
       a.style.display = 'none';
       document.body.appendChild(a);
       a.click();
-      document.body.removeChild(a);
+      setTimeout(() => {
+        URL.revokeObjectURL(blobUrl);
+        document.body.removeChild(a);
+      }, 5000);
     } catch (e) {
       if (e instanceof TypeError) {
         setMp3Error('网络连接失败，请检查网络后重试');
