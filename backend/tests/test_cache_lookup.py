@@ -7,7 +7,33 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from database import get_db, create_task, update_task, find_repair_cache, find_dual_repair_cache
+os.environ["TESTING"] = "1"
+
+from database import init_db, get_db, create_task, update_task, find_repair_cache, find_dual_repair_cache
+
+
+@pytest.fixture()
+def fresh_db():
+    db_fd, db_path = tempfile.mkstemp(suffix=".db")
+    os.close(db_fd)
+    old_path = None
+    try:
+        import config
+        old_path = getattr(config, "DB_PATH", None)
+        config.DB_PATH = db_path
+    except Exception:
+        pass
+    init_db()
+    yield {"db_path": db_path, "get_db": get_db, "create_task": create_task, "update_task": update_task}
+    if old_path is not None:
+        try:
+            config.DB_PATH = old_path
+        except Exception:
+            pass
+    try:
+        os.unlink(db_path)
+    except OSError:
+        pass
 
 
 SR = 44100
@@ -53,7 +79,9 @@ def _make_single_params(**overrides):
 
 class TestSingleTrackCacheLookup:
     @pytest.fixture(autouse=True)
-    def setup(self):
+    def setup(self, fresh_db):
+        self.db = fresh_db
+        self.create_task = fresh_db["create_task"]
         with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as f:
             self.wav_path = f.name
         _make_wav(self.wav_path)
@@ -73,11 +101,11 @@ class TestSingleTrackCacheLookup:
             pass
 
     def _create_task(self, task_id, params, output_path=None, status="completed"):
-        create_task(task_id, "test.wav", self.wav_path, params, file_hash=self.file_hash)
+        self.create_task(task_id, "test.wav", self.wav_path, params, file_hash=self.file_hash)
         if status == "completed" and output_path:
-            update_task(task_id, status=status, output_path=output_path)
+            self.db["update_task"](task_id, status=status, output_path=output_path)
         elif status:
-            update_task(task_id, status=status)
+            self.db["update_task"](task_id, status=status)
 
     def test_exact_match(self):
         self._create_task("test_single_001", self.params, self.output_path)
@@ -119,10 +147,39 @@ class TestSingleTrackCacheLookup:
         result = find_repair_cache(self.file_hash, self.params)
         assert result is None, "输出文件不存在应不命中"
 
+    def test_input_has_algorithm_version_stored_missing(self):
+        stored = _make_single_params()
+        stored.pop("algorithm_version", None)
+        input_params = _make_single_params(algorithm_version="v3.1")
+        self._create_task("test_single_007", stored, self.output_path)
+        result = find_repair_cache(self.file_hash, input_params)
+        assert result is not None, "输入有 algorithm_version 但存储没有，交集比较应命中"
+
+    def test_stored_has_mastering_style_input_missing(self):
+        stored = _make_single_params()
+        stored["mastering_style"] = "standard"
+        input_params = _make_single_params()
+        self._create_task("test_single_008", stored, self.output_path)
+        result = find_repair_cache(self.file_hash, input_params)
+        assert result is not None, "存储有 mastering_style 但输入没有，交集比较应命中"
+
+    def test_both_asymmetric_keys(self):
+        stored = _make_single_params()
+        stored.pop("algorithm_version", None)
+        stored["mastering_style"] = "standard"
+        stored["extra_stored"] = "only_stored"
+        input_params = _make_single_params(algorithm_version="v3.1")
+        input_params["extra_input"] = "only_input"
+        self._create_task("test_single_009", stored, self.output_path)
+        result = find_repair_cache(self.file_hash, input_params)
+        assert result is not None, "双方都有不对称 key，交集比较应命中"
+
 
 class TestDualTrackCacheLookup:
     @pytest.fixture(autouse=True)
-    def setup(self):
+    def setup(self, fresh_db):
+        self.db = fresh_db
+        self.create_task = fresh_db["create_task"]
         with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as f:
             self.vocal_path = f.name
         with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as f:
@@ -151,14 +208,14 @@ class TestDualTrackCacheLookup:
         full_params = dict(params)
         full_params["vocal_file_hash"] = vocal_hash
         full_params["accompaniment_file_hash"] = acc_hash
-        create_task(
+        self.create_task(
             task_id, "vocal.wav", self.vocal_path, full_params,
             file_hash=f"dual_{vocal_hash[:8]}_{acc_hash[:8]}"
         )
         if status == "completed":
-            update_task(task_id, status=status, output_path=self.output_path)
+            self.db["update_task"](task_id, status=status, output_path=self.output_path)
         else:
-            update_task(task_id, status=status)
+            self.db["update_task"](task_id, status=status)
 
     def test_exact_match(self):
         self._create_dual_task("test_dual_001", self.vocal_hash, self.acc_hash, self.params)
@@ -205,6 +262,22 @@ class TestDualTrackCacheLookup:
         self._create_dual_task("test_dual_006", self.vocal_hash, self.acc_hash, self.params)
         result = find_dual_repair_cache(wrong_hash, self.acc_hash, self.params)
         assert result is None, "vocal_hash 不同应不命中"
+
+    def test_input_has_algorithm_version_stored_missing(self):
+        stored = _make_dual_params()
+        input_params = dict(stored)
+        input_params["algorithm_version"] = "v3.1a"
+        self._create_dual_task("test_dual_007", self.vocal_hash, self.acc_hash, stored)
+        result = find_dual_repair_cache(self.vocal_hash, self.acc_hash, input_params)
+        assert result is not None, "输入有 algorithm_version 但存储没有，交集比较应命中"
+
+    def test_stored_has_algorithm_version_input_missing(self):
+        stored = _make_dual_params()
+        stored["algorithm_version"] = "v3.1a"
+        input_params = _make_dual_params()
+        self._create_dual_task("test_dual_008", self.vocal_hash, self.acc_hash, stored)
+        result = find_dual_repair_cache(self.vocal_hash, self.acc_hash, input_params)
+        assert result is not None, "存储有 algorithm_version 但输入没有，交集比较应命中"
 
 
 class TestMp3Encoding:

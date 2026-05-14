@@ -854,7 +854,7 @@ export function useAudioProcessor() {
 
     const context = getAudioContext();
     let buffer: AudioBuffer;
-    const workerDecoded = await audioWorker.decodeWav(context, arrayBuf);
+    const workerDecoded = await audioWorker.decodeWav(context, arrayBuf.slice(0));
     const isNonWavFile = !workerDecoded;
     if (workerDecoded) {
       buffer = workerDecoded;
@@ -883,7 +883,13 @@ export function useAudioProcessor() {
         } catch (decodeErr) {
           console.warn('[loadAudioFile] 浏览器解码失败:', decodeErr);
           setIsDecodingAudio(false);
-          setBackendError('音频解码失败：不支持的格式或文件已损坏');
+          if (arrayBuf.byteLength === 0) {
+            setBackendError('解码缓冲区异常，请重新上传文件');
+          } else if (decodeErr instanceof DOMException && decodeErr.name === 'EncodingError') {
+            setBackendError('浏览器不支持该音频格式，请尝试WAV格式');
+          } else {
+            setBackendError('音频解码失败：文件已损坏或无法解析');
+          }
           return;
         }
       }

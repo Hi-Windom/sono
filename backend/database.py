@@ -204,6 +204,8 @@ def find_repair_cache(file_hash: str, params: dict) -> TaskDict | None:
         stored_subset = {k: v for k, v in parsed.items() if k in repair_param_keys}
         input_subset = {k: v for k, v in params.items() if k in repair_param_keys}
         common_keys = stored_subset.keys() & input_subset.keys()
+        if not common_keys:
+            logger.info(f"[cache-lookup] task#{i} id={task_id} status={task_status} EMPTY_INTERSECTION stored_keys={sorted(stored_subset.keys())} input_keys={sorted(input_subset.keys())}")
         if common_keys and all(stored_subset[k] == input_subset[k] for k in common_keys):
             logger.info(f"[cache-lookup] ✅ MATCH task#{i} id={task_id} status={task_status} size={size} keys={sorted(common_keys)}")
             result["output_size"] = size
