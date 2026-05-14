@@ -46,6 +46,29 @@ if [ ! -d "backend" ] || [ ! -f "backend/main.py" ]; then
 fi
 echo "  后端代码确认: backend/"
 
+echo -e "${YELLOW}[3.5/4] 检查 Termux 不兼容依赖...${NC}"
+KNOWN_INCOMPATIBLE="psutil lameenc"
+INCOMPATIBLE_FOUND=""
+while IFS= read -r line; do
+    line="$(echo "$line" | sed 's/#.*//' | xargs)"
+    [ -z "$line" ] && continue
+    for pkg in $KNOWN_INCOMPATIBLE; do
+        if echo "$line" | grep -qi "^${pkg}"; then
+            INCOMPATIBLE_FOUND="$INCOMPATIBLE $pkg"
+        fi
+    done
+done < backend/requirements_android.txt
+
+if [ -n "$INCOMPATIBLE_FOUND" ]; then
+    echo -e "${RED}错误: requirements_android.txt 包含 Termux 不支持的依赖:${NC}"
+    for pkg in $INCOMPATIBLE_FOUND; do
+        echo -e "${RED}  - $pkg${NC}"
+    done
+    echo -e "${RED}请从 requirements_android.txt 中移除后再打包。${NC}"
+    exit 1
+fi
+echo "  依赖检查通过。"
+
 echo "  预编译 .pyc 文件..."
 python -m compileall -q backend/ 2>/dev/null || echo "  预编译跳过（非关键）"
 
@@ -61,9 +84,7 @@ cp -r backend "$PKG_DIR/"
 cp -r dist "$PKG_DIR/backend/dist"
 cp deploy/setup_android.sh "$PKG_DIR/"
 
-# 保留 __pycache__（.pyc 编译文件），删除 .py 源文件（保留 main.py 入口）
-find "$PKG_DIR/backend" -name '*.py' -not -name 'main.py' -delete
-# 删除测试文件（设备上不需要）
+# 删除开发/测试相关文件（设备上不需要）
 rm -rf "$PKG_DIR/backend/tests"
 # 删除开发数据库（设备上会重新创建）
 rm -f "$PKG_DIR/backend/sono.db"
