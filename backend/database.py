@@ -272,6 +272,9 @@ def find_dual_repair_cache(vocal_file_hash: str, accompaniment_file_hash: str, p
             _parse_json_fields(result)
             return result
         else:
+            stored_keys = set(filtered_stored.keys())
+            input_keys = set(params.keys())
+            logger.info(f"[cache-lookup-dual] task#{i} id={task_id} MISMATCH: stored_extra={stored_keys - input_keys} input_extra={input_keys - stored_keys}")
             logger.info(f"[cache-lookup-dual] task#{i} id={task_id} MISMATCH stored={stored_json}")
 
     logger.info(f"[cache-lookup-dual] NO MATCH for vocal_hash={vocal_file_hash} acc_hash={accompaniment_file_hash}")

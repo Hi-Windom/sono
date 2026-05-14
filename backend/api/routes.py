@@ -1,4 +1,5 @@
 import os
+import json
 import asyncio
 import logging
 import stat
@@ -449,8 +450,25 @@ async def upload_dual_audio(
     vocal_hash = vocal_file_hash or file_hash
     accompaniment_hash = accompaniment_file_hash or file_hash
 
-    create_task(vocal_task_id, f"vocal_{vocal_file.filename or 'audio'}", vocal_upload_path, {}, vocal_hash, len(vocal_content))
-    create_task(accompaniment_task_id, f"acc_{accompaniment_file.filename or 'audio'}", accompaniment_upload_path, {}, accompaniment_hash, len(accompaniment_content))
+    def get_audio_info(path):
+        try:
+            import miniaudio
+            info = miniaudio.get_file_info(path)
+            logger.info(f"[/upload-dual] audio_info for {path}: sr={info.sample_rate} ch={info.nchannels} dur={info.duration}")
+            return {"sample_rate": info.sample_rate, "channels": info.nchannels, "duration": info.duration}
+        except Exception as e:
+            logger.warning(f"[/upload-dual] get_audio_info failed for {path}: {e}")
+            return None
+
+    vocal_audio_info = get_audio_info(vocal_upload_path)
+    acc_audio_info = get_audio_info(accompaniment_upload_path)
+
+    create_task(vocal_task_id, f"vocal_{vocal_file.filename or 'audio'}", vocal_upload_path,
+                {"audio_info": vocal_audio_info} if vocal_audio_info else {},
+                vocal_hash, len(vocal_content))
+    create_task(accompaniment_task_id, f"acc_{accompaniment_file.filename or 'audio'}", accompaniment_upload_path,
+                {"audio_info": acc_audio_info} if acc_audio_info else {},
+                accompaniment_hash, len(accompaniment_content))
     create_task(main_task_id, f"dual_{vocal_file.filename or 'audio'}", vocal_upload_path, {
         "vocal_task_id": vocal_task_id,
         "accompaniment_task_id": accompaniment_task_id,
@@ -2127,6 +2145,14 @@ class DualRepairCacheLookupRequest(BaseModel):
     vocal_file_hash: str
     accompaniment_file_hash: str
     params: dict = {}
+    vocal_params: dict | None = None
+    accompaniment_params: dict | None = None
+    mix_ratio: float | None = None
+
+
+class FileInfoByHashRequest(BaseModel):
+    file_hashes: list[str]
+
 
 @router.post("/cache/lookup")
 async def lookup_repair_cache(req: RepairCacheLookupRequest):
@@ -2161,7 +2187,60 @@ async def lookup_repair_cache(req: RepairCacheLookupRequest):
 @router.post("/cache/lookup-dual")
 async def lookup_dual_repair_cache(req: DualRepairCacheLookupRequest):
     from database import find_dual_repair_cache
-    cached = find_dual_repair_cache(req.vocal_file_hash, req.accompaniment_file_hash, req.params)
+
+    flat_params = req.params.copy()
+    flat_params.pop("processing_mode", None)
+
+    _VOCAL_KEY_MAP = {
+        "de_clipping": "vocal_declip",
+        "de_pop": "vocal_depop",
+        "de_essing": "vocal_de_ess",
+        "bass_enhance": "vocal_bass_enhance",
+        "clarity": "vocal_air_texture",
+        "air_texture": "vocal_air_texture",
+        "formant_repair": "vocal_formant_repair",
+        "breath_enhance": "vocal_breath_enhance",
+        "ai_repair": "vocal_ai_repair",
+        "exciter": "vocal_exciter",
+        "compressor": "vocal_compressor",
+        "spatial": "vocal_spatial",
+        "warmth": "vocal_warmth",
+        "de_esser_advanced": "vocal_de_esser_advanced",
+        "ai_repair_enhanced": "vocal_ai_repair_enhanced",
+        "ai_repair_enhanced_lite": "vocal_ai_repair_enhanced_lite",
+        "loudness_optimize": "vocal_loudness",
+    }
+
+    _INST_KEY_MAP = {
+        "de_clipping": "inst_declip",
+        "de_pop": "inst_depop",
+        "noise_reduction": "inst_noise_reduction",
+        "dynamic_range": "inst_dynamic",
+        "spatial_enhance": "inst_spatial",
+        "warmth": "inst_warmth",
+        "timbre_protect": "inst_timbre_protect",
+        "stereo_enhance": "inst_stereo_enhance",
+        "loudness_optimize": "inst_loudness",
+    }
+
+    if req.vocal_params:
+        for src_key, flat_key in _VOCAL_KEY_MAP.items():
+            if src_key in req.vocal_params:
+                flat_params[flat_key] = req.vocal_params[src_key]
+
+    if req.accompaniment_params:
+        for src_key, flat_key in _INST_KEY_MAP.items():
+            if src_key in req.accompaniment_params:
+                flat_params[flat_key] = req.accompaniment_params[src_key]
+
+    if req.mix_ratio is not None:
+        flat_params["vocal_ratio"] = req.mix_ratio
+        flat_params["accompaniment_ratio"] = 1.0
+
+    logger.info(f"[cache-lookup-dual] input flat_params keys: {sorted(flat_params.keys())}")
+    logger.info(f"[cache-lookup-dual] input flat_params: {json.dumps(flat_params, sort_keys=True)[:500]}")
+
+    cached = find_dual_repair_cache(req.vocal_file_hash, req.accompaniment_file_hash, flat_params)
     if not cached:
         return {"found": False}
     repair_result = cached.get("repair_result")
@@ -2174,6 +2253,37 @@ async def lookup_dual_repair_cache(req: DualRepairCacheLookupRequest):
         "detection_result": cached.get("detection_result"),
         "repaired_detection_result": cached.get("repaired_detection_result"),
     }
+
+@router.post("/file-info-by-hash")
+async def get_file_info_by_hash(request: FileInfoByHashRequest):
+    from database import find_task_by_hash
+    result = {}
+    for file_hash in request.file_hashes:
+        task = find_task_by_hash(file_hash)
+        if not task:
+            logger.info(f"[file-info-by-hash] hash={file_hash[:12]} NOT FOUND")
+            continue
+        params = task.get("params", {})
+        if isinstance(params, str):
+            try:
+                params = json.loads(params)
+            except (json.JSONDecodeError, TypeError):
+                params = {}
+        audio_info = params.get("audio_info") if isinstance(params, dict) else None
+        if audio_info:
+            result[file_hash] = audio_info
+            logger.info(f"[file-info-by-hash] hash={file_hash[:12]} found audio_info in db: {audio_info}")
+        else:
+            path = task.get("original_path")
+            if path and os.path.exists(path):
+                try:
+                    info = miniaudio.get_file_info(path)
+                    audio_info = {"sample_rate": info.sample_rate, "channels": info.nchannels, "duration": info.duration}
+                    result[file_hash] = audio_info
+                    logger.info(f"[file-info-by-hash] hash={file_hash[:12]} read from file: {audio_info}")
+                except Exception as e:
+                    logger.info(f"[file-info-by-hash] hash={file_hash[:12]} read file error: {e}")
+    return result
 
 
 def _is_valid_audio_file(filepath: str) -> tuple[bool, str]:

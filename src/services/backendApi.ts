@@ -792,15 +792,26 @@ export interface DualRepairCacheLookupResult {
 export async function lookupDualRepairCache(
   vocalFileHash: string,
   accompanimentFileHash: string,
-  params: Record<string, unknown>
+  params: Record<string, unknown>,
+  vocalParams?: Record<string, unknown>,
+  accompanimentParams?: Record<string, unknown>,
+  mixRatio?: number
 ): Promise<DualRepairCacheLookupResult> {
   const url = `${API_BASE}/cache/lookup-dual`;
   log('cache-lookup-dual', `POST ${url} vocal_hash=${vocalFileHash.slice(0, 12)} acc_hash=${accompanimentFileHash.slice(0, 12)}`);
   try {
+    const body: Record<string, unknown> = {
+      vocal_file_hash: vocalFileHash,
+      accompaniment_file_hash: accompanimentFileHash,
+      params,
+    };
+    if (vocalParams !== undefined) body.vocal_params = vocalParams;
+    if (accompanimentParams !== undefined) body.accompaniment_params = accompanimentParams;
+    if (mixRatio !== undefined) body.mix_ratio = mixRatio;
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ vocal_file_hash: vocalFileHash, accompaniment_file_hash: accompanimentFileHash, params }),
+      body: JSON.stringify(body),
     });
     if (!res.ok) {
       log('cache-lookup-dual', `ERROR HTTP ${res.status}`);
@@ -1524,6 +1535,34 @@ export interface MemoryInfoResult {
   use_float32: boolean;
   has_streaming: boolean;
   memory_saving: number;
+}
+
+export interface FileInfoResult {
+  sample_rate: number;
+  channels: number;
+  duration: number;
+}
+
+export async function fetchFileInfoByHash(fileHashes: string[]): Promise<Record<string, FileInfoResult>> {
+  const url = `${API_BASE}/file-info-by-hash`;
+  log('file-info-by-hash', `POST ${url} hashes=${fileHashes.map(h => h.slice(0, 12)).join(',')}`);
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ file_hashes: fileHashes }),
+    });
+    if (!res.ok) {
+      log('file-info-by-hash', `ERROR HTTP ${res.status}`);
+      return {};
+    }
+    const data = await res.json();
+    log('file-info-by-hash', `result: ${JSON.stringify(data)}`);
+    return data;
+  } catch (e) {
+    log('file-info-by-hash', `FAILED: ${e instanceof Error ? e.message : String(e)}`);
+    return {};
+  }
 }
 
 export async function fetchMemoryInfo(

@@ -1008,6 +1008,14 @@
       "description": "POST /cache/lookup-dual"
     },
     {
+      "id": "route-POST--file-info-by-hash",
+      "label": "POST /file-info-by-hash",
+      "type": "api",
+      "layer": "backend",
+      "filePath": "/workspace/backend/api/routes.py",
+      "description": "POST /file-info-by-hash"
+    },
+    {
       "id": "route-POST--cache-clean-invalid",
       "label": "POST /cache/clean-invalid",
       "type": "api",
@@ -2653,6 +2661,12 @@
     {
       "source": "backend-api-routes.py",
       "target": "route-POST--cache-lookup-dual",
+      "label": "路由注册",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-api-routes.py",
+      "target": "route-POST--file-info-by-hash",
       "label": "路由注册",
       "type": "data-flow"
     },

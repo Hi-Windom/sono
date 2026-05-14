@@ -8,7 +8,7 @@ import { ErrorBoundary } from '../components/ErrorBoundary';
 import { DownloadModal, DownloadFileInfo, DualTrackDownloadUrls } from '../components/DownloadModal';
 import { RepairCacheModal, CacheHitInfo } from '../components/RepairCacheModal';
 import { useAudioProcessor, generateExportFilename } from '../hooks/useAudioProcessor';
-import { uploadDualAudio, repairDualAudio, repairDualFromHash, getDownloadUrl, getPreviewUrl, connectProgressWS, WSProgressControl, VocalRepairParams, InstrumentRepairParams, defaultVocalRepairParams, defaultInstrumentRepairParams, fetchRenderCache, lookupDualRepairCache, mapParamsToBackend, mapVocalParamsToBackend, mapInstrumentParamsToBackend, connectCacheWS, CacheUpdateEvent, RenderCacheEntry } from '../services/backendApi';
+import { uploadDualAudio, repairDualAudio, repairDualFromHash, getDownloadUrl, getPreviewUrl, connectProgressWS, WSProgressControl, VocalRepairParams, InstrumentRepairParams, defaultVocalRepairParams, defaultInstrumentRepairParams, fetchRenderCache, lookupDualRepairCache, mapParamsToBackend, mapVocalParamsToBackend, mapInstrumentParamsToBackend, connectCacheWS, CacheUpdateEvent, RenderCacheEntry, fetchFileInfoByHash } from '../services/backendApi';
 import { useBackend } from '../contexts/BackendContext';
 import { saveSettings, loadSettings } from '../utils/settingsStorage';
 import { computeFileHash } from '../utils/fileHash';
@@ -376,13 +376,15 @@ export default function RepairPage() {
         const mainParams = mapParamsToBackend(params, processingOptions, algorithmVersion);
         const vParams = mapVocalParamsToBackend(dualTrackVocalParams, processingOptions, algorithmVersion);
         const aParams = mapInstrumentParamsToBackend(dualTrackAccompanimentParams, processingOptions, algorithmVersion);
-        const dualParamsForCache: Record<string, unknown> = {
-          params: mainParams,
-          vocal_params: vParams,
-          accompaniment_params: aParams,
-          mix_ratio: mixRatio,
-        };
-        const cacheResult = await lookupDualRepairCache(dualTrackVocalFileHash, dualTrackAccompanimentFileHash, dualParamsForCache);
+        console.log('[双轨缓存] 发送缓存查询', {
+          vocalHash: dualTrackVocalFileHash?.slice(0, 12),
+          accHash: dualTrackAccompanimentFileHash?.slice(0, 12),
+          mainParamsKeys: Object.keys(mainParams),
+          vParamsKeys: Object.keys(vParams),
+          aParamsKeys: Object.keys(aParams),
+          mixRatio,
+        });
+        const cacheResult = await lookupDualRepairCache(dualTrackVocalFileHash, dualTrackAccompanimentFileHash, mainParams, vParams, aParams, mixRatio);
         if (cacheResult.found) {
           setDualCacheHitInfo({
             repair: {
@@ -512,14 +514,15 @@ export default function RepairPage() {
         const mainParams = mapParamsToBackend(params, processingOptions, algorithmVersion);
         const vParams = mapVocalParamsToBackend(dualTrackVocalParams, processingOptions, algorithmVersion);
         const aParams = mapInstrumentParamsToBackend(dualTrackAccompanimentParams, processingOptions, algorithmVersion);
-        const cacheResult = await lookupDualRepairCache(dualTrackVocalFileHash, dualTrackAccompanimentFileHash, {
-          params: mainParams,
-          vocal_params: vParams,
-          accompaniment_params: aParams,
-          mix_ratio: mixRatio,
+        console.log('[双轨] mount 查询缓存', {
+          vocalHash: dualTrackVocalFileHash?.slice(0, 12),
+          accHash: dualTrackAccompanimentFileHash?.slice(0, 12),
+          mainParamsKeys: Object.keys(mainParams),
         });
+        const cacheResult = await lookupDualRepairCache(dualTrackVocalFileHash, dualTrackAccompanimentFileHash, mainParams, vParams, aParams, mixRatio);
         if (cancelled) return;
         if (cacheResult.found && cacheResult.task_id) {
+          console.log('[双轨] mount 缓存命中', { taskId: cacheResult.task_id });
           setDualTrackTaskId(cacheResult.task_id);
           setTaskId(cacheResult.task_id);
           if (cacheResult.repair_result) {
@@ -527,7 +530,24 @@ export default function RepairPage() {
             sessionActions.setDualTrackProcessed(true);
           }
         }
-      } catch {}
+      } catch (e) {
+        console.warn('[双轨] mount 缓存查询失败', e);
+      }
+
+      try {
+        const fileInfo = await fetchFileInfoByHash([dualTrackVocalFileHash, dualTrackAccompanimentFileHash]);
+        if (cancelled) return;
+        if (fileInfo[dualTrackVocalFileHash]) {
+          console.log('[双轨] mount 恢复人声文件信息', fileInfo[dualTrackVocalFileHash]);
+          setDualTrackVocalInfo(fileInfo[dualTrackVocalFileHash]);
+        }
+        if (fileInfo[dualTrackAccompanimentFileHash]) {
+          console.log('[双轨] mount 恢复伴奏文件信息', fileInfo[dualTrackAccompanimentFileHash]);
+          setDualTrackAccompanimentInfo(fileInfo[dualTrackAccompanimentFileHash]);
+        }
+      } catch (e) {
+        console.warn('[双轨] mount 文件信息查询失败', e);
+      }
     })();
     return () => { cancelled = true; };
   }, [isDualTrackMode, dualTrackVocalFileHash, dualTrackAccompanimentFileHash, dualTrackTaskId]);

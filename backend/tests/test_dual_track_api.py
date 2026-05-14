@@ -515,10 +515,196 @@ class TestParamFlattening:
 
         for key in ["vocal_noise_reduction", "vocal_harmonic_enhance", "vocal_dynamic_range",
                      "vocal_softness", "vocal_presence_boost", "vocal_spatial_enhance",
-                     "vocal_transient_repair", "vocal_warmth", "vocal_de_crackle"]:
+                     "vocal_transient_repair", "vocal_de_crackle"]:
             assert key not in params, f"Skipped vocal key {key} should not appear in flattened params"
 
         for key in ["inst_de_essing", "inst_bass_enhance", "inst_harmonic_enhance",
                      "inst_softness", "inst_presence_boost", "inst_transient_repair",
                      "inst_clarity", "inst_de_crackle"]:
             assert key not in params, f"Skipped inst key {key} should not appear in flattened params"
+
+
+class TestAudioInfoStorage:
+    def test_audio_info_stored_for_vocal_task(self, api_client, fresh_db):
+        wav_bytes = _make_wav_bytes(duration=0.5)
+        res = api_client.post("/api/v1/upload-dual", files={
+            "vocal_file": ("vocal.wav", wav_bytes, "audio/wav"),
+            "accompaniment_file": ("acc.wav", wav_bytes, "audio/wav"),
+        })
+        assert res.status_code == 200
+        data = res.json()
+
+        vocal_task = fresh_db["get_task"](data["vocal_task_id"])
+        assert vocal_task is not None
+        params = vocal_task.get("params", {})
+        if isinstance(params, str):
+            params = json.loads(params)
+        audio_info = params.get("audio_info")
+        assert audio_info is not None, f"audio_info should be stored for vocal task, got params: {params}"
+        assert audio_info["duration"] > 0, f"duration should be > 0, got {audio_info}"
+        assert audio_info["channels"] > 0, f"channels should be > 0, got {audio_info}"
+        assert audio_info["sample_rate"] > 0, f"sample_rate should be > 0, got {audio_info}"
+
+    def test_audio_info_stored_for_accompaniment_task(self, api_client, fresh_db):
+        wav_bytes = _make_wav_bytes(duration=0.5)
+        res = api_client.post("/api/v1/upload-dual", files={
+            "vocal_file": ("vocal.wav", wav_bytes, "audio/wav"),
+            "accompaniment_file": ("acc.wav", wav_bytes, "audio/wav"),
+        })
+        assert res.status_code == 200
+        data = res.json()
+
+        acc_task = fresh_db["get_task"](data["accompaniment_task_id"])
+        assert acc_task is not None
+        params = acc_task.get("params", {})
+        if isinstance(params, str):
+            params = json.loads(params)
+        audio_info = params.get("audio_info")
+        assert audio_info is not None, f"audio_info should be stored for accompaniment task, got params: {params}"
+        assert audio_info["duration"] > 0
+        assert audio_info["channels"] > 0
+        assert audio_info["sample_rate"] > 0
+
+    def test_audio_info_not_stored_in_main_task(self, api_client, fresh_db):
+        wav_bytes = _make_wav_bytes(duration=0.5)
+        res = api_client.post("/api/v1/upload-dual", files={
+            "vocal_file": ("vocal.wav", wav_bytes, "audio/wav"),
+            "accompaniment_file": ("acc.wav", wav_bytes, "audio/wav"),
+        })
+        assert res.status_code == 200
+        data = res.json()
+
+        main_task = fresh_db["get_task"](data["task_id"])
+        assert main_task is not None
+        params = main_task.get("params", {})
+        if isinstance(params, str):
+            params = json.loads(params)
+        assert "audio_info" not in params, "audio_info should NOT be stored in main task"
+
+
+class TestDualCacheLookup:
+    def _build_flat_params(self, main_params, vocal_params, acc_params, mix_ratio):
+        _VOCAL_KEY_MAP = {
+            "de_clipping": "vocal_declip", "de_pop": "vocal_depop", "de_essing": "vocal_de_ess",
+            "bass_enhance": "vocal_bass_enhance", "clarity": "vocal_air_texture",
+            "air_texture": "vocal_air_texture", "formant_repair": "vocal_formant_repair",
+            "breath_enhance": "vocal_breath_enhance", "ai_repair": "vocal_ai_repair",
+            "exciter": "vocal_exciter", "compressor": "vocal_compressor", "spatial": "vocal_spatial",
+            "warmth": "vocal_warmth", "de_esser_advanced": "vocal_de_esser_advanced",
+            "ai_repair_enhanced": "vocal_ai_repair_enhanced",
+            "ai_repair_enhanced_lite": "vocal_ai_repair_enhanced_lite",
+            "loudness_optimize": "vocal_loudness",
+        }
+        _INST_KEY_MAP = {
+            "de_clipping": "inst_declip", "de_pop": "inst_depop", "noise_reduction": "inst_noise_reduction",
+            "dynamic_range": "inst_dynamic", "spatial_enhance": "inst_spatial", "warmth": "inst_warmth",
+            "timbre_protect": "inst_timbre_protect", "stereo_enhance": "inst_stereo_enhance",
+            "loudness_optimize": "inst_loudness",
+        }
+        flat = main_params.copy()
+        if vocal_params:
+            for src_key, flat_key in _VOCAL_KEY_MAP.items():
+                if src_key in vocal_params:
+                    flat[flat_key] = vocal_params[src_key]
+        if acc_params:
+            for src_key, flat_key in _INST_KEY_MAP.items():
+                if src_key in acc_params:
+                    flat[flat_key] = acc_params[src_key]
+        if mix_ratio is not None:
+            flat["vocal_ratio"] = mix_ratio
+            flat["accompaniment_ratio"] = 1.0
+        return flat
+
+    def test_cache_lookup_structured_params_matches_stored(self, api_client, fresh_db):
+        wav_bytes = _make_wav_bytes(duration=0.5)
+        upload_res = api_client.post("/api/v1/upload-dual", files={
+            "vocal_file": ("vocal.wav", wav_bytes, "audio/wav"),
+            "accompaniment_file": ("acc.wav", wav_bytes, "audio/wav"),
+        })
+        assert upload_res.status_code == 200
+        upload_data = upload_res.json()
+
+        vocal_params = {"de_clipping": 0.8, "de_pop": 0.6, "clarity": 0.5, "ai_repair": 0.1}
+        acc_params = {"de_clipping": 0.3, "noise_reduction": 0.5, "warmth": 0.2}
+        main_params = {"algorithm_version": "v3.0", "de_clipping": 0.3, "noise_reduction": 0.4}
+        mix_ratio = 0.6
+
+        repair_res = api_client.post("/api/v1/repair-dual", json={
+            "task_id": upload_data["task_id"],
+            "vocal_task_id": upload_data["vocal_task_id"],
+            "accompaniment_task_id": upload_data["accompaniment_task_id"],
+            "params": main_params,
+            "vocal_params": vocal_params,
+            "accompaniment_params": acc_params,
+            "mix_ratio": mix_ratio,
+        })
+        assert repair_res.status_code == 200
+
+        lookup_res = api_client.post("/api/v1/cache/lookup-dual", json={
+            "vocal_file_hash": "",
+            "accompaniment_file_hash": "",
+            "params": main_params,
+            "vocal_params": vocal_params,
+            "accompaniment_params": acc_params,
+            "mix_ratio": mix_ratio,
+        })
+        assert lookup_res.status_code == 200
+        lookup_data = lookup_res.json()
+        assert lookup_data["found"] is False, (
+            f"Cache lookup should return found=False (task has no output_path), "
+            f"got: {lookup_data}. This test verifies params format consistency."
+        )
+
+    def test_cache_lookup_with_completed_task(self, api_client, fresh_db):
+        import tempfile
+        wav_bytes = _make_wav_bytes(duration=0.5)
+        upload_res = api_client.post("/api/v1/upload-dual", files={
+            "vocal_file": ("vocal.wav", wav_bytes, "audio/wav"),
+            "accompaniment_file": ("acc.wav", wav_bytes, "audio/wav"),
+        })
+        assert upload_res.status_code == 200
+
+        vocal_params = {"de_clipping": 0.8, "ai_repair": 0.1}
+        acc_params = {"de_clipping": 0.3, "warmth": 0.2}
+        main_params = {"algorithm_version": "v3.0", "de_clipping": 0.3}
+        mix_ratio = 0.6
+
+        flat_params = self._build_flat_params(main_params, vocal_params, acc_params, mix_ratio)
+        flat_params["processing_mode"] = "dual"
+        flat_params["vocal_file_hash"] = ""
+        flat_params["accompaniment_file_hash"] = ""
+
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+            f.write(wav_bytes)
+            output_path = f.name
+
+        from database import update_task, create_task
+        cached_task_id = "cached-dual-task-id"
+        create_task(
+            cached_task_id,
+            "dual_test",
+            output_path,
+            flat_params,
+            "",
+            len(wav_bytes) * 2,
+        )
+        update_task(cached_task_id, output_path=output_path, status="completed")
+
+        lookup_res = api_client.post("/api/v1/cache/lookup-dual", json={
+            "vocal_file_hash": "",
+            "accompaniment_file_hash": "",
+            "params": main_params,
+            "vocal_params": vocal_params,
+            "accompaniment_params": acc_params,
+            "mix_ratio": mix_ratio,
+        })
+        assert lookup_res.status_code == 200
+        lookup_data = lookup_res.json()
+        assert lookup_data["found"] is True, (
+            f"Cache lookup should find completed task with matching params, "
+            f"got: {lookup_data}"
+        )
+        assert lookup_data["task_id"] == cached_task_id
+
+        import os
+        os.unlink(output_path)
