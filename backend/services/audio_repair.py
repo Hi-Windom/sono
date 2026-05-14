@@ -1144,7 +1144,7 @@ ALGORITHM_VERSIONS = {
             "inst_dynamic": 0.15, "inst_noise_reduction": 0.1,
             "inst_loudness": 0.5,
             "vocal_ratio": 1.0, "accompaniment_ratio": 1.0,
-            "mastering_style": "none",
+            "mastering_style": "standard",
             "processing_mode": "dual",
         },
         "modes": [

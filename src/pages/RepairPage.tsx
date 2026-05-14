@@ -1069,6 +1069,10 @@ export default function RepairPage() {
           backendDownloadUrl={renderDownloadUrl}
           dualTrackUrls={dualTrackUrls}
           onClose={() => setShowDownloadModal(false)}
+          taskId={taskId}
+          dualTrackTaskId={dualTrackTaskId}
+          dualTrackVocalTaskId={dualTrackVocalTaskId}
+          dualTrackAccompanimentTaskId={dualTrackAccompanimentTaskId}
         />
       )}
 

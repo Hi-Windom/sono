@@ -1,6 +1,5 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { parseFilenameFromDisposition } from '../services/backendApi';
-import { encodeMp3, terminateMp3Encoder } from '../utils/mp3Encoder';
 
 export interface DownloadFileInfo {
   filename: string;
@@ -11,6 +10,7 @@ export interface DownloadFileInfo {
   duration: number;
   algorithmVersion?: string;
   completedAt?: string;
+  taskId?: string;
 }
 
 function formatSpeed(bytesPerSec: number): string {
@@ -40,6 +40,10 @@ interface DownloadModalProps {
   backendDownloadAction?: () => void;
   isBackendLoading?: boolean;
   dualTrackUrls?: DualTrackDownloadUrls | null;
+  taskId?: string;
+  dualTrackTaskId?: string;
+  dualTrackVocalTaskId?: string;
+  dualTrackAccompanimentTaskId?: string;
 }
 
 export function DownloadModal({
@@ -50,6 +54,10 @@ export function DownloadModal({
   backendDownloadAction,
   isBackendLoading = false,
   dualTrackUrls,
+  taskId,
+  dualTrackTaskId,
+  dualTrackVocalTaskId,
+  dualTrackAccompanimentTaskId,
 }: DownloadModalProps) {
   const [copySuccess, setCopySuccess] = useState(false);
   const [downloading, setDownloading] = useState(false);
@@ -73,7 +81,6 @@ export function DownloadModal({
         abortRef.current.abort();
         abortRef.current = null;
       }
-      terminateMp3Encoder();
       setDownloading(false);
       setDlProgress(0);
       setDlLoaded(0);
@@ -104,41 +111,17 @@ export function DownloadModal({
     }
   }, []);
 
-  const handleDownloadMp3 = useCallback(async (url: string, fallbackFilename: string, channels: number) => {
+  const handleDownloadMp3 = useCallback(async (taskId: string) => {
     setMp3Loading(true);
     setMp3Error(null);
-    let audioCtx: AudioContext | null = null;
     try {
-      const res = await fetch(url);
-      if (!res.ok) throw new Error(`下载失败: HTTP ${res.status}`);
-      const arrayBuffer = await res.arrayBuffer();
-
-      audioCtx = new AudioContext();
-      const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-
-      const numChannels = Math.min(audioBuffer.numberOfChannels, channels || 2);
-      let interleaved: Float32Array;
-
-      if (numChannels === 2) {
-        const ch0 = audioBuffer.getChannelData(0);
-        const ch1 = audioBuffer.getChannelData(1);
-        interleaved = new Float32Array(ch0.length + ch1.length);
-        for (let i = 0; i < ch0.length; i++) {
-          interleaved[i * 2] = ch0[i];
-          interleaved[i * 2 + 1] = ch1[i];
-        }
-      } else {
-        interleaved = audioBuffer.getChannelData(0);
-      }
-
-      const sampleRate = audioBuffer.sampleRate;
-      const mp3Blob = await encodeMp3(interleaved, sampleRate, numChannels, 128);
-
-      const mp3Filename = fallbackFilename.replace(/\.wav$/i, '') + '.mp3';
-      const blobUrl = URL.createObjectURL(mp3Blob);
+      const res = await fetch(`/api/v1/download-mp3/${taskId}`);
+      if (!res.ok) throw new Error(`MP3 下载失败: HTTP ${res.status}`);
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = blobUrl;
-      a.download = mp3Filename;
+      a.download = `${taskId}.mp3`;
       a.style.display = 'none';
       document.body.appendChild(a);
       a.click();
@@ -150,9 +133,6 @@ export function DownloadModal({
       const msg = e instanceof Error ? e.message : String(e);
       setMp3Error(msg);
     } finally {
-      if (audioCtx) {
-        audioCtx.close();
-      }
       setMp3Loading(false);
     }
   }, []);
@@ -349,7 +329,7 @@ export function DownloadModal({
                     {downloading ? `下载中 ${Math.round(dlProgress * 100)}%` : '⬇ 下载 WAV'}
                   </button>
                   <button
-                    onClick={() => handleDownloadMp3(dualTrackUrls.merged || backendDownloadUrl!, dualTrackFilename, backendInfo?.channels || 2)}
+                    onClick={() => handleDownloadMp3(dualTrackTaskId!)}
                     disabled={(!dualTrackUrls.merged && !backendDownloadUrl) || mp3Loading || downloading || isBackendLoading}
                     className="flex-1 py-2 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 rounded-lg text-emerald-400 text-xs font-medium transition disabled:opacity-50"
                   >
@@ -379,7 +359,7 @@ export function DownloadModal({
                       {downloading ? `下载中 ${Math.round(dlProgress * 100)}%` : '⬇ 下载 WAV'}
                     </button>
                     <button
-                      onClick={() => handleDownloadMp3(dualTrackUrls.vocal!, vocalTrackFilename, backendInfo?.channels || 1)}
+                      onClick={() => handleDownloadMp3(dualTrackVocalTaskId!)}
                       disabled={mp3Loading || downloading || isBackendLoading}
                       className="flex-1 py-2 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 rounded-lg text-emerald-400 text-xs font-medium transition disabled:opacity-50"
                     >
@@ -409,7 +389,7 @@ export function DownloadModal({
                       {downloading ? `下载中 ${Math.round(dlProgress * 100)}%` : '⬇ 下载 WAV'}
                     </button>
                     <button
-                      onClick={() => handleDownloadMp3(dualTrackUrls.accompaniment!, accompanimentTrackFilename, backendInfo?.channels || 2)}
+                      onClick={() => handleDownloadMp3(dualTrackAccompanimentTaskId!)}
                       disabled={mp3Loading || downloading || isBackendLoading}
                       className="flex-1 py-2 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 rounded-lg text-emerald-400 text-xs font-medium transition disabled:opacity-50"
                     >
@@ -526,7 +506,7 @@ export function DownloadModal({
                     {downloading ? `下载中 ${Math.round(dlProgress * 100)}%` : '⬇ 下载 WAV'}
                   </button>
                   <button
-                    onClick={() => handleDownloadMp3(backendDownloadUrl, backendFilename, backendInfo?.channels || 2)}
+                    onClick={() => handleDownloadMp3(taskId!)}
                     disabled={mp3Loading || downloading || isBackendLoading}
                     className="flex-1 py-2 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 rounded-lg text-emerald-400 text-xs font-medium transition disabled:opacity-50"
                   >

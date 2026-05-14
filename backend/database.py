@@ -262,20 +262,43 @@ def find_dual_repair_cache(vocal_file_hash: str, accompaniment_file_hash: str, p
 
         filter_keys = {"vocal_file_hash", "accompaniment_file_hash", "vocal_task_id", "accompaniment_task_id",
                        "vocal_filename", "accompaniment_filename", "processing_mode",
-                       "vocal_path", "accompaniment_path", "vocal_output_path", "accompaniment_output_path"}
+                       "vocal_path", "accompaniment_path", "vocal_output_path", "accompaniment_output_path",
+                       "_issues", "source_bit_depth", "file_size", "file_hash",
+                       "original_filename", "original_path", "output_path",
+                       "status", "error", "progress", "step",
+                       "detection_result", "repair_result",
+                       "vocal_params", "accompaniment_params",
+                       "waveform_peaks", "source_sample_rate", "source_channels"}
         filtered_stored = {k: v for k, v in parsed.items() if k not in filter_keys}
-        stored_json = json.dumps(filtered_stored, sort_keys=True, ensure_ascii=False)
 
-        if stored_json == params_json:
+        # 只比较影响修复结果的参数子集
+        repair_param_keys = {
+            "algorithm_version", "sample_rate", "bit_depth",
+            "vocal_declip", "vocal_depop", "vocal_formant_repair",
+            "vocal_de_ess", "vocal_breath_enhance", "vocal_ai_repair",
+            "vocal_bass_enhance", "vocal_air_texture", "vocal_loudness",
+            "vocal_exciter", "vocal_compressor", "vocal_clarity",
+            "inst_declip", "inst_depop", "inst_noise_reduction",
+            "inst_dynamic", "inst_spatial", "inst_warmth",
+            "inst_timbre_protect", "inst_stereo_enhance", "inst_loudness",
+            "vocal_ratio", "accompaniment_ratio",
+            "mastering_style", "processing_mode",
+        }
+        stored_subset = {k: v for k, v in filtered_stored.items() if k in repair_param_keys}
+        input_subset = {k: v for k, v in params.items() if k in repair_param_keys}
+
+        if stored_subset == input_subset:
             logger.info(f"[cache-lookup-dual] task#{i} id={task_id} status={task_status} size={size}")
             result["output_size"] = size
             _parse_json_fields(result)
             return result
         else:
-            stored_keys = set(filtered_stored.keys())
-            input_keys = set(params.keys())
+            stored_keys = set(stored_subset.keys())
+            input_keys = set(input_subset.keys())
             logger.info(f"[cache-lookup-dual] task#{i} id={task_id} MISMATCH: stored_extra={stored_keys - input_keys} input_extra={input_keys - stored_keys}")
-            logger.info(f"[cache-lookup-dual] task#{i} id={task_id} MISMATCH stored={stored_json}")
+            for k in stored_keys & input_keys:
+                if stored_subset[k] != input_subset[k]:
+                    logger.info(f"[cache-lookup-dual] task#{i} id={task_id} key={k} stored={stored_subset[k]} != input={input_subset[k]}")
 
     logger.info(f"[cache-lookup-dual] NO MATCH for vocal_hash={vocal_file_hash} acc_hash={accompaniment_file_hash}")
     return None

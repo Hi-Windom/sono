@@ -123,8 +123,7 @@ export default function ComparePage() {
       const res = await fetch(`${API_BASE}/cache/info`);
       if (res.ok) {
         const data = await res.json();
-        const completed = (data.tasks || []).filter((t: CacheTask) => t.output_exists);
-        setTasks(completed);
+        setTasks(data.tasks || []);
       }
     } catch {
       // ignore
@@ -603,8 +602,8 @@ export default function ComparePage() {
         tasks.map(task => (
           <button
             key={task.id}
-            onClick={() => selectTask(task.id)}
-            className="w-full flex items-center gap-4 p-4 bg-white/5 border border-white/10 rounded-xl text-left"
+            onClick={() => task.output_exists ? selectTask(task.id) : undefined}
+            className={`w-full flex items-center gap-4 p-4 bg-white/5 border rounded-xl text-left ${task.output_exists ? 'border-white/10 cursor-pointer hover:bg-white/[0.07]' : 'border-white/5 cursor-not-allowed opacity-50'}`}
           >
             <div className="w-10 h-10 bg-gradient-to-br from-cyan-500/20 to-purple-500/20 rounded-lg flex items-center justify-center border border-cyan-400/20 shrink-0">
               <svg className="w-5 h-5 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -616,7 +615,11 @@ export default function ComparePage() {
               <p className="text-gray-500 text-xs mt-0.5">
                 {task.created_at ? new Date(task.created_at).toLocaleString('zh-CN') : ''}
                 {' \u2022 '}
-                <span className="text-green-400">已修复</span>
+                {task.output_exists ? (
+                  <span className="text-green-400">已修复</span>
+                ) : (
+                  <span className="text-yellow-500">文件已过期</span>
+                )}
               </p>
             </div>
             <svg className="w-4 h-4 text-gray-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">

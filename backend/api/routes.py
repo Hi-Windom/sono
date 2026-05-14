@@ -3,6 +3,7 @@ import json
 import asyncio
 import logging
 import stat
+import subprocess
 import time
 from datetime import datetime, timezone
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
@@ -1514,6 +1515,85 @@ async def download_file(filename: str, request: Request):
     return StreamingResponse(
         iter_full_file(),
         media_type="audio/wav",
+        headers={
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(file_size),
+            "Content-Disposition": disposition,
+        },
+    )
+
+@router.get("/download-mp3/{task_id}")
+async def download_mp3(task_id: str, request: Request):
+    wav_path = os.path.join(OUTPUT_DIR, f"{task_id}_repaired.wav")
+    if not os.path.exists(wav_path):
+        raise HTTPException(status_code=404, detail="音频文件不存在")
+    mp3_path = os.path.join(OUTPUT_DIR, f"{task_id}_repaired.mp3")
+    if not os.path.exists(mp3_path):
+        try:
+            subprocess.run(
+                ["ffmpeg", "-y", "-i", wav_path, "-codec:a", "libmp3lame", "-b:a", "128k", mp3_path],
+                capture_output=True, timeout=120, check=True
+            )
+        except subprocess.CalledProcessError as e:
+            logger.error(f"[DOWNLOAD-MP3] ffmpeg 转码失败 task_id={task_id}: {e.stderr.decode(errors='replace')}")
+            raise HTTPException(status_code=500, detail="MP3 转码失败")
+        except Exception as e:
+            logger.error(f"[DOWNLOAD-MP3] 转码异常 task_id={task_id}: {e}")
+            raise HTTPException(status_code=500, detail="MP3 转码失败")
+    file_size = os.path.getsize(mp3_path)
+    from urllib.parse import quote
+    download_name = f"{task_id}.mp3"
+    task = get_task(task_id)
+    if task and task.get("original_filename"):
+        original_basename = os.path.splitext(task["original_filename"])[0]
+        download_name = f"{original_basename}.mp3"
+    encoded_name = quote(download_name)
+    disposition = f"attachment; filename*=UTF-8''{encoded_name}"
+    range_header = request.headers.get("range")
+    if range_header:
+        range_match = __import__("re").match(r"bytes=(\d+)-(\d*)", range_header)
+        if range_match:
+            start = int(range_match.group(1))
+            end = int(range_match.group(2)) if range_match.group(2) else file_size - 1
+            if start >= file_size:
+                from fastapi.responses import Response
+                return Response(status_code=416, headers={"Content-Range": f"bytes */{file_size}"})
+            end = min(end, file_size - 1)
+            chunk_size = end - start + 1
+            def iter_file():
+                with open(mp3_path, "rb") as f:
+                    f.seek(start)
+                    remaining = chunk_size
+                    while remaining > 0:
+                        read_size = min(8192, remaining)
+                        data = f.read(read_size)
+                        if not data:
+                            break
+                        remaining -= len(data)
+                        yield data
+            from fastapi.responses import StreamingResponse
+            return StreamingResponse(
+                iter_file(),
+                status_code=206,
+                media_type="audio/mpeg",
+                headers={
+                    "Content-Range": f"bytes {start}-{end}/{file_size}",
+                    "Content-Length": str(chunk_size),
+                    "Accept-Ranges": "bytes",
+                    "Content-Disposition": disposition,
+                },
+            )
+    def iter_full_file():
+        with open(mp3_path, "rb") as f:
+            while True:
+                data = f.read(65536)
+                if not data:
+                    break
+                yield data
+    from fastapi.responses import StreamingResponse
+    return StreamingResponse(
+        iter_full_file(),
+        media_type="audio/mpeg",
         headers={
             "Accept-Ranges": "bytes",
             "Content-Length": str(file_size),
