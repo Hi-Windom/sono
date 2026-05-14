@@ -198,6 +198,11 @@ def find_repair_cache(file_hash: str, params: dict) -> TaskDict | None:
         
         stored_json = json.dumps(parsed, sort_keys=True, ensure_ascii=False)
 
+        # 单轨缓存请求不应匹配双轨任务
+        if parsed.get("processing_mode") == "dual":
+            logger.info(f"[cache-lookup] task#{i} id={task_id} status={task_status} SKIP: dual mode")
+            continue
+
         repair_param_keys = {
             "de_clipping", "noise_reduction", "de_essing", "de_crackle", "de_pop",
             "harmonic_enhance", "dynamic_range", "softness", "presence_boost",

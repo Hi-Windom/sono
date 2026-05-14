@@ -1528,11 +1528,72 @@ async def download_file(filename: str, request: Request):
         },
     )
 
+def _find_rendered_merged(task_id: str) -> str | None:
+    """查找任务的 render 合并缓存 WAV"""
+    if not os.path.isdir(OUTPUT_DIR):
+        return None
+    prefix = f"{task_id}_rendered_"
+    for fname in os.listdir(OUTPUT_DIR):
+        if fname.startswith(prefix) and fname.endswith("_merged.wav"):
+            return os.path.join(OUTPUT_DIR, fname)
+    return None
+
+
+def _merge_wavs(vocal_path: str, acc_path: str, output_path: str):
+    """合并人声和伴奏为混合 WAV"""
+    import numpy as np
+    import soundfile as sf
+    from services.audio_loader import load_audio_with_fallback
+
+    vocal_y, vocal_sr = load_audio_with_fallback(vocal_path, sr=None, mono=False)
+    acc_y, acc_sr = load_audio_with_fallback(acc_path, sr=None, mono=False)
+
+    max_len = max(vocal_y.shape[1], acc_y.shape[1])
+    if vocal_y.shape[1] < max_len:
+        vocal_y = np.pad(vocal_y, ((0, 0), (0, max_len - vocal_y.shape[1])), mode='constant')
+    if acc_y.shape[1] < max_len:
+        acc_y = np.pad(acc_y, ((0, 0), (0, max_len - acc_y.shape[1])), mode='constant')
+
+    mixed = np.clip((vocal_y + acc_y) / 2, -1.0, 1.0)
+    sf.write(output_path, mixed.T if mixed.ndim > 1 else mixed, vocal_sr, subtype="PCM_16")
+
+
 @router.get("/download-mp3/{task_id}")
 async def download_mp3(task_id: str, request: Request):
     wav_path = os.path.join(OUTPUT_DIR, f"{task_id}_repaired.wav")
+    temp_wav = None
+
+    if not os.path.exists(wav_path):
+        task = get_task(task_id)
+        if task:
+            params = task.get("params", {})
+            if isinstance(params, str):
+                import json as _json
+                try:
+                    params = _json.loads(params)
+                except Exception:
+                    params = {}
+            if params.get("processing_mode") == "dual":
+                merged_wav = _find_rendered_merged(task_id)
+                if merged_wav:
+                    wav_path = merged_wav
+                else:
+                    vocal_task_id = params.get("vocal_task_id")
+                    acc_task_id = params.get("accompaniment_task_id")
+                    vocal_wav = os.path.join(OUTPUT_DIR, f"{vocal_task_id}_repaired.wav") if vocal_task_id else None
+                    acc_wav = os.path.join(OUTPUT_DIR, f"{acc_task_id}_repaired.wav") if acc_task_id else None
+                    if vocal_wav and os.path.exists(vocal_wav) and acc_wav and os.path.exists(acc_wav):
+                        temp_wav = os.path.join(OUTPUT_DIR, f"{task_id}_temp_merged.wav")
+                        _merge_wavs(vocal_wav, acc_wav, temp_wav)
+                        wav_path = temp_wav
+                    elif vocal_wav and os.path.exists(vocal_wav):
+                        wav_path = vocal_wav
+                    elif acc_wav and os.path.exists(acc_wav):
+                        wav_path = acc_wav
+
     if not os.path.exists(wav_path):
         raise HTTPException(status_code=404, detail="音频文件不存在")
+
     mp3_path = os.path.join(OUTPUT_DIR, f"{task_id}_repaired.mp3")
     if not os.path.exists(mp3_path):
         try:
@@ -1546,6 +1607,11 @@ async def download_mp3(task_id: str, request: Request):
         except Exception as e:
             logger.error(f"[DOWNLOAD-MP3] 转码失败 task_id={task_id}: {e}")
             raise HTTPException(status_code=500, detail=f"MP3转码失败: {e}")
+
+    # Clean up temporary merged WAV (encoding already succeeded or MP3 existed)
+    if temp_wav and os.path.exists(temp_wav):
+        os.unlink(temp_wav)
+
     file_size = os.path.getsize(mp3_path)
     from urllib.parse import quote
     download_name = f"{task_id}.mp3"
@@ -1590,16 +1656,20 @@ async def download_mp3(task_id: str, request: Request):
                     "Content-Disposition": disposition,
                 },
             )
-    def iter_full_file():
-        with open(mp3_path, "rb") as f:
-            while True:
-                data = f.read(65536)
-                if not data:
-                    break
-                yield data
+    def iter_full_file_and_cleanup():
+        try:
+            with open(mp3_path, "rb") as f:
+                while True:
+                    data = f.read(65536)
+                    if not data:
+                        break
+                    yield data
+        finally:
+            if os.path.exists(mp3_path):
+                os.unlink(mp3_path)
     from fastapi.responses import StreamingResponse
     return StreamingResponse(
-        iter_full_file(),
+        iter_full_file_and_cleanup(),
         media_type="audio/mpeg",
         headers={
             "Accept-Ranges": "bytes",
