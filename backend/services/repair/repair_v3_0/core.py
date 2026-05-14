@@ -64,17 +64,18 @@ def _vocal_formant_repair_1d(data, sr, amount):
     sibilance_smooth = np.convolve(sibilance_gain, np.ones(3)/3, mode='same')
     pop_smooth = np.convolve(pop_gain, np.ones(5)/5, mode='same')
 
-    result = data.astype(np.float64)
+    gain_per_frame = np.ones(n_frames)
     for i in range(n_frames):
-        start = i * hop
-        end = start + frame_len
-        if end > len(result):
-            break
         s_gain = sibilance_smooth[i] if i < len(sibilance_smooth) else 1.0
         p_gain = pop_smooth[i] if i < len(pop_smooth) else 1.0
-        combined_gain = (s_gain + p_gain) / 2
-        result[start:end] *= combined_gain
+        gain_per_frame[i] = (s_gain + p_gain) / 2
 
+    sample_positions = np.arange(len(data))
+    frame_centers = np.arange(n_frames) * hop + frame_len // 2
+    frame_centers = np.clip(frame_centers, 0, len(data) - 1)
+    gain_per_sample = np.interp(sample_positions, frame_centers, gain_per_frame)
+
+    result = data.astype(np.float64) * gain_per_sample
     return result.astype(data.dtype)
 
 
@@ -246,11 +247,151 @@ def _soft_peak_limit(y, threshold=0.9):
 
 def _hf_protect(y, sr):
     nyq = sr / 2
-    cutoff = 3200
+    cutoff = 4100
     if cutoff >= nyq:
         return y
     sos = butter(6, cutoff / nyq, btype='low', output='sos')
     return sosfiltfilt(sos, y, axis=-1)
+
+
+def _spectral_hf_gate(y, sr, cutoff_hz=5000, strength=5.0):
+    if y.ndim == 1:
+        y = y.reshape(1, -1)
+        _spectral_hf_gate(y, sr, cutoff_hz, strength)
+        return y[0]
+
+    n_samples = y.shape[1]
+    if n_samples < 2048:
+        return _hf_protect(y, sr)
+
+    gate_n_fft = 1024
+    gate_hop = 256
+
+    for ch in range(y.shape[0]):
+        data = y[ch].astype(np.float64)
+        S = stft(data, n_fft=gate_n_fft, hop_length=gate_hop)
+        magnitude = np.abs(S)
+        phase = np.angle(S)
+
+        freqs = np.arange(magnitude.shape[0]) * sr / gate_n_fft
+        hf_mask = freqs >= cutoff_hz
+
+        if not np.any(hf_mask):
+            continue
+
+        noise_floor = np.percentile(magnitude, 10, axis=1, keepdims=True) + 1e-10
+        threshold = noise_floor * (1.0 + strength)
+        threshold_bc = np.broadcast_to(threshold, magnitude.shape)
+
+        gate = np.ones_like(magnitude)
+        noise_bins = magnitude < threshold
+        gate[noise_bins] = (magnitude[noise_bins] / threshold_bc[noise_bins]) ** 2
+        gate = np.maximum(gate, 0.005)
+
+        gate[~hf_mask] = 1.0
+
+        smooth_kernel_freq = np.ones(5) / 5
+        gate_smooth = np.zeros_like(gate)
+        for f in range(gate.shape[1]):
+            gate_smooth[:, f] = np.convolve(gate[:, f], smooth_kernel_freq, mode='same')
+
+        smooth_kernel_time = np.ones(3) / 3
+        for b in range(gate_smooth.shape[0]):
+            gate_smooth[b] = np.convolve(gate_smooth[b], smooth_kernel_time, mode='same')
+
+        S_processed = magnitude * gate_smooth * np.exp(1j * phase)
+        y_out = istft(S_processed, hop_length=gate_hop, length=n_samples)
+
+        if len(y_out) > n_samples:
+            y_out = y_out[:n_samples]
+        elif len(y_out) < n_samples:
+            y_out = np.pad(y_out, (0, n_samples - len(y_out)))
+
+        y[ch] = y_out.astype(y.dtype)
+
+    return y
+
+
+def _harmonic_bass_enhance(y, sr, amount, music_type):
+    if amount <= 0:
+        return y
+    if y.ndim == 1:
+        y_2d = y.reshape(1, -1)
+        _harmonic_bass_enhance(y_2d, sr, amount, music_type)
+        return y
+    nyq = sr / 2
+    low_cut = min(250, nyq * 0.9)
+    sos_low = butter(4, low_cut / nyq, btype='low', output='sos')
+    body_low = min(500, nyq * 0.9)
+    body_high = min(200, nyq * 0.9)
+    if body_low > body_high:
+        sos_body = butter(4, [body_high / nyq, body_low / nyq], btype='band', output='sos')
+    else:
+        sos_body = None
+    for ch in range(y.shape[0]):
+        low_band = sosfiltfilt(sos_low, y[ch])
+        half_len = len(low_band) // 2
+        averaged = (low_band[0::2][:half_len] + low_band[1::2][:half_len]) * 0.5
+        x_short = np.linspace(0, 1, len(averaged))
+        x_long = np.linspace(0, 1, len(low_band))
+        sub_harmonic = np.interp(x_long, x_short, averaged)
+        sub_harmonic = sosfiltfilt(sos_low, sub_harmonic)
+        excited = np.tanh(low_band * 1.5) * np.max(np.abs(low_band)) / (np.max(np.abs(np.tanh(low_band * 1.5))) + 1e-10)
+        body = np.zeros_like(y[ch])
+        if sos_body is not None:
+            body = sosfiltfilt(sos_body, y[ch])
+        y[ch] += sub_harmonic * amount * 0.15 + excited * amount * 0.1 + body * (10 ** (1.5 / 20) - 1) * amount
+        del low_band, sub_harmonic, excited, body
+    y = _spectral_hf_gate(y, sr, cutoff_hz=5000, strength=1.5)
+    return y
+
+
+def _air_texture_reconstruct(y, sr, amount, music_type):
+    if amount <= 0:
+        return y
+    if y.ndim == 1:
+        y_2d = y.reshape(1, -1)
+        _air_texture_reconstruct(y_2d, sr, amount, music_type)
+        return y
+    for ch in range(y.shape[0]):
+        n_samples = y.shape[1]
+        if n_samples < N_FFT:
+            continue
+        S = stft(y[ch], n_fft=N_FFT, hop_length=HOP_LENGTH)
+        freqs = np.arange(S.shape[0]) * sr / N_FFT
+        mid_mask = (freqs >= 2000) & (freqs < 8000)
+        high_mask = (freqs >= 8000) & (freqs < 16000)
+        air_mask = freqs >= 10000
+
+        mid_energy = np.mean(np.abs(S[mid_mask, :]) ** 2, axis=0) if np.any(mid_mask) else np.ones(S.shape[1])
+        mid_envelope = np.sqrt(mid_energy + 1e-10)
+        mid_envelope_norm = mid_envelope / (np.max(mid_envelope) + 1e-10)
+
+        snr_estimate = np.mean(mid_envelope) / (np.median(np.abs(S[:int(2000/sr*N_FFT), :])) + 1e-10)
+        mapping_scale = min(1.0, max(0.0, snr_estimate * 0.5))
+
+        reconstructed = np.zeros_like(S)
+        if np.any(mid_mask) and np.any(high_mask):
+            harmonic_ratio = 0.6 * mapping_scale
+            for j in range(S.shape[1]):
+                high_indices = np.where(high_mask)[0]
+                mid_indices = np.where(mid_mask)[0]
+                n_map = min(len(high_indices), len(mid_indices))
+                if n_map > 0:
+                    for k in range(n_map):
+                        hi = high_indices[k]
+                        mi = mid_indices[k]
+                        reconstructed[hi, j] = np.abs(S[mi, j]) * harmonic_ratio * mid_envelope_norm[j] * np.exp(1j * np.angle(S[hi, j]))
+        if np.any(air_mask):
+            air_indices = np.where(air_mask)[0]
+            noise = np.random.randn(len(air_indices), S.shape[1]) * 0.001 * amount * mapping_scale
+            noise *= mid_envelope_norm[np.newaxis, :]
+            reconstructed[air_indices, :] += noise * np.exp(1j * np.angle(S[air_indices, :]))
+        y_recon = istft(reconstructed, hop_length=HOP_LENGTH, length=n_samples)
+        y[ch] += y_recon * amount * 0.2 * mapping_scale
+        del S, reconstructed, y_recon
+    y = _spectral_hf_gate(y, sr, cutoff_hz=5000, strength=1.5)
+    return y
 
 
 def _adaptive_loudness_normalize(y, sr, target_loudness_lu=-14.0):
@@ -299,14 +440,12 @@ def process_vocal_track(y, sr, params):
             pass
 
     if params.get("bass_enhance", 0) > 0:
-        from services.repair.repair_v2_4.core import _harmonic_bass_enhance
         try:
             y = _harmonic_bass_enhance(y, sr, params["bass_enhance"], "vocal")
         except Exception:
             pass
 
     if params.get("air_texture", 0) > 0:
-        from services.repair.repair_v2_4.core import _air_texture_reconstruct
         try:
             y = _air_texture_reconstruct(y, sr, params["air_texture"], "vocal")
         except Exception:
@@ -316,6 +455,7 @@ def process_vocal_track(y, sr, params):
         y = _adaptive_loudness_normalize(y, sr, -14.0)
 
     y = _soft_peak_limit(y, threshold=0.9)
+    y = _spectral_hf_gate(y, sr)
     y = _hf_protect(y, sr)
     return y
 
@@ -352,9 +492,9 @@ def _mastering_standard(y, sr):
     sos_hp = butter(4, 20 / nyq, btype='high', output='sos')
     y = sosfiltfilt(sos_hp, y, axis=-1)
 
-    sos_presence = butter(4, [3000/nyq, min(5000, nyq*0.95)/nyq], btype='band', output='sos')
+    sos_presence = butter(4, [3000/nyq, min(4000, nyq*0.95)/nyq], btype='band', output='sos')
     presence_band = sosfiltfilt(sos_presence, y, axis=-1)
-    y = y.astype(np.float64) + presence_band * 0.08
+    y = y.astype(np.float64) + presence_band * 0.06
 
     peak = np.max(np.abs(y))
     if peak > 0.99:
@@ -552,6 +692,7 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
         if progress_callback:
             progress_callback(0.90, "v3.0 导出...")
 
+        mixed = _soft_peak_limit(mixed, threshold=0.95)
         mixed = _mastering_standard(mixed, working_sr)
         mixed = _soft_peak_limit(mixed, threshold=0.9)
         mixed = _hf_protect(mixed, working_sr)

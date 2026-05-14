@@ -259,18 +259,77 @@ def process_vocal_track(y, sr, params):
     if params.get("loudness", 0) > 0:
         y = _loudness_normalize(y, sr, -14.0)
 
-    y = _hf_protect(y, sr)
     y = _soft_peak_limit(y, threshold=0.9)
+    y = _spectral_hf_gate(y, sr)
+    y = _hf_protect(y, sr)
     return y
 
 
 def _hf_protect(y, sr):
     nyq = sr / 2
-    cutoff = 4200
+    cutoff = 4100
     if cutoff >= nyq:
         return y
     sos = butter(6, cutoff / nyq, btype='low', output='sos')
     return sosfiltfilt(sos, y, axis=-1)
+
+
+def _spectral_hf_gate(y, sr, cutoff_hz=5000, strength=5.0):
+    if y.ndim == 1:
+        y = y.reshape(1, -1)
+        _spectral_hf_gate(y, sr, cutoff_hz, strength)
+        return y[0]
+
+    n_samples = y.shape[1]
+    if n_samples < 2048:
+        return _hf_protect(y, sr)
+
+    gate_n_fft = 1024
+    gate_hop = 256
+
+    for ch in range(y.shape[0]):
+        data = y[ch].astype(np.float64)
+        S = stft(data, n_fft=gate_n_fft, hop_length=gate_hop)
+        magnitude = np.abs(S)
+        phase = np.angle(S)
+
+        freqs = np.arange(magnitude.shape[0]) * sr / gate_n_fft
+        hf_mask = freqs >= cutoff_hz
+
+        if not np.any(hf_mask):
+            continue
+
+        noise_floor = np.percentile(magnitude, 10, axis=1, keepdims=True) + 1e-10
+        threshold = noise_floor * (1.0 + strength)
+        threshold_bc = np.broadcast_to(threshold, magnitude.shape)
+
+        gate = np.ones_like(magnitude)
+        noise_bins = magnitude < threshold
+        gate[noise_bins] = (magnitude[noise_bins] / threshold_bc[noise_bins]) ** 2
+        gate = np.maximum(gate, 0.005)
+
+        gate[~hf_mask] = 1.0
+
+        smooth_kernel_freq = np.ones(5) / 5
+        gate_smooth = np.zeros_like(gate)
+        for f in range(gate.shape[1]):
+            gate_smooth[:, f] = np.convolve(gate[:, f], smooth_kernel_freq, mode='same')
+
+        smooth_kernel_time = np.ones(3) / 3
+        for b in range(gate_smooth.shape[0]):
+            gate_smooth[b] = np.convolve(gate_smooth[b], smooth_kernel_time, mode='same')
+
+        S_processed = magnitude * gate_smooth * np.exp(1j * phase)
+        y_out = istft(S_processed, hop_length=gate_hop, length=n_samples)
+
+        if len(y_out) > n_samples:
+            y_out = y_out[:n_samples]
+        elif len(y_out) < n_samples:
+            y_out = np.pad(y_out, (0, n_samples - len(y_out)))
+
+        y[ch] = y_out.astype(y.dtype)
+
+    return y
 
 
 def _apply_bass_enhance_lite(y, sr, amount):
@@ -331,7 +390,7 @@ def _mastering_standard_lite(y, sr):
 
     sos_low = butter(2, 60 / nyq, btype='high', output='sos')
     sos_high = butter(2, 12000 / nyq, btype='low', output='sos')
-    sos_presence = butter(2, [3000 / nyq, 5000 / nyq], btype='band', output='sos')
+    sos_presence = butter(2, [3000 / nyq, 4000 / nyq], btype='band', output='sos')
 
     for ch in range(y.shape[0]):
         data = y[ch].astype(np.float64)
@@ -339,7 +398,7 @@ def _mastering_standard_lite(y, sr):
         data = sosfiltfilt(sos_high, data)
 
         presence = sosfiltfilt(sos_presence, data)
-        data = data + presence * 0.15
+        data = data + presence * 0.10
 
         rms = np.sqrt(np.mean(data ** 2))
         if rms > 1e-10:
@@ -512,6 +571,7 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
 
     mixed = _mastering_standard_lite(mixed, working_sr)
     mixed = _soft_peak_limit(mixed, threshold=0.9)
+    mixed = _spectral_hf_gate(mixed, working_sr)
     mixed = _hf_protect(mixed, working_sr)
 
     if mixed.dtype == np.float32:

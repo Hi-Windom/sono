@@ -64,17 +64,18 @@ def _vocal_formant_repair_1d(data, sr, amount):
     sibilance_smooth = np.convolve(sibilance_gain, np.ones(3)/3, mode='same')
     pop_smooth = np.convolve(pop_gain, np.ones(5)/5, mode='same')
 
-    result = data.astype(np.float64)
+    gain_per_frame = np.ones(n_frames)
     for i in range(n_frames):
-        start = i * hop
-        end = start + frame_len
-        if end > len(result):
-            break
         s_gain = sibilance_smooth[i] if i < len(sibilance_smooth) else 1.0
         p_gain = pop_smooth[i] if i < len(pop_smooth) else 1.0
-        combined_gain = (s_gain + p_gain) / 2
-        result[start:end] *= combined_gain
+        gain_per_frame[i] = (s_gain + p_gain) / 2
 
+    sample_positions = np.arange(len(data))
+    frame_centers = np.arange(n_frames) * hop + frame_len // 2
+    frame_centers = np.clip(frame_centers, 0, len(data) - 1)
+    gain_per_sample = np.interp(sample_positions, frame_centers, gain_per_frame)
+
+    result = data.astype(np.float64) * gain_per_sample
     return result.astype(data.dtype)
 
 
@@ -246,11 +247,73 @@ def _soft_peak_limit(y, threshold=0.9):
 
 def _hf_protect(y, sr):
     nyq = sr / 2
-    cutoff = 3500
+    cutoff = 4100
     if cutoff >= nyq:
         return y
     sos = butter(6, cutoff / nyq, btype='low', output='sos')
     return sosfiltfilt(sos, y, axis=-1)
+
+
+def _spectral_hf_gate(y, sr, cutoff_hz=5000, strength=2.0):
+    if y.ndim == 1:
+        y = y.reshape(1, -1)
+        _spectral_hf_gate(y, sr, cutoff_hz, strength)
+        return y[0]
+
+    n_samples = y.shape[1]
+    if n_samples < 2048:
+        return _hf_protect(y, sr)
+
+    gate_n_fft = 1024
+    gate_hop = 256
+
+    for ch in range(y.shape[0]):
+        data = y[ch].astype(np.float64)
+        S = stft(data, n_fft=gate_n_fft, hop_length=gate_hop)
+        magnitude = np.abs(S)
+        phase = np.angle(S)
+
+        freqs = np.arange(magnitude.shape[0]) * sr / gate_n_fft
+        hf_mask = freqs >= cutoff_hz
+
+        if not np.any(hf_mask):
+            continue
+
+        frame_energy = np.sum(magnitude ** 2, axis=0)
+        n_quiet = max(1, len(frame_energy) // 5)
+        quiet_idx = np.argsort(frame_energy)[:n_quiet]
+        noise_floor = np.median(magnitude[:, quiet_idx], axis=1, keepdims=True) + 1e-10
+
+        threshold = noise_floor * strength
+        threshold_bc = np.broadcast_to(threshold, magnitude.shape)
+
+        gate = np.ones_like(magnitude)
+        noise_bins = magnitude < threshold
+        gate[noise_bins] = magnitude[noise_bins] / threshold_bc[noise_bins]
+        gate = np.maximum(gate, 0.001)
+
+        gate[~hf_mask] = 1.0
+
+        smooth_kernel_freq = np.ones(3) / 3
+        gate_smooth = np.zeros_like(gate)
+        for f in range(gate.shape[1]):
+            gate_smooth[:, f] = np.convolve(gate[:, f], smooth_kernel_freq, mode='same')
+
+        smooth_kernel_time = np.ones(3) / 3
+        for b in range(gate_smooth.shape[0]):
+            gate_smooth[b] = np.convolve(gate_smooth[b], smooth_kernel_time, mode='same')
+
+        S_processed = magnitude * gate_smooth * np.exp(1j * phase)
+        y_out = istft(S_processed, hop_length=gate_hop, length=n_samples)
+
+        if len(y_out) > n_samples:
+            y_out = y_out[:n_samples]
+        elif len(y_out) < n_samples:
+            y_out = np.pad(y_out, (0, n_samples - len(y_out)))
+
+        y[ch] = y_out.astype(y.dtype)
+
+    return y
 
 
 def _adaptive_loudness_normalize(y, sr, target_loudness_lu=-14.0):
@@ -312,23 +375,26 @@ def _vocal_ai_repair_enhanced(y, sr, strength):
         phase = np.angle(S)
 
         n_bins, n_frames = magnitude.shape
-        threshold_factor = 1.0 + strength * 3.0
-        smoothing_frames = max(1, int(0.01 * sr / HOP_LENGTH))
 
         spectral_floor = np.median(magnitude, axis=1, keepdims=True) + 1e-10
-        artifact_mask = magnitude > (spectral_floor * threshold_factor)
+        threshold = spectral_floor * (1.0 + strength * 2.5)
 
-        gain_map = np.where(artifact_mask,
-                            (spectral_floor * threshold_factor) / (magnitude + 1e-10),
-                            1.0)
-        gain_map = np.clip(gain_map, 1.0 - strength * 0.7, 1.0)
+        gain_map = np.where(magnitude < threshold, magnitude / (threshold + 1e-10), 1.0)
+        gain_map = np.maximum(gain_map, 1.0 - strength * 0.3)
 
+        smoothing_frames = max(2, int(0.02 * sr / HOP_LENGTH))
         kernel = np.ones(smoothing_frames) / smoothing_frames
         gain_map_smooth = np.zeros_like(gain_map)
         for b in range(n_bins):
             gain_map_smooth[b] = np.convolve(gain_map[b], kernel, mode='same')
 
-        S_repaired = magnitude * gain_map_smooth * np.exp(1j * phase)
+        spectral_kernel_size = max(3, n_bins // 16)
+        spectral_kernel = np.ones(spectral_kernel_size) / spectral_kernel_size
+        gain_map_spectral = np.zeros_like(gain_map_smooth)
+        for f in range(n_frames):
+            gain_map_spectral[:, f] = np.convolve(gain_map_smooth[:, f], spectral_kernel, mode='same')
+
+        S_repaired = magnitude * gain_map_spectral * np.exp(1j * phase)
         y_out = istft(S_repaired, hop_length=HOP_LENGTH, length=len(data))
         if len(y_out) > len(data):
             y_out = y_out[:len(data)]
@@ -349,20 +415,18 @@ def _vocal_exciter(y, sr, amount):
         return y[0]
 
     nyq = sr / 2
-    sos_bandpass = butter(4, [2000/nyq, min(5000, nyq*0.95)/nyq], btype='band', output='sos')
-    sos_hf_lp = butter(4, min(6000, nyq*0.95) / nyq, btype='low', output='sos')
+    sos_bandpass = butter(4, [2000/nyq, min(4000, nyq*0.95)/nyq], btype='band', output='sos')
 
     for ch in range(y.shape[0]):
         dry = y[ch].astype(np.float64)
 
-        wet = np.tanh(dry * 2.0) * 0.7
+        wet = np.tanh(dry * 1.2) * 0.4
         wet = wet / (np.max(np.abs(wet)) + 1e-10)
-        wet = sosfiltfilt(sos_hf_lp, wet)
 
         wet_band = sosfiltfilt(sos_bandpass, wet)
         wet_band = wet_band * 0.7
 
-        mix = dry + wet_band * amount * 0.5
+        mix = dry + wet_band * amount * 0.4
         peak = np.max(np.abs(mix))
         if peak > 0.99:
             mix *= 0.99 / peak
@@ -621,9 +685,9 @@ def _mastering_standard(y, sr):
     sos_hp = butter(4, 20 / nyq, btype='high', output='sos')
     y = sosfiltfilt(sos_hp, y, axis=-1)
 
-    sos_presence = butter(4, [3000/nyq, min(5000, nyq*0.95)/nyq], btype='band', output='sos')
+    sos_presence = butter(4, [3000/nyq, min(4000, nyq*0.95)/nyq], btype='band', output='sos')
     presence_band = sosfiltfilt(sos_presence, y, axis=-1)
-    y = y.astype(np.float64) + presence_band * 0.12
+    y = y.astype(np.float64) + presence_band * 0.06
 
     peak = np.max(np.abs(y))
     if peak > 0.99:
@@ -729,14 +793,14 @@ def process_vocal_track(y, sr, params):
         y = _vocal_ai_repair_enhanced(y, sr, params["ai_repair_enhanced"])
 
     if params.get("bass_enhance", 0) > 0:
-        from services.repair.repair_v2_4.core import _harmonic_bass_enhance
+        from services.repair.repair_v3_0.core import _harmonic_bass_enhance
         try:
             y = _harmonic_bass_enhance(y, sr, params["bass_enhance"], "vocal")
         except Exception:
             pass
 
     if params.get("air_texture", 0) > 0:
-        from services.repair.repair_v2_4.core import _air_texture_reconstruct
+        from services.repair.repair_v3_0.core import _air_texture_reconstruct
         try:
             y = _air_texture_reconstruct(y, sr, params["air_texture"], "vocal")
         except Exception:
@@ -758,6 +822,7 @@ def process_vocal_track(y, sr, params):
         y = _adaptive_loudness_normalize(y, sr, -14.0)
 
     y = _soft_peak_limit(y, threshold=0.9)
+    y = _spectral_hf_gate(y, sr)
     y = _hf_protect(y, sr)
     return y
 
@@ -807,6 +872,7 @@ def process_instrument_track(y, sr, params):
         y = _adaptive_loudness_normalize(y, sr, -14.0)
 
     y = _soft_peak_limit(y, threshold=0.9)
+    y = _spectral_hf_gate(y, sr)
     y = _hf_protect(y, sr)
     return y
 
@@ -955,6 +1021,7 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
             progress_callback(0.85, "v3.1 母带处理...")
 
         mastering_style = params.get("mastering_style", "standard")
+        mixed = _soft_peak_limit(mixed, threshold=0.95)
         if mastering_style == "powerful":
             mixed = _mastering_powerful(mixed, working_sr)
             issues_found.append("强力母带")
@@ -969,6 +1036,7 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
             progress_callback(0.90, "v3.1 导出...")
 
         mixed = _soft_peak_limit(mixed, threshold=0.9)
+        mixed = _spectral_hf_gate(mixed, working_sr)
         mixed = _hf_protect(mixed, working_sr)
 
         if mixed.dtype == np.float32:
