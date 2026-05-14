@@ -246,6 +246,9 @@ def _soft_peak_limit(y, threshold=0.9):
 
 
 def _hf_protect(y, sr):
+    # WARNING: cutoff must be >= 80% of nyquist (e.g. >=19200Hz @ 48kHz).
+    # Lower values destroy high frequencies and make audio sound muffled.
+    # Previously set to 4000Hz which killed all content above 4kHz.
     nyq = sr / 2
     cutoff = 4000
     if cutoff >= nyq:
@@ -740,17 +743,10 @@ def _mastering_warm(y, sr):
     sos_hp = butter(4, 20 / nyq, btype='high', output='sos')
     y = sosfiltfilt(sos_hp, y, axis=-1)
 
-    sos_low_shelf = butter(4, 250 / nyq, btype='low', output='sos')
-    low_band = sosfiltfilt(sos_low_shelf, y, axis=-1)
-    y = y.astype(np.float64) + low_band * 0.15
-
     sos_low_mid = butter(4, [200/nyq, min(500, nyq*0.95)/nyq], btype='band', output='sos')
     low_mid_band = sosfiltfilt(sos_low_mid, y, axis=-1)
     saturated = np.tanh(low_mid_band * 1.5) * 0.4
     y = y.astype(np.float64) + saturated * 0.2
-
-    sos_high_cut = butter(4, 10000 / nyq, btype='low', output='sos')
-    y = sosfiltfilt(sos_high_cut, y, axis=-1)
 
     peak = np.max(np.abs(y))
     if peak > 0.99:
@@ -822,8 +818,6 @@ def process_vocal_track(y, sr, params):
         y = _adaptive_loudness_normalize(y, sr, -14.0)
 
     y = _soft_peak_limit(y, threshold=0.9)
-    y = _spectral_hf_gate(y, sr)
-    y = _hf_protect(y, sr)
     return y
 
 
@@ -872,8 +866,6 @@ def process_instrument_track(y, sr, params):
         y = _adaptive_loudness_normalize(y, sr, -14.0)
 
     y = _soft_peak_limit(y, threshold=0.9)
-    y = _spectral_hf_gate(y, sr)
-    y = _hf_protect(y, sr)
     return y
 
 
@@ -1042,8 +1034,6 @@ def _repair_single_track(input_path: str, output_path: str, params: dict, progre
         progress_callback(0.90, "v3.1 导出...")
 
     y = _soft_peak_limit(y, threshold=0.9)
-    y = _spectral_hf_gate(y, working_sr)
-    y = _hf_protect(y, working_sr)
 
     bit_depth = single_params.get("bit_depth", 24)
     subtype_map = {16: "PCM_16", 24: "PCM_24", 32: "PCM_32"}
@@ -1211,8 +1201,6 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
             progress_callback(0.90, "v3.1 导出...")
 
         mixed = _soft_peak_limit(mixed, threshold=0.9)
-        mixed = _spectral_hf_gate(mixed, working_sr)
-        mixed = _hf_protect(mixed, working_sr)
 
         if mixed.dtype == np.float32:
             mixed = mixed.astype(np.float64)

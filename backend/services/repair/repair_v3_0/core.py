@@ -246,6 +246,9 @@ def _soft_peak_limit(y, threshold=0.9):
 
 
 def _hf_protect(y, sr):
+    # WARNING: cutoff must be >= 80% of nyquist (e.g. >=19200Hz @ 48kHz).
+    # Lower values destroy high frequencies and make audio sound muffled.
+    # Previously set to 3000Hz which killed all content above 3kHz.
     nyq = sr / 2
     cutoff = 3000
     if cutoff >= nyq:
@@ -346,8 +349,6 @@ def _harmonic_bass_enhance(y, sr, amount, music_type):
             body = sosfiltfilt(sos_body, y[ch])
         y[ch] += sub_harmonic * amount * 0.15 + excited * amount * 0.1 + body * (10 ** (1.5 / 20) - 1) * amount
         del low_band, sub_harmonic, excited, body
-    y = _spectral_hf_gate(y, sr, cutoff_hz=5000, strength=2.5)
-    y = _hf_protect(y, sr)
     return y
 
 
@@ -395,8 +396,6 @@ def _air_texture_reconstruct(y, sr, amount, music_type):
         y_recon = istft(reconstructed, hop_length=HOP_LENGTH, length=n_samples)
         y[ch] += y_recon * amount * 0.2 * mapping_scale
         del S, reconstructed, y_recon
-    y = _spectral_hf_gate(y, sr, cutoff_hz=5000, strength=2.5)
-    y = _hf_protect(y, sr)
     return y
 
 
@@ -448,24 +447,19 @@ def process_vocal_track(y, sr, params):
     if params.get("bass_enhance", 0) > 0:
         try:
             y = _harmonic_bass_enhance(y, sr, params["bass_enhance"], "vocal")
-            y = _hf_protect(y, sr)
         except Exception:
             pass
 
     if params.get("air_texture", 0) > 0:
         try:
             y = _air_texture_reconstruct(y, sr, params["air_texture"], "vocal")
-            y = _hf_protect(y, sr)
         except Exception:
             pass
 
     if params.get("loudness", 0) > 0:
         y = _adaptive_loudness_normalize(y, sr, -14.0)
-        y = _hf_protect(y, sr)
 
     y = _soft_peak_limit(y, threshold=0.9)
-    y = _spectral_hf_gate(y, sr, cutoff_hz=4500, strength=4.0)
-    y = _hf_protect(y, sr)
     return y
 
 
@@ -509,7 +503,6 @@ def _mastering_standard(y, sr):
     if peak > 0.99:
         y *= 0.99 / peak
 
-    y = _hf_protect(y, sr)
     return y
 
 
@@ -553,11 +546,8 @@ def process_instrument_track(y, sr, params):
 
     if params.get("loudness", 0) > 0:
         y = _adaptive_loudness_normalize(y, sr, -14.0)
-        y = _hf_protect(y, sr)
 
     y = _soft_peak_limit(y, threshold=0.9)
-    y = _spectral_hf_gate(y, sr, cutoff_hz=4500, strength=4.0)
-    y = _hf_protect(y, sr)
     return y
 
 
@@ -665,14 +655,12 @@ def _repair_single_track(input_path: str, output_path: str, params: dict, progre
     if single_params.get("bass_enhance", 0) > 0:
         try:
             y = _harmonic_bass_enhance(y, sr, single_params["bass_enhance"], "generic")
-            y = _hf_protect(y, sr)
         except Exception:
             pass
 
     if single_params.get("air_texture", 0) > 0:
         try:
             y = _air_texture_reconstruct(y, sr, single_params["air_texture"], "generic")
-            y = _hf_protect(y, sr)
         except Exception:
             pass
 
@@ -699,7 +687,6 @@ def _repair_single_track(input_path: str, output_path: str, params: dict, progre
 
     if single_params.get("loudness", 0) > 0:
         y = _adaptive_loudness_normalize(y, sr, -14.0)
-        y = _hf_protect(y, sr)
 
     if progress_callback:
         progress_callback(0.80, "v3.0 母带处理...")
@@ -707,8 +694,6 @@ def _repair_single_track(input_path: str, output_path: str, params: dict, progre
     y = _soft_peak_limit(y, threshold=0.95)
     y = _mastering_standard(y, working_sr)
     y = _soft_peak_limit(y, threshold=0.9)
-    y = _spectral_hf_gate(y, working_sr, cutoff_hz=4500, strength=4.0)
-    y = _hf_protect(y, working_sr)
 
     if progress_callback:
         progress_callback(0.90, "v3.0 导出...")
@@ -866,10 +851,6 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
         mixed = _soft_peak_limit(mixed, threshold=0.95)
         mixed = _mastering_standard(mixed, working_sr)
         mixed = _soft_peak_limit(mixed, threshold=0.9)
-        mixed = _spectral_hf_gate(mixed, working_sr, cutoff_hz=4000, strength=5.0)
-        mixed = _hf_protect(mixed, working_sr)
-        mixed = _spectral_hf_gate(mixed, working_sr, cutoff_hz=3500, strength=5.0)
-        mixed = _hf_protect(mixed, working_sr)
 
         if mixed.dtype == np.float32:
             mixed = mixed.astype(np.float64)

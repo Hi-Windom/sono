@@ -243,6 +243,7 @@ export function useAudioProcessor() {
 
   const applyAlgorithmVersion = useCallback((version: string) => {
     setAlgorithmVersionState(version);
+    setRenderDownloadUrl(null);
     const algoInfo = availableAlgorithms.find(a => a.name === version);
     if (!algoInfo) return;
 
@@ -1313,7 +1314,7 @@ export function useAudioProcessor() {
           writeLog('[applySettings] renderAndDownload 已在进行，跳过');
         } else {
           const currentOpts = { ...processingOptions };
-          renderAndDownload(currentOpts).then(result => {
+          renderAndDownload(currentOpts, effectiveAlgorithmVersion).then(result => {
             if (result?.downloadUrl) {
               setRenderDownloadUrl(result.downloadUrl);
             }
@@ -1801,7 +1802,7 @@ export function useAudioProcessor() {
     updateTime();
   }, [stopPlaying, getAudioContext]);
 
-  const renderAndDownload = useCallback(async (overrideOptions?: ProcessingOptions) => {
+  const renderAndDownload = useCallback(async (overrideOptions?: ProcessingOptions, overrideAlgoVersion?: string) => {
     if (renderActiveRef.current) {
       writeLog('[renderAndDownload] 已有渲染在进行中，跳过');
       return null;
@@ -1809,7 +1810,7 @@ export function useAudioProcessor() {
     renderActiveRef.current = true;
 
     const opts = overrideOptions || processingOptionsRef.current;
-    const algoVer = algorithmVersionRef.current;
+    const algoVer = overrideAlgoVersion || algorithmVersionRef.current;
     const fileName = generateExportFilename(audioFile?.name, algoVer, opts.sampleRate, opts.bitDepth);
 
     if (!taskIdRef.current) return null;
@@ -1960,7 +1961,7 @@ export function useAudioProcessor() {
     writeLog(`[handleUseRepairCache] 开始调用 renderAndDownload`);
     forceRenderRef.current = false;
     const currentOpts = { ...processingOptions };
-    renderAndDownload(currentOpts).then(result => {
+    renderAndDownload(currentOpts, algorithmVersion).then(result => {
       writeLog(`[handleUseRepairCache] renderAndDownload 完成: ${!!result}`);
       if (result?.downloadUrl) {
         setRenderDownloadUrl(result.downloadUrl);
@@ -1970,7 +1971,7 @@ export function useAudioProcessor() {
       writeLog(`[handleUseRepairCache] renderAndDownload 失败: ${err}`);
       setShowDownloadModal(true);
     });
-  }, [cacheHitInfo, loadAudioFromUrl, wavInfo, renderAndDownload]);
+  }, [cacheHitInfo, loadAudioFromUrl, wavInfo, renderAndDownload, algorithmVersion]);
 
   const handleRenderCacheDownload = useCallback((cache: RenderCacheEntry, downloadUrl: string, filename: string) => {
     writeLog(`[handleRenderCacheDownload] 秒下: ${cache.filename}`);

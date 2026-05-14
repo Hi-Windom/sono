@@ -194,7 +194,7 @@ export default function RepairPage() {
         setProcessingStep('准备渲染交付...');
         setProcessingProgress(0);
         try {
-          await renderAndDownload();
+          await renderAndDownload(undefined, algorithmVersion);
         } catch (e) {
           console.error('双轨渲染交付失败:', e);
         }
@@ -215,7 +215,7 @@ export default function RepairPage() {
         setQueueStatus(queue);
       },
     });
-  }, [stopDualTrackPolling, setProcessingProgress, setProcessingStep, setIsProcessing, setBackendError, loadAudioFromUrl, setBackendProcessedBuffer, setBackendWaveformPeaks, setIsTaskStuck, setStuckInfo, setQueueStatus, processingOptions.sampleRate, renderAndDownload, setTaskId, sessionActions]);
+  }, [stopDualTrackPolling, setProcessingProgress, setProcessingStep, setIsProcessing, setBackendError, loadAudioFromUrl, setBackendProcessedBuffer, setBackendWaveformPeaks, setIsTaskStuck, setStuckInfo, setQueueStatus, processingOptions.sampleRate, renderAndDownload, setTaskId, sessionActions, algorithmVersion]);
 
   const handleDualTrackUpload = useCallback(async (vocalFile: File, accompanimentFile: File) => {
     try {
@@ -509,12 +509,12 @@ export default function RepairPage() {
     setProcessingStep('准备渲染交付...');
     setProcessingProgress(0);
     try {
-      await renderAndDownload();
+      await renderAndDownload(undefined, algorithmVersion);
     } catch (e) {
       console.error('双轨渲染交付失败:', e);
     }
     setCacheTriggerKey(k => k + 1);
-  }, [dualCacheHitInfo, processingOptions.sampleRate, renderAndDownload, sessionActions, setTaskId, loadAudioFromUrl, setBackendProcessedBuffer, setBackendWaveformPeaks]);
+  }, [dualCacheHitInfo, processingOptions.sampleRate, renderAndDownload, sessionActions, setTaskId, loadAudioFromUrl, setBackendProcessedBuffer, setBackendWaveformPeaks, algorithmVersion]);
 
   const handleDualReRepair = useCallback(() => {
     setShowDualRepairCacheModal(false);

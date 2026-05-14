@@ -301,6 +301,7 @@ def find_dual_repair_cache(vocal_file_hash: str, accompaniment_file_hash: str, p
             "inst_timbre_protect", "inst_stereo_enhance", "inst_loudness",
             "vocal_ratio", "accompaniment_ratio",
             "mastering_style",
+            "algorithm_version",
         }
         stored_subset = {k: v for k, v in filtered_stored.items() if k in repair_param_keys}
         input_subset = {k: v for k, v in params.items() if k in repair_param_keys}

@@ -78,6 +78,21 @@ def _make_single_params(**overrides):
 
 
 class TestSingleTrackCacheLookup:
+    # Cache matching uses intersection comparison on repair_param_keys.
+    # algorithm_version IS in repair_param_keys for single-track, so:
+    # - Both have same algorithm_version → match (if other keys agree)
+    # - Both have different algorithm_version → NO match
+    # - One side missing algorithm_version → intersection excludes it, other keys compared
+    #
+    # WARNING: The intersection comparison allows matches when one side lacks
+    # algorithm_version. This is intentional for backward compatibility with
+    # old tasks that don't store algorithm_version. However, it means a
+    # v3.1 request could match a v2.x cache entry if the old entry has no
+    # algorithm_version field. This is acceptable because:
+    # 1. Old tasks without algorithm_version are from before v3.x existed
+    # 2. The repair result is still valid (just from an older algorithm)
+    # 3. The user can choose to re-repair if they want the new algorithm
+
     @pytest.fixture(autouse=True)
     def setup(self, fresh_db):
         self.db = fresh_db
@@ -174,8 +189,52 @@ class TestSingleTrackCacheLookup:
         result = find_repair_cache(self.file_hash, input_params)
         assert result is not None, "双方都有不对称 key，交集比较应命中"
 
+    def test_algorithm_version_mismatch_no_cache(self):
+        # CRITICAL: Different algorithm versions must NOT match the same cache.
+        # Previously, switching from v3.1a to v2.4a would incorrectly reuse
+        # the v3.1a repair result because the front-end renderDownloadUrl was
+        # not cleared and algorithmVersionRef was stale. The back-end cache
+        # matching correctly rejects this because algorithm_version is in
+        # repair_param_keys and the intersection includes it when both sides
+        # have it.
+        stored = _make_single_params(algorithm_version="v3.1a")
+        input_params = _make_single_params(algorithm_version="v2.4a")
+        self._create_task("test_single_010", stored, self.output_path)
+        result = find_repair_cache(self.file_hash, input_params)
+        assert result is None, (
+            "algorithm_version 不同（v3.1a vs v2.4a）应不命中缓存。"
+            "不同算法版本的修复结果不可互换！"
+        )
+
+    def test_algorithm_version_same_match(self):
+        stored = _make_single_params(algorithm_version="v3.1")
+        input_params = _make_single_params(algorithm_version="v3.1")
+        self._create_task("test_single_011", stored, self.output_path)
+        result = find_repair_cache(self.file_hash, input_params)
+        assert result is not None, "algorithm_version 相同应命中缓存"
+
+    def test_algorithm_version_minor_mismatch(self):
+        stored = _make_single_params(algorithm_version="v3.0")
+        input_params = _make_single_params(algorithm_version="v3.1")
+        self._create_task("test_single_012", stored, self.output_path)
+        result = find_repair_cache(self.file_hash, input_params)
+        assert result is None, (
+            "algorithm_version 不同（v3.0 vs v3.1）应不命中缓存。"
+            "即使是同一大版本，小版本差异也意味着不同的算法实现。"
+        )
+
 
 class TestDualTrackCacheLookup:
+    # Dual-track cache matching also uses intersection comparison on repair_param_keys.
+    # BUG FIX: algorithm_version was previously MISSING from dual-track repair_param_keys,
+    # which meant switching from v3.0 to v3.1 would incorrectly hit the v3.0 cache.
+    # algorithm_version has now been added to the dual-track repair_param_keys.
+    #
+    # This is critical because different algorithm versions produce different repair
+    # results (e.g., v3.0 uses _hf_protect with 3000Hz cutoff while v3.1 uses 4000Hz).
+    # Using a cached result from the wrong algorithm version would give the user
+    # audio processed by a different algorithm than what they selected.
+
     @pytest.fixture(autouse=True)
     def setup(self, fresh_db):
         self.db = fresh_db
@@ -278,6 +337,38 @@ class TestDualTrackCacheLookup:
         self._create_dual_task("test_dual_008", self.vocal_hash, self.acc_hash, stored)
         result = find_dual_repair_cache(self.vocal_hash, self.acc_hash, input_params)
         assert result is not None, "存储有 algorithm_version 但输入没有，交集比较应命中"
+
+    def test_algorithm_version_mismatch_no_cache(self):
+        # CRITICAL: Different algorithm versions must NOT match in dual-track cache.
+        # Previously, algorithm_version was missing from dual-track repair_param_keys,
+        # so switching from v3.0 to v3.1a would incorrectly reuse the v3.0 result.
+        # This was a confirmed bug — the same file with same params but different
+        # algorithm version would produce different audio, yet the cache would
+        # return the old version's result.
+        stored = _make_dual_params(algorithm_version="v3.0")
+        input_params = _make_dual_params(algorithm_version="v3.1a")
+        self._create_dual_task("test_dual_009", self.vocal_hash, self.acc_hash, stored)
+        result = find_dual_repair_cache(self.vocal_hash, self.acc_hash, input_params)
+        assert result is None, (
+            "双轨 algorithm_version 不同（v3.0 vs v3.1a）应不命中缓存。"
+            "不同算法版本的修复结果不可互换！"
+        )
+
+    def test_algorithm_version_same_match(self):
+        stored = _make_dual_params(algorithm_version="v3.1a")
+        input_params = _make_dual_params(algorithm_version="v3.1a")
+        self._create_dual_task("test_dual_010", self.vocal_hash, self.acc_hash, stored)
+        result = find_dual_repair_cache(self.vocal_hash, self.acc_hash, input_params)
+        assert result is not None, "双轨 algorithm_version 相同应命中缓存"
+
+    def test_algorithm_version_cross_major_mismatch(self):
+        stored = _make_dual_params(algorithm_version="v2.4a")
+        input_params = _make_dual_params(algorithm_version="v3.0a")
+        self._create_dual_task("test_dual_011", self.vocal_hash, self.acc_hash, stored)
+        result = find_dual_repair_cache(self.vocal_hash, self.acc_hash, input_params)
+        assert result is None, (
+            "双轨 algorithm_version 跨大版本不同（v2.4a vs v3.0a）应不命中缓存"
+        )
 
 
 class TestMp3Encoding:

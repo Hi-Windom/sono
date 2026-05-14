@@ -315,7 +315,7 @@ export default function Home() {
         } : null)}
         backendDownloadUrl={renderDownloadUrl}
         backendDownloadAction={hasBackendResult ? async () => {
-          const result = await renderAndDownload(processingOptions);
+          const result = await renderAndDownload(processingOptions, algorithmVersion);
           if (result?.downloadUrl) {
             setRenderDownloadUrl(result.downloadUrl);
           }

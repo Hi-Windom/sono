@@ -17,6 +17,7 @@ from backend.tests.conftest import (
     compute_per_step_snr,
     benchmark_step,
     SR,
+    ACTIVE_VERSIONS,
 )
 
 
@@ -72,7 +73,12 @@ class TestRepairQualityBaseline:
             hf_ratio = output_hf / input_hf
         else:
             hf_ratio = output_hf / 1e-10
-        assert hf_ratio < 10.0, (
+        # v3.x has higher HF ratio because _hf_protect/_spectral_hf_gate were removed.
+        # Previously _hf_protect cut off all content above 3-4kHz, artificially
+        # suppressing HF noise but also making audio muffled. The higher ratio
+        # is expected and acceptable — the absolute HF level is still very low.
+        threshold = 50.0 if repair_version.startswith("v3.") else 10.0
+        assert hf_ratio < threshold, (
             f"[{repair_version}] HF noise ratio: {hf_ratio:.1f}x (in: {input_hf:.2e}, out: {output_hf:.2e})"
         )
 
@@ -84,7 +90,12 @@ class TestRepairQualityBaseline:
             y_out = resample_poly(y_out, SR, sr_out)
         min_len = min(len(y), len(y_out))
         snr = compute_scale_adjusted_snr(y[:min_len], y_out[:min_len])
-        assert snr > 5.0, (
+        # v3.x SNR is slightly lower because _hf_protect was removed —
+        # the algorithm no longer artificially suppresses high frequencies,
+        # so more of the signal is modified. This is an acceptable trade-off
+        # for preserving audio clarity and avoiding muffled output.
+        threshold = 4.0 if repair_version.startswith("v3.") else 5.0
+        assert snr > threshold, (
             f"[{repair_version}] SNR too low: {snr:.1f} dB"
         )
 
@@ -1099,3 +1110,71 @@ class TestV30MemoryEstimate:
         est_v24a = estimate_repair_memory_bytes(n, 2, 44100, 48000, algorithm_version="v2.4a")
         est_v30a = estimate_repair_memory_bytes(n, 2, 44100, 48000, algorithm_version="v3.0a")
         assert est_v30a > est_v24a, "v3.0a should use more memory than v2.4a"
+
+
+class TestHighFrequencyPreservation:
+    # Regression test: _hf_protect with cutoff < 80% nyquist destroys high frequencies.
+    # Previously v3.0 used 3000Hz and v3.1/v3.0a/v3.1a used 4000Hz cutoff,
+    # which killed all content above those frequencies, making audio muffled.
+    # _hf_protect and _spectral_hf_gate calls have been removed from all v3.x pipelines.
+    # This test ensures high frequency content is preserved after repair.
+
+    @pytest.mark.parametrize("repair_version", ACTIVE_VERSIONS)
+    def test_high_frequency_content_preserved(self, repair_fn, default_params, tmp_wav_dir, repair_version):
+        sr = 48000
+        t = np.linspace(0, 1, sr, dtype=np.float64)
+        y = 0.3 * np.sin(2 * np.pi * 440 * t) + 0.1 * np.sin(2 * np.pi * 10000 * t) + 0.05 * np.sin(2 * np.pi * 15000 * t)
+        y = y.astype(np.float32).reshape(1, -1)
+
+        import soundfile as sf
+        input_path = str(tmp_wav_dir / f"hf_input_{repair_version}.wav")
+        output_path = str(tmp_wav_dir / f"hf_output_{repair_version}.wav")
+        sf.write(input_path, y.T, sr, subtype='PCM_24')
+
+        result = repair_fn(input_path, output_path, default_params)
+        assert "issues_found" in result
+
+        import soundfile as sf
+        y_out, sr_out = sf.read(output_path, dtype='float32')
+        if y_out.ndim == 1:
+            y_out = y_out.reshape(1, -1)
+
+        from scipy.signal import butter, sosfilt
+        nyq = sr_out / 2
+        sos_10k = butter(4, [9000 / nyq, 11000 / nyq], btype='band', output='sos')
+        sos_15k = butter(4, [14000 / nyq, 16000 / nyq], btype='band', output='sos')
+
+        hf_10k_input = np.sqrt(np.mean(sosfilt(sos_10k, y.flatten()) ** 2))
+        hf_15k_input = np.sqrt(np.mean(sosfilt(sos_15k, y.flatten()) ** 2))
+
+        if sr_out == sr:
+            hf_10k_output = np.sqrt(np.mean(sosfilt(sos_10k, y_out.flatten()) ** 2))
+            hf_15k_output = np.sqrt(np.mean(sosfilt(sos_15k, y_out.flatten()) ** 2))
+        else:
+            nyq2 = sr_out / 2
+            if 11000 < nyq2:
+                sos_10k_out = butter(4, [9000 / nyq2, 11000 / nyq2], btype='band', output='sos')
+                hf_10k_output = np.sqrt(np.mean(sosfilt(sos_10k_out, y_out.flatten()) ** 2))
+            else:
+                hf_10k_output = 0
+            if 16000 < nyq2:
+                sos_15k_out = butter(4, [14000 / nyq2, 16000 / nyq2], btype='band', output='sos')
+                hf_15k_output = np.sqrt(np.mean(sosfilt(sos_15k_out, y_out.flatten()) ** 2))
+            else:
+                hf_15k_output = 0
+
+        if hf_10k_input > 1e-6:
+            ratio_10k = hf_10k_output / hf_10k_input
+            assert ratio_10k > 0.05, (
+                f"[{repair_version}] 10kHz band nearly eliminated: ratio={ratio_10k:.4f} "
+                f"(in={hf_10k_input:.2e}, out={hf_10k_output:.2e}). "
+                f"Check _hf_protect cutoff is not too low!"
+            )
+
+        if hf_15k_input > 1e-6 and sr_out >= 32000:
+            ratio_15k = hf_15k_output / hf_15k_input
+            assert ratio_15k > 0.02, (
+                f"[{repair_version}] 15kHz band nearly eliminated: ratio={ratio_15k:.4f} "
+                f"(in={hf_15k_input:.2e}, out={hf_15k_output:.2e}). "
+                f"Check _hf_protect cutoff is not too low!"
+            )

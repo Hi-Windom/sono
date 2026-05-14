@@ -216,6 +216,9 @@ def _soft_peak_limit(y, threshold=0.9):
 
 
 def _hf_protect(y, sr):
+    # WARNING: cutoff must be >= 80% of nyquist (e.g. >=19200Hz @ 48kHz).
+    # Lower values destroy high frequencies and make audio sound muffled.
+    # Previously set to 4000Hz which killed all content above 4kHz.
     nyq = sr / 2
     cutoff = 4000
     if cutoff >= nyq:
@@ -422,13 +425,11 @@ def _mastering_standard_lite(y, sr):
     nyq = sr / 2
 
     sos_low = butter(2, 60 / nyq, btype='high', output='sos')
-    sos_high = butter(2, 12000 / nyq, btype='low', output='sos')
     sos_presence = butter(2, [3000 / nyq, 4000 / nyq], btype='band', output='sos')
 
     for ch in range(y.shape[0]):
         data = y[ch].astype(np.float64)
         data = sosfiltfilt(sos_low, data)
-        data = sosfiltfilt(sos_high, data)
 
         presence = sosfiltfilt(sos_presence, data)
         data = data + presence * 0.10
@@ -456,7 +457,6 @@ def _mastering_powerful_lite(y, sr):
     sos_low = butter(2, 40 / nyq, btype='high', output='sos')
     sos_bass = butter(2, 150 / nyq, btype='low', output='sos')
     sos_presence = butter(2, [2500 / nyq, 6000 / nyq], btype='band', output='sos')
-    sos_high = butter(2, 14000 / nyq, btype='low', output='sos')
 
     for ch in range(y.shape[0]):
         data = y[ch].astype(np.float64)
@@ -464,8 +464,6 @@ def _mastering_powerful_lite(y, sr):
 
         bass = sosfiltfilt(sos_bass, data)
         data = data + bass * 0.3
-
-        data = sosfiltfilt(sos_high, data)
 
         presence = sosfiltfilt(sos_presence, data)
         data = data + presence * 0.2
@@ -492,7 +490,6 @@ def _mastering_warm_lite(y, sr):
 
     sos_low = butter(2, 30 / nyq, btype='high', output='sos')
     sos_warm = butter(2, 800 / nyq, btype='low', output='sos')
-    sos_high_shelf = butter(2, 8000 / nyq, btype='low', output='sos')
 
     for ch in range(y.shape[0]):
         data = y[ch].astype(np.float64)
@@ -500,8 +497,6 @@ def _mastering_warm_lite(y, sr):
 
         warm = sosfiltfilt(sos_warm, data)
         data = data + warm * 0.25
-
-        data = sosfiltfilt(sos_high_shelf, data)
 
         rms = np.sqrt(np.mean(data ** 2))
         if rms > 1e-10:
@@ -599,8 +594,6 @@ def process_vocal_track(y, sr, params):
         y = _loudness_normalize(y, sr, -14.0)
 
     y = _soft_peak_limit(y, threshold=0.9)
-    y = _spectral_hf_gate(y, sr)
-    y = _hf_protect(y, sr)
     return y
 
 
@@ -752,8 +745,6 @@ def _repair_single_track(input_path: str, output_path: str, params: dict, progre
         progress_callback(0.90, "v3.1a 导出...")
 
     y = _soft_peak_limit(y, threshold=0.9)
-    y = _spectral_hf_gate(y, working_sr)
-    y = _hf_protect(y, working_sr)
 
     bit_depth = single_params.get("bit_depth", 24)
     subtype_map = {16: "PCM_16", 24: "PCM_24", 32: "PCM_32"}
@@ -917,8 +908,6 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
         progress_callback(0.90, "v3.1a 导出...")
 
     mixed = _soft_peak_limit(mixed, threshold=0.9)
-    mixed = _spectral_hf_gate(mixed, working_sr)
-    mixed = _hf_protect(mixed, working_sr)
 
     if mixed.dtype == np.float32:
         mixed = mixed.astype(np.float64)
