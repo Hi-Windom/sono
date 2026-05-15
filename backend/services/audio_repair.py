@@ -282,7 +282,7 @@ ALGORITHM_VERSIONS = {
         "name": "v2.0",
         "label": "v2.0",
         "description": "移动端友好，自适应采样率，频域合并优化",
-        "tags": ["mobile"],
+        "tags": [],
         "mobile_compatible": True,
         "supports_dual_track": False,
         "repair_version": "v2.0",
@@ -348,6 +348,7 @@ ALGORITHM_VERSIONS = {
         "name": "v2.1",
         "label": "v2.1",
         "description": "移动端优化升级版，增强降噪和清晰度",
+        "tags": ["mobile"],
         "mobile_compatible": True,
         "supports_dual_track": False,
         "repair_version": "v2.1",
@@ -411,7 +412,7 @@ ALGORITHM_VERSIONS = {
     },
     "v2.2": {
         "name": "v2.2",
-        "label": "v2.2 桌面版",
+        "label": "v2.2",
         "description": "最佳音质，流式分块处理（仅桌面端）",
         "tags": ["desktop"],
         "mobile_compatible": False,
@@ -508,7 +509,7 @@ ALGORITHM_VERSIONS = {
     },
     "v2.2a": {
         "name": "v2.2a",
-        "label": "v2.2a 移动版",
+        "label": "v2.2a",
         "description": "速度优先，精简处理（移动端专用）",
         "tags": ["mobile"],
         "mobile_compatible": True,
@@ -564,7 +565,7 @@ ALGORITHM_VERSIONS = {
     },
     "v2.3": {
         "name": "v2.3",
-        "label": "v2.3 桌面版",
+        "label": "v2.3",
         "description": "零AM伪影，流式分块+低内存（仅桌面端）",
         "tags": ["desktop"],
         "mobile_compatible": False,
@@ -661,7 +662,7 @@ ALGORITHM_VERSIONS = {
     },
     "v2.3a": {
         "name": "v2.3a",
-        "label": "v2.3a 移动版",
+        "label": "v2.3a",
         "description": "零AM伪影，流式降噪+低内存（移动端）",
         "tags": ["mobile"],
         "mobile_compatible": True,
@@ -717,7 +718,7 @@ ALGORITHM_VERSIONS = {
     },
     "v2.4": {
         "name": "v2.4",
-        "label": "v2.4 桌面版",
+        "label": "v2.4",
         "description": "HiFi优化+BPM自适应+节奏感知处理（仅桌面端）",
         "tags": ["desktop", "stable"],
         "mobile_compatible": False,
@@ -814,7 +815,7 @@ ALGORITHM_VERSIONS = {
     },
     "v2.4a": {
         "name": "v2.4a",
-        "label": "v2.4a 移动版",
+        "label": "v2.4a",
         "description": "AI频谱修复+次谐波低频+空气质感重建（移动端）",
         "tags": ["mobile", "stable"],
         "mobile_compatible": True,
@@ -875,7 +876,7 @@ ALGORITHM_VERSIONS = {
     },
     "v3.0": {
         "name": "v3.0",
-        "label": "v3.0 桌面版",
+        "label": "v3.0",
         "description": "双轨处理，人声+伴奏分别优化后混音",
         "tags": ["desktop", "dual-track"],
         "mobile_compatible": False,
@@ -1005,7 +1006,7 @@ ALGORITHM_VERSIONS = {
     },
     "v3.0a": {
         "name": "v3.0a",
-        "label": "v3.0a 移动版",
+        "label": "v3.0a",
         "description": "双轨处理，移动端优化",
         "tags": ["mobile", "dual-track"],
         "mobile_compatible": True,
@@ -1089,7 +1090,7 @@ ALGORITHM_VERSIONS = {
     },
     "v3.1": {
         "name": "v3.1",
-        "label": "v3.1 桌面增强版",
+        "label": "v3.1",
         "description": "增强型AI人声修复 + 人声效果器（激励/压缩/空间/温暖）+ 三种母带风格",
         "tags": ["desktop", "dual-track", "recommended"],
         "mobile_compatible": False,
@@ -1140,7 +1141,7 @@ ALGORITHM_VERSIONS = {
     },
     "v3.1a": {
         "name": "v3.1a",
-        "label": "v3.1a 移动增强版",
+        "label": "v3.1a",
         "description": "轻量级人声激励+压缩+母带风格，移动端优化",
         "tags": ["mobile", "dual-track", "recommended"],
         "mobile_compatible": True,
