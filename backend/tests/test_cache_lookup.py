@@ -10,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 os.environ["TESTING"] = "1"
 
 from database import init_db, get_db, create_task, update_task, find_repair_cache, find_dual_repair_cache
+from services.param_maps import VOCAL_KEY_MAP, INST_KEY_MAP, DUAL_REPAIR_PARAM_KEYS, SINGLE_REPAIR_PARAM_KEYS
 
 
 @pytest.fixture()
@@ -399,3 +400,108 @@ class TestMp3Encoding:
                     os.unlink(mp3_path)
             except OSError:
                 pass
+
+
+class TestParamMapsSync:
+    def test_vocal_key_map_sync(self):
+        for value in VOCAL_KEY_MAP.values():
+            assert value in DUAL_REPAIR_PARAM_KEYS, f"{value} 不在 DUAL_REPAIR_PARAM_KEYS 中"
+
+    def test_inst_key_map_sync(self):
+        for value in INST_KEY_MAP.values():
+            assert value in DUAL_REPAIR_PARAM_KEYS, f"{value} 不在 DUAL_REPAIR_PARAM_KEYS 中"
+
+
+@pytest.mark.parametrize("param_key", sorted(set(VOCAL_KEY_MAP.values()) | set(INST_KEY_MAP.values())))
+class TestEveryDualParamAffectsCache:
+    @pytest.fixture(autouse=True)
+    def setup(self, fresh_db):
+        self.db = fresh_db
+        self.create_task = fresh_db["create_task"]
+        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as f:
+            self.vocal_path = f.name
+        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as f:
+            self.acc_path = f.name
+        _make_wav(self.vocal_path)
+        _make_wav(self.acc_path)
+        with open(self.vocal_path, 'rb') as f:
+            import hashlib
+            self.vocal_hash = hashlib.sha256(f.read()).hexdigest()
+        with open(self.acc_path, 'rb') as f:
+            self.acc_hash = hashlib.sha256(f.read()).hexdigest()
+        self.output_dir = tempfile.mkdtemp()
+        self.output_path = os.path.join(self.output_dir, 'test_dual_repaired.wav')
+        _make_wav(self.output_path)
+        yield
+        try:
+            os.unlink(self.vocal_path)
+            os.unlink(self.acc_path)
+            os.unlink(self.output_path)
+            os.rmdir(self.output_dir)
+        except OSError:
+            pass
+
+    def _create_dual_task(self, task_id, vocal_hash, acc_hash, params, status="completed"):
+        full_params = dict(params)
+        full_params["vocal_file_hash"] = vocal_hash
+        full_params["accompaniment_file_hash"] = acc_hash
+        self.create_task(
+            task_id, "vocal.wav", self.vocal_path, full_params,
+            file_hash=f"dual_{vocal_hash[:8]}_{acc_hash[:8]}"
+        )
+        if status == "completed":
+            self.db["update_task"](task_id, status=status, output_path=self.output_path)
+        else:
+            self.db["update_task"](task_id, status=status)
+
+    def test_param_change_causes_cache_miss(self, param_key):
+        stored_params = _make_dual_params(**{param_key: 0.5})
+        input_params = _make_dual_params(**{param_key: 0.9})
+        self._create_dual_task(f"test_dual_param_{param_key}", self.vocal_hash, self.acc_hash, stored_params)
+        result = find_dual_repair_cache(self.vocal_hash, self.acc_hash, input_params)
+        assert result is None, f"改变参数 {param_key} 应导致缓存不命中"
+
+
+@pytest.mark.parametrize("param_key", sorted(SINGLE_REPAIR_PARAM_KEYS))
+class TestEverySingleParamAffectsCache:
+    @pytest.fixture(autouse=True)
+    def setup(self, fresh_db):
+        self.db = fresh_db
+        self.create_task = fresh_db["create_task"]
+        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as f:
+            self.wav_path = f.name
+        _make_wav(self.wav_path)
+        with open(self.wav_path, 'rb') as f:
+            import hashlib
+            self.file_hash = hashlib.sha256(f.read()).hexdigest()
+        self.output_dir = tempfile.mkdtemp()
+        self.output_path = os.path.join(self.output_dir, 'test_repaired.wav')
+        _make_wav(self.output_path)
+        yield
+        try:
+            os.unlink(self.wav_path)
+            os.unlink(self.output_path)
+            os.rmdir(self.output_dir)
+        except OSError:
+            pass
+
+    def _create_task(self, task_id, params, output_path=None, status="completed"):
+        self.create_task(task_id, "test.wav", self.wav_path, params, file_hash=self.file_hash)
+        if status == "completed" and output_path:
+            self.db["update_task"](task_id, status=status, output_path=output_path)
+        elif status:
+            self.db["update_task"](task_id, status=status)
+
+    def test_param_change_causes_cache_miss(self, param_key):
+        if param_key == "algorithm_version":
+            stored_params = _make_single_params(algorithm_version="v3.0")
+            input_params = _make_single_params(algorithm_version="v3.1")
+        elif param_key == "mastering_style":
+            stored_params = _make_single_params(mastering_style="standard")
+            input_params = _make_single_params(mastering_style="powerful")
+        else:
+            stored_params = _make_single_params(**{param_key: 0.5})
+            input_params = _make_single_params(**{param_key: 0.9})
+        self._create_task(f"test_single_param_{param_key}", stored_params, self.output_path)
+        result = find_repair_cache(self.file_hash, input_params)
+        assert result is None, f"改变参数 {param_key} 应导致缓存不命中"

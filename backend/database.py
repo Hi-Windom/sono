@@ -6,6 +6,7 @@ import sqlite3
 from typing import Any
 
 import config
+from services.param_maps import DUAL_REPAIR_PARAM_KEYS, SINGLE_REPAIR_PARAM_KEYS
 
 TaskDict = dict[str, Any]
 
@@ -203,18 +204,8 @@ def find_repair_cache(file_hash: str, params: dict) -> TaskDict | None:
             logger.info(f"[cache-lookup] task#{i} id={task_id} status={task_status} SKIP: dual mode")
             continue
 
-        repair_param_keys = {
-            "de_clipping", "noise_reduction", "de_essing", "de_crackle", "de_pop",
-            "harmonic_enhance", "dynamic_range", "softness", "presence_boost",
-            "bass_enhance", "spatial_enhance", "transient_repair", "warmth", "clarity",
-            "algorithm_version",
-            "declip", "depop", "de_ess", "formant_repair", "breath_enhance",
-            "ai_repair", "air_texture", "dynamic", "spatial", "loudness",
-            "exciter", "compressor", "stereo_enhance", "mastering_style",
-            "de_esser_advanced", "ai_repair_enhanced", "ai_repair_enhanced_lite",
-        }
-        stored_subset = {k: v for k, v in parsed.items() if k in repair_param_keys}
-        input_subset = {k: v for k, v in params.items() if k in repair_param_keys}
+        stored_subset = {k: v for k, v in parsed.items() if k in SINGLE_REPAIR_PARAM_KEYS}
+        input_subset = {k: v for k, v in params.items() if k in SINGLE_REPAIR_PARAM_KEYS}
         common_keys = stored_subset.keys() & input_subset.keys()
         if not common_keys:
             logger.info(f"[cache-lookup] task#{i} id={task_id} status={task_status} EMPTY_INTERSECTION stored_keys={sorted(stored_subset.keys())} input_keys={sorted(input_subset.keys())}")
@@ -295,23 +286,8 @@ def find_dual_repair_cache(vocal_file_hash: str, accompaniment_file_hash: str, p
         filtered_stored = {k: v for k, v in parsed.items() if k not in filter_keys}
 
         # 只比较影响修复结果的参数子集（交集比较，避免两边key集合不一致导致漏匹配）
-        repair_param_keys = {
-            "vocal_declip", "vocal_depop", "vocal_formant_repair",
-            "vocal_de_ess", "vocal_breath_enhance", "vocal_ai_repair",
-            "vocal_bass_enhance", "vocal_air_texture", "vocal_loudness",
-            "vocal_exciter", "vocal_compressor", "vocal_clarity",
-            "vocal_de_esser_advanced", "vocal_ai_repair_enhanced",
-            "vocal_ai_repair_enhanced_lite", "vocal_exciter_lite",
-            "vocal_compressor_lite", "vocal_spatial", "vocal_warmth",
-            "inst_declip", "inst_depop", "inst_noise_reduction",
-            "inst_dynamic", "inst_spatial", "inst_warmth",
-            "inst_timbre_protect", "inst_stereo_enhance", "inst_loudness",
-            "vocal_ratio", "accompaniment_ratio",
-            "mastering_style",
-            "algorithm_version",
-        }
-        stored_subset = {k: v for k, v in filtered_stored.items() if k in repair_param_keys}
-        input_subset = {k: v for k, v in params.items() if k in repair_param_keys}
+        stored_subset = {k: v for k, v in filtered_stored.items() if k in DUAL_REPAIR_PARAM_KEYS}
+        input_subset = {k: v for k, v in params.items() if k in DUAL_REPAIR_PARAM_KEYS}
 
         common_keys = stored_subset.keys() & input_subset.keys()
         if common_keys and all(stored_subset[k] == input_subset[k] for k in common_keys):

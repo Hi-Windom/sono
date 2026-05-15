@@ -15,6 +15,13 @@ export interface VocalRepairParams {
   compressor?: number;
   spatial?: number;
   warmth?: number;
+  smartCompressor?: number;
+  transientAware?: number;
+  resonanceSuppress?: number;
+  aiRepairAdaptive?: number;
+  exciterImproved?: number;
+  deEsserImproved?: number;
+  speed?: number;
 }
 
 export interface InstrumentRepairParams {
@@ -27,6 +34,7 @@ export interface InstrumentRepairParams {
   warmth: number;
   loudness: number;
   stereo_enhance?: number;
+  speed?: number;
 }
 
 export const defaultVocalRepairParams: VocalRepairParams = {
@@ -43,6 +51,13 @@ export const defaultVocalRepairParams: VocalRepairParams = {
   compressor: 0.5,
   spatial: 0.5,
   warmth: 0.5,
+  smartCompressor: 0.5,
+  transientAware: 0.3,
+  resonanceSuppress: 0.3,
+  aiRepairAdaptive: 0.5,
+  exciterImproved: 0.5,
+  deEsserImproved: 0.5,
+  speed: 1.0,
 };
 
 export const defaultInstrumentRepairParams: InstrumentRepairParams = {
@@ -55,12 +70,14 @@ export const defaultInstrumentRepairParams: InstrumentRepairParams = {
   warmth: 0.25,
   loudness: 0.5,
   stereo_enhance: 0.5,
+  speed: 1.0,
 };
 
 export interface ProcessingOptions {
   sampleRate: number;
   bitDepth: 16 | 24 | 32;
-  masteringStyle?: 'standard' | 'powerful' | 'warm';
+  masteringStyle?: 'standard' | 'powerful' | 'warm' | 'adaptive';
+  qualityMode?: 'standard' | 'fine';
 }
 
 const API_BASE = '/api/v1';
@@ -208,6 +225,13 @@ export function mapVocalParamsToBackend(params: VocalRepairParams, _options?: Pr
     compressor: params.compressor ?? 0.5,
     spatial: params.spatial ?? 0.5,
     warmth: params.warmth ?? 0.5,
+    smart_compressor: params.smartCompressor ?? 0.5,
+    transient_aware: params.transientAware ?? 0.3,
+    resonance_suppress: params.resonanceSuppress ?? 0.3,
+    ai_repair_adaptive: params.aiRepairAdaptive ?? 0.5,
+    exciter_improved: params.exciterImproved ?? 0.5,
+    de_esser_improved: params.deEsserImproved ?? 0.5,
+    speed: params.speed ?? 1.0,
     algorithm_version: algorithmVersion || 'v3.0',
   };
 }
@@ -223,6 +247,7 @@ export function mapInstrumentParamsToBackend(params: InstrumentRepairParams, _op
     warmth: params.warmth,
     loudness_optimize: params.loudness,
     stereo_enhance: params.stereo_enhance ?? 0.5,
+    speed: params.speed ?? 1.0,
     algorithm_version: algorithmVersion || 'v3.0',
   };
 }
@@ -1644,9 +1669,10 @@ export async function renderAudio(
   bitDepth: number,
   masteringStyle?: string,
   algorithmVersion?: string,
+  qualityMode?: string,
 ): Promise<RenderResult> {
   const url = `${API_BASE}/render`;
-  log('render', `POST ${url} task_id=${taskId} sr=${sampleRate} bd=${bitDepth} style=${masteringStyle || 'standard'} ver=${algorithmVersion || 'unknown'}`);
+  log('render', `POST ${url} task_id=${taskId} sr=${sampleRate} bd=${bitDepth} style=${masteringStyle || 'standard'} ver=${algorithmVersion || 'unknown'} quality=${qualityMode || 'standard'}`);
   const body: Record<string, unknown> = {
     task_id: taskId,
     sample_rate: sampleRate,
@@ -1657,6 +1683,9 @@ export async function renderAudio(
   }
   if (algorithmVersion) {
     body.algorithm_version = algorithmVersion;
+  }
+  if (qualityMode) {
+    body.quality_mode = qualityMode;
   }
   const res = await fetch(url, {
     method: 'POST',
@@ -1818,4 +1847,8 @@ export async function deleteDeliveryParent(filename: string): Promise<{deleted: 
 export const ALGORITHM_VERSIONS = [
   { id: 'v3.1', label: 'v3.1 (桌面增强)', description: 'AI人声修复增强 + 人声效果器' },
   { id: 'v3.1a', label: 'v3.1a (移动增强)', description: '精简版人声效果器' },
+  { id: 'v3.2', label: 'v3.2 (桌面智能)', description: '智能压缩+自适应AI修复+瞬态感知+共振抑制+自适应母带' },
+  { id: 'v3.2+', label: 'v3.2+ (精修)', description: '前视压缩+双分辨率AI修复+增强空间感+两遍处理' },
+  { id: 'v3.2a', label: 'v3.2a (移动)', description: '移动版智能压缩+自适应AI修复+瞬态感知+共振抑制' },
+  { id: 'v3.2a+', label: 'v3.2a+ (增强)', description: '移动增强版前视压缩+全分辨率AI修复+两遍处理' },
 ];

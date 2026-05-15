@@ -7,9 +7,10 @@ const TAG_CONFIG: Record<string, { label: string; className: string }> = {
   'stable':      { label: '稳定', className: 'bg-amber-500/20 text-amber-400 border border-amber-500/30' },
   'recommended': { label: '推荐', className: 'bg-purple-500/20 text-purple-400 border border-purple-500/30' },
   'dual-track':  { label: '双轨', className: 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30' },
+  'premium':     { label: '精修', className: 'bg-rose-500/20 text-rose-400 border border-rose-500/30' },
 };
 
-const TAG_ORDER = ['recommended', 'stable', 'dual-track', 'desktop', 'mobile'];
+const TAG_ORDER = ['recommended', 'premium', 'stable', 'dual-track', 'desktop', 'mobile'];
 
 interface AlgorithmSelectorProps {
   value: string;
@@ -110,7 +111,7 @@ export default function AlgorithmSelector({ value, algorithms, onChange, disable
 
       {open && (
         <div
-          className="absolute z-50 mt-1 left-0 right-0 min-w-[280px] bg-gray-900/95 backdrop-blur-sm
+          className="absolute z-50 mt-1 right-0 min-w-[280px] bg-gray-900/95 backdrop-blur-sm
             border border-cyan-500/20 rounded-xl shadow-xl shadow-black/40 overflow-hidden"
         >
           <div ref={listRef} className="max-h-[320px] overflow-y-auto py-1">

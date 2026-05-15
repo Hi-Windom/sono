@@ -16,6 +16,7 @@ from services.task_manager import generate_task_id, submit_detect_task, submit_r
 from services.audio_repair import get_available_versions
 from services.ai_detector import get_detector_versions
 from services.memory_guard import get_available_memory_bytes, estimate_repair_memory_bytes, should_use_float32, get_total_memory_bytes
+from services.param_maps import VOCAL_KEY_MAP, INST_KEY_MAP, flatten_vocal_params, flatten_inst_params
 
 logger = logging.getLogger(__name__)
 
@@ -715,6 +716,7 @@ class DualRepairRequest(BaseModel):
     vocal_params: dict | None = None
     accompaniment_params: dict | None = None
     mix_ratio: float | None = None
+    speed: float | None = None
 
 
 @router.post("/repair-dual")
@@ -746,51 +748,22 @@ async def repair_dual_audio_endpoint(request: DualRepairRequest):
     params["accompaniment_task_id"] = request.accompaniment_task_id
     params["processing_mode"] = "dual"
 
-    _VOCAL_KEY_MAP = {
-        "de_clipping": "vocal_declip",
-        "de_pop": "vocal_depop",
-        "de_essing": "vocal_de_ess",
-        "bass_enhance": "vocal_bass_enhance",
-        "clarity": "vocal_air_texture",
-        "air_texture": "vocal_air_texture",
-        "formant_repair": "vocal_formant_repair",
-        "breath_enhance": "vocal_breath_enhance",
-        "ai_repair": "vocal_ai_repair",
-        "exciter": "vocal_exciter",
-        "compressor": "vocal_compressor",
-        "spatial": "vocal_spatial",
-        "warmth": "vocal_warmth",
-        "de_esser_advanced": "vocal_de_esser_advanced",
-        "ai_repair_enhanced": "vocal_ai_repair_enhanced",
-        "ai_repair_enhanced_lite": "vocal_ai_repair_enhanced_lite",
-        "loudness_optimize": "vocal_loudness",
-    }
-
-    _INST_KEY_MAP = {
-        "de_clipping": "inst_declip",
-        "de_pop": "inst_depop",
-        "noise_reduction": "inst_noise_reduction",
-        "dynamic_range": "inst_dynamic",
-        "spatial_enhance": "inst_spatial",
-        "warmth": "inst_warmth",
-        "timbre_protect": "inst_timbre_protect",
-        "stereo_enhance": "inst_stereo_enhance",
-        "loudness_optimize": "inst_loudness",
-    }
-
     if request.vocal_params:
-        for src_key, flat_key in _VOCAL_KEY_MAP.items():
-            if src_key in request.vocal_params:
-                params[flat_key] = request.vocal_params[src_key]
+        flat_vocal = flatten_vocal_params(request.vocal_params)
+        params["vocal_params"] = flat_vocal
+        params.update(flat_vocal)
 
     if request.accompaniment_params:
-        for src_key, flat_key in _INST_KEY_MAP.items():
-            if src_key in request.accompaniment_params:
-                params[flat_key] = request.accompaniment_params[src_key]
+        flat_inst = flatten_inst_params(request.accompaniment_params)
+        params["inst_params"] = flat_inst
+        params.update(flat_inst)
 
     if request.mix_ratio is not None:
         params["vocal_ratio"] = request.mix_ratio
         params["accompaniment_ratio"] = 1.0
+
+    if request.speed is not None:
+        params["speed"] = request.speed
 
     params["vocal_path"] = vocal_path
     params["accompaniment_path"] = accompaniment_path
@@ -815,6 +788,7 @@ class DualRepairFromHashRequest(BaseModel):
     vocal_params: dict | None = None
     accompaniment_params: dict | None = None
     mix_ratio: float | None = None
+    speed: float | None = None
 
 
 @router.post("/repair-dual-from-hash")
@@ -865,51 +839,22 @@ async def repair_dual_from_hash(request: DualRepairFromHashRequest):
     params["accompaniment_task_id"] = accompaniment_task_id
     params["processing_mode"] = "dual"
 
-    _VOCAL_KEY_MAP = {
-        "de_clipping": "vocal_declip",
-        "de_pop": "vocal_depop",
-        "de_essing": "vocal_de_ess",
-        "bass_enhance": "vocal_bass_enhance",
-        "clarity": "vocal_air_texture",
-        "air_texture": "vocal_air_texture",
-        "formant_repair": "vocal_formant_repair",
-        "breath_enhance": "vocal_breath_enhance",
-        "ai_repair": "vocal_ai_repair",
-        "exciter": "vocal_exciter",
-        "compressor": "vocal_compressor",
-        "spatial": "vocal_spatial",
-        "warmth": "vocal_warmth",
-        "de_esser_advanced": "vocal_de_esser_advanced",
-        "ai_repair_enhanced": "vocal_ai_repair_enhanced",
-        "ai_repair_enhanced_lite": "vocal_ai_repair_enhanced_lite",
-        "loudness_optimize": "vocal_loudness",
-    }
-
-    _INST_KEY_MAP = {
-        "de_clipping": "inst_declip",
-        "de_pop": "inst_depop",
-        "noise_reduction": "inst_noise_reduction",
-        "dynamic_range": "inst_dynamic",
-        "spatial_enhance": "inst_spatial",
-        "warmth": "inst_warmth",
-        "timbre_protect": "inst_timbre_protect",
-        "stereo_enhance": "inst_stereo_enhance",
-        "loudness_optimize": "inst_loudness",
-    }
-
     if request.vocal_params:
-        for src_key, flat_key in _VOCAL_KEY_MAP.items():
-            if src_key in request.vocal_params:
-                params[flat_key] = request.vocal_params[src_key]
+        flat_vocal = flatten_vocal_params(request.vocal_params)
+        params["vocal_params"] = flat_vocal
+        params.update(flat_vocal)
 
     if request.accompaniment_params:
-        for src_key, flat_key in _INST_KEY_MAP.items():
-            if src_key in request.accompaniment_params:
-                params[flat_key] = request.accompaniment_params[src_key]
+        flat_inst = flatten_inst_params(request.accompaniment_params)
+        params["inst_params"] = flat_inst
+        params.update(flat_inst)
 
     if request.mix_ratio is not None:
         params["vocal_ratio"] = request.mix_ratio
         params["accompaniment_ratio"] = 1.0
+
+    if request.speed is not None:
+        params["speed"] = request.speed
 
     vocal_output_filename = f"{vocal_task_id}_repaired.wav"
     accompaniment_output_filename = f"{accompaniment_task_id}_repaired.wav"
@@ -1007,12 +952,14 @@ async def render_audio_endpoint(request: RenderRequest):
             raise HTTPException(status_code=400, detail="修复结果不存在，请先完成修复")
 
     algo_ver = task_params.get("algorithm_version", "v2.0").replace(".", "p")
-    
+    speed = task_params.get("speed", 1.0)
+    speed_tag = f"_{speed}x" if speed and speed != 1.0 else ""
+
     if is_dual_track and request.track_type != "both":
-        render_filename = f"{request.task_id}_rendered_{algo_ver}_{request.sample_rate}_{request.bit_depth}_{request.track_type}.wav"
+        render_filename = f"{request.task_id}_rendered_{algo_ver}{speed_tag}_{request.sample_rate}_{request.bit_depth}_{request.track_type}.wav"
     else:
         merge_suffix = "_merged" if request.merge else ""
-        render_filename = f"{request.task_id}_rendered_{algo_ver}_{request.sample_rate}_{request.bit_depth}{merge_suffix}.wav"
+        render_filename = f"{request.task_id}_rendered_{algo_ver}{speed_tag}_{request.sample_rate}_{request.bit_depth}{merge_suffix}.wav"
     render_path = os.path.join(OUTPUT_DIR, render_filename)
 
     update_task(request.task_id, status="rendering", step="渲染交付规格...", progress=0)
@@ -1143,6 +1090,14 @@ def _run_render_dual(task_id, vocal_path, accompaniment_path, output_path, targe
             
             progress_callback(0.5, "渲染输出...")
             mixed = np.clip(mixed, -1.0, 1.0)
+            if vocal_sr != target_sr:
+                from scipy.signal import resample_poly
+                target_len = int(mixed.shape[1] * target_sr / vocal_sr)
+                mixed_resampled = np.zeros((mixed.shape[0], target_len), dtype=mixed.dtype)
+                for ch in range(mixed.shape[0]):
+                    resampled = resample_poly(mixed[ch], target_sr, vocal_sr)
+                    mixed_resampled[ch, :len(resampled)] = resampled[:target_len]
+                mixed = mixed_resampled
             subtype_map = {16: "PCM_16", 24: "PCM_24", 32: "PCM_32"}
             subtype = subtype_map.get(bit_depth, "PCM_24")
             sf.write(output_path, mixed.T if mixed.ndim > 1 else mixed, target_sr, subtype=subtype)
@@ -1379,7 +1334,9 @@ async def download_audio(task_id: str):
     
     original_name = task.get("original_filename", "audio")
     base_name = os.path.splitext(original_name)[0]
-    download_name = f"{base_name}_repaired.wav"
+    speed = task.get("params", {}).get("speed", 1.0)
+    speed_tag = f"{speed}x_" if speed and speed != 1.0 else ""
+    download_name = f"{base_name}_{speed_tag}repaired.wav"
 
     file_size = os.path.getsize(output_path)
     from urllib.parse import quote
@@ -1448,6 +1405,9 @@ async def download_file(filename: str, request: Request):
         name_parts = [original_basename]
         if algo_ver_display:
             name_parts.append(algo_ver_display)
+        speed = task.get("params", {}).get("speed", 1.0) if task else 1.0
+        if speed and speed != 1.0:
+            name_parts.append(f"{speed}x")
         if sr_display and bd_display:
             name_parts.append(f"{sr_display}_{bd_display}")
         name_parts.append(ts)
@@ -1614,7 +1574,9 @@ async def download_mp3(task_id: str, request: Request):
     task = get_task(task_id)
     if task and task.get("original_filename"):
         original_basename = os.path.splitext(task["original_filename"])[0]
-        download_name = f"{original_basename}.mp3"
+        speed = task.get("params", {}).get("speed", 1.0)
+        speed_tag = f"{speed}x_" if speed and speed != 1.0 else ""
+        download_name = f"{original_basename}_{speed_tag}repaired.mp3"
     encoded_name = quote(download_name)
     ascii_name = download_name.encode("ascii", "ignore").decode("ascii") or "audio.mp3"
     disposition = f'attachment; filename="{ascii_name}"; filename*=UTF-8\'\'{encoded_name}'
@@ -2295,6 +2257,7 @@ class DualRepairCacheLookupRequest(BaseModel):
     vocal_params: dict | None = None
     accompaniment_params: dict | None = None
     mix_ratio: float | None = None
+    speed: float | None = None
 
 
 class FileInfoByHashRequest(BaseModel):
@@ -2338,51 +2301,22 @@ async def lookup_dual_repair_cache(req: DualRepairCacheLookupRequest):
     flat_params = req.params.copy()
     flat_params.pop("processing_mode", None)
 
-    _VOCAL_KEY_MAP = {
-        "de_clipping": "vocal_declip",
-        "de_pop": "vocal_depop",
-        "de_essing": "vocal_de_ess",
-        "bass_enhance": "vocal_bass_enhance",
-        "clarity": "vocal_air_texture",
-        "air_texture": "vocal_air_texture",
-        "formant_repair": "vocal_formant_repair",
-        "breath_enhance": "vocal_breath_enhance",
-        "ai_repair": "vocal_ai_repair",
-        "exciter": "vocal_exciter",
-        "compressor": "vocal_compressor",
-        "spatial": "vocal_spatial",
-        "warmth": "vocal_warmth",
-        "de_esser_advanced": "vocal_de_esser_advanced",
-        "ai_repair_enhanced": "vocal_ai_repair_enhanced",
-        "ai_repair_enhanced_lite": "vocal_ai_repair_enhanced_lite",
-        "loudness_optimize": "vocal_loudness",
-    }
-
-    _INST_KEY_MAP = {
-        "de_clipping": "inst_declip",
-        "de_pop": "inst_depop",
-        "noise_reduction": "inst_noise_reduction",
-        "dynamic_range": "inst_dynamic",
-        "spatial_enhance": "inst_spatial",
-        "warmth": "inst_warmth",
-        "timbre_protect": "inst_timbre_protect",
-        "stereo_enhance": "inst_stereo_enhance",
-        "loudness_optimize": "inst_loudness",
-    }
-
     if req.vocal_params:
-        for src_key, flat_key in _VOCAL_KEY_MAP.items():
-            if src_key in req.vocal_params:
-                flat_params[flat_key] = req.vocal_params[src_key]
+        flat_vocal = flatten_vocal_params(req.vocal_params)
+        flat_params["vocal_params"] = flat_vocal
+        flat_params.update(flat_vocal)
 
     if req.accompaniment_params:
-        for src_key, flat_key in _INST_KEY_MAP.items():
-            if src_key in req.accompaniment_params:
-                flat_params[flat_key] = req.accompaniment_params[src_key]
+        flat_inst = flatten_inst_params(req.accompaniment_params)
+        flat_params["inst_params"] = flat_inst
+        flat_params.update(flat_inst)
 
     if req.mix_ratio is not None:
         flat_params["vocal_ratio"] = req.mix_ratio
         flat_params["accompaniment_ratio"] = 1.0
+
+    if req.speed is not None:
+        flat_params["speed"] = req.speed
 
     logger.info(f"[cache-lookup-dual] input flat_params keys: {sorted(flat_params.keys())}")
     logger.info(f"[cache-lookup-dual] input flat_params: {json.dumps(flat_params, sort_keys=True)[:500]}")

@@ -1263,6 +1263,22 @@
       "description": "算法版本 v3.1a"
     },
     {
+      "id": "algo-v3.2",
+      "label": "算法 v3.2",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/audio_repair.py",
+      "description": "算法版本 v3.2"
+    },
+    {
+      "id": "algo-v3.2a",
+      "label": "算法 v3.2a",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/audio_repair.py",
+      "description": "算法版本 v3.2a"
+    },
+    {
       "id": "repair-module-__pycache__",
       "label": "__pycache__",
       "type": "module",
@@ -1604,6 +1620,34 @@
       "type": "module",
       "layer": "backend",
       "filePath": "/workspace/backend/services/repair/repair_v3_1a"
+    },
+    {
+      "id": "repair-module-repair_v3_2",
+      "label": "repair_v3_2",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/repair/repair_v3_2"
+    },
+    {
+      "id": "repair-module-repair_v3_2a",
+      "label": "repair_v3_2a",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/repair/repair_v3_2a"
+    },
+    {
+      "id": "repair-module-repair_v3_2ap",
+      "label": "repair_v3_2ap",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/repair/repair_v3_2ap"
+    },
+    {
+      "id": "repair-module-repair_v3_2p",
+      "label": "repair_v3_2p",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/repair/repair_v3_2p"
     },
     {
       "id": "dataflow-upload",
@@ -2891,6 +2935,18 @@
     },
     {
       "source": "backend-services-audio_repair.py",
+      "target": "algo-v3.2",
+      "label": "算法版本",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-services-audio_repair.py",
+      "target": "algo-v3.2a",
+      "label": "算法版本",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-services-audio_repair.py",
       "target": "repair-module-__pycache__",
       "label": "动态加载",
       "type": "call"
@@ -3180,6 +3236,30 @@
     {
       "source": "backend-services-audio_repair.py",
       "target": "repair-module-repair_v3_1a",
+      "label": "动态加载",
+      "type": "call"
+    },
+    {
+      "source": "backend-services-audio_repair.py",
+      "target": "repair-module-repair_v3_2",
+      "label": "动态加载",
+      "type": "call"
+    },
+    {
+      "source": "backend-services-audio_repair.py",
+      "target": "repair-module-repair_v3_2a",
+      "label": "动态加载",
+      "type": "call"
+    },
+    {
+      "source": "backend-services-audio_repair.py",
+      "target": "repair-module-repair_v3_2ap",
+      "label": "动态加载",
+      "type": "call"
+    },
+    {
+      "source": "backend-services-audio_repair.py",
+      "target": "repair-module-repair_v3_2p",
       "label": "动态加载",
       "type": "call"
     },

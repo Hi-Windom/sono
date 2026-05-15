@@ -47,6 +47,8 @@ interface AIRepairPanelProps {
   onVocalParamChange?: (key: keyof VocalRepairParams, value: number) => void;
   onAccompanimentParamChange?: (key: keyof InstrumentRepairParams, value: number) => void;
   onMixRatioChange?: (ratio: number) => void;
+  speed?: number;
+  onSpeedChange?: (speed: number) => void;
   onDualTrackRepair?: () => void;
   dualTrackVocalInfo?: DualTrackAudioInfo | null;
   dualTrackAccompanimentInfo?: DualTrackAudioInfo | null;
@@ -141,9 +143,11 @@ export function AIRepairPanel({
   vocalParams,
   accompanimentParams,
   mixRatio = 0.5,
+  speed = 1.0,
   onVocalParamChange,
   onAccompanimentParamChange,
   onMixRatioChange,
+  onSpeedChange,
   onDualTrackRepair,
   dualTrackVocalInfo,
   dualTrackAccompanimentInfo,
@@ -246,8 +250,15 @@ export function AIRepairPanel({
     compressor: '压缩器',
     spatial: '空间感',
     warmth: '温暖度',
+    smartCompressor: '智能压缩',
+    transientAware: '瞬态感知',
+    resonanceSuppress: '共振抑制',
+    aiRepairAdaptive: '自适应AI修复',
+    exciterImproved: '改进激励器',
+    deEsserImproved: '改进齿音抑制',
+    speed: '速度',
   };
-  const vocalParamKeys = Object.keys(vocalParamLabels) as (keyof VocalRepairParams)[];
+  const vocalParamKeys = (Object.keys(vocalParamLabels) as (keyof VocalRepairParams)[]).filter(k => k !== 'speed');
 
   const instParamLabels: Record<keyof InstrumentRepairParams, string> = {
     deClipping: '去削波',
@@ -259,8 +270,9 @@ export function AIRepairPanel({
     warmth: '温暖度',
     loudness: '响度优化',
     stereo_enhance: '立体声增强',
+    speed: '速度',
   };
-  const instParamKeys = Object.keys(instParamLabels) as (keyof InstrumentRepairParams)[];
+  const instParamKeys = (Object.keys(instParamLabels) as (keyof InstrumentRepairParams)[]).filter(k => k !== 'speed');
 
   const paramLabels: Record<keyof AIRepairParams, string> = {
     deClipping: '去削波',
@@ -517,6 +529,7 @@ export function AIRepairPanel({
               { value: 'standard' as const, label: '标准母带', recommended: true },
               { value: 'powerful' as const, label: '强力母带' },
               { value: 'warm' as const, label: '温暖母带' },
+              { value: 'adaptive' as const, label: '自适应' },
             ].map((option) => {
               const isSelected = (processingOptions.masteringStyle || 'standard') === option.value;
               return (
@@ -922,6 +935,47 @@ export function AIRepairPanel({
                 ))}
               </div>
             )}
+          </div>
+
+          <div className="p-3 bg-gradient-to-r from-cyan-500/5 to-blue-500/5 rounded-lg border border-white/5">
+            <div className="flex justify-between items-center mb-2">
+              <span className="text-gray-300 text-xs font-medium">速度</span>
+              <span className="text-xs text-gray-400">
+                {speed < 0.8 ? '慢速' : speed > 1.2 ? '快速' : '原速'}
+                <span className="ml-1 text-white font-medium">{speed.toFixed(2)}x</span>
+              </span>
+            </div>
+            <div className="relative pt-1 pb-5">
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.001"
+                value={Math.log2(speed / 0.5) / 2}
+                onChange={(e) => {
+                  const pos = parseFloat(e.target.value);
+                  const newSpeed = 0.5 * Math.pow(4, pos);
+                  onSpeedChange?.(Math.round(newSpeed * 100) / 100);
+                }}
+                disabled={disabled}
+                className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer slider-accent"
+              />
+              <div className="absolute left-0 right-0 top-8 text-[10px] text-gray-500 select-none pointer-events-none">
+                {[0.5, 0.75, 1.0, 1.25, 1.5, 2.0].map((tick) => {
+                  const pos = Math.log2(tick / 0.5) / 2;
+                  return (
+                    <div
+                      key={tick}
+                      className="absolute flex flex-col items-center"
+                      style={{ left: `${pos * 100}%`, transform: 'translateX(-50%)' }}
+                    >
+                      <div className="w-px h-1.5 bg-gray-500/40 mb-0.5" />
+                      <span>{tick}x</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
           </div>
 
           <div className="p-3 bg-gradient-to-r from-pink-500/5 to-purple-500/5 rounded-lg border border-white/5">

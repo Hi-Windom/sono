@@ -55,6 +55,7 @@ export const defaultProcessingOptions: ProcessingOptions = {
   sampleRate: 48000,
   bitDepth: 24,
   masteringStyle: 'standard',
+  qualityMode: 'standard',
 };
 
 function formatSpeed(bytesPerSec: number): string {
@@ -113,12 +114,15 @@ export function generateExportFilename(
   sampleRate: number,
   bitDepth: number,
   suffix?: string,
+  speed?: number,
 ): string {
   const baseName = audioFileName ? audioFileName.replace(/\.[^/.]+$/, '') : 'audio';
   const ts = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 15);
   const parts = [baseName];
   if (suffix) parts.push(suffix);
-  parts.push(algorithmVersion, `${sampleRate / 1000}k`, `${bitDepth}bit`, ts);
+  parts.push(algorithmVersion);
+  if (speed && speed !== 1.0) parts.push(`${speed}x`);
+  parts.push(`${sampleRate / 1000}k`, `${bitDepth}bit`, ts);
   return `${parts.join('_')}.wav`;
 }
 
@@ -1854,7 +1858,7 @@ export function useAudioProcessor() {
       setProcessingStep('渲染交付规格...');
       setProcessingProgress(0);
       setIsRenderLoading(true);
-      await renderAudio(taskIdRef.current, opts.sampleRate, opts.bitDepth, opts.masteringStyle, algoVer);
+      await renderAudio(taskIdRef.current, opts.sampleRate, opts.bitDepth, opts.masteringStyle, algoVer, opts.qualityMode);
       const { promise, close } = waitRenderWithWS(taskIdRef.current, (progress, step) => {
         writeLog(`[renderAndDownload] 渲染进度: ${progress} step=${step}`);
         setProcessingProgress(progress);

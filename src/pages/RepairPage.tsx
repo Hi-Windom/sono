@@ -143,6 +143,10 @@ export default function RepairPage() {
     const saved = loadSettings();
     return saved.dualTrackMixRatio ?? 0.5;
   });
+  const [dualTrackSpeed, setDualTrackSpeed] = useState(() => {
+    const saved = loadSettings();
+    return saved.dualTrackSpeed ?? 1.0;
+  });
   const [dualTrackUrls, setDualTrackUrls] = useState<DualTrackDownloadUrls | null>(null);
   const dualTrackRenderCachesRef = useRef<RenderCacheEntry[]>([]);
   const pollRef = useRef<NodeJS.Timeout | null>(null);
@@ -283,6 +287,12 @@ export default function RepairPage() {
 
   const handleDualTrackAccompanimentParamChange = useCallback((key: keyof InstrumentRepairParams, value: number) => {
     setDualTrackAccompanimentParams(prev => ({ ...prev, [key]: value }));
+  }, []);
+
+  const handleDualTrackSpeedChange = useCallback((speed: number) => {
+    setDualTrackSpeed(speed);
+    setDualTrackVocalParams(prev => ({ ...prev, speed }));
+    setDualTrackAccompanimentParams(prev => ({ ...prev, speed }));
   }, []);
 
   const handleDualTrackFileReplace = useCallback(async (type: 'vocal' | 'accompaniment', newFile: File) => {
@@ -597,6 +607,7 @@ export default function RepairPage() {
         dualTrackVocalParams: dualTrackVocalParams,
         dualTrackInstrumentParams: dualTrackAccompanimentParams,
         dualTrackMixRatio: mixRatio,
+        dualTrackSpeed: dualTrackSpeed,
       });
     }
   }, [isDualTrackMode, dualTrackVocalParams, dualTrackAccompanimentParams, mixRatio]);
@@ -1011,7 +1022,7 @@ export default function RepairPage() {
                     : (duration || 0);
                   
                   setInstantDownloadInfo({
-                    filename: generateExportFilename(fileName, cacheEntry.algorithm_version, cacheEntry.sample_rate, cacheEntry.bit_depth),
+                    filename: generateExportFilename(fileName, cacheEntry.algorithm_version, cacheEntry.sample_rate, cacheEntry.bit_depth, undefined, dualTrackSpeed),
                     fileSize: `${(cacheEntry.size / (1024 * 1024)).toFixed(2)} MB`,
                     sampleRate: `${cacheEntry.sample_rate / 1000} kHz`,
                     bitDepth: cacheEntry.bit_depth,
@@ -1045,6 +1056,8 @@ export default function RepairPage() {
                 onVocalParamChange={handleDualTrackVocalParamChange}
                 onAccompanimentParamChange={handleDualTrackAccompanimentParamChange}
                 onMixRatioChange={setMixRatio}
+                speed={dualTrackSpeed}
+                onSpeedChange={handleDualTrackSpeedChange}
                 onDualTrackRepair={isDualTrackMode ? handleDualTrackRepair : undefined}
                 dualTrackVocalInfo={dualTrackVocalInfo}
                 dualTrackAccompanimentInfo={dualTrackAccompanimentInfo}
