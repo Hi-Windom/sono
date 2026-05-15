@@ -62,7 +62,7 @@ export interface AppSettings {
   exportOptions: {
     sampleRate: number;
     bitDepth: 16 | 24 | 32;
-    masteringStyle?: 'standard' | 'powerful' | 'warm';
+    masteringStyle?: 'standard' | 'powerful' | 'warm' | 'adaptive';
   };
   stemSettings: {
     vocalGain: number;
