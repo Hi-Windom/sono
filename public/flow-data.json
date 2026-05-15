@@ -1687,6 +1687,20 @@
       "filePath": "/workspace/backend/services/repair/repair_v3_3/dynamic.py"
     },
     {
+      "id": "repair-module-repair_v3_3-inst",
+      "label": "repair_v3_3/inst",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/repair/repair_v3_3/inst.py"
+    },
+    {
+      "id": "repair-module-repair_v3_3-mixback",
+      "label": "repair_v3_3/mixback",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/repair/repair_v3_3/mixback.py"
+    },
+    {
       "id": "repair-module-repair_v3_3-phase",
       "label": "repair_v3_3/phase",
       "type": "module",
@@ -1713,6 +1727,13 @@
       "type": "module",
       "layer": "backend",
       "filePath": "/workspace/backend/services/repair/repair_v3_3/utils.py"
+    },
+    {
+      "id": "repair-module-repair_v3_3-vocal",
+      "label": "repair_v3_3/vocal",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/repair/repair_v3_3/vocal.py"
     },
     {
       "id": "repair-module-repair_v3_3a",
@@ -3402,6 +3423,18 @@
     },
     {
       "source": "repair-module-repair_v3_3",
+      "target": "repair-module-repair_v3_3-inst",
+      "label": "子模块",
+      "type": "import"
+    },
+    {
+      "source": "repair-module-repair_v3_3",
+      "target": "repair-module-repair_v3_3-mixback",
+      "label": "子模块",
+      "type": "import"
+    },
+    {
+      "source": "repair-module-repair_v3_3",
       "target": "repair-module-repair_v3_3-phase",
       "label": "子模块",
       "type": "import"
@@ -3421,6 +3454,12 @@
     {
       "source": "repair-module-repair_v3_3",
       "target": "repair-module-repair_v3_3-utils",
+      "label": "子模块",
+      "type": "import"
+    },
+    {
+      "source": "repair-module-repair_v3_3",
+      "target": "repair-module-repair_v3_3-vocal",
       "label": "子模块",
       "type": "import"
     },

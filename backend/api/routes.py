@@ -1334,9 +1334,7 @@ async def download_audio(task_id: str):
     
     original_name = task.get("original_filename", "audio")
     base_name = os.path.splitext(original_name)[0]
-    speed = task.get("params", {}).get("speed", 1.0)
-    speed_tag = f"{speed}x_" if speed and speed != 1.0 else ""
-    download_name = f"{base_name}_{speed_tag}repaired.wav"
+    download_name = f"{base_name}_repaired.wav"
 
     file_size = os.path.getsize(output_path)
     from urllib.parse import quote
