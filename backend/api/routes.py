@@ -764,6 +764,12 @@ async def repair_dual_audio_endpoint(request: DualRepairRequest):
         "ai_repair_enhanced": "vocal_ai_repair_enhanced",
         "ai_repair_enhanced_lite": "vocal_ai_repair_enhanced_lite",
         "loudness_optimize": "vocal_loudness",
+        "smart_compressor": "vocal_smart_compressor",
+        "transient_aware": "vocal_transient_aware",
+        "resonance_suppress": "vocal_resonance_suppress",
+        "ai_repair_adaptive": "vocal_ai_repair_adaptive",
+        "exciter_improved": "vocal_exciter_improved",
+        "de_esser_improved": "vocal_de_esser_improved",
     }
 
     _INST_KEY_MAP = {
@@ -776,6 +782,18 @@ async def repair_dual_audio_endpoint(request: DualRepairRequest):
         "timbre_protect": "inst_timbre_protect",
         "stereo_enhance": "inst_stereo_enhance",
         "loudness_optimize": "inst_loudness",
+        "exciter": "inst_exciter",
+        "compressor": "inst_compressor",
+        "de_esser_advanced": "inst_de_esser_advanced",
+        "ai_repair_enhanced": "inst_ai_repair_enhanced",
+        "ai_repair_enhanced_lite": "inst_ai_repair_enhanced_lite",
+        "exciter_lite": "inst_exciter_lite",
+        "compressor_lite": "inst_compressor_lite",
+        "transient": "inst_transient",
+        "resonance": "inst_resonance",
+        "bass_enhance": "inst_bass_enhance",
+        "air_texture": "inst_air_texture",
+        "clarity": "inst_clarity",
     }
 
     if request.vocal_params:
@@ -883,6 +901,12 @@ async def repair_dual_from_hash(request: DualRepairFromHashRequest):
         "ai_repair_enhanced": "vocal_ai_repair_enhanced",
         "ai_repair_enhanced_lite": "vocal_ai_repair_enhanced_lite",
         "loudness_optimize": "vocal_loudness",
+        "smart_compressor": "vocal_smart_compressor",
+        "transient_aware": "vocal_transient_aware",
+        "resonance_suppress": "vocal_resonance_suppress",
+        "ai_repair_adaptive": "vocal_ai_repair_adaptive",
+        "exciter_improved": "vocal_exciter_improved",
+        "de_esser_improved": "vocal_de_esser_improved",
     }
 
     _INST_KEY_MAP = {
@@ -895,6 +919,18 @@ async def repair_dual_from_hash(request: DualRepairFromHashRequest):
         "timbre_protect": "inst_timbre_protect",
         "stereo_enhance": "inst_stereo_enhance",
         "loudness_optimize": "inst_loudness",
+        "exciter": "inst_exciter",
+        "compressor": "inst_compressor",
+        "de_esser_advanced": "inst_de_esser_advanced",
+        "ai_repair_enhanced": "inst_ai_repair_enhanced",
+        "ai_repair_enhanced_lite": "inst_ai_repair_enhanced_lite",
+        "exciter_lite": "inst_exciter_lite",
+        "compressor_lite": "inst_compressor_lite",
+        "transient": "inst_transient",
+        "resonance": "inst_resonance",
+        "bass_enhance": "inst_bass_enhance",
+        "air_texture": "inst_air_texture",
+        "clarity": "inst_clarity",
     }
 
     if request.vocal_params:
@@ -1143,6 +1179,14 @@ def _run_render_dual(task_id, vocal_path, accompaniment_path, output_path, targe
             
             progress_callback(0.5, "渲染输出...")
             mixed = np.clip(mixed, -1.0, 1.0)
+            if vocal_sr != target_sr:
+                from scipy.signal import resample_poly
+                target_len = int(mixed.shape[1] * target_sr / vocal_sr)
+                mixed_resampled = np.zeros((mixed.shape[0], target_len), dtype=mixed.dtype)
+                for ch in range(mixed.shape[0]):
+                    resampled = resample_poly(mixed[ch], target_sr, vocal_sr)
+                    mixed_resampled[ch, :len(resampled)] = resampled[:target_len]
+                mixed = mixed_resampled
             subtype_map = {16: "PCM_16", 24: "PCM_24", 32: "PCM_32"}
             subtype = subtype_map.get(bit_depth, "PCM_24")
             sf.write(output_path, mixed.T if mixed.ndim > 1 else mixed, target_sr, subtype=subtype)
@@ -2356,6 +2400,12 @@ async def lookup_dual_repair_cache(req: DualRepairCacheLookupRequest):
         "ai_repair_enhanced": "vocal_ai_repair_enhanced",
         "ai_repair_enhanced_lite": "vocal_ai_repair_enhanced_lite",
         "loudness_optimize": "vocal_loudness",
+        "smart_compressor": "vocal_smart_compressor",
+        "transient_aware": "vocal_transient_aware",
+        "resonance_suppress": "vocal_resonance_suppress",
+        "ai_repair_adaptive": "vocal_ai_repair_adaptive",
+        "exciter_improved": "vocal_exciter_improved",
+        "de_esser_improved": "vocal_de_esser_improved",
     }
 
     _INST_KEY_MAP = {
@@ -2368,6 +2418,18 @@ async def lookup_dual_repair_cache(req: DualRepairCacheLookupRequest):
         "timbre_protect": "inst_timbre_protect",
         "stereo_enhance": "inst_stereo_enhance",
         "loudness_optimize": "inst_loudness",
+        "exciter": "inst_exciter",
+        "compressor": "inst_compressor",
+        "de_esser_advanced": "inst_de_esser_advanced",
+        "ai_repair_enhanced": "inst_ai_repair_enhanced",
+        "ai_repair_enhanced_lite": "inst_ai_repair_enhanced_lite",
+        "exciter_lite": "inst_exciter_lite",
+        "compressor_lite": "inst_compressor_lite",
+        "transient": "inst_transient",
+        "resonance": "inst_resonance",
+        "bass_enhance": "inst_bass_enhance",
+        "air_texture": "inst_air_texture",
+        "clarity": "inst_clarity",
     }
 
     if req.vocal_params:
