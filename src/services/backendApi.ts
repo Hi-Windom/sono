@@ -1851,4 +1851,8 @@ export const ALGORITHM_VERSIONS = [
   { id: 'v3.2+', label: 'v3.2+ (精修)', description: '前视压缩+双分辨率AI修复+增强空间感+两遍处理' },
   { id: 'v3.2a', label: 'v3.2a (移动)', description: '移动版智能压缩+自适应AI修复+瞬态感知+共振抑制' },
   { id: 'v3.2a+', label: 'v3.2a+ (增强)', description: '移动增强版前视压缩+全分辨率AI修复+两遍处理' },
+  { id: 'v3.3', label: 'v3.3 (自然化)', description: '统计自然化版：频谱自然化+瞬态保护+相位扩散+动态自然化（推荐）' },
+  { id: 'v3.3+', label: 'v3.3+ (反检测)', description: '增强版：f0引导谐波+感知加权+预设系统(Anti-Detect/HiFi-Pure/Vocal)' },
+  { id: 'v3.3a', label: 'v3.3a (移动自然化)', description: '移动精简版：简化频谱自然化+瞬态保护，低计算量' },
+  { id: 'v3.3a+', label: 'v3.3a+ (移动增强)', description: '移动增强版：精简自然化+残差扩散后处理' },
 ];
