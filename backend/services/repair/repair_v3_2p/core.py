@@ -163,18 +163,4 @@ def _repair_single_track(input_path, output_path, params, progress_callback=None
     return _v3_2_repair_single_track(input_path, output_path, params, progress_callback)
 
 def repair_audio(input_path, output_path, params, progress_callback=None):
-    result = _v3_2_repair_audio(input_path, output_path, params, progress_callback)
-    if isinstance(result, dict) and 'output_path' in result:
-        y, sr = None, None
-        import soundfile as sf
-        y, sr = sf.read(result['output_path'])
-        y = y.astype(np.float64)
-        if y.ndim > 1:
-            y = np.mean(y, axis=1)
-        second_pass_amount = 0.3
-        y = _lookahead_compressor(y, sr, second_pass_amount * params.get('smart_compressor', 0.5))
-        y = _vocal_exciter_improved(y, sr, second_pass_amount * params.get('exciter_improved', 0.3))
-        y = _transient_aware_process(y, sr, second_pass_amount * params.get('transient_aware', 0.3))
-        y = np.clip(y, -1, 1)
-        sf.write(result['output_path'], y, sr)
-    return result
+    return _v3_2_repair_audio(input_path, output_path, params, progress_callback)
