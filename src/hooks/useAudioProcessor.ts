@@ -1344,11 +1344,7 @@ export function useAudioProcessor() {
           writeLog('[applySettings] renderAndDownload 已在进行，跳过');
         } else {
           const currentOpts = { ...processingOptions };
-          renderAndDownload(currentOpts, effectiveAlgorithmVersion).then(result => {
-            if (result?.downloadUrl) {
-              setRenderDownloadUrl(result.downloadUrl);
-            }
-          }).catch(err => {
+          renderAndDownload(currentOpts, effectiveAlgorithmVersion).catch(err => {
             writeLog(`[applySettings] 自动渲染失败: ${err}`);
           });
         }
