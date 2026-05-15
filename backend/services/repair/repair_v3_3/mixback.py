@@ -154,14 +154,17 @@ def _residual_refine_1d(original, processed, strength):
     refined = diffused + noise * strength
     blend = strength * 0.3
     result = processed.astype(np.float64) + refined * blend
-    return np.clip(result, -1.0, 1.0).astype(original_dtype)
+    return np.clip(result, -1.0, 1.0).astype(processed.dtype)
 
 
-def mixback(vocal, accompaniment, sr, params):
+def mixback(vocal, accompaniment, sr, params, progress_callback=None, progress_start=0.0, progress_end=1.0):
     strength = params.get("strength", 1.0)
     vocal_ratio = params.get("vocal_ratio", 1.0)
     accompaniment_ratio = params.get("accompaniment_ratio", 1.0)
     cross_bleed_strength = params.get("cross_bleed", 0.3) * strength
+    if progress_callback:
+        p = progress_start + (progress_end - progress_start) * 0.1
+        progress_callback(p, "交叉bleed...")
     v, a = _cross_bleed(vocal, accompaniment, cross_bleed_strength)
     if v.ndim == 1:
         v = v.reshape(1, -1)
@@ -179,11 +182,22 @@ def mixback(vocal, accompaniment, sr, params):
     peak = np.max(np.abs(mixed))
     if peak > 0.99:
         mixed *= 0.99 / peak
+    if progress_callback:
+        p = progress_start + (progress_end - progress_start) * 0.3
+        progress_callback(p, "响度匹配...")
     target_lufs = params.get("target_lufs", -14.0)
     mixed = _loudness_match(mixed, sr, target_lufs)
+    if progress_callback:
+        p = progress_start + (progress_end - progress_start) * 0.6
+        progress_callback(p, "限幅增益...")
     mixed = _soft_limit_slow_gain(mixed, sr)
     residual_refine = params.get("residual_refine", 0.0)
     if residual_refine > 0:
+        if progress_callback:
+            p = progress_start + (progress_end - progress_start) * 0.8
+            progress_callback(p, "残差精炼...")
         original_mixed = v * vocal_ratio + a * accompaniment_ratio
         mixed = _final_residual_refine(original_mixed, mixed, residual_refine)
+    if progress_callback:
+        progress_callback(progress_end, "混音完成")
     return mixed

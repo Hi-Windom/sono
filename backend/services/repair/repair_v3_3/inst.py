@@ -308,21 +308,35 @@ def _inst_upward_compression(y, sr, strength):
         return np.stack(results).astype(original_dtype)
 
 
-def process_inst_v33(y, sr, params):
+def process_inst_v33(y, sr, params, progress_callback=None, progress_start=0.0, progress_end=1.0):
     strength = params.get("strength", 1.0)
+    stages = []
     if params.get("spectral_naturalize", 0) > 0:
-        s = params["spectral_naturalize"] * strength
-        y = _inst_aggressive_spectral_naturalize(y, sr, s)
+        stages.append(("spectral_naturalize", "谱自然化"))
     if params.get("harmonic_deregularize", 0) > 0:
-        s = params["harmonic_deregularize"] * strength
-        y = _inst_multiband_harmonic_dereg(y, sr, s)
+        stages.append(("harmonic_deregularize", "谐波去规整"))
     if params.get("spatial_enhance", 0) > 0:
-        s = params["spatial_enhance"] * strength
-        y = _inst_spatial_enhance(y, sr, s)
+        stages.append(("spatial_enhance", "空间感增强"))
     if params.get("transient_protect", 0) > 0:
-        s = params["transient_protect"] * strength
-        y = _inst_transient_impact_protect(y, sr, s)
+        stages.append(("transient_protect", "瞬态保护"))
     if params.get("dynamic_naturalize", 0) > 0:
-        s = params["dynamic_naturalize"] * strength
-        y = _inst_upward_compression(y, sr, s)
+        stages.append(("dynamic_naturalize", "动态自然化"))
+    n_stages = len(stages)
+    for idx, (key, label) in enumerate(stages):
+        s = params[key] * strength
+        if progress_callback and n_stages > 0:
+            p = progress_start + (progress_end - progress_start) * (idx / n_stages)
+            progress_callback(p, f"伴奏{label}...")
+        y = _INST_STAGE_MAP[key](y, sr, s)
+    if progress_callback:
+        progress_callback(progress_end, "伴奏处理完成")
     return y
+
+
+_INST_STAGE_MAP = {
+    "spectral_naturalize": _inst_aggressive_spectral_naturalize,
+    "harmonic_deregularize": _inst_multiband_harmonic_dereg,
+    "spatial_enhance": _inst_spatial_enhance,
+    "transient_protect": _inst_transient_impact_protect,
+    "dynamic_naturalize": _inst_upward_compression,
+}

@@ -321,15 +321,9 @@ def _repair_dual_track(input_path, output_path, params, progress_callback=None):
     if progress_callback:
         progress_callback(0.25, "v3.3a 处理人声轨...")
 
-    v_processed = process_vocal_v33(v_y, sr, vp)
+    v_processed = process_vocal_v33(v_y, sr, vp, progress_callback=progress_callback, progress_start=0.25, progress_end=0.50)
 
-    if progress_callback:
-        progress_callback(0.50, "v3.3a 处理伴奏轨...")
-
-    a_processed = process_inst_v33(a_y, sr, ip)
-
-    if progress_callback:
-        progress_callback(0.70, "v3.3a 混音...")
+    a_processed = process_inst_v33(a_y, sr, ip, progress_callback=progress_callback, progress_start=0.50, progress_end=0.70)
 
     mix_p = {
         "strength": params.get("strength", 1.0),
@@ -339,7 +333,7 @@ def _repair_dual_track(input_path, output_path, params, progress_callback=None):
         "target_lufs": mix_params.get("target_lufs", -14.0),
         "residual_refine": mix_params.get("residual_refine", 0.0),
     }
-    merged = mixback(v_processed, a_processed, sr, mix_p)
+    merged = mixback(v_processed, a_processed, sr, mix_p, progress_callback=progress_callback, progress_start=0.70, progress_end=0.85)
 
     if progress_callback:
         progress_callback(0.85, "v3.3a 导出...")

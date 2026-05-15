@@ -313,24 +313,38 @@ def _pink_noise_vocal(n_samples, rng):
     return pink / (np.std(pink) + 1e-12)
 
 
-def process_vocal_v33(y, sr, params):
+def process_vocal_v33(y, sr, params, progress_callback=None, progress_start=0.0, progress_end=1.0):
     strength = params.get("strength", 1.0)
+    stages = []
     if params.get("f0_harmonic", 0) > 0:
-        s = params["f0_harmonic"] * strength
-        y = _vocal_f0_harmonic_naturalize(y, sr, s)
+        stages.append(("f0_harmonic", "f0谐波自然化"))
     if params.get("microtremor_breath", 0) > 0:
-        s = params["microtremor_breath"] * strength
-        y = _vocal_microtremor_breath(y, sr, s)
+        stages.append(("microtremor_breath", "微颤音呼吸"))
     if params.get("transient_protect", 0) > 0:
-        s = params["transient_protect"] * strength
-        y = _vocal_emotional_transient_protect(y, sr, s)
+        stages.append(("transient_protect", "情感瞬态保护"))
     if params.get("de_shimmer", 0) > 0:
-        s = params["de_shimmer"] * strength
-        y = _vocal_de_shimmer(y, sr, s)
+        stages.append(("de_shimmer", "去金属感"))
     if params.get("phase_diffuse", 0) > 0:
-        s = params["phase_diffuse"] * strength
-        y = _vocal_light_phase_diffuse(y, sr, s)
+        stages.append(("phase_diffuse", "相位扩散"))
     if params.get("noise_floor", 0) > 0:
-        s = params["noise_floor"] * strength
-        y = _vocal_light_noise_floor(y, sr, s)
+        stages.append(("noise_floor", "噪声地板"))
+    n_stages = len(stages)
+    for idx, (key, label) in enumerate(stages):
+        s = params[key] * strength
+        if progress_callback and n_stages > 0:
+            p = progress_start + (progress_end - progress_start) * (idx / n_stages)
+            progress_callback(p, f"人声{label}...")
+        y = _STAGE_MAP[key](y, sr, s)
+    if progress_callback:
+        progress_callback(progress_end, "人声处理完成")
     return y
+
+
+_STAGE_MAP = {
+    "f0_harmonic": _vocal_f0_harmonic_naturalize,
+    "microtremor_breath": _vocal_microtremor_breath,
+    "transient_protect": _vocal_emotional_transient_protect,
+    "de_shimmer": _vocal_de_shimmer,
+    "phase_diffuse": _vocal_light_phase_diffuse,
+    "noise_floor": _vocal_light_noise_floor,
+}
