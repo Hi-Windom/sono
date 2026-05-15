@@ -939,8 +939,19 @@ async def render_audio_endpoint(request: RenderRequest):
     is_dual_track = task_params.get("processing_mode") == "dual"
     
     if is_dual_track:
-        vocal_output_path = task_params.get("vocal_output_path")
-        accompaniment_output_path = task_params.get("accompaniment_output_path")
+        # 优先从 repair_result 中获取 vocal_output_path，如果没有再从 task_params 取
+        vocal_output_path = None
+        accompaniment_output_path = None
+        
+        repair_result = task.get("repair_result")
+        if isinstance(repair_result, dict):
+            vocal_output_path = repair_result.get("vocal_output_path")
+            accompaniment_output_path = repair_result.get("accompaniment_output_path")
+        
+        if not vocal_output_path:
+            vocal_output_path = task_params.get("vocal_output_path")
+        if not accompaniment_output_path:
+            accompaniment_output_path = task_params.get("accompaniment_output_path")
         
         if not vocal_output_path or not os.path.exists(vocal_output_path):
             raise HTTPException(status_code=400, detail="人声修复结果不存在")

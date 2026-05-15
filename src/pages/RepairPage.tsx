@@ -507,11 +507,12 @@ export default function RepairPage() {
   }, [dualTrackVocalFile, dualTrackAccompanimentFile, dualTrackVocalFileHash, dualTrackAccompanimentFileHash, dualTrackVocalFileName, dualTrackAccompanimentFileName, dualTrackTaskId, dualTrackVocalTaskId, dualTrackAccompanimentTaskId, params, processingOptions, algorithmVersion, dualTrackVocalParams, dualTrackAccompanimentParams, mixRatio, setIsProcessing, setProcessingStep, setProcessingSource, setBackendError, startDualTrackPolling, sessionActions]);
 
   const handleUseDualCache = useCallback(async (cachedTaskId: string) => {
+    const cache = dualCacheHitInfo?.repair;
     setShowDualRepairCacheModal(false);
+    setDualCacheHitInfo(null);
     setDualTrackTaskId(cachedTaskId);
     setTaskId(cachedTaskId);
 
-    const cache = dualCacheHitInfo?.repair;
     if (cache?.repair_result) {
       setDualTrackRepairResult(cache.repair_result);
     }
@@ -1037,7 +1038,7 @@ export default function RepairPage() {
                     : (duration || 0);
                   
                   setInstantDownloadInfo({
-                    filename: generateExportFilename(fileName, cacheEntry.algorithm_version, cacheEntry.sample_rate, cacheEntry.bit_depth, undefined, dualTrackSpeed),
+                    filename: generateExportFilename(fileName, cacheEntry.algorithm_version, cacheEntry.sample_rate, cacheEntry.bit_depth, undefined, isDualTrackMode ? dualTrackSpeed : undefined),
                     fileSize: `${(cacheEntry.size / (1024 * 1024)).toFixed(2)} MB`,
                     sampleRate: `${cacheEntry.sample_rate / 1000} kHz`,
                     bitDepth: cacheEntry.bit_depth,

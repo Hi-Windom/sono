@@ -1936,10 +1936,11 @@ export function useAudioProcessor() {
   })();
 
   const handleUseRepairCache = useCallback((taskId: string) => {
+    const cache = cacheHitInfo?.repair;
     setShowRepairCacheModal(false);
+    setCacheHitInfo(null);
     writeLog(`[handleUseRepairCache] 使用修复缓存 taskId=${taskId}`);
 
-    const cache = cacheHitInfo?.repair;
     if (!cache) return;
 
     if (taskId && taskId !== taskIdRef.current) {

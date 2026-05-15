@@ -185,6 +185,12 @@ export function AIRepairPanel({
   const [renderCaches, setRenderCaches] = useState<RenderCacheEntry[]>(persistedRenderCaches || []);
   const [selectedCache, setSelectedCache] = useState<RenderCacheEntry | null>(null);
   const cacheCheckRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  
+  // 当 isDualTrackMode 变化时，清空渲染缓存，避免污染
+  useEffect(() => {
+    setRenderCaches([]);
+    setSelectedCache(null);
+  }, [isDualTrackMode]);
 
   useEffect(() => {
     if (!backendAvailable) {
