@@ -47,6 +47,8 @@ interface AIRepairPanelProps {
   onVocalParamChange?: (key: keyof VocalRepairParams, value: number) => void;
   onAccompanimentParamChange?: (key: keyof InstrumentRepairParams, value: number) => void;
   onMixRatioChange?: (ratio: number) => void;
+  speed?: number;
+  onSpeedChange?: (speed: number) => void;
   onDualTrackRepair?: () => void;
   dualTrackVocalInfo?: DualTrackAudioInfo | null;
   dualTrackAccompanimentInfo?: DualTrackAudioInfo | null;
@@ -141,9 +143,11 @@ export function AIRepairPanel({
   vocalParams,
   accompanimentParams,
   mixRatio = 0.5,
+  speed = 1.0,
   onVocalParamChange,
   onAccompanimentParamChange,
   onMixRatioChange,
+  onSpeedChange,
   onDualTrackRepair,
   dualTrackVocalInfo,
   dualTrackAccompanimentInfo,
@@ -252,8 +256,9 @@ export function AIRepairPanel({
     aiRepairAdaptive: '自适应AI修复',
     exciterImproved: '改进激励器',
     deEsserImproved: '改进齿音抑制',
+    speed: '速度',
   };
-  const vocalParamKeys = Object.keys(vocalParamLabels) as (keyof VocalRepairParams)[];
+  const vocalParamKeys = (Object.keys(vocalParamLabels) as (keyof VocalRepairParams)[]).filter(k => k !== 'speed');
 
   const instParamLabels: Record<keyof InstrumentRepairParams, string> = {
     deClipping: '去削波',
@@ -265,8 +270,9 @@ export function AIRepairPanel({
     warmth: '温暖度',
     loudness: '响度优化',
     stereo_enhance: '立体声增强',
+    speed: '速度',
   };
-  const instParamKeys = Object.keys(instParamLabels) as (keyof InstrumentRepairParams)[];
+  const instParamKeys = (Object.keys(instParamLabels) as (keyof InstrumentRepairParams)[]).filter(k => k !== 'speed');
 
   const paramLabels: Record<keyof AIRepairParams, string> = {
     deClipping: '去削波',
@@ -929,6 +935,31 @@ export function AIRepairPanel({
                 ))}
               </div>
             )}
+          </div>
+
+          <div className="p-3 bg-gradient-to-r from-cyan-500/5 to-blue-500/5 rounded-lg border border-white/5">
+            <div className="flex justify-between items-center mb-2">
+              <span className="text-gray-300 text-xs font-medium">速度</span>
+              <span className="text-xs text-gray-400">
+                {speed < 0.8 ? '慢速' : speed > 1.2 ? '快速' : '原速'}
+                <span className="ml-1 text-white font-medium">{speed.toFixed(2)}x</span>
+              </span>
+            </div>
+            <input
+              type="range"
+              min="0.5"
+              max="2.0"
+              step="0.01"
+              value={speed}
+              onChange={(e) => onSpeedChange?.(parseFloat(e.target.value))}
+              disabled={disabled}
+              className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer slider-accent"
+            />
+            <div className="flex justify-between text-[10px] text-gray-500 mt-1">
+              <span>0.5x</span>
+              <span>1.0x</span>
+              <span>2.0x</span>
+            </div>
           </div>
 
           <div className="p-3 bg-gradient-to-r from-pink-500/5 to-purple-500/5 rounded-lg border border-white/5">

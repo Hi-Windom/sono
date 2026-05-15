@@ -21,6 +21,7 @@ export interface VocalRepairParams {
   aiRepairAdaptive?: number;
   exciterImproved?: number;
   deEsserImproved?: number;
+  speed?: number;
 }
 
 export interface InstrumentRepairParams {
@@ -33,6 +34,7 @@ export interface InstrumentRepairParams {
   warmth: number;
   loudness: number;
   stereo_enhance?: number;
+  speed?: number;
 }
 
 export const defaultVocalRepairParams: VocalRepairParams = {
@@ -55,6 +57,7 @@ export const defaultVocalRepairParams: VocalRepairParams = {
   aiRepairAdaptive: 0.5,
   exciterImproved: 0.5,
   deEsserImproved: 0.5,
+  speed: 1.0,
 };
 
 export const defaultInstrumentRepairParams: InstrumentRepairParams = {
@@ -67,6 +70,7 @@ export const defaultInstrumentRepairParams: InstrumentRepairParams = {
   warmth: 0.25,
   loudness: 0.5,
   stereo_enhance: 0.5,
+  speed: 1.0,
 };
 
 export interface ProcessingOptions {
@@ -227,6 +231,7 @@ export function mapVocalParamsToBackend(params: VocalRepairParams, _options?: Pr
     ai_repair_adaptive: params.aiRepairAdaptive ?? 0.5,
     exciter_improved: params.exciterImproved ?? 0.5,
     de_esser_improved: params.deEsserImproved ?? 0.5,
+    speed: params.speed ?? 1.0,
     algorithm_version: algorithmVersion || 'v3.0',
   };
 }
@@ -242,6 +247,7 @@ export function mapInstrumentParamsToBackend(params: InstrumentRepairParams, _op
     warmth: params.warmth,
     loudness_optimize: params.loudness,
     stereo_enhance: params.stereo_enhance ?? 0.5,
+    speed: params.speed ?? 1.0,
     algorithm_version: algorithmVersion || 'v3.0',
   };
 }

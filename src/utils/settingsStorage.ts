@@ -59,6 +59,7 @@ export interface AppSettings {
   dualTrackVocalParams: VocalRepairParams;
   dualTrackInstrumentParams: InstrumentRepairParams;
   dualTrackMixRatio: number;
+  dualTrackSpeed: number;
   exportOptions: {
     sampleRate: number;
     bitDepth: 16 | 24 | 32;
@@ -81,6 +82,7 @@ export const defaultSettings: AppSettings = {
   dualTrackVocalParams: defaultVocalRepairParams,
   dualTrackInstrumentParams: defaultInstrumentRepairParams,
   dualTrackMixRatio: 0.5,
+  dualTrackSpeed: 1.0,
   exportOptions: {
     sampleRate: 48000,
     bitDepth: 24,
