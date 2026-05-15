@@ -246,6 +246,12 @@ export function AIRepairPanel({
     compressor: '压缩器',
     spatial: '空间感',
     warmth: '温暖度',
+    smartCompressor: '智能压缩',
+    transientAware: '瞬态感知',
+    resonanceSuppress: '共振抑制',
+    aiRepairAdaptive: '自适应AI修复',
+    exciterImproved: '改进激励器',
+    deEsserImproved: '改进齿音抑制',
   };
   const vocalParamKeys = Object.keys(vocalParamLabels) as (keyof VocalRepairParams)[];
 
@@ -517,6 +523,7 @@ export function AIRepairPanel({
               { value: 'standard' as const, label: '标准母带', recommended: true },
               { value: 'powerful' as const, label: '强力母带' },
               { value: 'warm' as const, label: '温暖母带' },
+              { value: 'adaptive' as const, label: '自适应' },
             ].map((option) => {
               const isSelected = (processingOptions.masteringStyle || 'standard') === option.value;
               return (

@@ -7,9 +7,10 @@ const TAG_CONFIG: Record<string, { label: string; className: string }> = {
   'stable':      { label: '稳定', className: 'bg-amber-500/20 text-amber-400 border border-amber-500/30' },
   'recommended': { label: '推荐', className: 'bg-purple-500/20 text-purple-400 border border-purple-500/30' },
   'dual-track':  { label: '双轨', className: 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30' },
+  'premium':     { label: '精修', className: 'bg-rose-500/20 text-rose-400 border border-rose-500/30' },
 };
 
-const TAG_ORDER = ['recommended', 'stable', 'dual-track', 'desktop', 'mobile'];
+const TAG_ORDER = ['recommended', 'premium', 'stable', 'dual-track', 'desktop', 'mobile'];
 
 interface AlgorithmSelectorProps {
   value: string;

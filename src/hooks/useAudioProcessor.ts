@@ -55,6 +55,7 @@ export const defaultProcessingOptions: ProcessingOptions = {
   sampleRate: 48000,
   bitDepth: 24,
   masteringStyle: 'standard',
+  qualityMode: 'standard',
 };
 
 function formatSpeed(bytesPerSec: number): string {
@@ -1854,7 +1855,7 @@ export function useAudioProcessor() {
       setProcessingStep('渲染交付规格...');
       setProcessingProgress(0);
       setIsRenderLoading(true);
-      await renderAudio(taskIdRef.current, opts.sampleRate, opts.bitDepth, opts.masteringStyle, algoVer);
+      await renderAudio(taskIdRef.current, opts.sampleRate, opts.bitDepth, opts.masteringStyle, algoVer, opts.qualityMode);
       const { promise, close } = waitRenderWithWS(taskIdRef.current, (progress, step) => {
         writeLog(`[renderAndDownload] 渲染进度: ${progress} step=${step}`);
         setProcessingProgress(progress);

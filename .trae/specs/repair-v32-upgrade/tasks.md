@@ -1,69 +1,64 @@
 # Tasks
 
-- [ ] Task 1: 创建 v3.2 桌面标准版核心算法 — 基于 v3.1 代码创建 `backend/services/repair/repair_v3_2/`，包含以下新算法函数：
-  - `_vocal_multiband_compressor` — 3 频段压缩器（20-200Hz, 200-4000Hz, 4000-20000Hz），每频段独立阈值/比率/attack/release
-  - `_vocal_multiband_exciter` — 分频段激励器（1-4kHz 中频 + 4-10kHz 高频）
-  - `_transient_enhance` — 瞬态检测 + 增益增强
-  - `_vocal_spatial_advanced` — 立体声加宽 + 早期反射 + 扩散混响
-  - `_mastering_adaptive` — 频谱分析驱动自适应 EQ/动态
-  - `_vocal_ai_repair_multi_resolution` — N_FFT=1024 + N_FFT=4096 双分辨率融合
-  - `_resonance_suppress` — 共振峰检测 + 动态陷波
-  - `_vocal_compressor_improved` — 带 5ms look-ahead 的改进压缩器
-  - 保留 v3.1 所有现有算法函数
-  - 实现 `repair_audio()` 入口函数（支持单轨/双轨）
-  - 实现 `process_vocal_track()` 和 `process_instrument_track()` 管线
-- [ ] Task 2: 创建 v3.2+ 桌面高画质版核心算法 — 创建 `backend/services/repair/repair_v3_2p/core.py`：
-  - 继承 v3.2 所有算法
-  - `_lookahead_compressor` — 10ms 前视 + 精确 RMS 包络
-  - 四频段多频段压缩/激励
-  - `_dynamic_eq` — 实时动态 EQ 衰减
-  - 高级混响（更长衰减 + 扩散网络）
-  - 两遍处理管线（第一遍 0.7 系数，第二遍 0.3 系数精修）
-  - 所有频谱处理使用 N_FFT=4096
+- [ ] Task 1: 创建 v3.2 桌面标准版核心算法 — 基于 v3.1 代码创建 `backend/services/repair/repair_v3_2/core.py`：
+  - `_vocal_smart_compressor` — 自适应 release 时间 + 滑动窗口 RMS + 峰值跟踪混合包络
+  - `_vocal_ai_repair_adaptive` — 动态噪声本底跟踪 + 频域自适应阈值
+  - `_transient_aware_process` — 帧间频谱变化检测瞬态 + 压缩/激励瞬态保护
+  - `_mastering_adaptive` — 频谱分析驱动自适应 EQ + 智能响度
+  - `_resonance_suppress` — STFT 幅值共振峰检测 + 动态陷波
+  - `_vocal_exciter_improved` — 多阶谐波生成（二次+三次）+ 非对称饱和 + 频段交叉渐变
+  - `_de_esser_improved` — 自适应阈值 + 频率跟踪
+  - 保留 v3.1 的其他未替换算法（declip, depop, formant_repair, breath_enhance, spatial, warmth, bass_enhance, air_texture, mastering_standard/powerful/warm, instrument 处理链）
+  - 处理管线顺序：declip → depop → formant_repair → de_ess → de_esser_improved → noise_reduction → ai_repair(hifi) → ai_repair_adaptive → breath_enhance → bass_enhance → air_texture → resonance_suppress → transient_aware_process → exciter_improved → dynamic → smart_compressor → warmth → spatial → loudness → mastering(adaptive/standard/powerful/warm) → soft_peak_limit
+  - 实现 `repair_audio()` 入口函数（支持单轨/双轨，双轨模式复用 v3.1 架构）
+- [ ] Task 2: 创建 v3.2+ 桌面精修版核心算法 — 创建 `backend/services/repair/repair_v3_2p/core.py`：
+  - 继承 v3.2 所有算法，通过 `from ..repair_v3_2.core import *` 导入基础函数
+  - `_lookahead_compressor` — 5ms look-ahead + RMS 混合包络（替换 smart_compressor）
+  - `_vocal_ai_repair_dual_resolution` — 瞬态帧 N_FFT=1024 + 平稳帧 N_FFT=2048（替换 ai_repair_adaptive）
+  - `_resonance_suppress_enhanced` — 频域+时域双域检测（替换 resonance_suppress）
+  - `_vocal_spatial_enhanced` — 早期反射 + 扩散混响 + 频率相关立体声加宽（替换 spatial）
+  - 两遍处理：第一遍全参数，第二遍核心步骤 0.3 系数
   - 实现 `repair_audio()` 入口函数
 - [ ] Task 3: 创建 v3.2a 移动标准版核心算法 — 创建 `backend/services/repair/repair_v3_2a/core.py`：
-  - `_vocal_multiband_compressor_lite` — 2 频段压缩
-  - `_vocal_multiband_exciter_lite` — 单频段激励（2-6kHz）
-  - `_transient_enhance_lite` — 简化瞬态增强
-  - `_vocal_spatial_lite` — 简单立体声加宽 + 短混响
-  - `_vocal_ai_repair_multi_res_lite` — N_FFT=1024 + N_FFT=2048 双分辨率
-  - `_resonance_suppress_lite` — 简化共振抑制
-  - 改进母带精简版
+  - `_vocal_smart_compressor_lite` — 自适应 release（保守参数范围）
+  - `_vocal_ai_repair_adaptive_lite` — 动态噪声本底 + 频域自适应阈值（N_FFT=1024）
+  - `_transient_aware_process_lite` — 时域能量变化检测瞬态
+  - `_resonance_suppress_lite` — 简化共振峰检测 + 衰减
+  - `_mastering_adaptive_lite` — 简化频谱分析 + EQ
+  - 改进激励器精简版 — 更好谐波混合比例
   - 实现 `repair_audio()` 入口函数
-- [ ] Task 4: 创建 v3.2a+ 移动高画质版核心算法 — 创建 `backend/services/repair/repair_v3_2ap/core.py`：
-  - 继承 v3.2a 所有算法
+- [ ] Task 4: 创建 v3.2a+ 移动增强版核心算法 — 创建 `backend/services/repair/repair_v3_2ap/core.py`：
+  - 继承 v3.2a 算法
   - 两遍轻量处理管线
-  - AI 修复使用 N_FFT=2048 全分辨率
-  - 压缩器 5ms look-ahead
-  - 三频段多频段压缩
-  - 更高质量混响
+  - 前视压缩器精简版 — 3ms look-ahead
+  - AI 修复 N_FFT=2048 全分辨率
+  - 增强空间感精简版 — 早期反射 + 短混响
   - 实现 `repair_audio()` 入口函数
 - [ ] Task 5: 注册新版本到 audio_repair.py — 修改 `backend/services/audio_repair.py`：
   - `_REPAIR_MODULES` 增加 v3.2/v3.2+/v3.2a/v3.2a+ 映射
-  - `ALGORITHM_VERSIONS` 增加四个版本的配置（标签、默认参数、模式）
+  - `ALGORITHM_VERSIONS` 增加四个版本配置
   - v3.2/v3.2+ 标记为 `mobile_compatible: False`
   - v3.2a/v3.2a+ 标记为 `mobile_compatible: True`
   - v3.2+ 标签包含 "premium"，v3.2a+ 标签包含 "premium"
+  - v3.2/v3.2a 标签包含 "recommended"
 - [ ] Task 6: 更新内存估算 — 修改 `backend/services/memory_guard.py`：
   - `has_streaming` 列表增加 v3.2/v3.2+/v3.2a/v3.2a+
-  - v3.2: peak_temp +150%
-  - v3.2+: peak_temp +250%
-  - v3.2a: peak_temp +80%
-  - v3.2a+: peak_temp +120%
+  - v3.2: peak_temp +30%
+  - v3.2+: peak_temp +60%
+  - v3.2a: peak_temp +20%
+  - v3.2a+: peak_temp +40%
 - [ ] Task 7: 更新前端 backendApi.ts — 修改 `src/services/backendApi.ts`：
-  - 增加 v3.2 系列参数接口类型
-  - VocalRepairParams 增加 multiband_compressor/multiband_exciter/transient_enhance/spatial_advanced/resonance_suppress/ai_repair_multi_res
-  - ProcessingOptions 增加 quality_mode/multi_pass
+  - VocalRepairParams 增加 smart_compressor/transient_aware/resonance_suppress/ai_repair_adaptive/exciter_improved/de_esser_improved
+  - ProcessingOptions 增加 quality_mode
   - ALGORITHM_VERSIONS 增加 v3.2/v3.2+/v3.2a/v3.2a+
 - [ ] Task 8: 更新前端 AIRepairPanel — 修改 `src/components/AIRepairPanel.tsx`：
-  - v3.2/v3.2+ 面板增加新效果器控件
-  - v3.2a/v3.2a+ 面板增加精简版控件
+  - v3.2/v3.2+ 面板：替换压缩器/激励器/齿音抑制控件，新增瞬态感知/共振抑制控件
+  - v3.2a/v3.2a+ 面板：对应精简版控件
   - 合并输出区域增加"自适应"母带模式
-  - v3.2+ 标注"高画质"标签，v3.2a+ 标注"移动高画质"
-  - + 版本选择提示
+  - v3.2+ 标注"精修"，v3.2a+ 标注"增强"
 - [ ] Task 9: 更新 useAudioProcessor hook — 修改 `src/hooks/useAudioProcessor.ts`：
-  - 传递 quality_mode/multi_pass 参数
-  - 处理新母带模式 mastering_mode="adaptive"
+  - 传递 quality_mode 参数
+  - 处理 mastering_mode="adaptive"
 
 # Task Dependencies
 
@@ -71,14 +66,14 @@
 - [Task 2] 依赖 [Task 1]（基于 v3.2 代码）
 - [Task 3] 无依赖（独立创建 v3.2a）
 - [Task 4] 依赖 [Task 3]（基于 v3.2a 代码）
-- [Task 5] 依赖 [Task 1] [Task 2] [Task 3] [Task 4]（需模块就绪）
+- [Task 5] 依赖 [Task 1] [Task 2] [Task 3] [Task 4]
 - [Task 6] 无依赖
-- [Task 7] 依赖 [Task 5]（需版本配置确定）
-- [Task 8] 依赖 [Task 7]（需类型定义就绪）
-- [Task 9] 依赖 [Task 7]（需参数定义就绪）
+- [Task 7] 依赖 [Task 5]
+- [Task 8] 依赖 [Task 7]
+- [Task 9] 依赖 [Task 7]
 
 **并行组**：
-- 组 A: [Task 1], [Task 3], [Task 6] 可并行执行
-- 组 B: [Task 2], [Task 4] 可并行执行（依赖组 A 完成）
-- 组 C: [Task 7] 可独立执行（依赖组 A 完成）
-- 组 D: [Task 8], [Task 9] 可并行执行（依赖组 C 完成）
+- 组 A: [Task 1], [Task 3], [Task 6] 可并行
+- 组 B: [Task 2], [Task 4] 可并行（依赖组 A）
+- 组 C: [Task 7] 可独立（依赖组 A 完成）
+- 组 D: [Task 8], [Task 9] 可并行（依赖组 C）
