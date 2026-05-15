@@ -200,6 +200,18 @@ export default function RepairPage() {
             setIsProcessing(false);
             return;
           }
+          // 渲染成功，设置秒下弹窗信息
+          setRenderDownloadUrl(result.downloadUrl);
+          setInstantDownloadInfo({
+            filename: result.fileName,
+            fileSize: '计算中...',
+            sampleRate: `${result.renderInfo.output_sample_rate / 1000} kHz`,
+            bitDepth: result.renderInfo.output_bit_depth,
+            channels: result.renderInfo.channels,
+            duration: result.renderInfo.duration,
+            algorithmVersion: algorithmVersion,
+          });
+          setShowDownloadModal(true);
         } catch (e) {
           console.error('[双轨] 渲染失败:', e);
           setBackendError(e instanceof Error ? e.message : '渲染交付失败');
@@ -283,6 +295,10 @@ export default function RepairPage() {
     setDualTrackDownloadUrl(null);
     setDualTrackRepairResult(null);
     stopDualTrackPolling();
+    // 清理弹窗状态，避免污染秒下刷新
+    setInstantDownloadInfo(null);
+    setShowDownloadModal(false);
+    setRenderDownloadUrl('');
   }, [stopDualTrackPolling, sessionActions]);
 
   const handleDualTrackVocalParamChange = useCallback((key: keyof VocalRepairParams, value: number) => {
@@ -524,6 +540,18 @@ export default function RepairPage() {
         setIsProcessing(false);
         return;
       }
+      // 渲染成功，设置秒下弹窗信息
+      setRenderDownloadUrl(result.downloadUrl);
+      setInstantDownloadInfo({
+        filename: result.fileName,
+        fileSize: '计算中...',
+        sampleRate: `${result.renderInfo.output_sample_rate / 1000} kHz`,
+        bitDepth: result.renderInfo.output_bit_depth,
+        channels: result.renderInfo.channels,
+        duration: result.renderInfo.duration,
+        algorithmVersion: algorithmVersion,
+      });
+      setShowDownloadModal(true);
     } catch (e) {
       console.error('[双轨-缓存] 渲染失败:', e);
       setBackendError(e instanceof Error ? e.message : '渲染交付失败');
@@ -663,6 +691,24 @@ export default function RepairPage() {
       setCacheTriggerKey(k => k + 1);
     }
   }, [dualTrackHasBeenProcessed]);
+
+  // 单轨渲染完成后设置秒下弹窗信息
+  useEffect(() => {
+    if (!isDualTrackMode && autoRenderInfo && renderDownloadUrl) {
+      setInstantDownloadInfo({
+        filename: `${(audioFile?.name || 'audio').replace(/\.[^/.]+$/, '')}_repaired.wav`,
+        fileSize: autoRenderInfo.duration && autoRenderInfo.output_sample_rate && autoRenderInfo.channels && autoRenderInfo.output_bit_depth
+          ? `${((autoRenderInfo.duration * autoRenderInfo.output_sample_rate * autoRenderInfo.channels * (autoRenderInfo.output_bit_depth / 8)) / (1024 * 1024)).toFixed(2)} MB`
+          : '计算中...',
+        sampleRate: autoRenderInfo.output_sample_rate ? `${autoRenderInfo.output_sample_rate / 1000} kHz` : 'N/A',
+        bitDepth: autoRenderInfo.output_bit_depth || 24,
+        channels: autoRenderInfo.channels || 2,
+        duration: autoRenderInfo.duration || 0,
+        algorithmVersion: algorithmVersion,
+      });
+      setShowDownloadModal(true);
+    }
+  }, [isDualTrackMode, autoRenderInfo, renderDownloadUrl, audioFile, algorithmVersion]);
 
   const [stuckDuration, setStuckDuration] = useState(0);
   const stuckTimerRef = useRef<NodeJS.Timeout | null>(null);
