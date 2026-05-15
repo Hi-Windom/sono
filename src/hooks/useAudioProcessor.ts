@@ -1348,10 +1348,8 @@ export function useAudioProcessor() {
             if (result?.downloadUrl) {
               setRenderDownloadUrl(result.downloadUrl);
             }
-            setShowDownloadModal(true);
           }).catch(err => {
             writeLog(`[applySettings] 自动渲染失败: ${err}`);
-            setShowDownloadModal(true);
           });
         }
       }

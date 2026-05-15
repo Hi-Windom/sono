@@ -201,8 +201,8 @@ def _repair_dual_track(input_path, output_path, params, progress_callback=None):
     accompaniment_path = params.get("accompaniment_path", input_path)
     output_dir = os.path.dirname(output_path)
     base_name = os.path.splitext(os.path.basename(output_path))[0]
-    vocal_output = os.path.join(output_dir, f"{base_name}_vocal.wav")
-    inst_output = os.path.join(output_dir, f"{base_name}_accompaniment.wav")
+    vocal_output = params.get("vocal_output_path", os.path.join(output_dir, f"{base_name}_vocal.wav"))
+    inst_output = params.get("accompaniment_output_path", os.path.join(output_dir, f"{base_name}_accompaniment.wav"))
 
     v_y, v_sr = load_audio_with_fallback(vocal_path, sr=None, mono=False)
     a_y, a_sr = load_audio_with_fallback(accompaniment_path, sr=None, mono=False)
@@ -350,4 +350,6 @@ def _repair_dual_track(input_path, output_path, params, progress_callback=None):
         "channels": channels,
         "algorithm_version": "v3.3",
         "processing_mode": "dual",
+        "vocal_output_path": vocal_output,
+        "accompaniment_output_path": inst_output,
     }
