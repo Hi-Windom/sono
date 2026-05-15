@@ -195,14 +195,21 @@ export default function RepairPage() {
           setBackendProcessedBuffer(buffer);
           setBackendWaveformPeaks(null);
         } catch (e) {
-          console.error('加载双轨处理结果失败:', e);
+          setBackendError('加载双轨处理结果失败，请检查后端服务');
         }
         setProcessingStep('准备渲染交付...');
         setProcessingProgress(0);
         try {
-          await renderAndDownload(undefined, algorithmVersion);
+          const result = await renderAndDownload(undefined, algorithmVersion);
+          if (result === null) {
+            setBackendError('渲染交付失败，请重试');
+            setIsProcessing(false);
+            return;
+          }
         } catch (e) {
-          console.error('双轨渲染交付失败:', e);
+          setBackendError(e instanceof Error ? e.message : '渲染交付失败');
+          setIsProcessing(false);
+          return;
         }
         setCacheTriggerKey(k => k + 1);
       },

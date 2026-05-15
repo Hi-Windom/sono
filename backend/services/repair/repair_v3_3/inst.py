@@ -93,13 +93,14 @@ def _inst_multiband_harmonic_dereg(y, sr, strength):
         if np.any(high_mask):
             high_perturb = rng.uniform(-0.06 * strength, 0.06 * strength, size=(np.sum(high_mask), n_frames))
             perturbed[high_mask] *= 1.0 + high_perturb
-        for j in range(n_frames):
+        step = max(1, n_frames // 200)
+        processed_frames = list(range(0, n_frames, step))
+        for j in processed_frames:
             col = perturbed[:, j]
-            peaks = np.zeros(n_bins, dtype=bool)
-            for b in range(1, n_bins - 1):
-                if col[b] > col[b - 1] and col[b] > col[b + 1] and col[b] > np.mean(col) * 1.5:
-                    peaks[b] = True
-            peak_indices = np.where(peaks)[0]
+            mean_col = np.mean(col)
+            is_peak = np.zeros(n_bins, dtype=bool)
+            is_peak[1:-1] = (col[1:-1] > col[:-2]) & (col[1:-1] > col[2:]) & (col[1:-1] > mean_col * 1.5)
+            peak_indices = np.where(is_peak)[0]
             if len(peak_indices) > 1:
                 for pi in range(len(peak_indices) - 1):
                     b1 = peak_indices[pi]
@@ -108,19 +109,25 @@ def _inst_multiband_harmonic_dereg(y, sr, strength):
                     ratio = col[b2] / (col[b1] + eps)
                     new_ratio = ratio * (1.0 + ratio_noise)
                     perturbed[b2, j] = col[b1] * new_ratio
+        if step > 1:
+            for b in range(n_bins):
+                row = perturbed[b]
+                proc_vals = row[processed_frames]
+                perturbed[b] = np.interp(np.arange(n_frames), processed_frames, proc_vals)
         S_out = perturbed * np.exp(1j * phase)
         y_out = istft(S_out, hop_length=HOP_LENGTH, length=n)
         if len(y_out) < n:
             y_out = np.pad(y_out, (0, n - len(y_out)))
         elif len(y_out) > n:
             y_out = y_out[:n]
-        signal_power = np.mean(y_in ** 2)
-        noise_power = np.mean((y_out - y_in) ** 2)
-        if noise_power > eps:
-            snr_db = 10.0 * np.log10(signal_power / noise_power)
-            if snr_db < 45.0:
-                scale = 10.0 ** ((45.0 - snr_db) / 20.0)
-                y_out = y_in + (y_out - y_in) * scale
+        if strength > 0.5:
+            signal_power = np.mean(y_in ** 2)
+            noise_power = np.mean((y_out - y_in) ** 2)
+            if noise_power > eps:
+                snr_db = 10.0 * np.log10(signal_power / noise_power)
+                if snr_db < 45.0:
+                    scale = 10.0 ** ((45.0 - snr_db) / 20.0)
+                    y_out = y_in + (y_out - y_in) * scale
         return y_out.astype(original_dtype)
     else:
         y_in = y.astype(np.float64)

@@ -1922,7 +1922,7 @@ export function useAudioProcessor() {
       setProcessingSource(null);
       setProcessingProgress(0);
       renderActiveRef.current = false;
-      return null;
+      throw renderErr;
     }
   }, [audioFile]);
 
