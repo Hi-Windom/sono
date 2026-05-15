@@ -130,6 +130,9 @@ export default defineConfig(({ mode }) => {
     },
     server: {
       allowedHosts: true,
+      watch: {
+        ignored: ['**/backend/storage/**', '**/node_modules/**'],
+      },
       proxy: {
         '/api': {
           target: apiUrl,

@@ -11,6 +11,10 @@ export interface VocalRepairParams {
   bassEnhance: number;
   airTexture: number;
   loudness: number;
+  exciter?: number;
+  compressor?: number;
+  spatial?: number;
+  warmth?: number;
 }
 
 export interface InstrumentRepairParams {
@@ -22,6 +26,7 @@ export interface InstrumentRepairParams {
   spatialEnhance: number;
   warmth: number;
   loudness: number;
+  stereo_enhance?: number;
 }
 
 export const defaultVocalRepairParams: VocalRepairParams = {
@@ -34,6 +39,10 @@ export const defaultVocalRepairParams: VocalRepairParams = {
   bassEnhance: 0.1,
   airTexture: 0.2,
   loudness: 0.5,
+  exciter: 0.5,
+  compressor: 0.5,
+  spatial: 0.5,
+  warmth: 0.5,
 };
 
 export const defaultInstrumentRepairParams: InstrumentRepairParams = {
@@ -45,11 +54,13 @@ export const defaultInstrumentRepairParams: InstrumentRepairParams = {
   spatialEnhance: 0.15,
   warmth: 0.25,
   loudness: 0.5,
+  stereo_enhance: 0.5,
 };
 
 export interface ProcessingOptions {
   sampleRate: number;
   bitDepth: 16 | 24 | 32;
+  masteringStyle?: 'standard' | 'powerful' | 'warm';
 }
 
 const API_BASE = '/api/v1';
@@ -63,7 +74,7 @@ function log(tag: string, ...args: unknown[]) {
   console.log(msg);
 }
 
-interface AudioInfo {
+export interface AudioInfo {
   sample_rate: number;
   channels: number;
   duration: number;
@@ -139,6 +150,8 @@ export interface AlgorithmVersion {
   name: string;
   label: string;
   description: string;
+  tags?: string[];
+  supportsDualTrack?: boolean;
   defaultParams: Record<string, number>;
   paramRanges: Record<string, {
     min: number;
@@ -191,6 +204,10 @@ export function mapVocalParamsToBackend(params: VocalRepairParams, _options?: Pr
     bass_enhance: params.bassEnhance,
     air_texture: params.airTexture,
     loudness_optimize: params.loudness,
+    exciter: params.exciter ?? 0.5,
+    compressor: params.compressor ?? 0.5,
+    spatial: params.spatial ?? 0.5,
+    warmth: params.warmth ?? 0.5,
     algorithm_version: algorithmVersion || 'v3.0',
   };
 }
@@ -205,6 +222,7 @@ export function mapInstrumentParamsToBackend(params: InstrumentRepairParams, _op
     spatial_enhance: params.spatialEnhance,
     warmth: params.warmth,
     loudness_optimize: params.loudness,
+    stereo_enhance: params.stereo_enhance ?? 0.5,
     algorithm_version: algorithmVersion || 'v3.0',
   };
 }
@@ -762,6 +780,53 @@ export async function lookupRepairCache(fileHash: string, params: Record<string,
   }
 }
 
+export interface DualRepairCacheLookupResult {
+  found: boolean;
+  task_id?: string;
+  output_path?: string;
+  output_size?: number;
+  repair_result?: BackendRepairResult;
+  detection_result?: BackendDetectionResult;
+  repaired_detection_result?: BackendDetectionResult;
+}
+
+export async function lookupDualRepairCache(
+  vocalFileHash: string,
+  accompanimentFileHash: string,
+  params: Record<string, unknown>,
+  vocalParams?: Record<string, unknown>,
+  accompanimentParams?: Record<string, unknown>,
+  mixRatio?: number
+): Promise<DualRepairCacheLookupResult> {
+  const url = `${API_BASE}/cache/lookup-dual`;
+  log('cache-lookup-dual', `POST ${url} vocal_hash=${vocalFileHash.slice(0, 12)} acc_hash=${accompanimentFileHash.slice(0, 12)}`);
+  try {
+    const body: Record<string, unknown> = {
+      vocal_file_hash: vocalFileHash,
+      accompaniment_file_hash: accompanimentFileHash,
+      params,
+    };
+    if (vocalParams !== undefined) body.vocal_params = vocalParams;
+    if (accompanimentParams !== undefined) body.accompaniment_params = accompanimentParams;
+    if (mixRatio !== undefined) body.mix_ratio = mixRatio;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      log('cache-lookup-dual', `ERROR HTTP ${res.status}`);
+      return { found: false };
+    }
+    const data = await res.json();
+    log('cache-lookup-dual', `result: found=${data.found} output_size=${data.output_size || 0}`);
+    return data;
+  } catch (e) {
+    log('cache-lookup-dual', `FAILED: ${e instanceof Error ? e.message : String(e)}`);
+    return { found: false };
+  }
+}
+
 const DEFAULT_TERMINAL_STATES = new Set(['completed', 'detected', 'error', 'timeout']);
 
 // 轮询配置
@@ -1114,6 +1179,8 @@ export interface RenderCacheEntry {
   size: number;
   mtime: string;
   algorithm_version: string;
+  is_merged?: boolean;
+  track_type?: string;
 }
 
 export async function fetchRenderCache(taskId: string): Promise<RenderCacheEntry[]> {
@@ -1215,6 +1282,107 @@ export async function uploadTrainingAudio(
 
 export interface WSProgressControl {
   close: () => void;
+}
+
+export interface CacheUpdateEvent {
+  type: 'render_cache_updated';
+  task_id: string;
+  files: Array<{
+    filename: string;
+    sample_rate: number;
+    bit_depth: number;
+    track_type: string;
+  }>;
+}
+
+export function connectCacheWS(
+  onCacheUpdate?: (event: CacheUpdateEvent) => void,
+): WSProgressControl {
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  let wsHost: string;
+  const viteApiUrl = import.meta.env.VITE_API_URL;
+  if (viteApiUrl && import.meta.env.DEV) {
+    try {
+      const backendUrl = new URL(viteApiUrl);
+      wsHost = backendUrl.host;
+    } catch {
+      wsHost = window.location.host;
+    }
+  } else {
+    wsHost = window.location.host;
+  }
+  const wsUrl = `${protocol}//${wsHost}/api/v1/ws/cache-events`;
+
+  let ws: WebSocket | null = null;
+  let reconnectAttempts = 0;
+  const maxReconnectAttempts = 5;
+  let closed = false;
+
+  const connect = () => {
+    if (closed) return;
+
+    try {
+      ws = new WebSocket(wsUrl);
+    } catch (e) {
+      console.warn(`[CacheWS] 创建连接失败:`, e);
+      return;
+    }
+
+    const connectTimeout = setTimeout(() => {
+      if (ws && ws.readyState === WebSocket.CONNECTING) {
+        console.warn(`[CacheWS] 连接超时`);
+        ws.close();
+      }
+    }, 5000);
+
+    ws.onopen = () => {
+      clearTimeout(connectTimeout);
+      reconnectAttempts = 0;
+      console.log(`[CacheWS] 连接成功`);
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.type === 'render_cache_updated') {
+          onCacheUpdate?.(data as CacheUpdateEvent);
+        }
+      } catch (e) {
+        console.warn(`[CacheWS] 消息解析失败:`, e);
+      }
+    };
+
+    ws.onerror = (e) => {
+      clearTimeout(connectTimeout);
+      console.warn(`[CacheWS] 连接错误`, e);
+    };
+
+    ws.onclose = () => {
+      clearTimeout(connectTimeout);
+      if (closed) return;
+
+      if (reconnectAttempts < maxReconnectAttempts) {
+        reconnectAttempts++;
+        const delay = Math.pow(2, reconnectAttempts - 1) * 1000;
+        console.log(`[CacheWS] 重连 #${reconnectAttempts} 延迟=${delay}ms`);
+        setTimeout(connect, delay);
+      } else {
+        console.warn(`[CacheWS] 重连耗尽`);
+      }
+    };
+  };
+
+  connect();
+
+  return {
+    close: () => {
+      closed = true;
+      if (ws) {
+        ws.close();
+        ws = null;
+      }
+    },
+  };
 }
 
 export function connectProgressWS(
@@ -1370,6 +1538,34 @@ export interface MemoryInfoResult {
   memory_saving: number;
 }
 
+export interface FileInfoResult {
+  sample_rate: number;
+  channels: number;
+  duration: number;
+}
+
+export async function fetchFileInfoByHash(fileHashes: string[]): Promise<Record<string, FileInfoResult>> {
+  const url = `${API_BASE}/file-info-by-hash`;
+  log('file-info-by-hash', `POST ${url} hashes=${fileHashes.map(h => h.slice(0, 12)).join(',')}`);
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ file_hashes: fileHashes }),
+    });
+    if (!res.ok) {
+      log('file-info-by-hash', `ERROR HTTP ${res.status}`);
+      return {};
+    }
+    const data = await res.json();
+    log('file-info-by-hash', `result: ${JSON.stringify(data)}`);
+    return data;
+  } catch (e) {
+    log('file-info-by-hash', `FAILED: ${e instanceof Error ? e.message : String(e)}`);
+    return {};
+  }
+}
+
 export async function fetchMemoryInfo(
   duration: number,
   channels: number,
@@ -1446,17 +1642,26 @@ export async function renderAudio(
   taskId: string,
   sampleRate: number,
   bitDepth: number,
+  masteringStyle?: string,
+  algorithmVersion?: string,
 ): Promise<RenderResult> {
   const url = `${API_BASE}/render`;
-  log('render', `POST ${url} task_id=${taskId} sr=${sampleRate} bd=${bitDepth}`);
+  log('render', `POST ${url} task_id=${taskId} sr=${sampleRate} bd=${bitDepth} style=${masteringStyle || 'standard'} ver=${algorithmVersion || 'unknown'}`);
+  const body: Record<string, unknown> = {
+    task_id: taskId,
+    sample_rate: sampleRate,
+    bit_depth: bitDepth,
+  };
+  if (masteringStyle) {
+    body.mastering_style = masteringStyle;
+  }
+  if (algorithmVersion) {
+    body.algorithm_version = algorithmVersion;
+  }
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      task_id: taskId,
-      sample_rate: sampleRate,
-      bit_depth: bitDepth,
-    }),
+    body: JSON.stringify(body),
   });
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
@@ -1514,6 +1719,21 @@ export interface AudioFileInfo {
   modified_at: number;
 }
 
+export interface DeliveryFile {
+  filename: string;
+  size: number;
+  mtime: string;
+  task_id?: string;
+  track_type?: string;
+  is_parent: boolean;
+  parent_filename?: string;
+  children?: DeliveryFile[];
+}
+
+export interface DeliveryFilesResponse {
+  files: DeliveryFile[];
+}
+
 export async function detectFile(file: File, detectorVersion: string = 'v1.1'): Promise<{ task_id: string; status: string }> {
   const formData = new FormData();
   formData.append('file', file);
@@ -1567,3 +1787,35 @@ export function parseFilenameFromDisposition(disposition: string | null): string
   if (plain?.[1]) return plain[1].trim();
   return null;
 }
+
+export async function fetchDeliveryFiles(): Promise<DeliveryFilesResponse> {
+  const res = await fetch(`${API_BASE}/delivery-files`);
+  if (!res.ok) throw new Error('获取交付文件列表失败');
+  return res.json();
+}
+
+export async function deleteDeliveryFile(filename: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/delivery-files/${encodeURIComponent(filename)}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.detail || '删除交付文件失败');
+  }
+}
+
+export async function deleteDeliveryParent(filename: string): Promise<{deleted: string[]}> {
+  const res = await fetch(`${API_BASE}/delivery-files/parent/${encodeURIComponent(filename)}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.detail || '删除交付文件组失败');
+  }
+  return res.json();
+}
+
+export const ALGORITHM_VERSIONS = [
+  { id: 'v3.1', label: 'v3.1 (桌面增强)', description: 'AI人声修复增强 + 人声效果器' },
+  { id: 'v3.1a', label: 'v3.1a (移动增强)', description: '精简版人声效果器' },
+];

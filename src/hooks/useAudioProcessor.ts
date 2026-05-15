@@ -29,6 +29,7 @@ import {
   fetchRenderCache,
   RenderCacheEntry,
   parseFilenameFromDisposition,
+  BackendRepairResult,
 } from '../services/backendApi';
 import { CacheHitInfo } from '../components/RepairCacheModal';
 
@@ -53,6 +54,7 @@ export type { ProcessingOptions };
 export const defaultProcessingOptions: ProcessingOptions = {
   sampleRate: 48000,
   bitDepth: 24,
+  masteringStyle: 'standard',
 };
 
 function formatSpeed(bytesPerSec: number): string {
@@ -241,6 +243,16 @@ export function useAudioProcessor() {
 
   const applyAlgorithmVersion = useCallback((version: string) => {
     setAlgorithmVersionState(version);
+    setRenderDownloadUrl(null);
+    setCacheHitInfo(null);
+    setShowRepairCacheModal(false);
+    setShowDownloadModal(false);
+    setAutoRenderInfo(null);
+    setBackendProcessedBuffer(null);
+    setRepairResult(null);
+    setHasBeenProcessed(false);
+    setBackendPreviewUrl(null);
+    setBackendWaveformPeaks(null);
     const algoInfo = availableAlgorithms.find(a => a.name === version);
     if (!algoInfo) return;
 
@@ -852,7 +864,7 @@ export function useAudioProcessor() {
 
     const context = getAudioContext();
     let buffer: AudioBuffer;
-    const workerDecoded = await audioWorker.decodeWav(context, arrayBuf);
+    const workerDecoded = await audioWorker.decodeWav(context, arrayBuf.slice(0));
     const isNonWavFile = !workerDecoded;
     if (workerDecoded) {
       buffer = workerDecoded;
@@ -875,8 +887,21 @@ export function useAudioProcessor() {
       } catch { /* 解码缓存不可用，继续正常流程 */ }
 
       if (!usedDecodedCache) {
-        buffer = await context.decodeAudioData(arrayBuf);
-        writeLog(`[loadAudioFile] 浏览器解码完成`);
+        try {
+          buffer = await context.decodeAudioData(arrayBuf);
+          writeLog(`[loadAudioFile] 浏览器解码完成`);
+        } catch (decodeErr) {
+          console.warn('[loadAudioFile] 浏览器解码失败:', decodeErr);
+          setIsDecodingAudio(false);
+          if (arrayBuf.byteLength === 0) {
+            setBackendError('解码缓冲区异常，请重新上传文件');
+          } else if (decodeErr instanceof DOMException && decodeErr.name === 'EncodingError') {
+            setBackendError('浏览器不支持该音频格式，请尝试WAV格式');
+          } else {
+            setBackendError('音频解码失败：文件已损坏或无法解析');
+          }
+          return;
+        }
       }
     }
     if (seq !== loadAudioSeqRef.current) return;
@@ -1298,7 +1323,7 @@ export function useAudioProcessor() {
           writeLog('[applySettings] renderAndDownload 已在进行，跳过');
         } else {
           const currentOpts = { ...processingOptions };
-          renderAndDownload(currentOpts).then(result => {
+          renderAndDownload(currentOpts, effectiveAlgorithmVersion).then(result => {
             if (result?.downloadUrl) {
               setRenderDownloadUrl(result.downloadUrl);
             }
@@ -1324,7 +1349,7 @@ export function useAudioProcessor() {
         setProcessingProgress(0);
       }, 2000);
     }
-  }, [audioBuffer, audioFile, params, processingOptions, loadAudioFromUrl, wavInfo]);
+  }, [audioBuffer, audioFile, params, processingOptions, loadAudioFromUrl, wavInfo, algorithmVersion, availableAlgorithms]);
 
   const resetParams = useCallback(() => {
     setParams(defaultAIRepairParams);
@@ -1786,7 +1811,7 @@ export function useAudioProcessor() {
     updateTime();
   }, [stopPlaying, getAudioContext]);
 
-  const renderAndDownload = useCallback(async (overrideOptions?: ProcessingOptions) => {
+  const renderAndDownload = useCallback(async (overrideOptions?: ProcessingOptions, overrideAlgoVersion?: string) => {
     if (renderActiveRef.current) {
       writeLog('[renderAndDownload] 已有渲染在进行中，跳过');
       return null;
@@ -1794,7 +1819,7 @@ export function useAudioProcessor() {
     renderActiveRef.current = true;
 
     const opts = overrideOptions || processingOptionsRef.current;
-    const algoVer = algorithmVersionRef.current;
+    const algoVer = overrideAlgoVersion || algorithmVersionRef.current;
     const fileName = generateExportFilename(audioFile?.name, algoVer, opts.sampleRate, opts.bitDepth);
 
     if (!taskIdRef.current) return null;
@@ -1829,7 +1854,7 @@ export function useAudioProcessor() {
       setProcessingStep('渲染交付规格...');
       setProcessingProgress(0);
       setIsRenderLoading(true);
-      await renderAudio(taskIdRef.current, opts.sampleRate, opts.bitDepth);
+      await renderAudio(taskIdRef.current, opts.sampleRate, opts.bitDepth, opts.masteringStyle, algoVer);
       const { promise, close } = waitRenderWithWS(taskIdRef.current, (progress, step) => {
         writeLog(`[renderAndDownload] 渲染进度: ${progress} step=${step}`);
         setProcessingProgress(progress);
@@ -1860,6 +1885,7 @@ export function useAudioProcessor() {
       setProcessingProgress(0);
       setIsProcessing(false);
       renderActiveRef.current = false;
+      forceRenderRef.current = false;
       return {
         downloadUrl: `/api/v1/download-file/${renderRes.render_filename}`,
         fileName,
@@ -1945,7 +1971,7 @@ export function useAudioProcessor() {
     writeLog(`[handleUseRepairCache] 开始调用 renderAndDownload`);
     forceRenderRef.current = false;
     const currentOpts = { ...processingOptions };
-    renderAndDownload(currentOpts).then(result => {
+    renderAndDownload(currentOpts, algorithmVersion).then(result => {
       writeLog(`[handleUseRepairCache] renderAndDownload 完成: ${!!result}`);
       if (result?.downloadUrl) {
         setRenderDownloadUrl(result.downloadUrl);
@@ -1955,7 +1981,7 @@ export function useAudioProcessor() {
       writeLog(`[handleUseRepairCache] renderAndDownload 失败: ${err}`);
       setShowDownloadModal(true);
     });
-  }, [cacheHitInfo, loadAudioFromUrl, wavInfo, renderAndDownload]);
+  }, [cacheHitInfo, loadAudioFromUrl, wavInfo, renderAndDownload, algorithmVersion]);
 
   const handleRenderCacheDownload = useCallback((cache: RenderCacheEntry, downloadUrl: string, filename: string) => {
     writeLog(`[handleRenderCacheDownload] 秒下: ${cache.filename}`);

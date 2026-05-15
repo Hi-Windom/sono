@@ -1,0 +1,3241 @@
+{
+  "nodes": [
+    {
+      "id": "root",
+      "label": "音频修复系统",
+      "type": "module",
+      "layer": "shared",
+      "filePath": "/workspace"
+    },
+    {
+      "id": "frontend",
+      "label": "前端 (React + Vite)",
+      "type": "module",
+      "layer": "frontend",
+      "filePath": "/workspace/src"
+    },
+    {
+      "id": "backend",
+      "label": "后端 (FastAPI)",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend"
+    },
+    {
+      "id": "src-pages-CacheManagerPage",
+      "label": "CacheManagerPage",
+      "type": "page",
+      "layer": "frontend",
+      "filePath": "/workspace/src/pages/CacheManagerPage.tsx",
+      "children": [
+        "src-components-Header",
+        "src-utils-settingsStorage",
+        "src-services-backendApi",
+        "src-utils-sessionDB"
+      ]
+    },
+    {
+      "id": "src-components-Header",
+      "label": "Header",
+      "type": "component",
+      "layer": "frontend",
+      "filePath": "/workspace/src/components/Header.tsx"
+    },
+    {
+      "id": "src-utils-settingsStorage",
+      "label": "settingsStorage",
+      "type": "utils",
+      "layer": "frontend",
+      "filePath": "/workspace/src/utils/settingsStorage.ts"
+    },
+    {
+      "id": "src-services-backendApi",
+      "label": "backendApi",
+      "type": "service",
+      "layer": "frontend",
+      "filePath": "/workspace/src/services/backendApi.ts"
+    },
+    {
+      "id": "src-utils-sessionDB",
+      "label": "sessionDB",
+      "type": "utils",
+      "layer": "frontend",
+      "filePath": "/workspace/src/utils/sessionDB.ts"
+    },
+    {
+      "id": "src-pages-ComparePage",
+      "label": "ComparePage",
+      "type": "page",
+      "layer": "frontend",
+      "filePath": "/workspace/src/pages/ComparePage.tsx",
+      "children": [
+        "src-components-Header",
+        "src-components-SpectrumVisualizer",
+        "src-components-WaveformVisualizer",
+        "src-components-ErrorBoundary",
+        "src-services-backendApi"
+      ]
+    },
+    {
+      "id": "src-components-SpectrumVisualizer",
+      "label": "SpectrumVisualizer",
+      "type": "component",
+      "layer": "frontend",
+      "filePath": "/workspace/src/components/SpectrumVisualizer.tsx"
+    },
+    {
+      "id": "src-components-WaveformVisualizer",
+      "label": "WaveformVisualizer",
+      "type": "component",
+      "layer": "frontend",
+      "filePath": "/workspace/src/components/WaveformVisualizer.tsx"
+    },
+    {
+      "id": "src-components-ErrorBoundary",
+      "label": "ErrorBoundary",
+      "type": "component",
+      "layer": "frontend",
+      "filePath": "/workspace/src/components/ErrorBoundary.tsx"
+    },
+    {
+      "id": "src-pages-DetectPage",
+      "label": "DetectPage",
+      "type": "page",
+      "layer": "frontend",
+      "filePath": "/workspace/src/pages/DetectPage.tsx",
+      "children": [
+        "src-components-Header",
+        "src-components-ErrorBoundary",
+        "src-components-LeaveConfirmModal",
+        "src-contexts-BackendContext",
+        "src-components-AIDetectionComparison",
+        "src-utils-aiSongChecker",
+        "src-services-backendApi"
+      ]
+    },
+    {
+      "id": "src-components-LeaveConfirmModal",
+      "label": "LeaveConfirmModal",
+      "type": "component",
+      "layer": "frontend",
+      "filePath": "/workspace/src/components/LeaveConfirmModal.tsx"
+    },
+    {
+      "id": "src-contexts-BackendContext",
+      "label": "BackendContext",
+      "type": "context",
+      "layer": "frontend",
+      "filePath": "/workspace/src/contexts/BackendContext.tsx"
+    },
+    {
+      "id": "src-components-AIDetectionComparison",
+      "label": "AIDetectionComparison",
+      "type": "component",
+      "layer": "frontend",
+      "filePath": "/workspace/src/components/AIDetectionComparison.tsx"
+    },
+    {
+      "id": "src-utils-aiSongChecker",
+      "label": "aiSongChecker",
+      "type": "utils",
+      "layer": "frontend",
+      "filePath": "/workspace/src/utils/aiSongChecker.ts"
+    },
+    {
+      "id": "src-pages-FlowVisualizationPage",
+      "label": "FlowVisualizationPage",
+      "type": "page",
+      "layer": "frontend",
+      "filePath": "/workspace/src/pages/FlowVisualizationPage.tsx",
+      "children": [
+        "src-components-Header"
+      ]
+    },
+    {
+      "id": "src-pages-Home",
+      "label": "Home",
+      "type": "page",
+      "layer": "frontend",
+      "filePath": "/workspace/src/pages/Home.tsx",
+      "children": [
+        "src-components-Header",
+        "src-components-AudioUploader",
+        "src-components-AudioPlayer",
+        "src-components-WaveformVisualizer",
+        "src-components-SpectrumVisualizer",
+        "src-components-AIRepairPanel",
+        "src-components-DownloadModal",
+        "src-hooks-useAudioProcessor"
+      ]
+    },
+    {
+      "id": "src-components-AudioUploader",
+      "label": "AudioUploader",
+      "type": "component",
+      "layer": "frontend",
+      "filePath": "/workspace/src/components/AudioUploader.tsx"
+    },
+    {
+      "id": "src-components-AudioPlayer",
+      "label": "AudioPlayer",
+      "type": "component",
+      "layer": "frontend",
+      "filePath": "/workspace/src/components/AudioPlayer.tsx"
+    },
+    {
+      "id": "src-components-AIRepairPanel",
+      "label": "AIRepairPanel",
+      "type": "component",
+      "layer": "frontend",
+      "filePath": "/workspace/src/components/AIRepairPanel.tsx"
+    },
+    {
+      "id": "src-components-DownloadModal",
+      "label": "DownloadModal",
+      "type": "component",
+      "layer": "frontend",
+      "filePath": "/workspace/src/components/DownloadModal.tsx"
+    },
+    {
+      "id": "src-hooks-useAudioProcessor",
+      "label": "useAudioProcessor",
+      "type": "hook",
+      "layer": "frontend",
+      "filePath": "/workspace/src/hooks/useAudioProcessor.ts"
+    },
+    {
+      "id": "src-pages-LandingPage",
+      "label": "LandingPage",
+      "type": "page",
+      "layer": "frontend",
+      "filePath": "/workspace/src/pages/LandingPage.tsx",
+      "children": [
+        "src-components-Header",
+        "src-contexts-BackendContext"
+      ]
+    },
+    {
+      "id": "src-pages-ProfileManagerPage",
+      "label": "ProfileManagerPage",
+      "type": "page",
+      "layer": "frontend",
+      "filePath": "/workspace/src/pages/ProfileManagerPage.tsx",
+      "children": [
+        "src-components-Header",
+        "src-utils-advancedAudioProcessing",
+        "src-utils-settingsStorage",
+        "src-services-backendApi"
+      ]
+    },
+    {
+      "id": "src-utils-advancedAudioProcessing",
+      "label": "advancedAudioProcessing",
+      "type": "utils",
+      "layer": "frontend",
+      "filePath": "/workspace/src/utils/advancedAudioProcessing.ts"
+    },
+    {
+      "id": "src-pages-QualityTestPage",
+      "label": "QualityTestPage",
+      "type": "page",
+      "layer": "frontend",
+      "filePath": "/workspace/src/pages/QualityTestPage.tsx",
+      "children": [
+        "src-components-Header"
+      ]
+    },
+    {
+      "id": "src-pages-RepairPage",
+      "label": "RepairPage",
+      "type": "page",
+      "layer": "frontend",
+      "filePath": "/workspace/src/pages/RepairPage.tsx",
+      "children": [
+        "src-components-Header",
+        "src-components-AudioUploader",
+        "src-components-DualTrackUploader",
+        "src-components-AIRepairPanel",
+        "src-components-ErrorBoundary",
+        "src-components-DownloadModal",
+        "src-components-RepairCacheModal",
+        "src-hooks-useAudioProcessor",
+        "src-services-backendApi",
+        "src-contexts-BackendContext",
+        "src-utils-settingsStorage",
+        "src-utils-fileHash",
+        "src-store-repairSessionStore"
+      ]
+    },
+    {
+      "id": "src-components-DualTrackUploader",
+      "label": "DualTrackUploader",
+      "type": "component",
+      "layer": "frontend",
+      "filePath": "/workspace/src/components/DualTrackUploader.tsx"
+    },
+    {
+      "id": "src-components-RepairCacheModal",
+      "label": "RepairCacheModal",
+      "type": "component",
+      "layer": "frontend",
+      "filePath": "/workspace/src/components/RepairCacheModal.tsx"
+    },
+    {
+      "id": "src-utils-fileHash",
+      "label": "fileHash",
+      "type": "utils",
+      "layer": "frontend",
+      "filePath": "/workspace/src/utils/fileHash.ts"
+    },
+    {
+      "id": "src-store-repairSessionStore",
+      "label": "repairSessionStore",
+      "type": "store",
+      "layer": "frontend",
+      "filePath": "/workspace/src/store/repairSessionStore.ts"
+    },
+    {
+      "id": "src-pages-TrainingUploadPage",
+      "label": "TrainingUploadPage",
+      "type": "page",
+      "layer": "frontend",
+      "filePath": "/workspace/src/pages/TrainingUploadPage.tsx",
+      "children": [
+        "src-components-Header",
+        "src-services-backendApi"
+      ]
+    },
+    {
+      "id": "src-components-AlgorithmSelector",
+      "label": "AlgorithmSelector",
+      "type": "external",
+      "layer": "frontend",
+      "filePath": "/workspace/src/components/AlgorithmSelector.tsx"
+    },
+    {
+      "id": "src-utils-audioUtils",
+      "label": "audioUtils",
+      "type": "utils",
+      "layer": "frontend",
+      "filePath": "/workspace/src/utils/audioUtils.ts"
+    },
+    {
+      "id": "src-components-BuildInfo",
+      "label": "BuildInfo",
+      "type": "component",
+      "layer": "frontend",
+      "filePath": "/workspace/src/components/BuildInfo.tsx"
+    },
+    {
+      "id": "src-components-EffectsPanel",
+      "label": "EffectsPanel",
+      "type": "component",
+      "layer": "frontend",
+      "filePath": "/workspace/src/components/EffectsPanel.tsx"
+    },
+    {
+      "id": "src-components-Empty",
+      "label": "Empty",
+      "type": "component",
+      "layer": "frontend",
+      "filePath": "/workspace/src/components/Empty.tsx"
+    },
+    {
+      "id": "src-lib-utils",
+      "label": "utils",
+      "type": "external",
+      "layer": "frontend",
+      "filePath": "/workspace/src/lib/utils.ts"
+    },
+    {
+      "id": "src-components-StemProcessingPanel",
+      "label": "StemProcessingPanel",
+      "type": "component",
+      "layer": "frontend",
+      "filePath": "/workspace/src/components/StemProcessingPanel.tsx"
+    },
+    {
+      "id": "src-utils-wavParser",
+      "label": "utils",
+      "type": "frontend",
+      "layer": "/workspace/src/utils/wavParser.ts"
+    },
+    {
+      "id": "src-workers-useAudioWorker",
+      "label": "worker",
+      "type": "frontend",
+      "layer": "/workspace/src/workers/useAudioWorker.ts"
+    },
+    {
+      "id": "src-hooks-useTheme",
+      "label": "useTheme",
+      "type": "hook",
+      "layer": "frontend",
+      "filePath": "/workspace/src/hooks/useTheme.ts"
+    },
+    {
+      "id": "api-checkFileHash",
+      "label": "checkFileHash()",
+      "type": "function",
+      "layer": "frontend",
+      "filePath": "/workspace/src/services/backendApi.ts"
+    },
+    {
+      "id": "api-uploadAudio",
+      "label": "uploadAudio()",
+      "type": "function",
+      "layer": "frontend",
+      "filePath": "/workspace/src/services/backendApi.ts"
+    },
+    {
+      "id": "api-uploadDualAudio",
+      "label": "uploadDualAudio()",
+      "type": "function",
+      "layer": "frontend",
+      "filePath": "/workspace/src/services/backendApi.ts"
+    },
+    {
+      "id": "api-detectAudio",
+      "label": "detectAudio()",
+      "type": "function",
+      "layer": "frontend",
+      "filePath": "/workspace/src/services/backendApi.ts"
+    },
+    {
+      "id": "api-detectFile",
+      "label": "detectFile()",
+      "type": "function",
+      "layer": "frontend",
+      "filePath": "/workspace/src/services/backendApi.ts"
+    },
+    {
+      "id": "api-detectByPath",
+      "label": "detectByPath()",
+      "type": "function",
+      "layer": "frontend",
+      "filePath": "/workspace/src/services/backendApi.ts"
+    },
+    {
+      "id": "api-repairAudio",
+      "label": "repairAudio()",
+      "type": "function",
+      "layer": "frontend",
+      "filePath": "/workspace/src/services/backendApi.ts"
+    },
+    {
+      "id": "api-repairDualAudio",
+      "label": "repairDualAudio()",
+      "type": "function",
+      "layer": "frontend",
+      "filePath": "/workspace/src/services/backendApi.ts"
+    },
+    {
+      "id": "api-repairDualFromHash",
+      "label": "repairDualFromHash()",
+      "type": "function",
+      "layer": "frontend",
+      "filePath": "/workspace/src/services/backendApi.ts"
+    },
+    {
+      "id": "api-renderAudio",
+      "label": "renderAudio()",
+      "type": "function",
+      "layer": "frontend",
+      "filePath": "/workspace/src/services/backendApi.ts"
+    },
+    {
+      "id": "api-waitRenderWithWS",
+      "label": "waitRenderWithWS()",
+      "type": "function",
+      "layer": "frontend",
+      "filePath": "/workspace/src/services/backendApi.ts"
+    },
+    {
+      "id": "api-getTaskStatus",
+      "label": "getTaskStatus()",
+      "type": "function",
+      "layer": "frontend",
+      "filePath": "/workspace/src/services/backendApi.ts"
+    },
+    {
+      "id": "api-getTrackStatus",
+      "label": "getTrackStatus()",
+      "type": "function",
+      "layer": "frontend",
+      "filePath": "/workspace/src/services/backendApi.ts"
+    },
+    {
+      "id": "api-getQueueStatus",
+      "label": "getQueueStatus()",
+      "type": "function",
+      "layer": "frontend",
+      "filePath": "/workspace/src/services/backendApi.ts"
+    },
+    {
+      "id": "api-pollProgress",
+      "label": "pollProgress()",
+      "type": "function",
+      "layer": "frontend",
+      "filePath": "/workspace/src/services/backendApi.ts"
+    },
+    {
+      "id": "api-connectProgressWS",
+      "label": "connectProgressWS()",
+      "type": "function",
+      "layer": "frontend",
+      "filePath": "/workspace/src/services/backendApi.ts"
+    },
+    {
+      "id": "api-getDownloadUrl",
+      "label": "getDownloadUrl()",
+      "type": "function",
+      "layer": "frontend",
+      "filePath": "/workspace/src/services/backendApi.ts"
+    },
+    {
+      "id": "api-getPreviewUrl",
+      "label": "getPreviewUrl()",
+      "type": "function",
+      "layer": "frontend",
+      "filePath": "/workspace/src/services/backendApi.ts"
+    },
+    {
+      "id": "api-cancelTask",
+      "label": "cancelTask()",
+      "type": "function",
+      "layer": "frontend",
+      "filePath": "/workspace/src/services/backendApi.ts"
+    },
+    {
+      "id": "api-downloadWithProgress",
+      "label": "downloadWithProgress()",
+      "type": "function",
+      "layer": "frontend",
+      "filePath": "/workspace/src/services/backendApi.ts"
+    },
+    {
+      "id": "api-checkBackendHealth",
+      "label": "checkBackendHealth()",
+      "type": "function",
+      "layer": "frontend",
+      "filePath": "/workspace/src/services/backendApi.ts"
+    },
+    {
+      "id": "api-fetchAlgorithmVersions",
+      "label": "fetchAlgorithmVersions()",
+      "type": "function",
+      "layer": "frontend",
+      "filePath": "/workspace/src/services/backendApi.ts"
+    },
+    {
+      "id": "api-fetchDetectorVersions",
+      "label": "fetchDetectorVersions()",
+      "type": "function",
+      "layer": "frontend",
+      "filePath": "/workspace/src/services/backendApi.ts"
+    },
+    {
+      "id": "api-fetchMemoryInfo",
+      "label": "fetchMemoryInfo()",
+      "type": "function",
+      "layer": "frontend",
+      "filePath": "/workspace/src/services/backendApi.ts"
+    },
+    {
+      "id": "api-fetchStorageEstimate",
+      "label": "fetchStorageEstimate()",
+      "type": "function",
+      "layer": "frontend",
+      "filePath": "/workspace/src/services/backendApi.ts"
+    },
+    {
+      "id": "api-lookupRepairCache",
+      "label": "lookupRepairCache()",
+      "type": "function",
+      "layer": "frontend",
+      "filePath": "/workspace/src/services/backendApi.ts"
+    },
+    {
+      "id": "api-fetchRenderCache",
+      "label": "fetchRenderCache()",
+      "type": "function",
+      "layer": "frontend",
+      "filePath": "/workspace/src/services/backendApi.ts"
+    },
+    {
+      "id": "api-uploadTrainingAudio",
+      "label": "uploadTrainingAudio()",
+      "type": "function",
+      "layer": "frontend",
+      "filePath": "/workspace/src/services/backendApi.ts"
+    },
+    {
+      "id": "api-checkTrainingHash",
+      "label": "checkTrainingHash()",
+      "type": "function",
+      "layer": "frontend",
+      "filePath": "/workspace/src/services/backendApi.ts"
+    },
+    {
+      "id": "api-fetchDeliveryFiles",
+      "label": "fetchDeliveryFiles()",
+      "type": "function",
+      "layer": "frontend",
+      "filePath": "/workspace/src/services/backendApi.ts"
+    },
+    {
+      "id": "api-deleteDeliveryFile",
+      "label": "deleteDeliveryFile()",
+      "type": "function",
+      "layer": "frontend",
+      "filePath": "/workspace/src/services/backendApi.ts"
+    },
+    {
+      "id": "api-deleteDeliveryParent",
+      "label": "deleteDeliveryParent()",
+      "type": "function",
+      "layer": "frontend",
+      "filePath": "/workspace/src/services/backendApi.ts"
+    },
+    {
+      "id": "api-getAudioFiles",
+      "label": "getAudioFiles()",
+      "type": "function",
+      "layer": "frontend",
+      "filePath": "/workspace/src/services/backendApi.ts"
+    },
+    {
+      "id": "api-mapParamsToBackend",
+      "label": "mapParamsToBackend()",
+      "type": "function",
+      "layer": "frontend",
+      "filePath": "/workspace/src/services/backendApi.ts"
+    },
+    {
+      "id": "api-mapVocalParamsToBackend",
+      "label": "mapVocalParamsToBackend()",
+      "type": "function",
+      "layer": "frontend",
+      "filePath": "/workspace/src/services/backendApi.ts"
+    },
+    {
+      "id": "api-mapInstrumentParamsToBackend",
+      "label": "mapInstrumentParamsToBackend()",
+      "type": "function",
+      "layer": "frontend",
+      "filePath": "/workspace/src/services/backendApi.ts"
+    },
+    {
+      "id": "backend-api-routes.py",
+      "label": "API Routes",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/api/routes.py"
+    },
+    {
+      "id": "route-POST--memory-info",
+      "label": "POST /memory/info",
+      "type": "api",
+      "layer": "backend",
+      "filePath": "/workspace/backend/api/routes.py",
+      "description": "POST /memory/info"
+    },
+    {
+      "id": "route-POST--log",
+      "label": "POST /log",
+      "type": "api",
+      "layer": "backend",
+      "filePath": "/workspace/backend/api/routes.py",
+      "description": "POST /log"
+    },
+    {
+      "id": "route-GET--algorithm-versions",
+      "label": "GET /algorithm-versions",
+      "type": "api",
+      "layer": "backend",
+      "filePath": "/workspace/backend/api/routes.py",
+      "description": "GET /algorithm-versions"
+    },
+    {
+      "id": "route-GET--detector-versions",
+      "label": "GET /detector-versions",
+      "type": "api",
+      "layer": "backend",
+      "filePath": "/workspace/backend/api/routes.py",
+      "description": "GET /detector-versions"
+    },
+    {
+      "id": "route-GET--deploy-info",
+      "label": "GET /deploy-info",
+      "type": "api",
+      "layer": "backend",
+      "filePath": "/workspace/backend/api/routes.py",
+      "description": "GET /deploy-info"
+    },
+    {
+      "id": "route-GET--system-load",
+      "label": "GET /system/load",
+      "type": "api",
+      "layer": "backend",
+      "filePath": "/workspace/backend/api/routes.py",
+      "description": "GET /system/load"
+    },
+    {
+      "id": "route-GET--diag",
+      "label": "GET /diag",
+      "type": "api",
+      "layer": "backend",
+      "filePath": "/workspace/backend/api/routes.py",
+      "description": "GET /diag"
+    },
+    {
+      "id": "route-POST--storage-estimate",
+      "label": "POST /storage/estimate",
+      "type": "api",
+      "layer": "backend",
+      "filePath": "/workspace/backend/api/routes.py",
+      "description": "POST /storage/estimate"
+    },
+    {
+      "id": "route-POST--check-hash",
+      "label": "POST /check-hash",
+      "type": "api",
+      "layer": "backend",
+      "filePath": "/workspace/backend/api/routes.py",
+      "description": "POST /check-hash"
+    },
+    {
+      "id": "route-POST--upload",
+      "label": "POST /upload",
+      "type": "api",
+      "layer": "backend",
+      "filePath": "/workspace/backend/api/routes.py",
+      "description": "POST /upload"
+    },
+    {
+      "id": "route-POST--upload-dual",
+      "label": "POST /upload-dual",
+      "type": "api",
+      "layer": "backend",
+      "filePath": "/workspace/backend/api/routes.py",
+      "description": "POST /upload-dual"
+    },
+    {
+      "id": "route-POST--detect",
+      "label": "POST /detect",
+      "type": "api",
+      "layer": "backend",
+      "filePath": "/workspace/backend/api/routes.py",
+      "description": "POST /detect"
+    },
+    {
+      "id": "route-POST--detect-file",
+      "label": "POST /detect-file",
+      "type": "api",
+      "layer": "backend",
+      "filePath": "/workspace/backend/api/routes.py",
+      "description": "POST /detect-file"
+    },
+    {
+      "id": "route-GET--audio-files",
+      "label": "GET /audio-files",
+      "type": "api",
+      "layer": "backend",
+      "filePath": "/workspace/backend/api/routes.py",
+      "description": "GET /audio-files"
+    },
+    {
+      "id": "route-POST--detect-path",
+      "label": "POST /detect-path",
+      "type": "api",
+      "layer": "backend",
+      "filePath": "/workspace/backend/api/routes.py",
+      "description": "POST /detect-path"
+    },
+    {
+      "id": "route-POST--repair",
+      "label": "POST /repair",
+      "type": "api",
+      "layer": "backend",
+      "filePath": "/workspace/backend/api/routes.py",
+      "description": "POST /repair"
+    },
+    {
+      "id": "route-POST--repair-dual",
+      "label": "POST /repair-dual",
+      "type": "api",
+      "layer": "backend",
+      "filePath": "/workspace/backend/api/routes.py",
+      "description": "POST /repair-dual"
+    },
+    {
+      "id": "route-POST--repair-dual-from-hash",
+      "label": "POST /repair-dual-from-hash",
+      "type": "api",
+      "layer": "backend",
+      "filePath": "/workspace/backend/api/routes.py",
+      "description": "POST /repair-dual-from-hash"
+    },
+    {
+      "id": "route-GET--tracks--task_id-",
+      "label": "GET /tracks/{task_id}",
+      "type": "api",
+      "layer": "backend",
+      "filePath": "/workspace/backend/api/routes.py",
+      "description": "GET /tracks/{task_id}"
+    },
+    {
+      "id": "route-POST--render",
+      "label": "POST /render",
+      "type": "api",
+      "layer": "backend",
+      "filePath": "/workspace/backend/api/routes.py",
+      "description": "POST /render"
+    },
+    {
+      "id": "route-GET--status--task_id-",
+      "label": "GET /status/{task_id}",
+      "type": "api",
+      "layer": "backend",
+      "filePath": "/workspace/backend/api/routes.py",
+      "description": "GET /status/{task_id}"
+    },
+    {
+      "id": "route-GET--queue-status",
+      "label": "GET /queue-status",
+      "type": "api",
+      "layer": "backend",
+      "filePath": "/workspace/backend/api/routes.py",
+      "description": "GET /queue-status"
+    },
+    {
+      "id": "route-WEBSOCKET--ws--task_id-",
+      "label": "WEBSOCKET /ws/{task_id}",
+      "type": "api",
+      "layer": "backend",
+      "filePath": "/workspace/backend/api/routes.py",
+      "description": "WEBSOCKET /ws/{task_id}"
+    },
+    {
+      "id": "route-WEBSOCKET--ws-cache-events",
+      "label": "WEBSOCKET /ws/cache-events",
+      "type": "api",
+      "layer": "backend",
+      "filePath": "/workspace/backend/api/routes.py",
+      "description": "WEBSOCKET /ws/cache-events"
+    },
+    {
+      "id": "route-GET--download--task_id-",
+      "label": "GET /download/{task_id}",
+      "type": "api",
+      "layer": "backend",
+      "filePath": "/workspace/backend/api/routes.py",
+      "description": "GET /download/{task_id}"
+    },
+    {
+      "id": "route-GET--download-file--filename-",
+      "label": "GET /download-file/{filename}",
+      "type": "api",
+      "layer": "backend",
+      "filePath": "/workspace/backend/api/routes.py",
+      "description": "GET /download-file/{filename}"
+    },
+    {
+      "id": "route-GET--download-mp3--task_id-",
+      "label": "GET /download-mp3/{task_id}",
+      "type": "api",
+      "layer": "backend",
+      "filePath": "/workspace/backend/api/routes.py",
+      "description": "GET /download-mp3/{task_id}"
+    },
+    {
+      "id": "route-GET--render-cache--task_id-",
+      "label": "GET /render-cache/{task_id}",
+      "type": "api",
+      "layer": "backend",
+      "filePath": "/workspace/backend/api/routes.py",
+      "description": "GET /render-cache/{task_id}"
+    },
+    {
+      "id": "route-DELETE--render-cache--filename-",
+      "label": "DELETE /render-cache/{filename}",
+      "type": "api",
+      "layer": "backend",
+      "filePath": "/workspace/backend/api/routes.py",
+      "description": "DELETE /render-cache/{filename}"
+    },
+    {
+      "id": "route-GET--delivery-files",
+      "label": "GET /delivery-files",
+      "type": "api",
+      "layer": "backend",
+      "filePath": "/workspace/backend/api/routes.py",
+      "description": "GET /delivery-files"
+    },
+    {
+      "id": "route-DELETE--delivery-files--filename-",
+      "label": "DELETE /delivery-files/{filename}",
+      "type": "api",
+      "layer": "backend",
+      "filePath": "/workspace/backend/api/routes.py",
+      "description": "DELETE /delivery-files/{filename}"
+    },
+    {
+      "id": "route-DELETE--delivery-files-parent--filename-",
+      "label": "DELETE /delivery-files/parent/{filename}",
+      "type": "api",
+      "layer": "backend",
+      "filePath": "/workspace/backend/api/routes.py",
+      "description": "DELETE /delivery-files/parent/{filename}"
+    },
+    {
+      "id": "route-GET--analysis-cache--quick_hash-",
+      "label": "GET /analysis-cache/{quick_hash}",
+      "type": "api",
+      "layer": "backend",
+      "filePath": "/workspace/backend/api/routes.py",
+      "description": "GET /analysis-cache/{quick_hash}"
+    },
+    {
+      "id": "route-POST--analysis-cache",
+      "label": "POST /analysis-cache",
+      "type": "api",
+      "layer": "backend",
+      "filePath": "/workspace/backend/api/routes.py",
+      "description": "POST /analysis-cache"
+    },
+    {
+      "id": "route-GET--analysis-cache-list",
+      "label": "GET /analysis-cache-list",
+      "type": "api",
+      "layer": "backend",
+      "filePath": "/workspace/backend/api/routes.py",
+      "description": "GET /analysis-cache-list"
+    },
+    {
+      "id": "route-DELETE--analysis-cache--quick_hash-",
+      "label": "DELETE /analysis-cache/{quick_hash}",
+      "type": "api",
+      "layer": "backend",
+      "filePath": "/workspace/backend/api/routes.py",
+      "description": "DELETE /analysis-cache/{quick_hash}"
+    },
+    {
+      "id": "route-POST--analysis-cache-clear",
+      "label": "POST /analysis-cache-clear",
+      "type": "api",
+      "layer": "backend",
+      "filePath": "/workspace/backend/api/routes.py",
+      "description": "POST /analysis-cache-clear"
+    },
+    {
+      "id": "route-GET--decoded-wav--file_hash-",
+      "label": "GET /decoded-wav/{file_hash}",
+      "type": "api",
+      "layer": "backend",
+      "filePath": "/workspace/backend/api/routes.py",
+      "description": "GET /decoded-wav/{file_hash}"
+    },
+    {
+      "id": "route-POST--decoded-wav--file_hash-",
+      "label": "POST /decoded-wav/{file_hash}",
+      "type": "api",
+      "layer": "backend",
+      "filePath": "/workspace/backend/api/routes.py",
+      "description": "POST /decoded-wav/{file_hash}"
+    },
+    {
+      "id": "route-GET--audio-info--file_hash-",
+      "label": "GET /audio-info/{file_hash}",
+      "type": "api",
+      "layer": "backend",
+      "filePath": "/workspace/backend/api/routes.py",
+      "description": "GET /audio-info/{file_hash}"
+    },
+    {
+      "id": "route-GET--waveform--file_hash-",
+      "label": "GET /waveform/{file_hash}",
+      "type": "api",
+      "layer": "backend",
+      "filePath": "/workspace/backend/api/routes.py",
+      "description": "GET /waveform/{file_hash}"
+    },
+    {
+      "id": "route-POST--cancel--task_id-",
+      "label": "POST /cancel/{task_id}",
+      "type": "api",
+      "layer": "backend",
+      "filePath": "/workspace/backend/api/routes.py",
+      "description": "POST /cancel/{task_id}"
+    },
+    {
+      "id": "route-GET--preview--task_id-",
+      "label": "GET /preview/{task_id}",
+      "type": "api",
+      "layer": "backend",
+      "filePath": "/workspace/backend/api/routes.py",
+      "description": "GET /preview/{task_id}"
+    },
+    {
+      "id": "route-POST--training-check-hash",
+      "label": "POST /training/check-hash",
+      "type": "api",
+      "layer": "backend",
+      "filePath": "/workspace/backend/api/routes.py",
+      "description": "POST /training/check-hash"
+    },
+    {
+      "id": "route-POST--training-upload",
+      "label": "POST /training/upload",
+      "type": "api",
+      "layer": "backend",
+      "filePath": "/workspace/backend/api/routes.py",
+      "description": "POST /training/upload"
+    },
+    {
+      "id": "route-GET--cache-info",
+      "label": "GET /cache/info",
+      "type": "api",
+      "layer": "backend",
+      "filePath": "/workspace/backend/api/routes.py",
+      "description": "GET /cache/info"
+    },
+    {
+      "id": "route-POST--cache-lookup",
+      "label": "POST /cache/lookup",
+      "type": "api",
+      "layer": "backend",
+      "filePath": "/workspace/backend/api/routes.py",
+      "description": "POST /cache/lookup"
+    },
+    {
+      "id": "route-POST--cache-lookup-dual",
+      "label": "POST /cache/lookup-dual",
+      "type": "api",
+      "layer": "backend",
+      "filePath": "/workspace/backend/api/routes.py",
+      "description": "POST /cache/lookup-dual"
+    },
+    {
+      "id": "route-POST--file-info-by-hash",
+      "label": "POST /file-info-by-hash",
+      "type": "api",
+      "layer": "backend",
+      "filePath": "/workspace/backend/api/routes.py",
+      "description": "POST /file-info-by-hash"
+    },
+    {
+      "id": "route-POST--cache-clean-invalid",
+      "label": "POST /cache/clean-invalid",
+      "type": "api",
+      "layer": "backend",
+      "filePath": "/workspace/backend/api/routes.py",
+      "description": "POST /cache/clean-invalid"
+    },
+    {
+      "id": "route-POST--cache-clear-all",
+      "label": "POST /cache/clear-all",
+      "type": "api",
+      "layer": "backend",
+      "filePath": "/workspace/backend/api/routes.py",
+      "description": "POST /cache/clear-all"
+    },
+    {
+      "id": "route-POST--cache-clear-output",
+      "label": "POST /cache/clear-output",
+      "type": "api",
+      "layer": "backend",
+      "filePath": "/workspace/backend/api/routes.py",
+      "description": "POST /cache/clear-output"
+    },
+    {
+      "id": "route-POST--cache-clear-render",
+      "label": "POST /cache/clear-render",
+      "type": "api",
+      "layer": "backend",
+      "filePath": "/workspace/backend/api/routes.py",
+      "description": "POST /cache/clear-render"
+    },
+    {
+      "id": "route-POST--cache-clear-upload",
+      "label": "POST /cache/clear-upload",
+      "type": "api",
+      "layer": "backend",
+      "filePath": "/workspace/backend/api/routes.py",
+      "description": "POST /cache/clear-upload"
+    },
+    {
+      "id": "route-POST--cache-delete--task_id-",
+      "label": "POST /cache/delete/{task_id}",
+      "type": "api",
+      "layer": "backend",
+      "filePath": "/workspace/backend/api/routes.py",
+      "description": "POST /cache/delete/{task_id}"
+    },
+    {
+      "id": "route-GET--training-list",
+      "label": "GET /training/list",
+      "type": "api",
+      "layer": "backend",
+      "filePath": "/workspace/backend/api/routes.py",
+      "description": "GET /training/list"
+    },
+    {
+      "id": "route-POST--quality-tests-start",
+      "label": "POST /quality-tests/start",
+      "type": "api",
+      "layer": "backend",
+      "filePath": "/workspace/backend/api/routes.py",
+      "description": "POST /quality-tests/start"
+    },
+    {
+      "id": "route-GET--quality-tests-result--task_id-",
+      "label": "GET /quality-tests/result/{task_id}",
+      "type": "api",
+      "layer": "backend",
+      "filePath": "/workspace/backend/api/routes.py",
+      "description": "GET /quality-tests/result/{task_id}"
+    },
+    {
+      "id": "backend-services-task_manager.py",
+      "label": "Task Manager",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/task_manager.py"
+    },
+    {
+      "id": "tm-submit_detect_task",
+      "label": "submit_detect_task",
+      "type": "function",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/task_manager.py",
+      "description": "提交检测任务"
+    },
+    {
+      "id": "tm-_run_detect",
+      "label": "_run_detect",
+      "type": "function",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/task_manager.py",
+      "description": "执行检测（detect_ai_audio）"
+    },
+    {
+      "id": "tm-submit_repair_task",
+      "label": "submit_repair_task",
+      "type": "function",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/task_manager.py",
+      "description": "提交修复任务"
+    },
+    {
+      "id": "tm-_run_repair",
+      "label": "_run_repair",
+      "type": "function",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/task_manager.py",
+      "description": "执行修复（repair_audio）"
+    },
+    {
+      "id": "backend-services-audio_repair.py",
+      "label": "Audio Repair",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/audio_repair.py"
+    },
+    {
+      "id": "algo-v1.0",
+      "label": "算法 v1.0",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/audio_repair.py",
+      "description": "算法版本 v1.0"
+    },
+    {
+      "id": "algo-v1.1",
+      "label": "算法 v1.1",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/audio_repair.py",
+      "description": "算法版本 v1.1"
+    },
+    {
+      "id": "algo-v1.2",
+      "label": "算法 v1.2",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/audio_repair.py",
+      "description": "算法版本 v1.2"
+    },
+    {
+      "id": "algo-v2.0",
+      "label": "算法 v2.0",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/audio_repair.py",
+      "description": "算法版本 v2.0"
+    },
+    {
+      "id": "algo-v2.1",
+      "label": "算法 v2.1",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/audio_repair.py",
+      "description": "算法版本 v2.1"
+    },
+    {
+      "id": "algo-v2.2",
+      "label": "算法 v2.2",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/audio_repair.py",
+      "description": "算法版本 v2.2"
+    },
+    {
+      "id": "algo-v2.2a",
+      "label": "算法 v2.2a",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/audio_repair.py",
+      "description": "算法版本 v2.2a"
+    },
+    {
+      "id": "algo-v2.3",
+      "label": "算法 v2.3",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/audio_repair.py",
+      "description": "算法版本 v2.3"
+    },
+    {
+      "id": "algo-v2.3a",
+      "label": "算法 v2.3a",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/audio_repair.py",
+      "description": "算法版本 v2.3a"
+    },
+    {
+      "id": "algo-v2.4",
+      "label": "算法 v2.4",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/audio_repair.py",
+      "description": "算法版本 v2.4"
+    },
+    {
+      "id": "algo-v2.4a",
+      "label": "算法 v2.4a",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/audio_repair.py",
+      "description": "算法版本 v2.4a"
+    },
+    {
+      "id": "algo-v3.0",
+      "label": "算法 v3.0",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/audio_repair.py",
+      "description": "算法版本 v3.0"
+    },
+    {
+      "id": "algo-v3.0a",
+      "label": "算法 v3.0a",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/audio_repair.py",
+      "description": "算法版本 v3.0a"
+    },
+    {
+      "id": "algo-v3.1",
+      "label": "算法 v3.1",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/audio_repair.py",
+      "description": "算法版本 v3.1"
+    },
+    {
+      "id": "algo-v3.1a",
+      "label": "算法 v3.1a",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/audio_repair.py",
+      "description": "算法版本 v3.1a"
+    },
+    {
+      "id": "repair-module-__pycache__",
+      "label": "__pycache__",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/repair/__pycache__"
+    },
+    {
+      "id": "repair-module-repair_v2_0",
+      "label": "repair_v2_0",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/repair/repair_v2_0"
+    },
+    {
+      "id": "repair-module-repair_v2_0-declip",
+      "label": "repair_v2_0/declip",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/repair/repair_v2_0/declip.py"
+    },
+    {
+      "id": "repair-module-repair_v2_0-depop",
+      "label": "repair_v2_0/depop",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/repair/repair_v2_0/depop.py"
+    },
+    {
+      "id": "repair-module-repair_v2_0-dynamics",
+      "label": "repair_v2_0/dynamics",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/repair/repair_v2_0/dynamics.py"
+    },
+    {
+      "id": "repair-module-repair_v2_0-filters",
+      "label": "repair_v2_0/filters",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/repair/repair_v2_0/filters.py"
+    },
+    {
+      "id": "repair-module-repair_v2_0-postprocess",
+      "label": "repair_v2_0/postprocess",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/repair/repair_v2_0/postprocess.py"
+    },
+    {
+      "id": "repair-module-repair_v2_0-spatial",
+      "label": "repair_v2_0/spatial",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/repair/repair_v2_0/spatial.py"
+    },
+    {
+      "id": "repair-module-repair_v2_0-spectral_group_a",
+      "label": "repair_v2_0/spectral_group_a",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/repair/repair_v2_0/spectral_group_a.py"
+    },
+    {
+      "id": "repair-module-repair_v2_0-spectral_group_b",
+      "label": "repair_v2_0/spectral_group_b",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/repair/repair_v2_0/spectral_group_b.py"
+    },
+    {
+      "id": "repair-module-repair_v2_0-transient",
+      "label": "repair_v2_0/transient",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/repair/repair_v2_0/transient.py"
+    },
+    {
+      "id": "repair-module-repair_v2_1",
+      "label": "repair_v2_1",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/repair/repair_v2_1"
+    },
+    {
+      "id": "repair-module-repair_v2_1-declip",
+      "label": "repair_v2_1/declip",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/repair/repair_v2_1/declip.py"
+    },
+    {
+      "id": "repair-module-repair_v2_1-depop",
+      "label": "repair_v2_1/depop",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/repair/repair_v2_1/depop.py"
+    },
+    {
+      "id": "repair-module-repair_v2_1-dynamics",
+      "label": "repair_v2_1/dynamics",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/repair/repair_v2_1/dynamics.py"
+    },
+    {
+      "id": "repair-module-repair_v2_1-filters",
+      "label": "repair_v2_1/filters",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/repair/repair_v2_1/filters.py"
+    },
+    {
+      "id": "repair-module-repair_v2_1-postprocess",
+      "label": "repair_v2_1/postprocess",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/repair/repair_v2_1/postprocess.py"
+    },
+    {
+      "id": "repair-module-repair_v2_1-spatial",
+      "label": "repair_v2_1/spatial",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/repair/repair_v2_1/spatial.py"
+    },
+    {
+      "id": "repair-module-repair_v2_1-spectral_group_a",
+      "label": "repair_v2_1/spectral_group_a",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/repair/repair_v2_1/spectral_group_a.py"
+    },
+    {
+      "id": "repair-module-repair_v2_1-spectral_group_b",
+      "label": "repair_v2_1/spectral_group_b",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/repair/repair_v2_1/spectral_group_b.py"
+    },
+    {
+      "id": "repair-module-repair_v2_1-transient",
+      "label": "repair_v2_1/transient",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/repair/repair_v2_1/transient.py"
+    },
+    {
+      "id": "repair-module-repair_v2_2",
+      "label": "repair_v2_2",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/repair/repair_v2_2"
+    },
+    {
+      "id": "repair-module-repair_v2_2-declip",
+      "label": "repair_v2_2/declip",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/repair/repair_v2_2/declip.py"
+    },
+    {
+      "id": "repair-module-repair_v2_2-depop",
+      "label": "repair_v2_2/depop",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/repair/repair_v2_2/depop.py"
+    },
+    {
+      "id": "repair-module-repair_v2_2-dynamics",
+      "label": "repair_v2_2/dynamics",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/repair/repair_v2_2/dynamics.py"
+    },
+    {
+      "id": "repair-module-repair_v2_2-filters",
+      "label": "repair_v2_2/filters",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/repair/repair_v2_2/filters.py"
+    },
+    {
+      "id": "repair-module-repair_v2_2-music_type_detector",
+      "label": "repair_v2_2/music_type_detector",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/repair/repair_v2_2/music_type_detector.py"
+    },
+    {
+      "id": "repair-module-repair_v2_2-postprocess",
+      "label": "repair_v2_2/postprocess",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/repair/repair_v2_2/postprocess.py"
+    },
+    {
+      "id": "repair-module-repair_v2_2-spatial",
+      "label": "repair_v2_2/spatial",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/repair/repair_v2_2/spatial.py"
+    },
+    {
+      "id": "repair-module-repair_v2_2-spectral_group_a",
+      "label": "repair_v2_2/spectral_group_a",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/repair/repair_v2_2/spectral_group_a.py"
+    },
+    {
+      "id": "repair-module-repair_v2_2-spectral_group_b",
+      "label": "repair_v2_2/spectral_group_b",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/repair/repair_v2_2/spectral_group_b.py"
+    },
+    {
+      "id": "repair-module-repair_v2_2-subband_processing",
+      "label": "repair_v2_2/subband_processing",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/repair/repair_v2_2/subband_processing.py"
+    },
+    {
+      "id": "repair-module-repair_v2_2-transient",
+      "label": "repair_v2_2/transient",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/repair/repair_v2_2/transient.py"
+    },
+    {
+      "id": "repair-module-repair_v2_2-type_params",
+      "label": "repair_v2_2/type_params",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/repair/repair_v2_2/type_params.py"
+    },
+    {
+      "id": "repair-module-repair_v2_2a",
+      "label": "repair_v2_2a",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/repair/repair_v2_2a"
+    },
+    {
+      "id": "repair-module-repair_v2_3",
+      "label": "repair_v2_3",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/repair/repair_v2_3"
+    },
+    {
+      "id": "repair-module-repair_v2_3a",
+      "label": "repair_v2_3a",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/repair/repair_v2_3a"
+    },
+    {
+      "id": "repair-module-repair_v2_4",
+      "label": "repair_v2_4",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/repair/repair_v2_4"
+    },
+    {
+      "id": "repair-module-repair_v2_4-bit_depth_enhance",
+      "label": "repair_v2_4/bit_depth_enhance",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/repair/repair_v2_4/bit_depth_enhance.py"
+    },
+    {
+      "id": "repair-module-repair_v2_4-detail_enhance",
+      "label": "repair_v2_4/detail_enhance",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/repair/repair_v2_4/detail_enhance.py"
+    },
+    {
+      "id": "repair-module-repair_v2_4-hifi_ai_repair",
+      "label": "repair_v2_4/hifi_ai_repair",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/repair/repair_v2_4/hifi_ai_repair.py"
+    },
+    {
+      "id": "repair-module-repair_v2_4-hifi_multiband",
+      "label": "repair_v2_4/hifi_multiband",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/repair/repair_v2_4/hifi_multiband.py"
+    },
+    {
+      "id": "repair-module-repair_v2_4-spectral_superres",
+      "label": "repair_v2_4/spectral_superres",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/repair/repair_v2_4/spectral_superres.py"
+    },
+    {
+      "id": "repair-module-repair_v2_4-tempo_analyzer",
+      "label": "repair_v2_4/tempo_analyzer",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/repair/repair_v2_4/tempo_analyzer.py"
+    },
+    {
+      "id": "repair-module-repair_v2_4a",
+      "label": "repair_v2_4a",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/repair/repair_v2_4a"
+    },
+    {
+      "id": "repair-module-repair_v3_0",
+      "label": "repair_v3_0",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/repair/repair_v3_0"
+    },
+    {
+      "id": "repair-module-repair_v3_0a",
+      "label": "repair_v3_0a",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/repair/repair_v3_0a"
+    },
+    {
+      "id": "repair-module-repair_v3_1",
+      "label": "repair_v3_1",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/repair/repair_v3_1"
+    },
+    {
+      "id": "repair-module-repair_v3_1a",
+      "label": "repair_v3_1a",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/repair/repair_v3_1a"
+    },
+    {
+      "id": "dataflow-upload",
+      "label": "上传音频",
+      "type": "function",
+      "layer": "shared",
+      "filePath": "",
+      "description": "前端 uploadAudio() → POST /api/v1/upload"
+    },
+    {
+      "id": "dataflow-detect",
+      "label": "AI 检测",
+      "type": "function",
+      "layer": "shared",
+      "filePath": "",
+      "description": "前端 detectAudio() → POST /api/v1/detect → submit_detect_task → _run_detect → detect_ai_audio"
+    },
+    {
+      "id": "dataflow-repair",
+      "label": "音频修复",
+      "type": "function",
+      "layer": "shared",
+      "filePath": "",
+      "description": "前端 repairAudio() → POST /api/v1/repair → submit_repair_task → _run_repair → repair_audio"
+    },
+    {
+      "id": "dataflow-render",
+      "label": "渲染交付",
+      "type": "function",
+      "layer": "shared",
+      "filePath": "",
+      "description": "前端 renderAudio() → POST /api/v1/render → _run_render → render_output"
+    },
+    {
+      "id": "dataflow-download",
+      "label": "下载结果",
+      "type": "function",
+      "layer": "shared",
+      "filePath": "",
+      "description": "前端 getDownloadUrl() → GET /api/v1/download/{task_id}"
+    },
+    {
+      "id": "dataflow-ws",
+      "label": "WebSocket 进度",
+      "type": "function",
+      "layer": "shared",
+      "filePath": "",
+      "description": "前端 connectProgressWS() → WS /api/v1/ws/{task_id}"
+    },
+    {
+      "id": "dataflow-upload-dual",
+      "label": "双轨上传",
+      "type": "function",
+      "layer": "shared",
+      "filePath": "",
+      "description": "前端 uploadDualAudio() → POST /api/v1/upload-dual"
+    },
+    {
+      "id": "dataflow-repair-dual",
+      "label": "双轨修复",
+      "type": "function",
+      "layer": "shared",
+      "filePath": "",
+      "description": "前端 repairDualAudio() → POST /api/v1/repair-dual → 人声+伴奏分别修复后混音"
+    }
+  ],
+  "edges": [
+    {
+      "source": "root",
+      "target": "frontend",
+      "label": "SPA 单页应用",
+      "type": "data-flow"
+    },
+    {
+      "source": "root",
+      "target": "backend",
+      "label": "REST API / WebSocket",
+      "type": "data-flow"
+    },
+    {
+      "source": "frontend",
+      "target": "src-pages-CacheManagerPage",
+      "label": "路由页面",
+      "type": "renders"
+    },
+    {
+      "source": "src-pages-CacheManagerPage",
+      "target": "src-components-Header",
+      "label": "渲染",
+      "type": "renders"
+    },
+    {
+      "source": "src-pages-CacheManagerPage",
+      "target": "src-utils-settingsStorage",
+      "label": "使用",
+      "type": "import"
+    },
+    {
+      "source": "src-pages-CacheManagerPage",
+      "target": "src-services-backendApi",
+      "label": "使用",
+      "type": "import"
+    },
+    {
+      "source": "src-pages-CacheManagerPage",
+      "target": "src-utils-sessionDB",
+      "label": "使用",
+      "type": "import"
+    },
+    {
+      "source": "frontend",
+      "target": "src-pages-ComparePage",
+      "label": "路由页面",
+      "type": "renders"
+    },
+    {
+      "source": "src-pages-ComparePage",
+      "target": "src-components-Header",
+      "label": "渲染",
+      "type": "renders"
+    },
+    {
+      "source": "src-pages-ComparePage",
+      "target": "src-components-SpectrumVisualizer",
+      "label": "渲染",
+      "type": "renders"
+    },
+    {
+      "source": "src-pages-ComparePage",
+      "target": "src-components-WaveformVisualizer",
+      "label": "渲染",
+      "type": "renders"
+    },
+    {
+      "source": "src-pages-ComparePage",
+      "target": "src-components-ErrorBoundary",
+      "label": "渲染",
+      "type": "renders"
+    },
+    {
+      "source": "src-pages-ComparePage",
+      "target": "src-services-backendApi",
+      "label": "使用",
+      "type": "import"
+    },
+    {
+      "source": "frontend",
+      "target": "src-pages-DetectPage",
+      "label": "路由页面",
+      "type": "renders"
+    },
+    {
+      "source": "src-pages-DetectPage",
+      "target": "src-components-Header",
+      "label": "渲染",
+      "type": "renders"
+    },
+    {
+      "source": "src-pages-DetectPage",
+      "target": "src-components-ErrorBoundary",
+      "label": "渲染",
+      "type": "renders"
+    },
+    {
+      "source": "src-pages-DetectPage",
+      "target": "src-components-LeaveConfirmModal",
+      "label": "渲染",
+      "type": "renders"
+    },
+    {
+      "source": "src-pages-DetectPage",
+      "target": "src-contexts-BackendContext",
+      "label": "使用",
+      "type": "import"
+    },
+    {
+      "source": "src-pages-DetectPage",
+      "target": "src-components-AIDetectionComparison",
+      "label": "渲染",
+      "type": "renders"
+    },
+    {
+      "source": "src-pages-DetectPage",
+      "target": "src-utils-aiSongChecker",
+      "label": "使用",
+      "type": "import"
+    },
+    {
+      "source": "src-pages-DetectPage",
+      "target": "src-services-backendApi",
+      "label": "使用",
+      "type": "import"
+    },
+    {
+      "source": "frontend",
+      "target": "src-pages-FlowVisualizationPage",
+      "label": "路由页面",
+      "type": "renders"
+    },
+    {
+      "source": "src-pages-FlowVisualizationPage",
+      "target": "src-components-Header",
+      "label": "渲染",
+      "type": "renders"
+    },
+    {
+      "source": "frontend",
+      "target": "src-pages-Home",
+      "label": "路由页面",
+      "type": "renders"
+    },
+    {
+      "source": "src-pages-Home",
+      "target": "src-components-Header",
+      "label": "渲染",
+      "type": "renders"
+    },
+    {
+      "source": "src-pages-Home",
+      "target": "src-components-AudioUploader",
+      "label": "渲染",
+      "type": "renders"
+    },
+    {
+      "source": "src-pages-Home",
+      "target": "src-components-AudioPlayer",
+      "label": "渲染",
+      "type": "renders"
+    },
+    {
+      "source": "src-pages-Home",
+      "target": "src-components-WaveformVisualizer",
+      "label": "渲染",
+      "type": "renders"
+    },
+    {
+      "source": "src-pages-Home",
+      "target": "src-components-SpectrumVisualizer",
+      "label": "渲染",
+      "type": "renders"
+    },
+    {
+      "source": "src-pages-Home",
+      "target": "src-components-AIRepairPanel",
+      "label": "渲染",
+      "type": "renders"
+    },
+    {
+      "source": "src-pages-Home",
+      "target": "src-components-DownloadModal",
+      "label": "渲染",
+      "type": "renders"
+    },
+    {
+      "source": "src-pages-Home",
+      "target": "src-hooks-useAudioProcessor",
+      "label": "使用",
+      "type": "import"
+    },
+    {
+      "source": "frontend",
+      "target": "src-pages-LandingPage",
+      "label": "路由页面",
+      "type": "renders"
+    },
+    {
+      "source": "src-pages-LandingPage",
+      "target": "src-components-Header",
+      "label": "渲染",
+      "type": "renders"
+    },
+    {
+      "source": "src-pages-LandingPage",
+      "target": "src-contexts-BackendContext",
+      "label": "使用",
+      "type": "import"
+    },
+    {
+      "source": "frontend",
+      "target": "src-pages-ProfileManagerPage",
+      "label": "路由页面",
+      "type": "renders"
+    },
+    {
+      "source": "src-pages-ProfileManagerPage",
+      "target": "src-components-Header",
+      "label": "渲染",
+      "type": "renders"
+    },
+    {
+      "source": "src-pages-ProfileManagerPage",
+      "target": "src-utils-advancedAudioProcessing",
+      "label": "使用",
+      "type": "import"
+    },
+    {
+      "source": "src-pages-ProfileManagerPage",
+      "target": "src-utils-settingsStorage",
+      "label": "使用",
+      "type": "import"
+    },
+    {
+      "source": "src-pages-ProfileManagerPage",
+      "target": "src-services-backendApi",
+      "label": "使用",
+      "type": "import"
+    },
+    {
+      "source": "frontend",
+      "target": "src-pages-QualityTestPage",
+      "label": "路由页面",
+      "type": "renders"
+    },
+    {
+      "source": "src-pages-QualityTestPage",
+      "target": "src-components-Header",
+      "label": "渲染",
+      "type": "renders"
+    },
+    {
+      "source": "frontend",
+      "target": "src-pages-RepairPage",
+      "label": "路由页面",
+      "type": "renders"
+    },
+    {
+      "source": "src-pages-RepairPage",
+      "target": "src-components-Header",
+      "label": "渲染",
+      "type": "renders"
+    },
+    {
+      "source": "src-pages-RepairPage",
+      "target": "src-components-AudioUploader",
+      "label": "渲染",
+      "type": "renders"
+    },
+    {
+      "source": "src-pages-RepairPage",
+      "target": "src-components-DualTrackUploader",
+      "label": "渲染",
+      "type": "renders"
+    },
+    {
+      "source": "src-pages-RepairPage",
+      "target": "src-components-AIRepairPanel",
+      "label": "渲染",
+      "type": "renders"
+    },
+    {
+      "source": "src-pages-RepairPage",
+      "target": "src-components-ErrorBoundary",
+      "label": "渲染",
+      "type": "renders"
+    },
+    {
+      "source": "src-pages-RepairPage",
+      "target": "src-components-DownloadModal",
+      "label": "渲染",
+      "type": "renders"
+    },
+    {
+      "source": "src-pages-RepairPage",
+      "target": "src-components-RepairCacheModal",
+      "label": "渲染",
+      "type": "renders"
+    },
+    {
+      "source": "src-pages-RepairPage",
+      "target": "src-hooks-useAudioProcessor",
+      "label": "使用",
+      "type": "import"
+    },
+    {
+      "source": "src-pages-RepairPage",
+      "target": "src-services-backendApi",
+      "label": "使用",
+      "type": "import"
+    },
+    {
+      "source": "src-pages-RepairPage",
+      "target": "src-contexts-BackendContext",
+      "label": "使用",
+      "type": "import"
+    },
+    {
+      "source": "src-pages-RepairPage",
+      "target": "src-utils-settingsStorage",
+      "label": "使用",
+      "type": "import"
+    },
+    {
+      "source": "src-pages-RepairPage",
+      "target": "src-utils-fileHash",
+      "label": "使用",
+      "type": "import"
+    },
+    {
+      "source": "src-pages-RepairPage",
+      "target": "src-store-repairSessionStore",
+      "label": "使用",
+      "type": "import"
+    },
+    {
+      "source": "frontend",
+      "target": "src-pages-TrainingUploadPage",
+      "label": "路由页面",
+      "type": "renders"
+    },
+    {
+      "source": "src-pages-TrainingUploadPage",
+      "target": "src-components-Header",
+      "label": "渲染",
+      "type": "renders"
+    },
+    {
+      "source": "src-pages-TrainingUploadPage",
+      "target": "src-services-backendApi",
+      "label": "使用",
+      "type": "import"
+    },
+    {
+      "source": "src-components-AIDetectionComparison",
+      "target": "src-utils-aiSongChecker",
+      "label": "导入",
+      "type": "import"
+    },
+    {
+      "source": "src-components-AIRepairPanel",
+      "target": "src-utils-advancedAudioProcessing",
+      "label": "导入",
+      "type": "import"
+    },
+    {
+      "source": "src-components-AIRepairPanel",
+      "target": "src-services-backendApi",
+      "label": "导入",
+      "type": "import"
+    },
+    {
+      "source": "src-components-AIRepairPanel",
+      "target": "src-components-AlgorithmSelector",
+      "label": "导入",
+      "type": "import"
+    },
+    {
+      "source": "src-components-AlgorithmSelector",
+      "target": "src-services-backendApi",
+      "label": "导入",
+      "type": "import"
+    },
+    {
+      "source": "src-components-AudioPlayer",
+      "target": "src-hooks-useAudioProcessor",
+      "label": "导入",
+      "type": "import"
+    },
+    {
+      "source": "src-components-AudioUploader",
+      "target": "src-utils-audioUtils",
+      "label": "导入",
+      "type": "import"
+    },
+    {
+      "source": "src-components-DownloadModal",
+      "target": "src-services-backendApi",
+      "label": "导入",
+      "type": "import"
+    },
+    {
+      "source": "src-components-EffectsPanel",
+      "target": "src-utils-audioUtils",
+      "label": "导入",
+      "type": "import"
+    },
+    {
+      "source": "src-components-Empty",
+      "target": "src-lib-utils",
+      "label": "导入",
+      "type": "import"
+    },
+    {
+      "source": "src-components-Header",
+      "target": "src-contexts-BackendContext",
+      "label": "导入",
+      "type": "import"
+    },
+    {
+      "source": "src-components-Header",
+      "target": "src-contexts-BackendContext",
+      "label": "导入",
+      "type": "import"
+    },
+    {
+      "source": "src-components-RepairCacheModal",
+      "target": "src-services-backendApi",
+      "label": "导入",
+      "type": "import"
+    },
+    {
+      "source": "src-components-RepairCacheModal",
+      "target": "src-hooks-useAudioProcessor",
+      "label": "导入",
+      "type": "import"
+    },
+    {
+      "source": "src-hooks-useAudioProcessor",
+      "target": "src-utils-advancedAudioProcessing",
+      "label": "调用",
+      "type": "call"
+    },
+    {
+      "source": "src-hooks-useAudioProcessor",
+      "target": "src-utils-settingsStorage",
+      "label": "调用",
+      "type": "call"
+    },
+    {
+      "source": "src-hooks-useAudioProcessor",
+      "target": "src-utils-wavParser",
+      "label": "调用",
+      "type": "call"
+    },
+    {
+      "source": "src-hooks-useAudioProcessor",
+      "target": "src-utils-sessionDB",
+      "label": "调用",
+      "type": "call"
+    },
+    {
+      "source": "src-hooks-useAudioProcessor",
+      "target": "src-utils-fileHash",
+      "label": "调用",
+      "type": "call"
+    },
+    {
+      "source": "src-hooks-useAudioProcessor",
+      "target": "src-workers-useAudioWorker",
+      "label": "调用",
+      "type": "call"
+    },
+    {
+      "source": "src-hooks-useAudioProcessor",
+      "target": "src-store-repairSessionStore",
+      "label": "调用",
+      "type": "call"
+    },
+    {
+      "source": "src-hooks-useAudioProcessor",
+      "target": "src-services-backendApi",
+      "label": "调用",
+      "type": "call"
+    },
+    {
+      "source": "src-hooks-useAudioProcessor",
+      "target": "src-components-RepairCacheModal",
+      "label": "调用",
+      "type": "call"
+    },
+    {
+      "source": "src-hooks-useAudioProcessor",
+      "target": "src-services-backendApi",
+      "label": "调用",
+      "type": "call"
+    },
+    {
+      "source": "src-hooks-useAudioProcessor",
+      "target": "src-utils-settingsStorage",
+      "label": "调用",
+      "type": "call"
+    },
+    {
+      "source": "frontend",
+      "target": "src-services-backendApi",
+      "label": "API 服务层",
+      "type": "import"
+    },
+    {
+      "source": "src-services-backendApi",
+      "target": "api-checkFileHash",
+      "label": "导出函数",
+      "type": "import"
+    },
+    {
+      "source": "src-services-backendApi",
+      "target": "api-uploadAudio",
+      "label": "导出函数",
+      "type": "import"
+    },
+    {
+      "source": "src-services-backendApi",
+      "target": "api-uploadDualAudio",
+      "label": "导出函数",
+      "type": "import"
+    },
+    {
+      "source": "src-services-backendApi",
+      "target": "api-detectAudio",
+      "label": "导出函数",
+      "type": "import"
+    },
+    {
+      "source": "src-services-backendApi",
+      "target": "api-detectFile",
+      "label": "导出函数",
+      "type": "import"
+    },
+    {
+      "source": "src-services-backendApi",
+      "target": "api-detectByPath",
+      "label": "导出函数",
+      "type": "import"
+    },
+    {
+      "source": "src-services-backendApi",
+      "target": "api-repairAudio",
+      "label": "导出函数",
+      "type": "import"
+    },
+    {
+      "source": "src-services-backendApi",
+      "target": "api-repairDualAudio",
+      "label": "导出函数",
+      "type": "import"
+    },
+    {
+      "source": "src-services-backendApi",
+      "target": "api-repairDualFromHash",
+      "label": "导出函数",
+      "type": "import"
+    },
+    {
+      "source": "src-services-backendApi",
+      "target": "api-renderAudio",
+      "label": "导出函数",
+      "type": "import"
+    },
+    {
+      "source": "src-services-backendApi",
+      "target": "api-waitRenderWithWS",
+      "label": "导出函数",
+      "type": "import"
+    },
+    {
+      "source": "src-services-backendApi",
+      "target": "api-getTaskStatus",
+      "label": "导出函数",
+      "type": "import"
+    },
+    {
+      "source": "src-services-backendApi",
+      "target": "api-getTrackStatus",
+      "label": "导出函数",
+      "type": "import"
+    },
+    {
+      "source": "src-services-backendApi",
+      "target": "api-getQueueStatus",
+      "label": "导出函数",
+      "type": "import"
+    },
+    {
+      "source": "src-services-backendApi",
+      "target": "api-pollProgress",
+      "label": "导出函数",
+      "type": "import"
+    },
+    {
+      "source": "src-services-backendApi",
+      "target": "api-connectProgressWS",
+      "label": "导出函数",
+      "type": "import"
+    },
+    {
+      "source": "src-services-backendApi",
+      "target": "api-getDownloadUrl",
+      "label": "导出函数",
+      "type": "import"
+    },
+    {
+      "source": "src-services-backendApi",
+      "target": "api-getPreviewUrl",
+      "label": "导出函数",
+      "type": "import"
+    },
+    {
+      "source": "src-services-backendApi",
+      "target": "api-cancelTask",
+      "label": "导出函数",
+      "type": "import"
+    },
+    {
+      "source": "src-services-backendApi",
+      "target": "api-downloadWithProgress",
+      "label": "导出函数",
+      "type": "import"
+    },
+    {
+      "source": "src-services-backendApi",
+      "target": "api-checkBackendHealth",
+      "label": "导出函数",
+      "type": "import"
+    },
+    {
+      "source": "src-services-backendApi",
+      "target": "api-fetchAlgorithmVersions",
+      "label": "导出函数",
+      "type": "import"
+    },
+    {
+      "source": "src-services-backendApi",
+      "target": "api-fetchDetectorVersions",
+      "label": "导出函数",
+      "type": "import"
+    },
+    {
+      "source": "src-services-backendApi",
+      "target": "api-fetchMemoryInfo",
+      "label": "导出函数",
+      "type": "import"
+    },
+    {
+      "source": "src-services-backendApi",
+      "target": "api-fetchStorageEstimate",
+      "label": "导出函数",
+      "type": "import"
+    },
+    {
+      "source": "src-services-backendApi",
+      "target": "api-lookupRepairCache",
+      "label": "导出函数",
+      "type": "import"
+    },
+    {
+      "source": "src-services-backendApi",
+      "target": "api-fetchRenderCache",
+      "label": "导出函数",
+      "type": "import"
+    },
+    {
+      "source": "src-services-backendApi",
+      "target": "api-uploadTrainingAudio",
+      "label": "导出函数",
+      "type": "import"
+    },
+    {
+      "source": "src-services-backendApi",
+      "target": "api-checkTrainingHash",
+      "label": "导出函数",
+      "type": "import"
+    },
+    {
+      "source": "src-services-backendApi",
+      "target": "api-fetchDeliveryFiles",
+      "label": "导出函数",
+      "type": "import"
+    },
+    {
+      "source": "src-services-backendApi",
+      "target": "api-deleteDeliveryFile",
+      "label": "导出函数",
+      "type": "import"
+    },
+    {
+      "source": "src-services-backendApi",
+      "target": "api-deleteDeliveryParent",
+      "label": "导出函数",
+      "type": "import"
+    },
+    {
+      "source": "src-services-backendApi",
+      "target": "api-getAudioFiles",
+      "label": "导出函数",
+      "type": "import"
+    },
+    {
+      "source": "src-services-backendApi",
+      "target": "api-mapParamsToBackend",
+      "label": "导出函数",
+      "type": "import"
+    },
+    {
+      "source": "src-services-backendApi",
+      "target": "api-mapVocalParamsToBackend",
+      "label": "导出函数",
+      "type": "import"
+    },
+    {
+      "source": "src-services-backendApi",
+      "target": "api-mapInstrumentParamsToBackend",
+      "label": "导出函数",
+      "type": "import"
+    },
+    {
+      "source": "backend",
+      "target": "backend-api-routes.py",
+      "label": "路由层",
+      "type": "import"
+    },
+    {
+      "source": "backend-api-routes.py",
+      "target": "route-POST--memory-info",
+      "label": "路由注册",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-api-routes.py",
+      "target": "route-POST--log",
+      "label": "路由注册",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-api-routes.py",
+      "target": "route-GET--algorithm-versions",
+      "label": "路由注册",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-api-routes.py",
+      "target": "route-GET--detector-versions",
+      "label": "路由注册",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-api-routes.py",
+      "target": "route-GET--deploy-info",
+      "label": "路由注册",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-api-routes.py",
+      "target": "route-GET--system-load",
+      "label": "路由注册",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-api-routes.py",
+      "target": "route-GET--diag",
+      "label": "路由注册",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-api-routes.py",
+      "target": "route-POST--storage-estimate",
+      "label": "路由注册",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-api-routes.py",
+      "target": "route-POST--check-hash",
+      "label": "路由注册",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-api-routes.py",
+      "target": "route-POST--upload",
+      "label": "路由注册",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-api-routes.py",
+      "target": "route-POST--upload-dual",
+      "label": "路由注册",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-api-routes.py",
+      "target": "route-POST--detect",
+      "label": "路由注册",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-api-routes.py",
+      "target": "route-POST--detect-file",
+      "label": "路由注册",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-api-routes.py",
+      "target": "route-GET--audio-files",
+      "label": "路由注册",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-api-routes.py",
+      "target": "route-POST--detect-path",
+      "label": "路由注册",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-api-routes.py",
+      "target": "route-POST--repair",
+      "label": "路由注册",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-api-routes.py",
+      "target": "route-POST--repair-dual",
+      "label": "路由注册",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-api-routes.py",
+      "target": "route-POST--repair-dual-from-hash",
+      "label": "路由注册",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-api-routes.py",
+      "target": "route-GET--tracks--task_id-",
+      "label": "路由注册",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-api-routes.py",
+      "target": "route-POST--render",
+      "label": "路由注册",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-api-routes.py",
+      "target": "route-GET--status--task_id-",
+      "label": "路由注册",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-api-routes.py",
+      "target": "route-GET--queue-status",
+      "label": "路由注册",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-api-routes.py",
+      "target": "route-WEBSOCKET--ws--task_id-",
+      "label": "路由注册",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-api-routes.py",
+      "target": "route-WEBSOCKET--ws-cache-events",
+      "label": "路由注册",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-api-routes.py",
+      "target": "route-GET--download--task_id-",
+      "label": "路由注册",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-api-routes.py",
+      "target": "route-GET--download-file--filename-",
+      "label": "路由注册",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-api-routes.py",
+      "target": "route-GET--download-mp3--task_id-",
+      "label": "路由注册",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-api-routes.py",
+      "target": "route-GET--render-cache--task_id-",
+      "label": "路由注册",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-api-routes.py",
+      "target": "route-DELETE--render-cache--filename-",
+      "label": "路由注册",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-api-routes.py",
+      "target": "route-GET--delivery-files",
+      "label": "路由注册",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-api-routes.py",
+      "target": "route-DELETE--delivery-files--filename-",
+      "label": "路由注册",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-api-routes.py",
+      "target": "route-DELETE--delivery-files-parent--filename-",
+      "label": "路由注册",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-api-routes.py",
+      "target": "route-GET--analysis-cache--quick_hash-",
+      "label": "路由注册",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-api-routes.py",
+      "target": "route-POST--analysis-cache",
+      "label": "路由注册",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-api-routes.py",
+      "target": "route-GET--analysis-cache-list",
+      "label": "路由注册",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-api-routes.py",
+      "target": "route-DELETE--analysis-cache--quick_hash-",
+      "label": "路由注册",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-api-routes.py",
+      "target": "route-POST--analysis-cache-clear",
+      "label": "路由注册",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-api-routes.py",
+      "target": "route-GET--decoded-wav--file_hash-",
+      "label": "路由注册",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-api-routes.py",
+      "target": "route-POST--decoded-wav--file_hash-",
+      "label": "路由注册",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-api-routes.py",
+      "target": "route-GET--audio-info--file_hash-",
+      "label": "路由注册",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-api-routes.py",
+      "target": "route-GET--waveform--file_hash-",
+      "label": "路由注册",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-api-routes.py",
+      "target": "route-POST--cancel--task_id-",
+      "label": "路由注册",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-api-routes.py",
+      "target": "route-GET--preview--task_id-",
+      "label": "路由注册",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-api-routes.py",
+      "target": "route-POST--training-check-hash",
+      "label": "路由注册",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-api-routes.py",
+      "target": "route-POST--training-upload",
+      "label": "路由注册",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-api-routes.py",
+      "target": "route-GET--cache-info",
+      "label": "路由注册",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-api-routes.py",
+      "target": "route-POST--cache-lookup",
+      "label": "路由注册",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-api-routes.py",
+      "target": "route-POST--cache-lookup-dual",
+      "label": "路由注册",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-api-routes.py",
+      "target": "route-POST--file-info-by-hash",
+      "label": "路由注册",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-api-routes.py",
+      "target": "route-POST--cache-clean-invalid",
+      "label": "路由注册",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-api-routes.py",
+      "target": "route-POST--cache-clear-all",
+      "label": "路由注册",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-api-routes.py",
+      "target": "route-POST--cache-clear-output",
+      "label": "路由注册",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-api-routes.py",
+      "target": "route-POST--cache-clear-render",
+      "label": "路由注册",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-api-routes.py",
+      "target": "route-POST--cache-clear-upload",
+      "label": "路由注册",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-api-routes.py",
+      "target": "route-POST--cache-delete--task_id-",
+      "label": "路由注册",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-api-routes.py",
+      "target": "route-GET--training-list",
+      "label": "路由注册",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-api-routes.py",
+      "target": "route-POST--quality-tests-start",
+      "label": "路由注册",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-api-routes.py",
+      "target": "route-GET--quality-tests-result--task_id-",
+      "label": "路由注册",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend",
+      "target": "backend-services-task_manager.py",
+      "label": "任务管理",
+      "type": "import"
+    },
+    {
+      "source": "backend-services-task_manager.py",
+      "target": "tm-submit_detect_task",
+      "label": "任务函数",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-services-task_manager.py",
+      "target": "tm-_run_detect",
+      "label": "任务函数",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-services-task_manager.py",
+      "target": "tm-submit_repair_task",
+      "label": "任务函数",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-services-task_manager.py",
+      "target": "tm-_run_repair",
+      "label": "任务函数",
+      "type": "data-flow"
+    },
+    {
+      "source": "tm-submit_detect_task",
+      "target": "tm-_run_detect",
+      "label": "executor.submit",
+      "type": "call"
+    },
+    {
+      "source": "tm-submit_repair_task",
+      "target": "tm-_run_repair",
+      "label": "executor.submit",
+      "type": "call"
+    },
+    {
+      "source": "backend",
+      "target": "backend-services-audio_repair.py",
+      "label": "修复引擎",
+      "type": "import"
+    },
+    {
+      "source": "backend-services-audio_repair.py",
+      "target": "algo-v1.0",
+      "label": "算法版本",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-services-audio_repair.py",
+      "target": "algo-v1.1",
+      "label": "算法版本",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-services-audio_repair.py",
+      "target": "algo-v1.2",
+      "label": "算法版本",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-services-audio_repair.py",
+      "target": "algo-v2.0",
+      "label": "算法版本",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-services-audio_repair.py",
+      "target": "algo-v2.1",
+      "label": "算法版本",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-services-audio_repair.py",
+      "target": "algo-v2.2",
+      "label": "算法版本",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-services-audio_repair.py",
+      "target": "algo-v2.2a",
+      "label": "算法版本",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-services-audio_repair.py",
+      "target": "algo-v2.3",
+      "label": "算法版本",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-services-audio_repair.py",
+      "target": "algo-v2.3a",
+      "label": "算法版本",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-services-audio_repair.py",
+      "target": "algo-v2.4",
+      "label": "算法版本",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-services-audio_repair.py",
+      "target": "algo-v2.4a",
+      "label": "算法版本",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-services-audio_repair.py",
+      "target": "algo-v3.0",
+      "label": "算法版本",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-services-audio_repair.py",
+      "target": "algo-v3.0a",
+      "label": "算法版本",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-services-audio_repair.py",
+      "target": "algo-v3.1",
+      "label": "算法版本",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-services-audio_repair.py",
+      "target": "algo-v3.1a",
+      "label": "算法版本",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-services-audio_repair.py",
+      "target": "repair-module-__pycache__",
+      "label": "动态加载",
+      "type": "call"
+    },
+    {
+      "source": "backend-services-audio_repair.py",
+      "target": "repair-module-repair_v2_0",
+      "label": "动态加载",
+      "type": "call"
+    },
+    {
+      "source": "repair-module-repair_v2_0",
+      "target": "repair-module-repair_v2_0-declip",
+      "label": "子模块",
+      "type": "import"
+    },
+    {
+      "source": "repair-module-repair_v2_0",
+      "target": "repair-module-repair_v2_0-depop",
+      "label": "子模块",
+      "type": "import"
+    },
+    {
+      "source": "repair-module-repair_v2_0",
+      "target": "repair-module-repair_v2_0-dynamics",
+      "label": "子模块",
+      "type": "import"
+    },
+    {
+      "source": "repair-module-repair_v2_0",
+      "target": "repair-module-repair_v2_0-filters",
+      "label": "子模块",
+      "type": "import"
+    },
+    {
+      "source": "repair-module-repair_v2_0",
+      "target": "repair-module-repair_v2_0-postprocess",
+      "label": "子模块",
+      "type": "import"
+    },
+    {
+      "source": "repair-module-repair_v2_0",
+      "target": "repair-module-repair_v2_0-spatial",
+      "label": "子模块",
+      "type": "import"
+    },
+    {
+      "source": "repair-module-repair_v2_0",
+      "target": "repair-module-repair_v2_0-spectral_group_a",
+      "label": "子模块",
+      "type": "import"
+    },
+    {
+      "source": "repair-module-repair_v2_0",
+      "target": "repair-module-repair_v2_0-spectral_group_b",
+      "label": "子模块",
+      "type": "import"
+    },
+    {
+      "source": "repair-module-repair_v2_0",
+      "target": "repair-module-repair_v2_0-transient",
+      "label": "子模块",
+      "type": "import"
+    },
+    {
+      "source": "backend-services-audio_repair.py",
+      "target": "repair-module-repair_v2_1",
+      "label": "动态加载",
+      "type": "call"
+    },
+    {
+      "source": "repair-module-repair_v2_1",
+      "target": "repair-module-repair_v2_1-declip",
+      "label": "子模块",
+      "type": "import"
+    },
+    {
+      "source": "repair-module-repair_v2_1",
+      "target": "repair-module-repair_v2_1-depop",
+      "label": "子模块",
+      "type": "import"
+    },
+    {
+      "source": "repair-module-repair_v2_1",
+      "target": "repair-module-repair_v2_1-dynamics",
+      "label": "子模块",
+      "type": "import"
+    },
+    {
+      "source": "repair-module-repair_v2_1",
+      "target": "repair-module-repair_v2_1-filters",
+      "label": "子模块",
+      "type": "import"
+    },
+    {
+      "source": "repair-module-repair_v2_1",
+      "target": "repair-module-repair_v2_1-postprocess",
+      "label": "子模块",
+      "type": "import"
+    },
+    {
+      "source": "repair-module-repair_v2_1",
+      "target": "repair-module-repair_v2_1-spatial",
+      "label": "子模块",
+      "type": "import"
+    },
+    {
+      "source": "repair-module-repair_v2_1",
+      "target": "repair-module-repair_v2_1-spectral_group_a",
+      "label": "子模块",
+      "type": "import"
+    },
+    {
+      "source": "repair-module-repair_v2_1",
+      "target": "repair-module-repair_v2_1-spectral_group_b",
+      "label": "子模块",
+      "type": "import"
+    },
+    {
+      "source": "repair-module-repair_v2_1",
+      "target": "repair-module-repair_v2_1-transient",
+      "label": "子模块",
+      "type": "import"
+    },
+    {
+      "source": "backend-services-audio_repair.py",
+      "target": "repair-module-repair_v2_2",
+      "label": "动态加载",
+      "type": "call"
+    },
+    {
+      "source": "repair-module-repair_v2_2",
+      "target": "repair-module-repair_v2_2-declip",
+      "label": "子模块",
+      "type": "import"
+    },
+    {
+      "source": "repair-module-repair_v2_2",
+      "target": "repair-module-repair_v2_2-depop",
+      "label": "子模块",
+      "type": "import"
+    },
+    {
+      "source": "repair-module-repair_v2_2",
+      "target": "repair-module-repair_v2_2-dynamics",
+      "label": "子模块",
+      "type": "import"
+    },
+    {
+      "source": "repair-module-repair_v2_2",
+      "target": "repair-module-repair_v2_2-filters",
+      "label": "子模块",
+      "type": "import"
+    },
+    {
+      "source": "repair-module-repair_v2_2",
+      "target": "repair-module-repair_v2_2-music_type_detector",
+      "label": "子模块",
+      "type": "import"
+    },
+    {
+      "source": "repair-module-repair_v2_2",
+      "target": "repair-module-repair_v2_2-postprocess",
+      "label": "子模块",
+      "type": "import"
+    },
+    {
+      "source": "repair-module-repair_v2_2",
+      "target": "repair-module-repair_v2_2-spatial",
+      "label": "子模块",
+      "type": "import"
+    },
+    {
+      "source": "repair-module-repair_v2_2",
+      "target": "repair-module-repair_v2_2-spectral_group_a",
+      "label": "子模块",
+      "type": "import"
+    },
+    {
+      "source": "repair-module-repair_v2_2",
+      "target": "repair-module-repair_v2_2-spectral_group_b",
+      "label": "子模块",
+      "type": "import"
+    },
+    {
+      "source": "repair-module-repair_v2_2",
+      "target": "repair-module-repair_v2_2-subband_processing",
+      "label": "子模块",
+      "type": "import"
+    },
+    {
+      "source": "repair-module-repair_v2_2",
+      "target": "repair-module-repair_v2_2-transient",
+      "label": "子模块",
+      "type": "import"
+    },
+    {
+      "source": "repair-module-repair_v2_2",
+      "target": "repair-module-repair_v2_2-type_params",
+      "label": "子模块",
+      "type": "import"
+    },
+    {
+      "source": "backend-services-audio_repair.py",
+      "target": "repair-module-repair_v2_2a",
+      "label": "动态加载",
+      "type": "call"
+    },
+    {
+      "source": "backend-services-audio_repair.py",
+      "target": "repair-module-repair_v2_3",
+      "label": "动态加载",
+      "type": "call"
+    },
+    {
+      "source": "backend-services-audio_repair.py",
+      "target": "repair-module-repair_v2_3a",
+      "label": "动态加载",
+      "type": "call"
+    },
+    {
+      "source": "backend-services-audio_repair.py",
+      "target": "repair-module-repair_v2_4",
+      "label": "动态加载",
+      "type": "call"
+    },
+    {
+      "source": "repair-module-repair_v2_4",
+      "target": "repair-module-repair_v2_4-bit_depth_enhance",
+      "label": "子模块",
+      "type": "import"
+    },
+    {
+      "source": "repair-module-repair_v2_4",
+      "target": "repair-module-repair_v2_4-detail_enhance",
+      "label": "子模块",
+      "type": "import"
+    },
+    {
+      "source": "repair-module-repair_v2_4",
+      "target": "repair-module-repair_v2_4-hifi_ai_repair",
+      "label": "子模块",
+      "type": "import"
+    },
+    {
+      "source": "repair-module-repair_v2_4",
+      "target": "repair-module-repair_v2_4-hifi_multiband",
+      "label": "子模块",
+      "type": "import"
+    },
+    {
+      "source": "repair-module-repair_v2_4",
+      "target": "repair-module-repair_v2_4-spectral_superres",
+      "label": "子模块",
+      "type": "import"
+    },
+    {
+      "source": "repair-module-repair_v2_4",
+      "target": "repair-module-repair_v2_4-tempo_analyzer",
+      "label": "子模块",
+      "type": "import"
+    },
+    {
+      "source": "backend-services-audio_repair.py",
+      "target": "repair-module-repair_v2_4a",
+      "label": "动态加载",
+      "type": "call"
+    },
+    {
+      "source": "backend-services-audio_repair.py",
+      "target": "repair-module-repair_v3_0",
+      "label": "动态加载",
+      "type": "call"
+    },
+    {
+      "source": "backend-services-audio_repair.py",
+      "target": "repair-module-repair_v3_0a",
+      "label": "动态加载",
+      "type": "call"
+    },
+    {
+      "source": "backend-services-audio_repair.py",
+      "target": "repair-module-repair_v3_1",
+      "label": "动态加载",
+      "type": "call"
+    },
+    {
+      "source": "backend-services-audio_repair.py",
+      "target": "repair-module-repair_v3_1a",
+      "label": "动态加载",
+      "type": "call"
+    },
+    {
+      "source": "dataflow-upload",
+      "target": "dataflow-detect",
+      "label": "检测",
+      "type": "data-flow"
+    },
+    {
+      "source": "dataflow-detect",
+      "target": "dataflow-repair",
+      "label": "修复",
+      "type": "data-flow"
+    },
+    {
+      "source": "dataflow-repair",
+      "target": "dataflow-render",
+      "label": "渲染",
+      "type": "data-flow"
+    },
+    {
+      "source": "dataflow-render",
+      "target": "dataflow-download",
+      "label": "下载",
+      "type": "data-flow"
+    },
+    {
+      "source": "dataflow-ws",
+      "target": "dataflow-detect",
+      "label": "进度推送",
+      "type": "data-flow"
+    },
+    {
+      "source": "dataflow-ws",
+      "target": "dataflow-repair",
+      "label": "进度推送",
+      "type": "data-flow"
+    },
+    {
+      "source": "dataflow-ws",
+      "target": "dataflow-render",
+      "label": "进度推送",
+      "type": "data-flow"
+    },
+    {
+      "source": "dataflow-upload-dual",
+      "target": "dataflow-repair-dual",
+      "label": "双轨修复",
+      "type": "data-flow"
+    },
+    {
+      "source": "dataflow-repair-dual",
+      "target": "dataflow-render",
+      "label": "渲染交付",
+      "type": "data-flow"
+    }
+  ]
+}

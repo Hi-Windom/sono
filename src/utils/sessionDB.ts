@@ -14,8 +14,8 @@ interface SessionData {
   hasBeenProcessed: boolean;
   wavInfo: string;
   repairResult: string;
-  originalDetectTime: string;
-  repairedDetectTime: string;
+  originalDetectTime?: string;
+  repairedDetectTime?: string;
   processingOptions: string;
 }
 

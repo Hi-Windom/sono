@@ -64,17 +64,18 @@ def _vocal_formant_repair_1d(data, sr, amount):
     sibilance_smooth = np.convolve(sibilance_gain, np.ones(3)/3, mode='same')
     pop_smooth = np.convolve(pop_gain, np.ones(5)/5, mode='same')
 
-    result = data.astype(np.float64)
+    gain_per_frame = np.ones(n_frames)
     for i in range(n_frames):
-        start = i * hop
-        end = start + frame_len
-        if end > len(result):
-            break
         s_gain = sibilance_smooth[i] if i < len(sibilance_smooth) else 1.0
         p_gain = pop_smooth[i] if i < len(pop_smooth) else 1.0
-        combined_gain = (s_gain + p_gain) / 2
-        result[start:end] *= combined_gain
+        gain_per_frame[i] = (s_gain + p_gain) / 2
 
+    sample_positions = np.arange(len(data))
+    frame_centers = np.arange(n_frames) * hop + frame_len // 2
+    frame_centers = np.clip(frame_centers, 0, len(data) - 1)
+    gain_per_sample = np.interp(sample_positions, frame_centers, gain_per_frame)
+
+    result = data.astype(np.float64) * gain_per_sample
     return result.astype(data.dtype)
 
 
@@ -244,6 +245,86 @@ def _soft_peak_limit(y, threshold=0.9):
     return y
 
 
+def _harmonic_bass_enhance(y, sr, amount, music_type):
+    if amount <= 0:
+        return y
+    if y.ndim == 1:
+        y_2d = y.reshape(1, -1)
+        _harmonic_bass_enhance(y_2d, sr, amount, music_type)
+        return y
+    nyq = sr / 2
+    low_cut = min(250, nyq * 0.9)
+    sos_low = butter(4, low_cut / nyq, btype='low', output='sos')
+    body_low = min(500, nyq * 0.9)
+    body_high = min(200, nyq * 0.9)
+    if body_low > body_high:
+        sos_body = butter(4, [body_high / nyq, body_low / nyq], btype='band', output='sos')
+    else:
+        sos_body = None
+    for ch in range(y.shape[0]):
+        low_band = sosfiltfilt(sos_low, y[ch])
+        half_len = len(low_band) // 2
+        averaged = (low_band[0::2][:half_len] + low_band[1::2][:half_len]) * 0.5
+        x_short = np.linspace(0, 1, len(averaged))
+        x_long = np.linspace(0, 1, len(low_band))
+        sub_harmonic = np.interp(x_long, x_short, averaged)
+        sub_harmonic = sosfiltfilt(sos_low, sub_harmonic)
+        excited = np.tanh(low_band * 1.5) * np.max(np.abs(low_band)) / (np.max(np.abs(np.tanh(low_band * 1.5))) + 1e-10)
+        body = np.zeros_like(y[ch])
+        if sos_body is not None:
+            body = sosfiltfilt(sos_body, y[ch])
+        y[ch] += sub_harmonic * amount * 0.15 + excited * amount * 0.1 + body * (10 ** (1.5 / 20) - 1) * amount
+        del low_band, sub_harmonic, excited, body
+    return y
+
+
+def _air_texture_reconstruct(y, sr, amount, music_type):
+    if amount <= 0:
+        return y
+    if y.ndim == 1:
+        y_2d = y.reshape(1, -1)
+        _air_texture_reconstruct(y_2d, sr, amount, music_type)
+        return y
+    for ch in range(y.shape[0]):
+        n_samples = y.shape[1]
+        if n_samples < N_FFT:
+            continue
+        S = stft(y[ch], n_fft=N_FFT, hop_length=HOP_LENGTH)
+        freqs = np.arange(S.shape[0]) * sr / N_FFT
+        mid_mask = (freqs >= 2000) & (freqs < 8000)
+        high_mask = (freqs >= 8000) & (freqs < 16000)
+        air_mask = freqs >= 10000
+
+        mid_energy = np.mean(np.abs(S[mid_mask, :]) ** 2, axis=0) if np.any(mid_mask) else np.ones(S.shape[1])
+        mid_envelope = np.sqrt(mid_energy + 1e-10)
+        mid_envelope_norm = mid_envelope / (np.max(mid_envelope) + 1e-10)
+
+        snr_estimate = np.mean(mid_envelope) / (np.median(np.abs(S[:int(2000 / sr * N_FFT), :])) + 1e-10)
+        mapping_scale = min(1.0, max(0.0, snr_estimate * 0.5))
+
+        reconstructed = np.zeros_like(S)
+        if np.any(mid_mask) and np.any(high_mask):
+            harmonic_ratio = 0.6 * mapping_scale
+            for j in range(S.shape[1]):
+                high_indices = np.where(high_mask)[0]
+                mid_indices = np.where(mid_mask)[0]
+                n_map = min(len(high_indices), len(mid_indices))
+                if n_map > 0:
+                    for k in range(n_map):
+                        hi = high_indices[k]
+                        mi = mid_indices[k]
+                        reconstructed[hi, j] = np.abs(S[mi, j]) * harmonic_ratio * mid_envelope_norm[j] * np.exp(1j * np.angle(S[hi, j]))
+        if np.any(air_mask):
+            air_indices = np.where(air_mask)[0]
+            noise = np.random.randn(len(air_indices), S.shape[1]) * 0.001 * amount * mapping_scale
+            noise *= mid_envelope_norm[np.newaxis, :]
+            reconstructed[air_indices, :] += noise * np.exp(1j * np.angle(S[air_indices, :]))
+        y_recon = istft(reconstructed, hop_length=HOP_LENGTH, length=n_samples)
+        y[ch] += y_recon * amount * 0.2 * mapping_scale
+        del S, reconstructed, y_recon
+    return y
+
+
 def _adaptive_loudness_normalize(y, sr, target_loudness_lu=-14.0):
     if y.ndim == 1:
         y = y.reshape(1, -1)
@@ -290,14 +371,12 @@ def process_vocal_track(y, sr, params):
             pass
 
     if params.get("bass_enhance", 0) > 0:
-        from services.repair.repair_v2_4.core import _harmonic_bass_enhance
         try:
             y = _harmonic_bass_enhance(y, sr, params["bass_enhance"], "vocal")
         except Exception:
             pass
 
     if params.get("air_texture", 0) > 0:
-        from services.repair.repair_v2_4.core import _air_texture_reconstruct
         try:
             y = _air_texture_reconstruct(y, sr, params["air_texture"], "vocal")
         except Exception:
@@ -333,6 +412,23 @@ def _apply_vocal_de_ess(y, sr, amount):
     gain = max(gain, 0.1)
 
     y = (low_band + high_band * gain).astype(y.dtype)
+    return y
+
+
+def _mastering_standard(y, sr):
+    nyq = sr / 2
+
+    sos_hp = butter(4, 20 / nyq, btype='high', output='sos')
+    y = sosfiltfilt(sos_hp, y, axis=-1)
+
+    sos_presence = butter(4, [3000 / nyq, min(4000, nyq * 0.95) / nyq], btype='band', output='sos')
+    presence_band = sosfiltfilt(sos_presence, y, axis=-1)
+    y = y.astype(np.float64) + presence_band * 0.06
+
+    peak = np.max(np.abs(y))
+    if peak > 0.99:
+        y *= 0.99 / peak
+
     return y
 
 
@@ -405,7 +501,169 @@ def mix_tracks(vocal, accompaniment, vocal_ratio=1.0, accompaniment_ratio=1.0):
     return mixed
 
 
+def _repair_single_track(input_path: str, output_path: str, params: dict, progress_callback=None) -> dict:
+    if progress_callback:
+        progress_callback(0.05, "v3.0 加载音频...")
+
+    y, sr = load_audio_with_fallback(input_path, sr=None, mono=False)
+    if y.ndim == 1:
+        y = y.reshape(1, -1)
+
+    original_sr = sr
+    original_duration = round(y.shape[1] / sr, 2)
+    issues_found = ["单轨处理"]
+
+    working_sr = DESKTOP_WORKING_SR
+
+    from services.memory_guard import check_memory_before_repair, should_use_float32
+    working_sr = check_memory_before_repair(
+        n_samples=y.shape[1],
+        n_channels=y.shape[0],
+        sr=sr,
+        working_sr=working_sr,
+        algorithm_version="v3.0",
+    )
+
+    if should_use_float32(y.shape[1], y.shape[0]):
+        y = y.astype(np.float32)
+
+    if sr != working_sr:
+        target_len = int(y.shape[1] * working_sr / sr)
+        new_y = np.zeros((y.shape[0], target_len), dtype=y.dtype)
+        for ch in range(y.shape[0]):
+            resampled = resample_poly(y[ch], working_sr, sr)
+            copy_len = min(target_len, len(resampled))
+            new_y[ch, :copy_len] = resampled[:copy_len]
+        y = new_y
+        sr = working_sr
+
+    gc.collect()
+
+    single_params = dict(params)
+    _SINGLE_KEY_MAP = {
+        "de_clipping": "declip", "de_pop": "depop", "de_essing": "de_ess",
+        "dynamic_range": "dynamic", "spatial_enhance": "spatial",
+        "loudness_optimize": "loudness",
+    }
+    for _sk, _dk in _SINGLE_KEY_MAP.items():
+        if _sk in single_params and _dk not in single_params:
+            single_params[_dk] = single_params[_sk]
+    single_params["_issues"] = issues_found
+
+    if progress_callback:
+        progress_callback(0.10, "v3.0 处理音频...")
+
+    if single_params.get("declip", 0) > 0:
+        y = _tanh_declip(y, single_params["declip"])
+
+    if single_params.get("depop", 0) > 0:
+        y = _diff_clamp_depop(y, sr, single_params["depop"])
+
+    if single_params.get("formant_repair", 0) > 0:
+        y = _vocal_formant_repair(y, sr, single_params["formant_repair"])
+
+    if single_params.get("de_ess", 0) > 0:
+        y = _apply_vocal_de_ess(y, sr, single_params["de_ess"])
+
+    if single_params.get("noise_reduction", 0) > 0:
+        from services.repair.repair_v2_2.spectral_group_a import apply_spectral_group_a
+        try:
+            y = apply_spectral_group_a(y, sr, single_params, N_FFT, HOP_LENGTH, issues_found, "generic")
+        except Exception:
+            pass
+
+    if single_params.get("ai_repair", 0) > 0:
+        from services.repair.repair_v2_4.hifi_ai_repair import apply_hifi_ai_repair
+        from services.repair.repair_v2_2.music_type_detector import detect_music_type
+        try:
+            music_type, _, _ = detect_music_type(y, sr)
+            y = apply_hifi_ai_repair(y, sr, single_params["ai_repair"], {})
+            if "AI频谱修复" not in issues_found:
+                issues_found.append("AI频谱修复")
+        except Exception:
+            pass
+
+    if single_params.get("breath_enhance", 0) > 0:
+        y = _vocal_breath_enhance(y, sr, single_params["breath_enhance"])
+
+    if single_params.get("bass_enhance", 0) > 0:
+        try:
+            y = _harmonic_bass_enhance(y, sr, single_params["bass_enhance"], "generic")
+        except Exception:
+            pass
+
+    if single_params.get("air_texture", 0) > 0:
+        try:
+            y = _air_texture_reconstruct(y, sr, single_params["air_texture"], "generic")
+        except Exception:
+            pass
+
+    if single_params.get("dynamic", 0) > 0:
+        from services.repair.repair_v2_2.dynamics import apply_softness_v5
+        try:
+            y = apply_softness_v5(y, sr, single_params["dynamic"])
+        except Exception:
+            pass
+
+    if single_params.get("spatial", 0) > 0:
+        from services.repair.repair_v2_2.spatial import apply_spatial_enhance_v6
+        try:
+            y = apply_spatial_enhance_v6(y, sr, single_params["spatial"], "generic")
+        except Exception:
+            pass
+
+    if single_params.get("warmth", 0) > 0:
+        from services.repair.repair_v2_2.filters import apply_warmth_v2
+        try:
+            y = apply_warmth_v2(y, sr, single_params["warmth"], "generic")
+        except Exception:
+            pass
+
+    if single_params.get("loudness", 0) > 0:
+        y = _adaptive_loudness_normalize(y, sr, -14.0)
+
+    if progress_callback:
+        progress_callback(0.80, "v3.0 母带处理...")
+
+    y = _soft_peak_limit(y, threshold=0.95)
+    y = _mastering_standard(y, working_sr)
+    y = _soft_peak_limit(y, threshold=0.9)
+
+    if progress_callback:
+        progress_callback(0.90, "v3.0 导出...")
+
+    bit_depth = single_params.get("bit_depth", 24)
+    subtype_map = {16: "PCM_16", 24: "PCM_24", 32: "PCM_32"}
+    subtype = subtype_map.get(bit_depth, "PCM_24")
+
+    if y.dtype == np.float32:
+        y = y.astype(np.float64)
+
+    sf.write(output_path, y.T if y.ndim > 1 else y, working_sr, subtype=subtype)
+
+    channels = y.shape[0] if y.ndim > 1 else 1
+
+    if progress_callback:
+        progress_callback(1.0, "v3.0 修复完成")
+
+    return {
+        "issues_found": issues_found,
+        "original_sample_rate": original_sr,
+        "output_sample_rate": working_sr,
+        "output_bit_depth": bit_depth,
+        "duration": original_duration,
+        "channels": channels,
+        "algorithm_version": "v3.0",
+        "processing_mode": "single",
+    }
+
+
 def repair_audio(input_path: str, output_path: str, params: dict, progress_callback=None) -> dict:
+    processing_mode = params.get("processing_mode", "single")
+
+    if processing_mode == "single":
+        return _repair_single_track(input_path, output_path, params, progress_callback)
+
     vocal_path = params.get("vocal_path", input_path)
     accompaniment_path = params.get("accompaniment_path", input_path)
 
@@ -524,6 +782,8 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
         if progress_callback:
             progress_callback(0.90, "v3.0 导出...")
 
+        mixed = _soft_peak_limit(mixed, threshold=0.95)
+        mixed = _mastering_standard(mixed, working_sr)
         mixed = _soft_peak_limit(mixed, threshold=0.9)
 
         if mixed.dtype == np.float32:

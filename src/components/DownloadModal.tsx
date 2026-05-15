@@ -10,6 +10,7 @@ export interface DownloadFileInfo {
   duration: number;
   algorithmVersion?: string;
   completedAt?: string;
+  taskId?: string;
 }
 
 function formatSpeed(bytesPerSec: number): string {
@@ -25,6 +26,12 @@ function formatBytes(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
+export interface DualTrackDownloadUrls {
+  merged?: string;
+  vocal?: string;
+  accompaniment?: string;
+}
+
 interface DownloadModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -32,6 +39,11 @@ interface DownloadModalProps {
   backendDownloadUrl?: string | null;
   backendDownloadAction?: () => void;
   isBackendLoading?: boolean;
+  dualTrackUrls?: DualTrackDownloadUrls | null;
+  taskId?: string;
+  dualTrackTaskId?: string;
+  dualTrackVocalTaskId?: string;
+  dualTrackAccompanimentTaskId?: string;
 }
 
 export function DownloadModal({
@@ -41,6 +53,11 @@ export function DownloadModal({
   backendDownloadUrl,
   backendDownloadAction,
   isBackendLoading = false,
+  dualTrackUrls,
+  taskId,
+  dualTrackTaskId,
+  dualTrackVocalTaskId,
+  dualTrackAccompanimentTaskId,
 }: DownloadModalProps) {
   const [copySuccess, setCopySuccess] = useState(false);
   const [downloading, setDownloading] = useState(false);
@@ -48,6 +65,8 @@ export function DownloadModal({
   const [dlLoaded, setDlLoaded] = useState(0);
   const [dlTotal, setDlTotal] = useState(0);
   const [dlSpeed, setDlSpeed] = useState(0);
+  const [mp3Loading, setMp3Loading] = useState(false);
+  const [mp3Error, setMp3Error] = useState<string | null>(null);
   const [editingBackendName, setEditingBackendName] = useState(false);
   const [backendFilename, setBackendFilename] = useState('');
   const abortRef = useRef<AbortController | null>(null);
@@ -67,6 +86,8 @@ export function DownloadModal({
       setDlLoaded(0);
       setDlTotal(0);
       setDlSpeed(0);
+      setMp3Loading(false);
+      setMp3Error(null);
     }
   }, [isOpen]);
 
@@ -87,6 +108,44 @@ export function DownloadModal({
       document.body.removeChild(textArea);
       setCopySuccess(true);
       setTimeout(() => setCopySuccess(false), 2000);
+    }
+  }, []);
+
+  const handleDownloadMp3 = useCallback(async (taskId: string) => {
+    setMp3Loading(true);
+    setMp3Error(null);
+    try {
+      const res = await fetch(`/api/v1/download-mp3/${taskId}`);
+      if (!res.ok) {
+        if (res.status === 404) throw new Error('WAV音频文件不存在，请先完成修复');
+        if (res.status === 500) throw new Error('MP3编码失败，请检查服务器日志');
+        throw new Error(`服务器错误 (HTTP ${res.status})`);
+      }
+      const contentType = res.headers.get('content-type') || '';
+      if (!contentType.includes('audio/')) {
+        throw new Error(`服务器返回了非音频内容 (${contentType})，请重试`);
+      }
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = `${taskId}.mp3`;
+      a.style.display = 'none';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        URL.revokeObjectURL(blobUrl);
+        document.body.removeChild(a);
+      }, 5000);
+    } catch (e) {
+      if (e instanceof TypeError) {
+        setMp3Error('网络连接失败，请检查网络后重试');
+      } else {
+        const msg = e instanceof Error ? e.message : String(e);
+        setMp3Error(msg);
+      }
+    } finally {
+      setMp3Loading(false);
     }
   }, []);
 
@@ -188,6 +247,16 @@ export function DownloadModal({
     }
   }, []);
 
+  const dualTrackFilename = backendInfo?.filename
+    ? `【合并_】${backendInfo.filename}`
+    : '【合并_】audio.wav';
+  const vocalTrackFilename = backendInfo?.filename
+    ? backendInfo.filename.replace(/\.wav$/i, '') + '_人声.wav'
+    : '人声.wav';
+  const accompanimentTrackFilename = backendInfo?.filename
+    ? backendInfo.filename.replace(/\.wav$/i, '') + '_伴奏.wav'
+    : '伴奏.wav';
+
   if (!isOpen) return null;
 
   const showProgress = downloading && dlLoaded > 0;
@@ -222,7 +291,138 @@ export function DownloadModal({
         </div>
 
         <div className="space-y-3">
-          {backendInfo && (
+          {dualTrackUrls && backendInfo ? (
+            <>
+              <div className="bg-cyan-500/5 border border-cyan-500/20 rounded-lg p-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <div className="w-2 h-2 rounded-full bg-cyan-400" />
+                  <span className="text-cyan-400 font-medium text-sm">双轨导出 - 合并轨</span>
+                </div>
+                <div className="space-y-1.5 text-xs">
+                  <div className="flex justify-between">
+                    <span className="text-gray-400">文件名</span>
+                    <span className="text-white truncate max-w-[200px]" title={dualTrackFilename}>{dualTrackFilename}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-400">文件大小</span>
+                    <span className="text-white">{backendInfo?.fileSize || '—'}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-400">音频格式</span>
+                    <span className="text-cyan-400">{backendInfo?.sampleRate || '—'} / {backendInfo?.bitDepth || '—'} bit</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-400">声道</span>
+                    <span className="text-white">{backendInfo?.channels === 1 ? '单声道' : backendInfo?.channels === 2 ? '立体声' : (backendInfo?.channels ? `${backendInfo.channels} 声道` : '—')}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-400">时长</span>
+                    <span className="text-white">{backendInfo?.duration ? `${backendInfo.duration.toFixed(1)}s` : '—'}</span>
+                  </div>
+                  {backendInfo?.algorithmVersion && (
+                    <div className="flex justify-between">
+                      <span className="text-gray-400">算法版本</span>
+                      <span className="text-purple-400">{backendInfo.algorithmVersion}</span>
+                    </div>
+                  )}
+                  {backendInfo?.completedAt && (
+                    <div className="flex justify-between">
+                      <span className="text-gray-400">完成时间</span>
+                      <span className="text-gray-300">{backendInfo.completedAt}</span>
+                    </div>
+                  )}
+                </div>
+                <div className="mt-3 flex gap-2">
+                  <button
+                    onClick={() => handleDownload(dualTrackUrls.merged || backendDownloadUrl!, dualTrackFilename)}
+                    disabled={(!dualTrackUrls.merged && !backendDownloadUrl) || downloading || isBackendLoading}
+                    className="flex-1 py-2 bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/30 rounded-lg text-cyan-400 text-xs font-medium transition disabled:opacity-50"
+                  >
+                    {downloading ? `下载中 ${Math.round(dlProgress * 100)}%` : '⬇ 下载 WAV'}
+                  </button>
+                  <button
+                    onClick={() => handleDownloadMp3(dualTrackTaskId!)}
+                    disabled={(!dualTrackUrls.merged && !backendDownloadUrl) || mp3Loading || downloading || isBackendLoading}
+                    className="flex-1 py-2 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 rounded-lg text-emerald-400 text-xs font-medium transition disabled:opacity-50"
+                  >
+                    {mp3Loading ? '编码中...' : '⬇ 下载 MP3 (128k)'}
+                  </button>
+                  <button
+                    onClick={() => handleCopyLink(dualTrackUrls.merged || backendDownloadUrl!)}
+                    disabled={!dualTrackUrls.merged && !backendDownloadUrl}
+                    className="px-3 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-gray-400 text-xs transition disabled:opacity-50"
+                  >
+                    {copySuccess ? '✓ 已复制' : '📋 复制链接'}
+                  </button>
+                </div>
+              </div>
+              {dualTrackUrls.vocal && (
+                <div className="bg-purple-500/5 border border-purple-500/20 rounded-lg p-4">
+                  <div className="flex items-center gap-2 mb-3">
+                    <div className="w-2 h-2 rounded-full bg-purple-400" />
+                    <span className="text-purple-400 font-medium text-sm">人声轨</span>
+                  </div>
+                  <div className="mt-3 flex gap-2">
+                    <button
+                      onClick={() => handleDownload(dualTrackUrls.vocal!, vocalTrackFilename)}
+                      disabled={downloading || isBackendLoading}
+                      className="flex-1 py-2 bg-purple-500/20 hover:bg-purple-500/30 border border-purple-500/30 rounded-lg text-purple-400 text-xs font-medium transition disabled:opacity-50"
+                    >
+                      {downloading ? `下载中 ${Math.round(dlProgress * 100)}%` : '⬇ 下载 WAV'}
+                    </button>
+                    <button
+                      onClick={() => handleDownloadMp3(dualTrackVocalTaskId!)}
+                      disabled={mp3Loading || downloading || isBackendLoading}
+                      className="flex-1 py-2 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 rounded-lg text-emerald-400 text-xs font-medium transition disabled:opacity-50"
+                    >
+                      {mp3Loading ? '编码中...' : '⬇ 下载 MP3 (128k)'}
+                    </button>
+                    <button
+                      onClick={() => handleCopyLink(dualTrackUrls.vocal!)}
+                      className="px-3 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-gray-400 text-xs transition"
+                    >
+                      {copySuccess ? '✓ 已复制' : '📋 复制链接'}
+                    </button>
+                  </div>
+                </div>
+              )}
+              {dualTrackUrls.accompaniment && (
+                <div className="bg-amber-500/5 border border-amber-500/20 rounded-lg p-4">
+                  <div className="flex items-center gap-2 mb-3">
+                    <div className="w-2 h-2 rounded-full bg-amber-400" />
+                    <span className="text-amber-400 font-medium text-sm">伴奏轨</span>
+                  </div>
+                  <div className="mt-3 flex gap-2">
+                    <button
+                      onClick={() => handleDownload(dualTrackUrls.accompaniment!, accompanimentTrackFilename)}
+                      disabled={downloading || isBackendLoading}
+                      className="flex-1 py-2 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/30 rounded-lg text-amber-400 text-xs font-medium transition disabled:opacity-50"
+                    >
+                      {downloading ? `下载中 ${Math.round(dlProgress * 100)}%` : '⬇ 下载 WAV'}
+                    </button>
+                    <button
+                      onClick={() => handleDownloadMp3(dualTrackAccompanimentTaskId!)}
+                      disabled={mp3Loading || downloading || isBackendLoading}
+                      className="flex-1 py-2 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 rounded-lg text-emerald-400 text-xs font-medium transition disabled:opacity-50"
+                    >
+                      {mp3Loading ? '编码中...' : '⬇ 下载 MP3 (128k)'}
+                    </button>
+                    <button
+                      onClick={() => handleCopyLink(dualTrackUrls.accompaniment!)}
+                      className="px-3 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-gray-400 text-xs transition"
+                    >
+                      {copySuccess ? '✓ 已复制' : '📋 复制链接'}
+                    </button>
+                  </div>
+                </div>
+              )}
+              {mp3Error && (
+                <div className="mt-2 text-red-400 text-[10px] text-center">
+                  MP3 转换失败: {mp3Error}
+                </div>
+              )}
+            </>
+          ) : backendInfo ? (
             <div className="bg-cyan-500/5 border border-cyan-500/20 rounded-lg p-4">
               <div className="flex items-center gap-2 mb-3">
                 <div className="w-2 h-2 rounded-full bg-cyan-400" />
@@ -315,7 +515,14 @@ export function DownloadModal({
                     disabled={downloading || isBackendLoading}
                     className="flex-1 py-2 bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/30 rounded-lg text-cyan-400 text-xs font-medium transition disabled:opacity-50"
                   >
-                    {downloading ? `下载中 ${Math.round(dlProgress * 100)}%` : '⬇ 下载'}
+                    {downloading ? `下载中 ${Math.round(dlProgress * 100)}%` : '⬇ 下载 WAV'}
+                  </button>
+                  <button
+                    onClick={() => handleDownloadMp3(taskId!)}
+                    disabled={mp3Loading || downloading || isBackendLoading}
+                    className="flex-1 py-2 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 rounded-lg text-emerald-400 text-xs font-medium transition disabled:opacity-50"
+                  >
+                    {mp3Loading ? '编码中...' : '⬇ 下载 MP3 (128k)'}
                   </button>
                   <button
                     onClick={() => handleCopyLink(backendDownloadUrl)}
@@ -323,6 +530,11 @@ export function DownloadModal({
                   >
                     {copySuccess ? '✓ 已复制' : '📋 复制链接'}
                   </button>
+                </div>
+              )}
+              {mp3Error && (
+                <div className="mt-2 text-red-400 text-[10px] text-center">
+                  MP3 转换失败: {mp3Error}
                 </div>
               )}
               {!backendDownloadUrl && backendDownloadAction && (
@@ -337,9 +549,7 @@ export function DownloadModal({
                 </div>
               )}
             </div>
-          )}
-
-          {!backendInfo && (
+          ) : (
             <div className="text-center py-8 text-gray-500 text-sm">
               暂无可导出的音频
             </div>

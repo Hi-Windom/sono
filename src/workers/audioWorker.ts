@@ -315,7 +315,7 @@ self.onmessage = (e: MessageEvent<WorkerRequest>) => {
       }
     }
     const response: WorkerResponse = { type: 'decode-wav', id: msg.id, result };
-    self.postMessage(response, transfer);
+    (self as any).postMessage(response, transfer);
   } else if (msg.type === 'analyze-audio') {
     const result = detectAudioIssues(msg.channelData[0], msg.sampleRate, msg.channels, msg.channelData);
     const response: WorkerResponse = { type: 'analyze-audio', id: msg.id, result };
@@ -331,6 +331,6 @@ self.onmessage = (e: MessageEvent<WorkerRequest>) => {
       }
     }
     const response: WorkerResponse = { type: 'decode-and-analyze', id: msg.id, decode, analysis };
-    self.postMessage(response, transfer);
+    (self as any).postMessage(response, transfer);
   }
 };

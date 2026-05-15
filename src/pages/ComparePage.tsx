@@ -4,6 +4,8 @@ import { Header } from '../components/Header';
 import { SpectrumVisualizer } from '../components/SpectrumVisualizer';
 import { WaveformVisualizer } from '../components/WaveformVisualizer';
 import { ErrorBoundary } from '../components/ErrorBoundary';
+import { connectCacheWS } from '../services/backendApi';
+import type { CacheUpdateEvent } from '../services/backendApi';
 
 type CompareMode = 'original' | 'repaired';
 type DualTrackMode = 'vocal' | 'accompaniment' | 'merged';
@@ -115,22 +117,36 @@ export default function ComparePage() {
 
   const activeBuffer = compareMode === 'original' ? originalBuffer : repairedBuffer;
 
-  useEffect(() => {
-    if (taskId) return;
-    let cancelled = false;
+  const fetchTaskList = useCallback(async () => {
     setTasksLoading(true);
-    fetch(`${API_BASE}/cache/info`)
-      .then(res => res.ok ? res.json() : Promise.reject(new Error('获取缓存信息失败')))
-      .then(data => {
-        if (!cancelled) {
-          const completed = (data.tasks || []).filter((t: CacheTask) => t.output_exists);
-          setTasks(completed);
-        }
-      })
-      .catch(() => {})
-      .finally(() => { if (!cancelled) setTasksLoading(false); });
-    return () => { cancelled = true };
-  }, [taskId]);
+    try {
+      const res = await fetch(`${API_BASE}/cache/info`);
+      if (res.ok) {
+        const data = await res.json();
+        setTasks(data.tasks || []);
+      }
+    } catch {
+      // ignore
+    } finally {
+      setTasksLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchTaskList();
+  }, [fetchTaskList]);
+
+  const wsControlRef = useRef<{ close: () => void } | null>(null);
+  const taskIdRef = useRef(taskId);
+  taskIdRef.current = taskId;
+  useEffect(() => {
+    if (wsControlRef.current) return;
+    wsControlRef.current = connectCacheWS(() => {
+      if (!taskIdRef.current) {
+        fetchTaskList();
+      }
+    });
+  }, []);
 
   const dualTrackSubIds = useMemo<{ vocalTaskId: string | null; accompanimentTaskId: string | null }>(() => {
     if (!taskInfo) return { vocalTaskId: null, accompanimentTaskId: null };
@@ -585,8 +601,8 @@ export default function ComparePage() {
         tasks.map(task => (
           <button
             key={task.id}
-            onClick={() => selectTask(task.id)}
-            className="w-full flex items-center gap-4 p-4 bg-white/5 border border-white/10 rounded-xl text-left"
+            onClick={() => task.output_exists ? selectTask(task.id) : undefined}
+            className={`w-full flex items-center gap-4 p-4 bg-white/5 border rounded-xl text-left ${task.output_exists ? 'border-white/10 cursor-pointer hover:bg-white/[0.07]' : 'border-white/5 cursor-not-allowed opacity-50'}`}
           >
             <div className="w-10 h-10 bg-gradient-to-br from-cyan-500/20 to-purple-500/20 rounded-lg flex items-center justify-center border border-cyan-400/20 shrink-0">
               <svg className="w-5 h-5 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -598,7 +614,11 @@ export default function ComparePage() {
               <p className="text-gray-500 text-xs mt-0.5">
                 {task.created_at ? new Date(task.created_at).toLocaleString('zh-CN') : ''}
                 {' \u2022 '}
-                <span className="text-green-400">已修复</span>
+                {task.output_exists ? (
+                  <span className="text-green-400">已修复</span>
+                ) : (
+                  <span className="text-yellow-500">文件已过期</span>
+                )}
               </p>
             </div>
             <svg className="w-4 h-4 text-gray-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -976,15 +996,6 @@ export default function ComparePage() {
 
         <div className="container mx-auto px-4 max-w-5xl mt-4">
           <div className="flex items-center gap-3 mb-6">
-            <button
-              onClick={() => navigate('/')}
-              className="flex items-center gap-2 text-gray-400"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-              </svg>
-              <span>返回首页</span>
-            </button>
             {taskId && (
               <button
                 onClick={() => setSearchParams({})}

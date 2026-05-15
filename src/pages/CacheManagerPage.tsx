@@ -1,7 +1,9 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Header } from '../components/Header';
 import { loadSettings } from '../utils/settingsStorage';
+import { fetchDeliveryFiles, deleteDeliveryFile, deleteDeliveryParent, connectCacheWS } from '../services/backendApi';
+import type { DeliveryFile, CacheUpdateEvent } from '../services/backendApi';
 
 interface CacheTask {
   id: string;
@@ -60,7 +62,7 @@ function formatDateTime(dateString: string): string {
   return date.toLocaleDateString();
 }
 
-type TabType = 'backend' | 'frontend' | 'analysis';
+type TabType = 'backend' | 'frontend' | 'analysis' | 'delivery';
 
 export default function CacheManagerPage() {
   const navigate = useNavigate();
@@ -81,6 +83,14 @@ export default function CacheManagerPage() {
   // 解析缓存
   const [analysisEntries, setAnalysisEntries] = useState<Record<string, string | number>[]>([]);
   const [analysisCount, setAnalysisCount] = useState(0);
+
+  // 交付渲染
+  const [deliveryFiles, setDeliveryFiles] = useState<DeliveryFile[]>([]);
+  const [deliveryLoading, setDeliveryLoading] = useState(false);
+  const [deliveryError, setDeliveryError] = useState<string | null>(null);
+  const [expandedParent, setExpandedParent] = useState<string | null>(null);
+  const [deliveryUpdateMsg, setDeliveryUpdateMsg] = useState<string | null>(null);
+  const wsControlRef = useRef<{ close: () => void } | null>(null);
 
   // 后端缓存操作
   const fetchCacheInfo = useCallback(async () => {
@@ -238,16 +248,73 @@ export default function CacheManagerPage() {
     fetchAnalysisCache();
   };
 
+  // 交付渲染操作
+  const fetchDeliveryList = useCallback(async () => {
+    setDeliveryLoading(true);
+    setDeliveryError(null);
+    try {
+      const data = await fetchDeliveryFiles();
+      setDeliveryFiles(data.files || []);
+    } catch (err) {
+      setDeliveryError('获取交付渲染文件失败');
+      setDeliveryFiles([]);
+    } finally {
+      setDeliveryLoading(false);
+    }
+  }, []);
+
+  const handleDownloadDelivery = (filename: string) => {
+    const a = document.createElement('a');
+    a.href = '/api/v1/download/' + encodeURIComponent(filename);
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
+
+  const handleDeleteDeliveryChild = async (filename: string) => {
+    if (!confirm('确定删除此交付文件？')) return;
+    try {
+      await deleteDeliveryFile(filename);
+      fetchDeliveryList();
+    } catch { /* ignore */ }
+  };
+
+  const handleDeleteDeliveryParent = async (filename: string) => {
+    if (!confirm(`确定删除"${filename}"及其所有子文件？此操作不可恢复！`)) return;
+    try {
+      await deleteDeliveryParent(filename);
+      fetchDeliveryList();
+    } catch { /* ignore */ }
+  };
+
   useEffect(() => {
     fetchCacheInfo();
     fetchFrontendCacheInfo();
     fetchAnalysisCache();
-  }, [fetchCacheInfo, fetchFrontendCacheInfo, fetchAnalysisCache]);
+    fetchDeliveryList();
+  }, [fetchCacheInfo, fetchFrontendCacheInfo, fetchAnalysisCache, fetchDeliveryList]);
+
+  useEffect(() => {
+    wsControlRef.current = connectCacheWS((event: CacheUpdateEvent) => {
+      if (activeTab === 'delivery') {
+        fetchDeliveryList();
+      }
+      const fileCount = event.files?.length ?? 0;
+      setDeliveryUpdateMsg(`渲染缓存已更新: ${event.task_id.slice(0, 8)}... (${fileCount} 个文件)`);
+      setTimeout(() => setDeliveryUpdateMsg(null), 3000);
+    });
+    return () => {
+      wsControlRef.current?.close();
+      wsControlRef.current = null;
+    };
+  }, []);
 
   const tabs: { key: TabType; label: string; icon: string }[] = [
     { key: 'backend', label: '后端缓存', icon: '🖥️' },
     { key: 'frontend', label: '前端缓存', icon: '📱' },
     { key: 'analysis', label: '解析缓存', icon: '🔍' },
+    { key: 'delivery', label: '交付渲染', icon: '🎵' },
   ];
 
   return (
@@ -579,6 +646,165 @@ export default function CacheManagerPage() {
             <div className="p-4 bg-cyan-500/5 border border-cyan-500/20 rounded-lg text-xs text-cyan-400/80">
               💡 解析缓存基于文件哈希（前1MB+后1MB），同一文件重复加载时可跳过解析直接使用缓存结果，加速页面响应。非WAV文件会自动创建解码WAV缓存，二次加载可跳过慢速解码。
             </div>
+          </div>
+        )}
+
+        {/* 交付渲染 Tab */}
+        {activeTab === 'delivery' && (
+          <div className="space-y-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-white font-medium">交付渲染文件</h3>
+                <p className="text-gray-500 text-xs">已渲染完成的交付文件，按任务分组管理</p>
+              </div>
+              <button
+                onClick={fetchDeliveryList}
+                disabled={deliveryLoading}
+                className="px-3 py-1.5 bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/30 rounded-lg text-cyan-400 text-xs transition disabled:opacity-50"
+              >
+                刷新
+              </button>
+            </div>
+
+            {deliveryUpdateMsg && (
+              <div className="mb-4 p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-lg">
+                <div className="flex items-center gap-2">
+                  <span className="text-emerald-400 text-sm">✓</span>
+                  <span className="text-emerald-400 text-sm">{deliveryUpdateMsg}</span>
+                </div>
+              </div>
+            )}
+
+            {deliveryLoading && (
+              <div className="text-center py-12 text-gray-400">加载中...</div>
+            )}
+
+            {deliveryError && !deliveryLoading && (
+              <div className="p-4 bg-red-500/10 border border-red-500/30 rounded-lg">
+                <div className="flex items-center gap-2">
+                  <span className="text-red-400 text-sm">⚠️</span>
+                  <span className="text-red-400 text-sm">{deliveryError}</span>
+                </div>
+                <button
+                  onClick={fetchDeliveryList}
+                  className="mt-2 px-3 py-1 bg-red-500/20 hover:bg-red-500/30 border border-red-500/30 rounded text-red-400 text-xs transition"
+                >
+                  重试
+                </button>
+              </div>
+            )}
+
+            {!deliveryLoading && !deliveryError && deliveryFiles.length === 0 && (
+              <div className="text-center py-12 text-gray-500">
+                暂无交付渲染文件<br />
+                <span className="text-xs">完成修复并渲染后，交付文件会出现在这里</span>
+              </div>
+            )}
+
+            {!deliveryLoading && deliveryFiles.length > 0 && (
+              <div className="bg-black/20 rounded-lg border border-white/10 divide-y divide-white/5">
+                {deliveryFiles.map((file) => (
+                  <div key={file.filename}>
+                    <div className="p-3 hover:bg-white/5">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2 min-w-0 flex-1">
+                          {file.is_parent && (
+                            <button
+                              onClick={() => setExpandedParent(expandedParent === file.filename ? null : file.filename)}
+                              className="text-gray-500 hover:text-white text-xs transition flex-shrink-0"
+                            >
+                              {expandedParent === file.filename ? '▼' : '▶'}
+                            </button>
+                          )}
+                          <span className="text-white text-sm font-medium truncate">{file.filename}</span>
+                          <span className="text-gray-500 text-xs">{formatBytes(file.size)}</span>
+                        </div>
+                        <div className="flex items-center gap-2 flex-shrink-0 ml-2">
+                          {file.mtime && (
+                            <span className="text-gray-500 text-xs">{formatDateTime(file.mtime)}</span>
+                          )}
+                          <button
+                            onClick={() => handleDownloadDelivery(file.filename)}
+                            className="text-gray-500 hover:text-cyan-400 transition p-1"
+                            title="下载"
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                            </svg>
+                          </button>
+                          {file.is_parent ? (
+                            <button
+                              onClick={() => handleDeleteDeliveryParent(file.filename)}
+                              className="text-gray-500 hover:text-red-400 transition p-1"
+                              title="删除整组"
+                            >
+                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                              </svg>
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => handleDeleteDeliveryChild(file.filename)}
+                              className="text-gray-500 hover:text-red-400 transition p-1"
+                              title="删除"
+                            >
+                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                              </svg>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      {!file.is_parent && file.track_type && (
+                        <div className="mt-1">
+                          <span className="text-xs px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400">
+                            {file.track_type === 'vocal' ? '人声轨' : file.track_type === 'accompaniment' ? '伴奏轨' : file.track_type}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+
+                    {expandedParent === file.filename && file.children && file.children.length > 0 && (
+                      <div className="px-3 pb-3">
+                        <div className="bg-emerald-500/5 border border-emerald-500/20 rounded-lg divide-y divide-emerald-500/10">
+                          {file.children.map((child, idx) => (
+                            <div key={idx} className="flex items-center justify-between p-2.5 text-xs">
+                              <div className="flex items-center gap-2 min-w-0 flex-1">
+                                <span className="text-gray-300 truncate">{child.filename}</span>
+                                <span className="text-xs px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 flex-shrink-0">
+                                  {child.track_type === 'vocal' ? '人声轨' : child.track_type === 'accompaniment' ? '伴奏轨' : child.track_type || '音频'}
+                                </span>
+                                <span className="text-gray-500 flex-shrink-0">{formatBytes(child.size)}</span>
+                              </div>
+                              <div className="flex items-center gap-2 flex-shrink-0 ml-2">
+                                <button
+                                  onClick={() => handleDownloadDelivery(child.filename)}
+                                  className="text-gray-500 hover:text-cyan-400 transition p-1"
+                                  title="下载"
+                                >
+                                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                                  </svg>
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteDeliveryChild(child.filename)}
+                                  className="text-gray-500 hover:text-red-400 transition p-1"
+                                  title="删除"
+                                >
+                                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                  </svg>
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>

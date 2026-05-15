@@ -1,19 +1,55 @@
 import os
+import json
 import asyncio
 import logging
+import stat
+import subprocess
 import time
+from datetime import datetime, timezone
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from config import ALLOWED_EXTENSIONS, MAX_UPLOAD_SIZE, MOBILE_MODE, OUTPUT_DIR, UPLOAD_DIR, DECODED_DIR, DEPLOY_TIME_FILE
-from database import create_task, find_task_by_hash, get_queue_status, get_task, update_task
-from services.task_manager import generate_task_id, submit_detect_task, submit_repair_task, cancel_task, executor
+from database import create_task, find_task_by_hash, get_queue_status, get_task, update_task, _format_timestamp
+from services.task_manager import generate_task_id, submit_detect_task, submit_repair_task, cancel_task, executor, can_accept_task, get_active_task_count, get_active_tasks
 from services.audio_repair import get_available_versions
 from services.ai_detector import get_detector_versions
 from services.memory_guard import get_available_memory_bytes, estimate_repair_memory_bytes, should_use_float32, get_total_memory_bytes
 
 logger = logging.getLogger(__name__)
+
+def _get_audio_info(path: str) -> dict | None:
+    try:
+        import soundfile as sf
+        info = sf.info(path)
+        return {
+            "sample_rate": info.samplerate,
+            "channels": info.channels,
+            "duration": info.duration,
+            "num_frames": info.frames,
+            "format": info.format,
+            "subtype": info.subtype,
+        }
+    except Exception:
+        pass
+    try:
+        import miniaudio
+        info = miniaudio.get_file_info(path)
+        return {
+            "sample_rate": info.sample_rate,
+            "channels": info.nchannels,
+            "duration": info.duration,
+            "num_frames": info.num_frames,
+            "format": str(info.file_format),
+            "sample_width": info.sample_width,
+        }
+    except Exception:
+        return None
+
+def _wav_to_mp3(wav_path: str, mp3_path: str, bitrate: int = 128):
+    from services.mp3_encoder import encode_mp3
+    encode_mp3(wav_path, mp3_path, bitrate)
 
 router = APIRouter(prefix="/api/v1")
 
@@ -145,6 +181,21 @@ async def deploy_info():
     except (FileNotFoundError, ValueError, OSError):
         pass
     return {"deploy_time": deploy_time, "deploy_days": deploy_days}
+
+@router.get("/system/load")
+async def system_load():
+    active_count = get_active_task_count()
+    active_tasks = get_active_tasks()
+    available_mem = get_available_memory_bytes()
+    from config import MAX_CONCURRENT_TASKS
+    return {
+        "active_tasks": active_count,
+        "max_concurrent_tasks": MAX_CONCURRENT_TASKS,
+        "available_memory_mb": round(available_mem / 1024 / 1024, 1) if available_mem else None,
+        "can_accept": active_count < MAX_CONCURRENT_TASKS,
+        "load_percent": round(active_count / MAX_CONCURRENT_TASKS * 100, 1) if MAX_CONCURRENT_TASKS > 0 else 0,
+        "active_task_ids": active_tasks,
+    }
 
 @router.get("/diag")
 async def diagnostics():
@@ -370,20 +421,7 @@ async def upload_audio(file: UploadFile = File(...), file_hash: str = Form("")):
     create_task(task_id, file.filename or "audio", upload_path, {}, file_hash, file_size)
     logger.info(f"[/upload] task_id={task_id} file_hash={file_hash or 'none'}")
 
-    audio_info = None
-    try:
-        import miniaudio
-        info = miniaudio.get_file_info(upload_path)
-        audio_info = {
-            "sample_rate": info.sample_rate,
-            "channels": info.nchannels,
-            "duration": info.duration,
-            "num_frames": info.num_frames,
-            "format": str(info.file_format),
-            "sample_width": info.sample_width,
-        }
-    except Exception:
-        pass
+    audio_info = _get_audio_info(upload_path)
 
     return {
         "task_id": task_id,
@@ -432,8 +470,15 @@ async def upload_dual_audio(
     vocal_hash = vocal_file_hash or file_hash
     accompaniment_hash = accompaniment_file_hash or file_hash
 
-    create_task(vocal_task_id, f"vocal_{vocal_file.filename or 'audio'}", vocal_upload_path, {}, vocal_hash, len(vocal_content))
-    create_task(accompaniment_task_id, f"acc_{accompaniment_file.filename or 'audio'}", accompaniment_upload_path, {}, accompaniment_hash, len(accompaniment_content))
+    vocal_audio_info = _get_audio_info(vocal_upload_path)
+    acc_audio_info = _get_audio_info(accompaniment_upload_path)
+
+    create_task(vocal_task_id, f"vocal_{vocal_file.filename or 'audio'}", vocal_upload_path,
+                {"audio_info": vocal_audio_info} if vocal_audio_info else {},
+                vocal_hash, len(vocal_content))
+    create_task(accompaniment_task_id, f"acc_{accompaniment_file.filename or 'audio'}", accompaniment_upload_path,
+                {"audio_info": acc_audio_info} if acc_audio_info else {},
+                accompaniment_hash, len(accompaniment_content))
     create_task(main_task_id, f"dual_{vocal_file.filename or 'audio'}", vocal_upload_path, {
         "vocal_task_id": vocal_task_id,
         "accompaniment_task_id": accompaniment_task_id,
@@ -445,17 +490,8 @@ async def upload_dual_audio(
 
     logger.info(f"[/upload-dual] main_task_id={main_task_id} vocal={vocal_task_id} acc={accompaniment_task_id} vocal_hash={vocal_hash[:12] if vocal_hash else 'none'} acc_hash={accompaniment_hash[:12] if accompaniment_hash else 'none'}")
 
-    def get_audio_info(path):
-        try:
-            info = miniaudio.get_file_info(path)
-            return {
-                "sample_rate": info.sample_rate,
-                "channels": info.nchannels,
-                "duration": info.duration,
-                "num_frames": info.num_frames,
-            }
-        except Exception:
-            return None
+    vocal_info = _get_audio_info(vocal_upload_path)
+    acc_info = _get_audio_info(accompaniment_upload_path)
 
     return {
         "task_id": main_task_id,
@@ -465,8 +501,8 @@ async def upload_dual_audio(
         "accompaniment_filename": accompaniment_file.filename,
         "vocal_size": len(vocal_content),
         "accompaniment_size": len(accompaniment_content),
-        "vocal_info": get_audio_info(vocal_upload_path),
-        "accompaniment_info": get_audio_info(accompaniment_upload_path),
+        "vocal_info": _get_audio_info(vocal_upload_path),
+        "accompaniment_info": _get_audio_info(accompaniment_upload_path),
     }
 
 
@@ -479,6 +515,10 @@ class DetectRequest(BaseModel):
 @router.post("/detect")
 async def detect_audio(request: DetectRequest):
     logger.info(f"[/detect] 收到请求: task_id={request.task_id}, type={request.type}, detector_version={request.detector_version}, skip_cache={request.skip_cache}")
+
+    can_accept, reject_reason = can_accept_task()
+    if not can_accept:
+        raise HTTPException(status_code=503, detail=reject_reason)
 
     task = get_task(request.task_id)
     if not task:
@@ -527,6 +567,10 @@ async def detect_audio(request: DetectRequest):
 
 @router.post("/detect-file")
 async def detect_file(file: UploadFile = File(...), detector_version: str = Form("v1.1")):
+    can_accept, reject_reason = can_accept_task()
+    if not can_accept:
+        raise HTTPException(status_code=503, detail=reject_reason)
+
     ext = os.path.splitext(file.filename or '')[1].lower()
     if ext not in ALLOWED_EXTENSIONS:
         raise HTTPException(status_code=400, detail=f"不支持的文件格式: {ext}")
@@ -604,6 +648,10 @@ class DetectPathRequest(BaseModel):
 
 @router.post("/detect-path")
 async def detect_by_path(request: DetectPathRequest):
+    can_accept, reject_reason = can_accept_task()
+    if not can_accept:
+        raise HTTPException(status_code=503, detail=reject_reason)
+
     import hashlib
 
     target_id = request.file_id
@@ -642,6 +690,10 @@ class RepairRequest(BaseModel):
 
 @router.post("/repair")
 async def repair_audio_endpoint(request: RepairRequest):
+    can_accept, reject_reason = can_accept_task()
+    if not can_accept:
+        raise HTTPException(status_code=503, detail=reject_reason)
+
     task = get_task(request.task_id)
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
@@ -667,6 +719,10 @@ class DualRepairRequest(BaseModel):
 
 @router.post("/repair-dual")
 async def repair_dual_audio_endpoint(request: DualRepairRequest):
+    can_accept, reject_reason = can_accept_task()
+    if not can_accept:
+        raise HTTPException(status_code=503, detail=reject_reason)
+
     vocal_task = get_task(request.vocal_task_id)
     accompaniment_task = get_task(request.accompaniment_task_id)
 
@@ -700,6 +756,13 @@ async def repair_dual_audio_endpoint(request: DualRepairRequest):
         "formant_repair": "vocal_formant_repair",
         "breath_enhance": "vocal_breath_enhance",
         "ai_repair": "vocal_ai_repair",
+        "exciter": "vocal_exciter",
+        "compressor": "vocal_compressor",
+        "spatial": "vocal_spatial",
+        "warmth": "vocal_warmth",
+        "de_esser_advanced": "vocal_de_esser_advanced",
+        "ai_repair_enhanced": "vocal_ai_repair_enhanced",
+        "ai_repair_enhanced_lite": "vocal_ai_repair_enhanced_lite",
         "loudness_optimize": "vocal_loudness",
     }
 
@@ -711,6 +774,7 @@ async def repair_dual_audio_endpoint(request: DualRepairRequest):
         "spatial_enhance": "inst_spatial",
         "warmth": "inst_warmth",
         "timbre_protect": "inst_timbre_protect",
+        "stereo_enhance": "inst_stereo_enhance",
         "loudness_optimize": "inst_loudness",
     }
 
@@ -755,6 +819,10 @@ class DualRepairFromHashRequest(BaseModel):
 
 @router.post("/repair-dual-from-hash")
 async def repair_dual_from_hash(request: DualRepairFromHashRequest):
+    can_accept, reject_reason = can_accept_task()
+    if not can_accept:
+        raise HTTPException(status_code=503, detail=reject_reason)
+
     vocal_task = find_task_by_hash(request.vocal_file_hash)
     if not vocal_task or not vocal_task.get("original_path") or not os.path.exists(vocal_task["original_path"]):
         raise HTTPException(status_code=404, detail="人声音频不存在，请重新上传")
@@ -807,6 +875,13 @@ async def repair_dual_from_hash(request: DualRepairFromHashRequest):
         "formant_repair": "vocal_formant_repair",
         "breath_enhance": "vocal_breath_enhance",
         "ai_repair": "vocal_ai_repair",
+        "exciter": "vocal_exciter",
+        "compressor": "vocal_compressor",
+        "spatial": "vocal_spatial",
+        "warmth": "vocal_warmth",
+        "de_esser_advanced": "vocal_de_esser_advanced",
+        "ai_repair_enhanced": "vocal_ai_repair_enhanced",
+        "ai_repair_enhanced_lite": "vocal_ai_repair_enhanced_lite",
         "loudness_optimize": "vocal_loudness",
     }
 
@@ -818,6 +893,7 @@ async def repair_dual_from_hash(request: DualRepairFromHashRequest):
         "spatial_enhance": "inst_spatial",
         "warmth": "inst_warmth",
         "timbre_protect": "inst_timbre_protect",
+        "stereo_enhance": "inst_stereo_enhance",
         "loudness_optimize": "inst_loudness",
     }
 
@@ -987,6 +1063,15 @@ def _run_render(task_id, input_path, output_path, target_sr, bit_depth, render_f
             "render_filename": render_filename,
             "render_result": result,
         })
+        from services.ws_manager import ws_manager
+        files = [{"filename": render_filename, "sample_rate": target_sr, "bit_depth": bit_depth, "track_type": "both"}]
+        try:
+            asyncio.run_coroutine_threadsafe(
+                ws_manager.broadcast_render_cache_update(task_id, files),
+                asyncio.get_event_loop()
+            )
+        except Exception:
+            pass
     except Exception as e:
         logger.error(f"[render] 渲染失败 task_id={task_id}: {e}")
         update_task(task_id, status="error", error=str(e), step="渲染失败")
@@ -1003,6 +1088,11 @@ def _run_render_dual(task_id, vocal_path, accompaniment_path, output_path, targe
     from services.task_manager import _ws_send_progress, _ws_send_final
     import numpy as np
     import soundfile as sf
+
+    vocal_rendered = False
+    accompaniment_rendered = False
+    vocal_render_filename = None
+    accompaniment_render_filename = None
 
     def progress_callback(pct, step):
         update_task(task_id, progress=pct, step=step)
@@ -1064,6 +1154,42 @@ def _run_render_dual(task_id, vocal_path, accompaniment_path, output_path, targe
                 "channels": mixed.shape[0] if mixed.ndim > 1 else 1,
             }
 
+            base_name = render_filename.rsplit(".", 1)[0]
+            if base_name.endswith("_merged"):
+                base_name = base_name[:-7]
+
+            progress_callback(0.6, "渲染人声独立轨...")
+            vocal_render_filename = f"{base_name}_vocal.wav"
+            vocal_render_path = os.path.join(os.path.dirname(output_path), vocal_render_filename)
+            vocal_source_bit_depth = None
+            try:
+                _, _, src_bd = load_audio_with_fallback(vocal_path, sr=None, mono=False, return_bit_depth=True)
+                vocal_source_bit_depth = src_bd
+            except Exception:
+                pass
+            try:
+                render_output(vocal_path, vocal_render_path, target_sr, bit_depth, progress_callback=progress_callback, source_bit_depth=vocal_source_bit_depth)
+                vocal_rendered = True
+                logger.info(f"[render_dual] 人声独立轨渲染完成: {vocal_render_filename}")
+            except Exception as e:
+                logger.warning(f"[render_dual] 人声独立轨渲染失败: {e}")
+
+            progress_callback(0.8, "渲染伴奏独立轨...")
+            accompaniment_render_filename = f"{base_name}_accompaniment.wav"
+            accompaniment_render_path = os.path.join(os.path.dirname(output_path), accompaniment_render_filename)
+            accompaniment_source_bit_depth = None
+            try:
+                _, _, src_bd = load_audio_with_fallback(accompaniment_path, sr=None, mono=False, return_bit_depth=True)
+                accompaniment_source_bit_depth = src_bd
+            except Exception:
+                pass
+            try:
+                render_output(accompaniment_path, accompaniment_render_path, target_sr, bit_depth, progress_callback=progress_callback, source_bit_depth=accompaniment_source_bit_depth)
+                accompaniment_rendered = True
+                logger.info(f"[render_dual] 伴奏独立轨渲染完成: {accompaniment_render_filename}")
+            except Exception as e:
+                logger.warning(f"[render_dual] 伴奏独立轨渲染失败: {e}")
+
         progress_callback(0.9, "完成")
         update_task(task_id,
             status="render_completed",
@@ -1080,6 +1206,19 @@ def _run_render_dual(task_id, vocal_path, accompaniment_path, output_path, targe
             "render_filename": render_filename,
             "render_result": result,
         })
+        from services.ws_manager import ws_manager
+        files = [{"filename": render_filename, "sample_rate": target_sr, "bit_depth": bit_depth, "track_type": "both"}]
+        if vocal_rendered and vocal_render_filename:
+            files.append({"filename": vocal_render_filename, "sample_rate": target_sr, "bit_depth": bit_depth, "track_type": "vocal"})
+        if accompaniment_rendered and accompaniment_render_filename:
+            files.append({"filename": accompaniment_render_filename, "sample_rate": target_sr, "bit_depth": bit_depth, "track_type": "accompaniment"})
+        try:
+            asyncio.run_coroutine_threadsafe(
+                ws_manager.broadcast_render_cache_update(task_id, files),
+                asyncio.get_event_loop()
+            )
+        except Exception:
+            pass
     except Exception as e:
         logger.error(f"[render_dual] 渲染失败 task_id={task_id}: {e}")
         update_task(task_id, status="error", error=str(e), step="渲染失败")
@@ -1092,10 +1231,16 @@ def _run_render_dual(task_id, vocal_path, accompaniment_path, output_path, targe
 
 @router.get("/status/{task_id}")
 async def get_task_status(task_id: str):
-    task = get_task(task_id)
-    if not task:
-        raise HTTPException(status_code=404, detail="任务不存在")
-    return task
+    try:
+        task = get_task(task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail="任务不存在")
+        return task
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[/status/{task_id}] 获取任务状态失败: {e}", exc_info=True)
+        raise HTTPException(status_code=503, detail=f"获取任务状态失败: {str(e)[:100]}")
 
 @router.get("/queue-status")
 async def get_queue():
@@ -1202,6 +1347,26 @@ async def websocket_task_status(websocket: WebSocket, task_id: str):
     finally:
         ws_manager.disconnect(task_id, websocket)
 
+
+@router.websocket("/ws/cache-events")
+async def websocket_cache_events(websocket: WebSocket):
+    await websocket.accept()
+    from services.ws_manager import ws_manager
+    CACHE_LISTENER_ID = "__cache_events__"
+    await ws_manager.connect(CACHE_LISTENER_ID, websocket)
+    try:
+        import asyncio
+        while True:
+            try:
+                await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
+            except asyncio.TimeoutError:
+                await websocket.send_json({"type": "heartbeat", "status": "alive"})
+    except WebSocketDisconnect:
+        pass
+    finally:
+        ws_manager.disconnect(CACHE_LISTENER_ID, websocket)
+
+
 @router.get("/download/{task_id}")
 async def download_audio(task_id: str):
     task = get_task(task_id)
@@ -1219,7 +1384,8 @@ async def download_audio(task_id: str):
     file_size = os.path.getsize(output_path)
     from urllib.parse import quote
     encoded_name = quote(download_name)
-    disposition = f"attachment; filename*=UTF-8''{encoded_name}"
+    ascii_name = download_name.encode("ascii", "ignore").decode("ascii") or "audio_repaired.wav"
+    disposition = f'attachment; filename="{ascii_name}"; filename*=UTF-8\'\'{encoded_name}'
 
     def iter_full_file():
         with open(output_path, "rb") as f:
@@ -1293,7 +1459,8 @@ async def download_file(filename: str, request: Request):
     # 统一使用 RFC 5987 编码 Content-Disposition，确保中文文件名正确
     from urllib.parse import quote
     encoded_name = quote(download_name)
-    disposition = f"attachment; filename*=UTF-8''{encoded_name}"
+    ascii_name = download_name.encode("ascii", "ignore").decode("ascii") or "audio.wav"
+    disposition = f'attachment; filename="{ascii_name}"; filename*=UTF-8\'\'{encoded_name}'
 
     if range_header:
         # 解析 Range: bytes=start-end
@@ -1350,6 +1517,156 @@ async def download_file(filename: str, request: Request):
     return StreamingResponse(
         iter_full_file(),
         media_type="audio/wav",
+        headers={
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(file_size),
+            "Content-Disposition": disposition,
+        },
+    )
+
+def _find_rendered_merged(task_id: str) -> str | None:
+    """查找任务的 render 合并缓存 WAV"""
+    if not os.path.isdir(OUTPUT_DIR):
+        return None
+    prefix = f"{task_id}_rendered_"
+    for fname in os.listdir(OUTPUT_DIR):
+        if fname.startswith(prefix) and fname.endswith("_merged.wav"):
+            return os.path.join(OUTPUT_DIR, fname)
+    return None
+
+
+def _merge_wavs(vocal_path: str, acc_path: str, output_path: str):
+    """合并人声和伴奏为混合 WAV"""
+    import numpy as np
+    import soundfile as sf
+    from services.audio_loader import load_audio_with_fallback
+
+    vocal_y, vocal_sr = load_audio_with_fallback(vocal_path, sr=None, mono=False)
+    acc_y, acc_sr = load_audio_with_fallback(acc_path, sr=None, mono=False)
+
+    max_len = max(vocal_y.shape[1], acc_y.shape[1])
+    if vocal_y.shape[1] < max_len:
+        vocal_y = np.pad(vocal_y, ((0, 0), (0, max_len - vocal_y.shape[1])), mode='constant')
+    if acc_y.shape[1] < max_len:
+        acc_y = np.pad(acc_y, ((0, 0), (0, max_len - acc_y.shape[1])), mode='constant')
+
+    mixed = np.clip((vocal_y + acc_y) / 2, -1.0, 1.0)
+    sf.write(output_path, mixed.T if mixed.ndim > 1 else mixed, vocal_sr, subtype="PCM_16")
+
+
+@router.get("/download-mp3/{task_id}")
+async def download_mp3(task_id: str, request: Request):
+    wav_path = os.path.join(OUTPUT_DIR, f"{task_id}_repaired.wav")
+    temp_wav = None
+
+    if not os.path.exists(wav_path):
+        task = get_task(task_id)
+        if task:
+            params = task.get("params", {})
+            if isinstance(params, str):
+                import json as _json
+                try:
+                    params = _json.loads(params)
+                except Exception:
+                    params = {}
+            if params.get("processing_mode") == "dual":
+                merged_wav = _find_rendered_merged(task_id)
+                if merged_wav:
+                    wav_path = merged_wav
+                else:
+                    vocal_task_id = params.get("vocal_task_id")
+                    acc_task_id = params.get("accompaniment_task_id")
+                    vocal_wav = os.path.join(OUTPUT_DIR, f"{vocal_task_id}_repaired.wav") if vocal_task_id else None
+                    acc_wav = os.path.join(OUTPUT_DIR, f"{acc_task_id}_repaired.wav") if acc_task_id else None
+                    if vocal_wav and os.path.exists(vocal_wav) and acc_wav and os.path.exists(acc_wav):
+                        temp_wav = os.path.join(OUTPUT_DIR, f"{task_id}_temp_merged.wav")
+                        _merge_wavs(vocal_wav, acc_wav, temp_wav)
+                        wav_path = temp_wav
+                    elif vocal_wav and os.path.exists(vocal_wav):
+                        wav_path = vocal_wav
+                    elif acc_wav and os.path.exists(acc_wav):
+                        wav_path = acc_wav
+
+    if not os.path.exists(wav_path):
+        raise HTTPException(status_code=404, detail="音频文件不存在")
+
+    mp3_path = os.path.join(OUTPUT_DIR, f"{task_id}_repaired.mp3")
+    if not os.path.exists(mp3_path):
+        try:
+            _wav_to_mp3(wav_path, mp3_path)
+        except FileNotFoundError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+        except (ImportError, RuntimeError) as e:
+            raise HTTPException(status_code=500, detail=f"MP3编码库未安装: {e}")
+        except ValueError as e:
+            raise HTTPException(status_code=500, detail=f"音频格式不支持: {e}")
+        except Exception as e:
+            logger.error(f"[DOWNLOAD-MP3] 转码失败 task_id={task_id}: {e}")
+            raise HTTPException(status_code=500, detail=f"MP3转码失败: {e}")
+
+    # Clean up temporary merged WAV (encoding already succeeded or MP3 existed)
+    if temp_wav and os.path.exists(temp_wav):
+        os.unlink(temp_wav)
+
+    file_size = os.path.getsize(mp3_path)
+    from urllib.parse import quote
+    download_name = f"{task_id}.mp3"
+    task = get_task(task_id)
+    if task and task.get("original_filename"):
+        original_basename = os.path.splitext(task["original_filename"])[0]
+        download_name = f"{original_basename}.mp3"
+    encoded_name = quote(download_name)
+    ascii_name = download_name.encode("ascii", "ignore").decode("ascii") or "audio.mp3"
+    disposition = f'attachment; filename="{ascii_name}"; filename*=UTF-8\'\'{encoded_name}'
+    range_header = request.headers.get("range")
+    if range_header:
+        range_match = __import__("re").match(r"bytes=(\d+)-(\d*)", range_header)
+        if range_match:
+            start = int(range_match.group(1))
+            end = int(range_match.group(2)) if range_match.group(2) else file_size - 1
+            if start >= file_size:
+                from fastapi.responses import Response
+                return Response(status_code=416, headers={"Content-Range": f"bytes */{file_size}"})
+            end = min(end, file_size - 1)
+            chunk_size = end - start + 1
+            def iter_file():
+                with open(mp3_path, "rb") as f:
+                    f.seek(start)
+                    remaining = chunk_size
+                    while remaining > 0:
+                        read_size = min(8192, remaining)
+                        data = f.read(read_size)
+                        if not data:
+                            break
+                        remaining -= len(data)
+                        yield data
+            from fastapi.responses import StreamingResponse
+            return StreamingResponse(
+                iter_file(),
+                status_code=206,
+                media_type="audio/mpeg",
+                headers={
+                    "Content-Range": f"bytes {start}-{end}/{file_size}",
+                    "Content-Length": str(chunk_size),
+                    "Accept-Ranges": "bytes",
+                    "Content-Disposition": disposition,
+                },
+            )
+    def iter_full_file_and_cleanup():
+        try:
+            with open(mp3_path, "rb") as f:
+                while True:
+                    data = f.read(65536)
+                    if not data:
+                        break
+                    yield data
+        finally:
+            if os.path.exists(mp3_path):
+                os.unlink(mp3_path)
+    from fastapi.responses import StreamingResponse
+    return StreamingResponse(
+        iter_full_file_and_cleanup(),
+        media_type="audio/mpeg",
         headers={
             "Accept-Ranges": "bytes",
             "Content-Length": str(file_size),
@@ -1445,6 +1762,132 @@ async def delete_render_cache(filename: str):
     released = os.path.getsize(file_path)
     os.remove(file_path)
     return {"released_bytes": released, "filename": filename}
+
+
+_DELIVERY_AUDIO_EXTENSIONS = {".wav", ".mp3", ".flac", ".ogg", ".m4a"}
+
+
+@router.get("/delivery-files")
+async def list_delivery_files():
+    if not os.path.isdir(OUTPUT_DIR):
+        return {"files": []}
+
+    files = []
+    for fname in os.listdir(OUTPUT_DIR):
+        ext = os.path.splitext(fname)[1].lower()
+        if ext not in _DELIVERY_AUDIO_EXTENSIONS:
+            continue
+        fp = os.path.join(OUTPUT_DIR, fname)
+        if not os.path.isfile(fp):
+            continue
+        try:
+            st = os.stat(fp)
+        except OSError:
+            continue
+
+        entry = {
+            "filename": fname,
+            "size": st.st_size,
+            "mtime": datetime.fromtimestamp(st.st_mtime, tz=timezone.utc).isoformat(),
+            "is_parent": False,
+        }
+
+        if "_rendered_" in fname:
+            base = fname.replace(".wav", "")
+            parts = base.split("_rendered_")
+            if len(parts) == 2:
+                task_id = parts[0]
+                suffix = parts[1]
+                segments = suffix.split("_")
+                track_type = "both"
+                if segments[-1] == "vocal":
+                    track_type = "vocal"
+                elif segments[-1] == "accompaniment":
+                    track_type = "accompaniment"
+                elif segments[-1] == "merged":
+                    track_type = "both"
+                entry["task_id"] = task_id
+                if track_type != "both":
+                    entry["track_type"] = track_type
+
+        files.append(entry)
+
+    task_groups = {}
+    for f in files:
+        tid = f.get("task_id")
+        if tid:
+            task_groups.setdefault(tid, []).append(f)
+
+    for task_id, group in task_groups.items():
+        parent = None
+        children = []
+        for f in group:
+            if f.get("track_type") in ("vocal", "accompaniment"):
+                children.append(f)
+            else:
+                parent = f
+        if parent and children:
+            parent["is_parent"] = True
+            parent["children"] = [c["filename"] for c in children]
+            for c in children:
+                c["parent_filename"] = parent["filename"]
+
+    return {"files": files}
+
+
+@router.delete("/delivery-files/{filename}")
+async def delete_delivery_file(filename: str):
+    file_path = os.path.join(OUTPUT_DIR, filename)
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="文件不存在")
+    if not os.path.isfile(file_path):
+        raise HTTPException(status_code=400, detail="不是文件")
+    try:
+        os.remove(file_path)
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="权限不足，无法删除")
+    logger.info(f"[/delivery-files] deleted: {filename}")
+    return {"status": "ok"}
+
+
+@router.delete("/delivery-files/parent/{filename}")
+async def delete_delivery_parent(filename: str):
+    file_path = os.path.join(OUTPUT_DIR, filename)
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="文件不存在")
+
+    parent_task_id = None
+    if "_rendered_" in filename:
+        base = filename.replace(".wav", "")
+        parts = base.split("_rendered_")
+        if len(parts) == 2:
+            parent_task_id = parts[0]
+
+    if not parent_task_id:
+        try:
+            os.remove(file_path)
+        except PermissionError:
+            raise HTTPException(status_code=403, detail="权限不足，无法删除")
+        return {"status": "ok", "deleted": [filename]}
+
+    deleted = []
+    if os.path.isdir(OUTPUT_DIR):
+        for fname in os.listdir(OUTPUT_DIR):
+            if fname.startswith(f"{parent_task_id}_rendered_") and fname.endswith(".wav"):
+                fp = os.path.join(OUTPUT_DIR, fname)
+                if os.path.isfile(fp):
+                    try:
+                        os.remove(fp)
+                        deleted.append(fname)
+                    except PermissionError:
+                        logger.warning(f"无法删除文件: {fp}")
+
+    if not deleted:
+        raise HTTPException(status_code=404, detail="未找到相关文件")
+
+    logger.info(f"[/delivery-files/parent] deleted: {deleted}")
+    return {"status": "ok", "deleted": deleted}
+
 
 # ===== 分析缓存 API =====
 
@@ -1628,16 +2071,10 @@ async def get_audio_info(file_hash: str):
         raise HTTPException(status_code=404, detail="音频文件不存在")
 
     try:
-        import miniaudio
-        info = miniaudio.get_file_info(original_path)
-        return {
-            "sample_rate": info.sample_rate,
-            "channels": info.nchannels,
-            "duration": info.duration,
-            "num_frames": info.num_frames,
-            "format": str(info.file_format),
-            "sample_width": info.sample_width,
-        }
+        audio_info = _get_audio_info(original_path)
+        if audio_info is None:
+            raise HTTPException(status_code=500, detail="获取音频信息失败")
+        return audio_info
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"获取音频信息失败: {e}")
 
@@ -1821,7 +2258,7 @@ async def get_cache_info():
             "id": row["id"],
             "filename": row["original_filename"] or "unknown",
             "status": row["status"],
-            "created_at": row["created_at"],
+            "created_at": _format_timestamp(row["created_at"]),
             "original_exists": orig_exists,
             "output_exists": out_exists,
             "original_size": orig_size,
@@ -1850,6 +2287,19 @@ async def get_cache_info():
 class RepairCacheLookupRequest(BaseModel):
     file_hash: str
     params: dict
+
+class DualRepairCacheLookupRequest(BaseModel):
+    vocal_file_hash: str
+    accompaniment_file_hash: str
+    params: dict = {}
+    vocal_params: dict | None = None
+    accompaniment_params: dict | None = None
+    mix_ratio: float | None = None
+
+
+class FileInfoByHashRequest(BaseModel):
+    file_hashes: list[str]
+
 
 @router.post("/cache/lookup")
 async def lookup_repair_cache(req: RepairCacheLookupRequest):
@@ -1880,6 +2330,107 @@ async def lookup_repair_cache(req: RepairCacheLookupRequest):
         "detection_result": cached.get("detection_result"),
         "repaired_detection_result": cached.get("repaired_detection_result"),
     }
+
+@router.post("/cache/lookup-dual")
+async def lookup_dual_repair_cache(req: DualRepairCacheLookupRequest):
+    from database import find_dual_repair_cache
+
+    flat_params = req.params.copy()
+    flat_params.pop("processing_mode", None)
+
+    _VOCAL_KEY_MAP = {
+        "de_clipping": "vocal_declip",
+        "de_pop": "vocal_depop",
+        "de_essing": "vocal_de_ess",
+        "bass_enhance": "vocal_bass_enhance",
+        "clarity": "vocal_air_texture",
+        "air_texture": "vocal_air_texture",
+        "formant_repair": "vocal_formant_repair",
+        "breath_enhance": "vocal_breath_enhance",
+        "ai_repair": "vocal_ai_repair",
+        "exciter": "vocal_exciter",
+        "compressor": "vocal_compressor",
+        "spatial": "vocal_spatial",
+        "warmth": "vocal_warmth",
+        "de_esser_advanced": "vocal_de_esser_advanced",
+        "ai_repair_enhanced": "vocal_ai_repair_enhanced",
+        "ai_repair_enhanced_lite": "vocal_ai_repair_enhanced_lite",
+        "loudness_optimize": "vocal_loudness",
+    }
+
+    _INST_KEY_MAP = {
+        "de_clipping": "inst_declip",
+        "de_pop": "inst_depop",
+        "noise_reduction": "inst_noise_reduction",
+        "dynamic_range": "inst_dynamic",
+        "spatial_enhance": "inst_spatial",
+        "warmth": "inst_warmth",
+        "timbre_protect": "inst_timbre_protect",
+        "stereo_enhance": "inst_stereo_enhance",
+        "loudness_optimize": "inst_loudness",
+    }
+
+    if req.vocal_params:
+        for src_key, flat_key in _VOCAL_KEY_MAP.items():
+            if src_key in req.vocal_params:
+                flat_params[flat_key] = req.vocal_params[src_key]
+
+    if req.accompaniment_params:
+        for src_key, flat_key in _INST_KEY_MAP.items():
+            if src_key in req.accompaniment_params:
+                flat_params[flat_key] = req.accompaniment_params[src_key]
+
+    if req.mix_ratio is not None:
+        flat_params["vocal_ratio"] = req.mix_ratio
+        flat_params["accompaniment_ratio"] = 1.0
+
+    logger.info(f"[cache-lookup-dual] input flat_params keys: {sorted(flat_params.keys())}")
+    logger.info(f"[cache-lookup-dual] input flat_params: {json.dumps(flat_params, sort_keys=True)[:500]}")
+
+    cached = find_dual_repair_cache(req.vocal_file_hash, req.accompaniment_file_hash, flat_params)
+    if not cached:
+        return {"found": False}
+    repair_result = cached.get("repair_result")
+    return {
+        "found": True,
+        "task_id": cached["id"],
+        "output_path": cached.get("output_path", ""),
+        "output_size": cached.get("output_size", 0),
+        "repair_result": repair_result,
+        "detection_result": cached.get("detection_result"),
+        "repaired_detection_result": cached.get("repaired_detection_result"),
+    }
+
+@router.post("/file-info-by-hash")
+async def get_file_info_by_hash(request: FileInfoByHashRequest):
+    from database import find_task_by_hash
+    result = {}
+    for file_hash in request.file_hashes:
+        task = find_task_by_hash(file_hash)
+        if not task:
+            logger.info(f"[file-info-by-hash] hash={file_hash[:12]} NOT FOUND")
+            continue
+        params = task.get("params", {})
+        if isinstance(params, str):
+            try:
+                params = json.loads(params)
+            except (json.JSONDecodeError, TypeError):
+                params = {}
+        audio_info = params.get("audio_info") if isinstance(params, dict) else None
+        if audio_info:
+            result[file_hash] = audio_info
+            logger.info(f"[file-info-by-hash] hash={file_hash[:12]} found audio_info in db: {audio_info}")
+        else:
+            path = task.get("original_path")
+            if path and os.path.exists(path):
+                try:
+                    audio_info = _get_audio_info(path)
+                    if audio_info:
+                        result[file_hash] = audio_info
+                    logger.info(f"[file-info-by-hash] hash={file_hash[:12]} read from file: {audio_info}")
+                except Exception as e:
+                    logger.info(f"[file-info-by-hash] hash={file_hash[:12]} read file error: {e}")
+    return result
 
 
 def _is_valid_audio_file(filepath: str) -> tuple[bool, str]:
@@ -2286,7 +2837,6 @@ def _run_quality_tests_background(task_id: str, loop):
 
 @router.post("/quality-tests/start")
 async def start_quality_tests():
-    import threading
     import uuid
     import asyncio
     global _quality_test_cache
@@ -2295,8 +2845,7 @@ async def start_quality_tests():
                                      "tests": [], "baseline": [], "per_step": [], "iron_rule": [],
                                      "summary": "", "raw_output": "", "exit_code": -1}
     loop = asyncio.get_event_loop()
-    thread = threading.Thread(target=_run_quality_tests_background, args=(task_id, loop), daemon=True)
-    thread.start()
+    executor.submit(_run_quality_tests_background, task_id, loop)
     return {"task_id": task_id, "status": "running"}
 
 

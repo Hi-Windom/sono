@@ -60,5 +60,24 @@ class ProgressWSManager:
                 pass
         self._connections.pop(task_id, None)
 
+    async def broadcast(self, data: dict[str, Any]) -> None:
+        disconnected: list[tuple[str, WebSocket]] = []
+        for task_id, connections in self._connections.items():
+            for ws in connections:
+                try:
+                    await ws.send_json(data)
+                except Exception:
+                    disconnected.append((task_id, ws))
+        for task_id, ws in disconnected:
+            self.disconnect(task_id, ws)
+
+    async def broadcast_render_cache_update(self, task_id: str, files: list[dict]) -> None:
+        message = {
+            "type": "render_cache_updated",
+            "task_id": task_id,
+            "files": files,
+        }
+        await self.broadcast(message)
+
 
 ws_manager = ProgressWSManager()

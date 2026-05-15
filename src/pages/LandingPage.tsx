@@ -255,6 +255,30 @@ export default function LandingPage() {
               </svg>
             </div>
           </div>
+
+          {/* 系统流程可视化 */}
+          <div
+            onClick={() => navigate('/flow')}
+            className="group bg-primary/50 border border-white/10 rounded-2xl p-8 cursor-pointer
+                       hover:border-cyan-400/50 hover:bg-primary/70 transition-all duration-300"
+          >
+            <div className="w-16 h-16 bg-gradient-to-br from-cyan-500/20 to-emerald-500/20 rounded-xl
+                            flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
+              <svg className="w-8 h-8 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z" />
+              </svg>
+            </div>
+            <h2 className="text-2xl font-bold text-white mb-3">系统流程可视化</h2>
+            <p className="text-gray-400 mb-4">
+              交互式系统架构图，展示前端组件、后端服务与数据流的完整拓扑关系
+            </p>
+            <div className="flex items-center text-cyan-400 group-hover:text-cyan-300">
+              <span className="text-sm font-medium">查看架构</span>
+              <svg className="w-5 h-5 ml-2 group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
+              </svg>
+            </div>
+          </div>
         </div>
 
         {/* Recent Updates Section */}

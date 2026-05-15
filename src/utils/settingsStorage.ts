@@ -62,6 +62,7 @@ export interface AppSettings {
   exportOptions: {
     sampleRate: number;
     bitDepth: 16 | 24 | 32;
+    masteringStyle?: 'standard' | 'powerful' | 'warm';
   };
   stemSettings: {
     vocalGain: number;
@@ -83,6 +84,7 @@ export const defaultSettings: AppSettings = {
   exportOptions: {
     sampleRate: 48000,
     bitDepth: 24,
+    masteringStyle: 'standard',
   },
   stemSettings: {
     vocalGain: 0,
