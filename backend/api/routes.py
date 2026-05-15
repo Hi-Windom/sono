@@ -1330,6 +1330,17 @@ async def download_audio(task_id: str):
     
     output_path = task.get("output_path")
     if not output_path or not os.path.exists(output_path):
+        task_params = task.get("params", {})
+        if isinstance(task_params, str):
+            try:
+                import json as _json
+                task_params = _json.loads(task_params)
+            except Exception:
+                task_params = {}
+        if task_params.get("processing_mode") == "dual":
+            logger.warning(f"双轨任务下载失败: task_id={task_id}, output_path={output_path}, "
+                           f"vocal_output_path={task_params.get('vocal_output_path')}, "
+                           f"accompaniment_output_path={task_params.get('accompaniment_output_path')}")
         raise HTTPException(status_code=404, detail="修复后的音频不存在")
     
     original_name = task.get("original_filename", "audio")

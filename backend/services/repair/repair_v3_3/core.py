@@ -2,6 +2,7 @@ import numpy as np
 import soundfile as sf
 import gc
 import os
+import logging
 from scipy.signal import resample_poly
 
 from services.audio_loader import load_audio_with_fallback
@@ -315,6 +316,9 @@ def _repair_dual_track(input_path, output_path, params, progress_callback=None):
         y = y.astype(np.float64)
 
     sf.write(output_path, y.T if y.ndim > 1 else y, sr, subtype=subtype)
+    if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
+        logger = logging.getLogger(__name__)
+        logger.error(f"v3.3 双轨混音输出文件写入失败: {output_path}")
 
     v_export = _soft_peak_limit(v_processed, threshold=0.95)
     a_export = _soft_peak_limit(a_processed, threshold=0.95)
@@ -323,7 +327,13 @@ def _repair_dual_track(input_path, output_path, params, progress_callback=None):
     if a_export.dtype == np.float32:
         a_export = a_export.astype(np.float64)
     sf.write(vocal_output, v_export.T if v_export.ndim > 1 else v_export, sr, subtype=subtype)
+    if not os.path.exists(vocal_output) or os.path.getsize(vocal_output) == 0:
+        logger = logging.getLogger(__name__)
+        logger.error(f"v3.3 双轨人声输出文件写入失败: {vocal_output}")
     sf.write(inst_output, a_export.T if a_export.ndim > 1 else a_export, sr, subtype=subtype)
+    if not os.path.exists(inst_output) or os.path.getsize(inst_output) == 0:
+        logger = logging.getLogger(__name__)
+        logger.error(f"v3.3 双轨伴奏输出文件写入失败: {inst_output}")
 
     channels = y.shape[0] if y.ndim > 1 else 1
     original_duration = round(max(v_y.shape[1], a_y.shape[1]) / sr, 2)

@@ -1832,7 +1832,7 @@ export function useAudioProcessor() {
     updateTime();
   }, [stopPlaying, getAudioContext]);
 
-  const renderAndDownload = useCallback(async (overrideOptions?: ProcessingOptions, overrideAlgoVersion?: string) => {
+  const renderAndDownload = useCallback(async (overrideOptions?: ProcessingOptions, overrideAlgoVersion?: string, force?: boolean) => {
     if (renderActiveRef.current) {
       writeLog('[renderAndDownload] 已有渲染在进行中，跳过');
       return null;
@@ -1843,10 +1843,13 @@ export function useAudioProcessor() {
     const algoVer = overrideAlgoVersion || algorithmVersionRef.current;
     const fileName = generateExportFilename(audioFile?.name, algoVer, opts.sampleRate, opts.bitDepth);
 
-    if (!taskIdRef.current) return null;
+    if (!taskIdRef.current) {
+      renderActiveRef.current = false;
+      return null;
+    }
 
     try {
-      if (!forceRenderRef.current) {
+      if (!force && !forceRenderRef.current) {
         const caches = await fetchRenderCache(taskIdRef.current);
         const hit = caches.find(c => c.sample_rate === opts.sampleRate && c.bit_depth === opts.bitDepth && c.algorithm_version === algoVer);
         if (hit) {

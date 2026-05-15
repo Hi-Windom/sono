@@ -190,23 +190,18 @@ export default function RepairPage() {
         const downloadUrl = getDownloadUrl(taskId);
         setDualTrackDownloadUrl(downloadUrl);
         setTaskId(taskId);
-        try {
-          const buffer = await loadAudioFromUrl(downloadUrl, processingOptions.sampleRate, true);
-          setBackendProcessedBuffer(buffer);
-          setBackendWaveformPeaks(null);
-        } catch (e) {
-          setBackendError('加载双轨处理结果失败，请检查后端服务');
-        }
         setProcessingStep('准备渲染交付...');
         setProcessingProgress(0);
         try {
-          const result = await renderAndDownload(undefined, algorithmVersion);
+          const result = await renderAndDownload(undefined, algorithmVersion, true);
           if (result === null) {
+            console.error('[双轨] renderAndDownload 返回 null（taskId 为空或渲染进行中）');
             setBackendError('渲染交付失败，请重试');
             setIsProcessing(false);
             return;
           }
         } catch (e) {
+          console.error('[双轨] 渲染失败:', e);
           setBackendError(e instanceof Error ? e.message : '渲染交付失败');
           setIsProcessing(false);
           return;
@@ -519,24 +514,24 @@ export default function RepairPage() {
 
     sessionActions.setDualTrackProcessed(true);
 
-    const previewUrl = getPreviewUrl(cachedTaskId, 'repaired');
-    try {
-      const buffer = await loadAudioFromUrl(previewUrl, processingOptions.sampleRate, true);
-      setBackendProcessedBuffer(buffer);
-      setBackendWaveformPeaks(null);
-    } catch (e) {
-      console.error('加载双轨缓存音频失败:', e);
-    }
-
     setProcessingStep('准备渲染交付...');
     setProcessingProgress(0);
     try {
-      await renderAndDownload(undefined, algorithmVersion);
+      const result = await renderAndDownload(undefined, algorithmVersion, true);
+      if (result === null) {
+        console.error('[双轨-缓存] renderAndDownload 返回 null');
+        setBackendError('渲染交付失败，请重试');
+        setIsProcessing(false);
+        return;
+      }
     } catch (e) {
-      console.error('双轨渲染交付失败:', e);
+      console.error('[双轨-缓存] 渲染失败:', e);
+      setBackendError(e instanceof Error ? e.message : '渲染交付失败');
+      setIsProcessing(false);
+      return;
     }
     setCacheTriggerKey(k => k + 1);
-  }, [dualCacheHitInfo, processingOptions.sampleRate, renderAndDownload, sessionActions, setTaskId, loadAudioFromUrl, setBackendProcessedBuffer, setBackendWaveformPeaks, algorithmVersion]);
+  }, [dualCacheHitInfo, processingOptions.sampleRate, renderAndDownload, sessionActions, setTaskId, algorithmVersion]);
 
   const handleDualReRepair = useCallback(() => {
     setShowDualRepairCacheModal(false);

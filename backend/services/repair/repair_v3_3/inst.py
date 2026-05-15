@@ -85,17 +85,18 @@ def _inst_multiband_harmonic_dereg(y, sr, strength):
         high_mask = freqs > 4000.0
         perturbed = mag.copy()
         if np.any(low_mask):
-            low_perturb = rng.uniform(-0.01 * strength, 0.01 * strength, size=(np.sum(low_mask), n_frames))
+            low_perturb = rng.uniform(-0.01 * strength, 0.01 * strength, size=(np.sum(low_mask), 1))
             perturbed[low_mask] *= 1.0 + low_perturb
         if np.any(mid_mask):
-            mid_perturb = rng.uniform(-0.03 * strength, 0.03 * strength, size=(np.sum(mid_mask), n_frames))
+            mid_perturb = rng.uniform(-0.03 * strength, 0.03 * strength, size=(np.sum(mid_mask), 1))
             perturbed[mid_mask] *= 1.0 + mid_perturb
         if np.any(high_mask):
-            high_perturb = rng.uniform(-0.06 * strength, 0.06 * strength, size=(np.sum(high_mask), n_frames))
+            high_perturb = rng.uniform(-0.06 * strength, 0.06 * strength, size=(np.sum(high_mask), 1))
             perturbed[high_mask] *= 1.0 + high_perturb
         step = max(1, n_frames // 200)
         processed_frames = list(range(0, n_frames, step))
-        for j in processed_frames:
+        all_ratio_noise = rng.uniform(-0.1 * strength, 0.1 * strength, size=(len(processed_frames), n_bins))
+        for idx, j in enumerate(processed_frames):
             col = perturbed[:, j]
             mean_col = np.mean(col)
             is_peak = np.zeros(n_bins, dtype=bool)
@@ -105,7 +106,7 @@ def _inst_multiband_harmonic_dereg(y, sr, strength):
                 for pi in range(len(peak_indices) - 1):
                     b1 = peak_indices[pi]
                     b2 = peak_indices[pi + 1]
-                    ratio_noise = rng.uniform(-0.1 * strength, 0.1 * strength)
+                    ratio_noise = all_ratio_noise[idx, pi]
                     ratio = col[b2] / (col[b1] + eps)
                     new_ratio = ratio * (1.0 + ratio_noise)
                     perturbed[b2, j] = col[b1] * new_ratio
