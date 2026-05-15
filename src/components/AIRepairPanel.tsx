@@ -945,20 +945,36 @@ export function AIRepairPanel({
                 <span className="ml-1 text-white font-medium">{speed.toFixed(2)}x</span>
               </span>
             </div>
-            <input
-              type="range"
-              min="0.5"
-              max="2.0"
-              step="0.01"
-              value={speed}
-              onChange={(e) => onSpeedChange?.(parseFloat(e.target.value))}
-              disabled={disabled}
-              className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer slider-accent"
-            />
-            <div className="flex justify-between text-[10px] text-gray-500 mt-1">
-              <span>0.5x</span>
-              <span>1.0x</span>
-              <span>2.0x</span>
+            <div className="relative pt-1 pb-5">
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.001"
+                value={Math.log2(speed / 0.5) / 2}
+                onChange={(e) => {
+                  const pos = parseFloat(e.target.value);
+                  const newSpeed = 0.5 * Math.pow(4, pos);
+                  onSpeedChange?.(Math.round(newSpeed * 100) / 100);
+                }}
+                disabled={disabled}
+                className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer slider-accent"
+              />
+              <div className="absolute left-0 right-0 top-8 text-[10px] text-gray-500 select-none pointer-events-none">
+                {[0.5, 0.75, 1.0, 1.25, 1.5, 2.0].map((tick) => {
+                  const pos = Math.log2(tick / 0.5) / 2;
+                  return (
+                    <div
+                      key={tick}
+                      className="absolute flex flex-col items-center"
+                      style={{ left: `${pos * 100}%`, transform: 'translateX(-50%)' }}
+                    >
+                      <div className="w-px h-1.5 bg-gray-500/40 mb-0.5" />
+                      <span>{tick}x</span>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           </div>
 
