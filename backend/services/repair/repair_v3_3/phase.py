@@ -68,14 +68,14 @@ def _group_delay_correct(y, sr, strength):
     rng = np.random.RandomState(42)
     if S.ndim == 3:
         for ch in range(S.shape[0]):
-            phase_shift = (rng.rand(len(high_indices), n_frames) - 0.5) * 2 * np.pi * strength * 0.03
+            phase_shift = (rng.rand(len(high_indices), n_frames) - 0.5) * 2 * np.pi * strength * 0.1
             S_ch = S[ch]
             mag = np.abs(S_ch)
             phase = np.angle(S_ch)
             phase[high_indices] += phase_shift
             S[ch] = mag * np.exp(1j * phase)
     else:
-        phase_shift = (rng.rand(len(high_indices), n_frames) - 0.5) * 2 * np.pi * strength * 0.03
+        phase_shift = (rng.rand(len(high_indices), n_frames) - 0.5) * 2 * np.pi * strength * 0.1
         mag = np.abs(S)
         phase = np.angle(S)
         phase[high_indices] += phase_shift

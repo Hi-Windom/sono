@@ -37,6 +37,87 @@ export interface InstrumentRepairParams {
   speed?: number;
 }
 
+export interface V33RepairParams {
+  spectralNaturalize: number;
+  noiseFloorShape: number;
+  harmonicDeregularize: number;
+  phaseNaturalize: number;
+  transientProtect: number;
+  dynamicNaturalize: number;
+  loudness: number;
+  f0GuidedDepth?: number;
+  perceptualWeight?: number;
+  preset?: 'none' | 'anti-detect' | 'hifi-pure' | 'vocal';
+  residualRefine?: number;
+}
+
+export const defaultV33RepairParams: V33RepairParams = {
+  spectralNaturalize: 0.8,
+  noiseFloorShape: 0.6,
+  harmonicDeregularize: 0.7,
+  phaseNaturalize: 0.5,
+  transientProtect: 0.5,
+  dynamicNaturalize: 0.4,
+  loudness: 0.5,
+};
+
+export const defaultV33pRepairParams: V33RepairParams = {
+  spectralNaturalize: 0.85,
+  noiseFloorShape: 0.65,
+  harmonicDeregularize: 0.75,
+  phaseNaturalize: 0.55,
+  transientProtect: 0.5,
+  dynamicNaturalize: 0.5,
+  loudness: 0.5,
+  f0GuidedDepth: 0.3,
+  perceptualWeight: 0.3,
+  preset: 'anti-detect',
+};
+
+export const defaultV33aRepairParams: V33RepairParams = {
+  spectralNaturalize: 0.6,
+  noiseFloorShape: 0.4,
+  harmonicDeregularize: 0.4,
+  phaseNaturalize: 0,
+  transientProtect: 0.5,
+  dynamicNaturalize: 0.3,
+  loudness: 0.5,
+};
+
+export const defaultV33apRepairParams: V33RepairParams = {
+  spectralNaturalize: 0.6,
+  noiseFloorShape: 0.4,
+  harmonicDeregularize: 0.4,
+  phaseNaturalize: 0,
+  transientProtect: 0.5,
+  dynamicNaturalize: 0.3,
+  loudness: 0.5,
+  residualRefine: 0.4,
+};
+
+export function getDefaultV33Params(algorithmVersion: string): V33RepairParams {
+  if (algorithmVersion === 'v3.3+') return defaultV33pRepairParams;
+  if (algorithmVersion === 'v3.3a') return defaultV33aRepairParams;
+  if (algorithmVersion === 'v3.3a+') return defaultV33apRepairParams;
+  return defaultV33RepairParams;
+}
+
+export function mapV33ParamsToBackend(params: V33RepairParams): Record<string, any> {
+  const result: Record<string, any> = {};
+  if (params.spectralNaturalize != null) result.spectral_naturalize = params.spectralNaturalize;
+  if (params.noiseFloorShape != null) result.noise_floor_shape = params.noiseFloorShape;
+  if (params.harmonicDeregularize != null) result.harmonic_deregularize = params.harmonicDeregularize;
+  if (params.phaseNaturalize != null) result.phase_naturalize = params.phaseNaturalize;
+  if (params.transientProtect != null) result.transient_protect = params.transientProtect;
+  if (params.dynamicNaturalize != null) result.dynamic_naturalize = params.dynamicNaturalize;
+  if (params.loudness != null) result.loudness = params.loudness;
+  if (params.f0GuidedDepth != null) result.f0_guided_depth = params.f0GuidedDepth;
+  if (params.perceptualWeight != null) result.perceptual_weight = params.perceptualWeight;
+  if (params.preset != null && params.preset !== 'none') result.preset = params.preset;
+  if (params.residualRefine != null) result.residual_refine = params.residualRefine;
+  return result;
+}
+
 export const defaultVocalRepairParams: VocalRepairParams = {
   deClipping: 0.30,
   dePop: 0.18,

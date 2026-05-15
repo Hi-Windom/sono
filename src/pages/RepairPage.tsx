@@ -8,7 +8,7 @@ import { ErrorBoundary } from '../components/ErrorBoundary';
 import { DownloadModal, DownloadFileInfo, DualTrackDownloadUrls } from '../components/DownloadModal';
 import { RepairCacheModal, CacheHitInfo } from '../components/RepairCacheModal';
 import { useAudioProcessor, generateExportFilename } from '../hooks/useAudioProcessor';
-import { uploadDualAudio, repairDualAudio, repairDualFromHash, getDownloadUrl, getPreviewUrl, connectProgressWS, WSProgressControl, VocalRepairParams, InstrumentRepairParams, defaultVocalRepairParams, defaultInstrumentRepairParams, fetchRenderCache, lookupDualRepairCache, mapParamsToBackend, mapVocalParamsToBackend, mapInstrumentParamsToBackend, connectCacheWS, CacheUpdateEvent, RenderCacheEntry, fetchFileInfoByHash, checkFileHash } from '../services/backendApi';
+import { uploadDualAudio, repairDualAudio, repairDualFromHash, getDownloadUrl, getPreviewUrl, connectProgressWS, WSProgressControl, VocalRepairParams, InstrumentRepairParams, defaultVocalRepairParams, defaultInstrumentRepairParams, mapParamsToBackend, mapVocalParamsToBackend, mapInstrumentParamsToBackend, connectCacheWS, CacheUpdateEvent, RenderCacheEntry, fetchFileInfoByHash, checkFileHash, V33RepairParams, mapV33ParamsToBackend } from '../services/backendApi';
 import { useBackend } from '../contexts/BackendContext';
 import { saveSettings, loadSettings } from '../utils/settingsStorage';
 import { computeFileHash } from '../utils/fileHash';
@@ -44,6 +44,8 @@ export default function RepairPage() {
     backendWaveformPeaks,
     originalWaveformPeaks,
     algorithmVersion,
+    v33Params,
+    setV33Params,
     availableAlgorithms,
     applyAlgorithmVersion,
     isTaskStuck,
@@ -395,7 +397,10 @@ export default function RepairPage() {
 
     if (hasHashes && !forceDualReRepairRef.current) {
       try {
-        const mainParams = mapParamsToBackend(params, processingOptions, algorithmVersion);
+        let mainParams = mapParamsToBackend(params, processingOptions, algorithmVersion);
+        if (algorithmVersion.startsWith('v3.3') && v33Params) {
+          mainParams = { ...mainParams, ...mapV33ParamsToBackend(v33Params) };
+        }
         const vParams = mapVocalParamsToBackend(dualTrackVocalParams, processingOptions, algorithmVersion);
         const aParams = mapInstrumentParamsToBackend(dualTrackAccompanimentParams, processingOptions, algorithmVersion);
         console.log('[双轨缓存] 发送缓存查询', {
@@ -544,7 +549,10 @@ export default function RepairPage() {
     let cancelled = false;
     (async () => {
       try {
-        const mainParams = mapParamsToBackend(params, processingOptions, algorithmVersion);
+        let mainParams = mapParamsToBackend(params, processingOptions, algorithmVersion);
+        if (algorithmVersion.startsWith('v3.3') && v33Params) {
+          mainParams = { ...mainParams, ...mapV33ParamsToBackend(v33Params) };
+        }
         const vParams = mapVocalParamsToBackend(dualTrackVocalParams, processingOptions, algorithmVersion);
         const aParams = mapInstrumentParamsToBackend(dualTrackAccompanimentParams, processingOptions, algorithmVersion);
         console.log('[双轨] mount 查询缓存', {
@@ -1056,6 +1064,8 @@ export default function RepairPage() {
                 onVocalParamChange={handleDualTrackVocalParamChange}
                 onAccompanimentParamChange={handleDualTrackAccompanimentParamChange}
                 onMixRatioChange={setMixRatio}
+                v33Params={v33Params}
+                onV33ParamChange={(key, value) => setV33Params(prev => ({ ...prev, [key]: value }))}
                 speed={dualTrackSpeed}
                 onSpeedChange={handleDualTrackSpeedChange}
                 onDualTrackRepair={isDualTrackMode ? handleDualTrackRepair : undefined}

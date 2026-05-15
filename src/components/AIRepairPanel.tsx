@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { AIRepairParams, RepairMode } from '../utils/advancedAudioProcessing';
-import { ProcessingOptions, AlgorithmVersion, fetchMemoryInfo, MemoryInfoResult, fetchStorageEstimate, StorageEstimateResult, fetchRenderCache, RenderCacheEntry, VocalRepairParams, InstrumentRepairParams, defaultVocalRepairParams, defaultInstrumentRepairParams } from '../services/backendApi';
+import { ProcessingOptions, AlgorithmVersion, fetchMemoryInfo, MemoryInfoResult, fetchStorageEstimate, StorageEstimateResult, fetchRenderCache, RenderCacheEntry, VocalRepairParams, InstrumentRepairParams, defaultVocalRepairParams, defaultInstrumentRepairParams, V33RepairParams, mapV33ParamsToBackend } from '../services/backendApi';
 import AlgorithmSelector from './AlgorithmSelector';
 
 interface DualTrackAudioInfo {
@@ -53,6 +53,8 @@ interface AIRepairPanelProps {
   dualTrackVocalInfo?: DualTrackAudioInfo | null;
   dualTrackAccompanimentInfo?: DualTrackAudioInfo | null;
   persistedRenderCaches?: RenderCacheEntry[];
+  v33Params?: V33RepairParams | null;
+  onV33ParamChange?: (key: keyof V33RepairParams, value: number | string) => void;
 }
 
 const sampleRateOptions = [
@@ -152,6 +154,8 @@ export function AIRepairPanel({
   dualTrackVocalInfo,
   dualTrackAccompanimentInfo,
   persistedRenderCaches,
+  v33Params,
+  onV33ParamChange,
 }: AIRepairPanelProps) {
   const effectiveDuration = useMemo(() => {
     if (isDualTrackMode && dualTrackVocalInfo && dualTrackAccompanimentInfo) {
@@ -1042,6 +1046,128 @@ export function AIRepairPanel({
                   />
                 </div>
               ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* v3.3 自然化参数 */}
+      {algorithmVersion.startsWith('v3.3') && v33Params && onV33ParamChange && (
+        <div className="mb-4">
+          <button
+            type="button"
+            onClick={() => setShowParams(showParams === 'v33' ? false : 'v33')}
+            className="w-full flex items-center justify-between p-2 bg-cyan-900/10 rounded-lg border border-cyan-500/20 hover:border-cyan-500/40 transition-all"
+          >
+            <div className="flex items-center gap-2">
+              <span className="text-cyan-400 text-sm font-medium">v3.3 自然化参数</span>
+              {algorithmVersion === 'v3.3+' && (
+                <span className="text-[10px] bg-violet-500/20 text-violet-400 px-1.5 py-0.5 rounded">增强版</span>
+              )}
+              {algorithmVersion === 'v3.3a' && (
+                <span className="text-[10px] bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded">移动精简版</span>
+              )}
+              {algorithmVersion === 'v3.3a+' && (
+                <span className="text-[10px] bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded">移动增强版</span>
+              )}
+            </div>
+            <svg className={`w-4 h-4 text-cyan-400 transition-transform ${showParams === 'v33' ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+          
+          {showParams === 'v33' && (
+            <div className="mt-3 p-3 bg-slate-900/50 rounded-lg border border-slate-700/30">
+              {algorithmVersion === 'v3.3+' && (
+                <div className="mb-3 p-2 bg-gradient-to-r from-violet-900/30 to-fuchsia-900/30 rounded-lg border border-violet-500/20">
+                  <div className="text-violet-400 text-xs font-medium mb-2">预设模式</div>
+                  <div className="flex gap-1.5">
+                    {[
+                      { value: 'anti-detect', label: '反检测', icon: '🛡️' },
+                      { value: 'hifi-pure', label: '高保真', icon: '🎵' },
+                      { value: 'vocal', label: '人声优化', icon: '🎤' },
+                    ].map(preset => (
+                      <button
+                        key={preset.value}
+                        type="button"
+                        onClick={() => onV33ParamChange('preset', preset.value)}
+                        className={`flex-1 py-1.5 px-2 rounded-md text-xs font-medium transition-all ${
+                          v33Params.preset === preset.value
+                            ? 'bg-violet-500/30 text-violet-300 border border-violet-400/50'
+                            : 'bg-slate-800/50 text-slate-400 border border-slate-700/30 hover:text-slate-300'
+                        }`}
+                      >
+                        {preset.icon} {preset.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              
+              <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+                {[
+                  { key: 'spectralNaturalize' as const, label: '频谱自然化', color: 'cyan' },
+                  { key: 'noiseFloorShape' as const, label: '噪声地板塑形', color: 'blue' },
+                  { key: 'harmonicDeregularize' as const, label: '谐波去规整', color: 'purple' },
+                  { key: 'phaseNaturalize' as const, label: '相位自然化', color: 'green' },
+                  { key: 'transientProtect' as const, label: '瞬态保护', color: 'amber' },
+                  { key: 'dynamicNaturalize' as const, label: '动态自然化', color: 'orange' },
+                ].map(({ key, label }) => {
+                  const val = v33Params[key] ?? 0;
+                  return (
+                    <div key={key}>
+                      <label className="text-sm text-text flex justify-between">
+                        <span>{label}</span>
+                        <span className="text-secondary text-xs">{(val * 100).toFixed(0)}%</span>
+                      </label>
+                      <input
+                        type="range"
+                        min="0"
+                        max="1"
+                        step="0.01"
+                        value={val}
+                        onChange={(e) => onV33ParamChange(key, parseFloat(e.target.value))}
+                        className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer slider-accent mt-1"
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+              
+              {algorithmVersion === 'v3.3+' && (
+                <div className="grid grid-cols-2 gap-x-4 gap-y-3 mt-3 pt-3 border-t border-slate-700/30">
+                  <div>
+                    <label className="text-sm text-text flex justify-between">
+                      <span>F0 引导深度</span>
+                      <span className="text-secondary text-xs">{((v33Params.f0GuidedDepth ?? 0) * 100).toFixed(0)}%</span>
+                    </label>
+                    <input type="range" min="0" max="1" step="0.01" value={v33Params.f0GuidedDepth ?? 0}
+                      onChange={(e) => onV33ParamChange('f0GuidedDepth', parseFloat(e.target.value))}
+                      className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer slider-accent mt-1" />
+                  </div>
+                  <div>
+                    <label className="text-sm text-text flex justify-between">
+                      <span>感知加权</span>
+                      <span className="text-secondary text-xs">{((v33Params.perceptualWeight ?? 0) * 100).toFixed(0)}%</span>
+                    </label>
+                    <input type="range" min="0" max="1" step="0.01" value={v33Params.perceptualWeight ?? 0}
+                      onChange={(e) => onV33ParamChange('perceptualWeight', parseFloat(e.target.value))}
+                      className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer slider-accent mt-1" />
+                  </div>
+                </div>
+              )}
+              
+              {algorithmVersion === 'v3.3a+' && (
+                <div className="mt-3 pt-3 border-t border-slate-700/30">
+                  <label className="text-sm text-text flex justify-between">
+                    <span>残差精炼</span>
+                    <span className="text-secondary text-xs">{((v33Params.residualRefine ?? 0) * 100).toFixed(0)}%</span>
+                  </label>
+                  <input type="range" min="0" max="1" step="0.01" value={v33Params.residualRefine ?? 0}
+                    onChange={(e) => onV33ParamChange('residualRefine', parseFloat(e.target.value))}
+                    className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer slider-accent mt-1" />
+                </div>
+              )}
             </div>
           )}
         </div>

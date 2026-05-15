@@ -30,6 +30,8 @@ import {
   RenderCacheEntry,
   parseFilenameFromDisposition,
   BackendRepairResult,
+  V33RepairParams,
+  getDefaultV33Params,
 } from '../services/backendApi';
 import { CacheHitInfo } from '../components/RepairCacheModal';
 
@@ -157,6 +159,10 @@ export function useAudioProcessor() {
     taskIdRef.current = id;
   }, []);
   const [algorithmVersion, setAlgorithmVersionState] = useState<string>(savedSettings.algorithmVersion);
+  const [v33Params, setV33Params] = useState<V33RepairParams>(() => {
+    const defaults = getDefaultV33Params(savedSettings.algorithmVersion || 'v3.3');
+    return { ...defaults, ...(savedSettings.v33RepairParams as V33RepairParams) || {} };
+  });
   const [availableAlgorithms, setAvailableAlgorithms] = useState<AlgorithmVersion[]>([]);
   const [repairModes, setRepairModes] = useState<RepairMode[]>([]);
   const versionInitializedRef = useRef(false);
@@ -229,6 +235,12 @@ export function useAudioProcessor() {
 
   useEffect(() => { processingOptionsRef.current = processingOptions; }, [processingOptions]);
   useEffect(() => { algorithmVersionRef.current = algorithmVersion; }, [algorithmVersion]);
+
+  useEffect(() => {
+    if (!algorithmVersion.startsWith('v3.3')) return;
+    const defaults = getDefaultV33Params(algorithmVersion);
+    setV33Params(prev => ({ ...defaults, ...prev }));
+  }, [algorithmVersion]);
   // 静音策略：为每种播放模式维护独立的 source + gain，通过 gain 切换实现无缝 A/B 对比
   const modeNodesRef = useRef<Record<PlayMode, { source: AudioBufferSourceNode; gain: GainNode } | null>>({
     original: null,
@@ -272,6 +284,10 @@ export function useAudioProcessor() {
       }));
       setRepairModes(modes);
       setSelectedMode(modes[0].name);
+    }
+    if (version.startsWith('v3.3')) {
+      const defaults = getDefaultV33Params(version);
+      setV33Params(defaults);
     }
   }, [availableAlgorithms]);
 
@@ -336,8 +352,9 @@ export function useAudioProcessor() {
       },
       selectedMode,
       algorithmVersion,
+      v33RepairParams: v33Params,
     });
-  }, [params, processingOptions, selectedMode, algorithmVersion]);
+  }, [params, processingOptions, selectedMode, algorithmVersion, v33Params]);
 
   useEffect(() => {
     if (availableAlgorithms.length > 0 && !versionInitializedRef.current) {
@@ -2045,6 +2062,8 @@ export function useAudioProcessor() {
     repairResult,
     backendWaveformPeaks,
     algorithmVersion,
+    v33Params,
+    setV33Params,
     availableAlgorithms,
     applyAlgorithmVersion,
     isTaskStuck,

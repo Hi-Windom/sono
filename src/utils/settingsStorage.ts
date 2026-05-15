@@ -1,4 +1,5 @@
 import { AIRepairParams, defaultAIRepairParams } from './advancedAudioProcessing';
+import { V33RepairParams, defaultV33RepairParams } from '../services/backendApi';
 
 export interface VocalRepairParams {
   deClipping: number;
@@ -73,6 +74,7 @@ export interface AppSettings {
   selectedMode: string;
   algorithmVersion: string;
   savedProfiles: ProfileConfig[];
+  v33RepairParams?: V33RepairParams;
 }
 
 const SETTINGS_KEY = 'ai-music-repair-settings';
@@ -96,6 +98,7 @@ export const defaultSettings: AppSettings = {
   selectedMode: '全面修复',
   algorithmVersion: '',
   savedProfiles: [],
+  v33RepairParams: defaultV33RepairParams,
 };
 
 export function loadSettings(): AppSettings {
@@ -118,6 +121,9 @@ export function loadSettings(): AppSettings {
           ...defaultSettings.dualTrackInstrumentParams,
           ...parsed.dualTrackInstrumentParams,
         },
+        v33RepairParams: parsed.v33RepairParams
+          ? { ...defaultSettings.v33RepairParams, ...parsed.v33RepairParams }
+          : defaultSettings.v33RepairParams,
         dualTrackMixRatio: parsed.dualTrackMixRatio ?? defaultSettings.dualTrackMixRatio,
         exportOptions: {
           ...defaultSettings.exportOptions,

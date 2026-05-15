@@ -279,13 +279,13 @@ def _nfs_channel(y, sr, strength):
     noise_S = stft(pink, n_fft=N_FFT, hop_length=HOP_LENGTH)
     noise_mag = np.abs(noise_S)
     peak_mag = np.max(mag)
-    noise_target_db = -78.0 + (1.0 - strength) * 7.0
+    noise_target_db = -70.0 + (1.0 - strength) * 8.0
     noise_target_linear = peak_mag * (10.0 ** (noise_target_db / 20.0))
     noise_scale = noise_target_linear / (np.mean(noise_mag) + eps)
     shaped = mag.copy()
     for b in range(n_bins):
         if flat_bands[b]:
-            noise_b = noise_mag[b, :n_frames] * noise_scale * strength * 0.5
+            noise_b = noise_mag[b, :n_frames] * noise_scale * strength
             shaped[b, :] = mag[b, :] + noise_b
     S_out = shaped * np.exp(1j * phase)
     y_out = istft(S_out, hop_length=HOP_LENGTH, length=n_samples)
@@ -313,7 +313,7 @@ def _hd_channel(y, sr, strength):
     n_bins, n_frames = mag.shape
     eps = 1e-12
     np.random.seed(42)
-    perturb_scale = 0.005 * strength
+    perturb_scale = 0.02 * strength
     energy_noise = np.random.uniform(-perturb_scale, perturb_scale, size=mag.shape)
     perturbed_mag = mag * (1.0 + energy_noise)
     freqs = fft_frequencies(sr=sr, n_fft=N_FFT)
@@ -328,7 +328,7 @@ def _hd_channel(y, sr, strength):
             for pi in range(len(peak_indices) - 1):
                 b1 = peak_indices[pi]
                 b2 = peak_indices[pi + 1]
-                ratio_noise = np.random.uniform(-0.02 * strength, 0.02 * strength)
+                ratio_noise = np.random.uniform(-0.08 * strength, 0.08 * strength)
                 ratio = col[b2] / (col[b1] + eps)
                 new_ratio = ratio * (1.0 + ratio_noise)
                 perturbed_mag[b2, j] = col[b1] * new_ratio
