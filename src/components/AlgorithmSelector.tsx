@@ -111,7 +111,7 @@ export default function AlgorithmSelector({ value, algorithms, onChange, disable
 
       {open && (
         <div
-          className="absolute z-50 mt-1 left-0 right-0 min-w-[280px] bg-gray-900/95 backdrop-blur-sm
+          className="absolute z-50 mt-1 right-0 min-w-[280px] bg-gray-900/95 backdrop-blur-sm
             border border-cyan-500/20 rounded-xl shadow-xl shadow-black/40 overflow-hidden"
         >
           <div ref={listRef} className="max-h-[320px] overflow-y-auto py-1">
