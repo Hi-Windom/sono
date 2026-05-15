@@ -1338,17 +1338,7 @@ export function useAudioProcessor() {
         });
       }
 
-      if (backendResult && taskIdRef.current) {
-        forceRenderRef.current = true;
-        if (renderActiveRef.current) {
-          writeLog('[applySettings] renderAndDownload 已在进行，跳过');
-        } else {
-          const currentOpts = { ...processingOptions };
-          renderAndDownload(currentOpts, effectiveAlgorithmVersion).catch(err => {
-            writeLog(`[applySettings] 自动渲染失败: ${err}`);
-          });
-        }
-      }
+      // 不再自动调用 renderAndDownload，靠用户点击秒下
     }
 
     if (backendResult) {
@@ -1986,20 +1976,8 @@ export function useAudioProcessor() {
       processingOptions: JSON.stringify(processingOptionsRef.current),
     });
 
-    // 直接开始渲染下载，确保进度条显示
-    writeLog(`[handleUseRepairCache] 开始调用 renderAndDownload`);
-    forceRenderRef.current = false;
-    const currentOpts = { ...processingOptions };
-    renderAndDownload(currentOpts, algorithmVersion).then(result => {
-      writeLog(`[handleUseRepairCache] renderAndDownload 完成: ${!!result}`);
-      if (result?.downloadUrl) {
-        setRenderDownloadUrl(result.downloadUrl);
-      }
-      setShowDownloadModal(true);
-    }).catch((err) => {
-      writeLog(`[handleUseRepairCache] renderAndDownload 失败: ${err}`);
-      setShowDownloadModal(true);
-    });
+    // 不再自动调用 renderAndDownload，也不自动弹窗，靠用户点击秒下
+    writeLog(`[handleUseRepairCache] 使用修复缓存成功，等待用户点击秒下`);
   }, [cacheHitInfo, loadAudioFromUrl, wavInfo, renderAndDownload, algorithmVersion]);
 
   const handleRenderCacheDownload = useCallback((cache: RenderCacheEntry, downloadUrl: string, filename: string) => {

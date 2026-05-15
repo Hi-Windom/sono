@@ -241,6 +241,12 @@ export function AIRepairPanel({
     };
   }, [taskId, backendAvailable, algorithmVersion, refreshRenderCache, cacheTriggerKey]);
 
+  // 当 isDualTrackMode 变化时，清空渲染缓存，避免单双轨污染
+  useEffect(() => {
+    setRenderCaches([]);
+    setSelectedCache(null);
+  }, [isDualTrackMode]);
+
   // 注册缓存刷新回调给父组件
   useEffect(() => {
     if (onRenderCacheRefresh) onRenderCacheRefresh(refreshRenderCache);
