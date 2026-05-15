@@ -114,12 +114,15 @@ export function generateExportFilename(
   sampleRate: number,
   bitDepth: number,
   suffix?: string,
+  speed?: number,
 ): string {
   const baseName = audioFileName ? audioFileName.replace(/\.[^/.]+$/, '') : 'audio';
   const ts = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 15);
   const parts = [baseName];
   if (suffix) parts.push(suffix);
-  parts.push(algorithmVersion, `${sampleRate / 1000}k`, `${bitDepth}bit`, ts);
+  parts.push(algorithmVersion);
+  if (speed && speed !== 1.0) parts.push(`${speed}x`);
+  parts.push(`${sampleRate / 1000}k`, `${bitDepth}bit`, ts);
   return `${parts.join('_')}.wav`;
 }
 

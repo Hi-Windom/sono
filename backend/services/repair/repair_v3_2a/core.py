@@ -940,8 +940,13 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
 
     gc.collect()
 
-    vocal_params = {k.replace("vocal_", ""): v for k, v in params.items() if k.startswith("vocal_")}
-    inst_params = {k.replace("inst_", ""): v for k, v in params.items() if k.startswith("inst_")}
+    vocal_params = params.get("vocal_params", {}).copy()
+    inst_params = params.get("inst_params", {}).copy()
+
+    for shared_key in ("speed",):
+        if shared_key in params:
+            vocal_params[shared_key] = params[shared_key]
+            inst_params[shared_key] = params[shared_key]
 
     if progress_callback:
         progress_callback(0.20, "v3.2a 处理人声轨...")

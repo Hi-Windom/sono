@@ -2,59 +2,92 @@
 
 ## 问题 1：倍速参数没生效
 
-### 根因分析
+### 根因
 
-双轨模式下，`speed` 参数在参数拆分时丢失。
-
-**数据流追踪**：
-
-1. 前端发送 `vocal_params = {speed: 1.5, ...}` 和 `accompaniment_params = {speed: 1.5, ...}`
-2. `routes.py` 中 `flatten_vocal_params` 和 `flatten_inst_params` 将 `speed` 映射为无前缀的 `"speed"` 键（见 `param_maps.py` 第 25、50 行）
-3. 最终 `params["speed"] = request.speed`（第 762 行）覆盖了 flatten 的结果
-4. 在 repair core 的双轨函数中，`vocal_params` 和 `inst_params` 通过前缀过滤提取：
-   ```python
-   vocal_params = {k.replace("vocal_", ""): v for k, v in params.items() if k.startswith("vocal_")}
-   inst_params = {k.replace("inst_", ""): v for k, v in params.items() if k.startswith("inst_")}
-   ```
-5. `params["speed"]` 没有 `vocal_` 或 `inst_` 前缀 → 被排除 → `process_vocal_track` 和 `process_instrument_track` 拿不到 speed → `params.get('speed', 1.0)` 返回 1.0 → 变速不生效
-
-### 修复方案
-
-在双轨参数拆分后，显式将 `speed` 从 `params` 复制到 `vocal_params` 和 `inst_params`。
-
-**修改文件**：
-- `backend/services/repair/repair_v3_2/core.py`（第 1304-1308 行附近）
-- `backend/services/repair/repair_v3_2a/core.py`（第 943-944 行附近）
-
-**修改内容**（两处相同）：
+双轨模式下，repair core 用**前缀过滤**来拆分参数：
 ```python
 vocal_params = {k.replace("vocal_", ""): v for k, v in params.items() if k.startswith("vocal_")}
 inst_params = {k.replace("inst_", ""): v for k, v in params.items() if k.startswith("inst_")}
-
-# speed 存储在 params 中无前缀，需显式传递给两轨
-if "speed" in params:
-    vocal_params["speed"] = params["speed"]
-    inst_params["speed"] = params["speed"]
 ```
+
+但 `speed` 在 `params` 中存储为无前缀的 `"speed"` 键（routes.py 第 762 行），不匹配 `vocal_` 或 `inst_` 前缀 → 被排除 → 变速不生效。
+
+**根本问题**：前缀过滤本身就是脆弱的模式。任何新增的共享参数（如 speed）都需要手动处理，容易遗漏。
+
+### 修复方案
+
+**重构参数传递架构**：不再依赖前缀过滤，而是将 vocal/inst 参数作为嵌套 dict 直接传递。
+
+#### 修改 1：`param_maps.py`
+
+`VOCAL_KEY_MAP` 和 `INST_KEY_MAP` 中 `speed` 映射改为带前缀的键，避免 flatten 时冲突：
+
+```python
+# 修改前
+VOCAL_KEY_MAP = { ..., "speed": "speed" }
+INST_KEY_MAP = { ..., "speed": "speed" }
+
+# 修改后
+VOCAL_KEY_MAP = { ..., "speed": "vocal_speed" }
+INST_KEY_MAP = { ..., "speed": "inst_speed" }
+```
+
+`DUAL_REPAIR_PARAM_KEYS` 自动从 map values 派生，无需手动修改。
+
+#### 修改 2：`routes.py` 双轨端点
+
+在 flatten 的同时，将结果也存为嵌套 dict，供 repair core 直接使用：
+
+```python
+# 修改前
+if request.vocal_params:
+    params.update(flatten_vocal_params(request.vocal_params))
+if request.accompaniment_params:
+    params.update(flatten_inst_params(request.accompaniment_params))
+
+# 修改后
+if request.vocal_params:
+    flat_vocal = flatten_vocal_params(request.vocal_params)
+    params["vocal_params"] = flat_vocal       # 供 repair core 使用
+    params.update(flat_vocal)                  # 供缓存比较使用（flat keys）
+if request.accompaniment_params:
+    flat_inst = flatten_inst_params(request.accompaniment_params)
+    params["inst_params"] = flat_inst          # 供 repair core 使用
+    params.update(flat_inst)                   # 供缓存比较使用（flat keys）
+```
+
+`params["speed"] = request.speed` 保持不变（共享参数在顶层）。
+
+#### 修改 3：`repair_v3_2/core.py` 和 `repair_v3_2a/core.py` 双轨段
+
+用嵌套 dict 直接读取替代前缀过滤：
+
+```python
+# 修改前
+vocal_params = {k.replace("vocal_", ""): v for k, v in params.items() if k.startswith("vocal_")}
+inst_params = {k.replace("inst_", ""): v for k, v in params.items() if k.startswith("inst_")}
+
+# 修改后
+vocal_params = params.get("vocal_params", {}).copy()
+inst_params = params.get("inst_params", {}).copy()
+# 共享参数（无前缀）显式传递给两轨
+for shared_key in ("speed",):
+    if shared_key in params:
+        vocal_params[shared_key] = params[shared_key]
+        inst_params[shared_key] = params[shared_key]
+```
+
+#### 修改 4：`database.py`
+
+无需修改。缓存比较继续使用 `DUAL_REPAIR_PARAM_KEYS` 从 flat keys 中提取比较，逻辑不变。
 
 ---
 
 ## 问题 2：下载文件名加上倍速信息
 
-### 需求
+当 speed ≠ 1.0 时，下载文件名应包含倍速信息。
 
-当 speed ≠ 1.0 时，下载文件名应包含倍速信息，例如：
-- `{原始名}_1.5x_repaired.wav`
-- `{原始名}_1.5x.mp3`
-- `{原始名}_v2.4a_1.5x_44k_16bit_20260515_123456.wav`
-
-### 修改点
-
-#### 2.1 WAV 下载 `/download/{task_id}`
-
-**文件**：`backend/api/routes.py` 第 1325-1327 行
-
-从 `task.get("params", {})` 中读取 `speed`，若不为 None 且 ≠ 1.0，在文件名中加入 `{speed}x`。
+### 修改 5：`routes.py` WAV 下载 `/download/{task_id}`（第 1325-1327 行）
 
 ```python
 # 修改前
@@ -62,15 +95,11 @@ download_name = f"{base_name}_repaired.wav"
 
 # 修改后
 speed = task.get("params", {}).get("speed", 1.0)
-speed_suffix = f"{speed}x_" if speed and speed != 1.0 else ""
-download_name = f"{base_name}_{speed_suffix}repaired.wav"
+speed_tag = f"{speed}x_" if speed and speed != 1.0 else ""
+download_name = f"{base_name}_{speed_tag}repaired.wav"
 ```
 
-#### 2.2 MP3 下载 `/download-mp3/{task_id}`
-
-**文件**：`backend/api/routes.py` 第 1558-1562 行
-
-同样从 task params 读取 speed，加入文件名。
+### 修改 6：`routes.py` MP3 下载 `/download-mp3/{task_id}`（第 1558-1562 行）
 
 ```python
 # 修改前
@@ -78,15 +107,11 @@ download_name = f"{original_basename}.mp3"
 
 # 修改后
 speed = task.get("params", {}).get("speed", 1.0) if task else 1.0
-speed_suffix = f"{speed}x_" if speed and speed != 1.0 else ""
-download_name = f"{original_basename}_{speed_suffix}repaired.mp3"
+speed_tag = f"{speed}x_" if speed and speed != 1.0 else ""
+download_name = f"{original_basename}_{speed_tag}repaired.mp3"
 ```
 
-#### 2.3 渲染缓存下载 `/download-file/{filename}`
-
-**文件**：`backend/api/routes.py` 第 1393-1399 行
-
-在 `name_parts` 中加入 speed 信息。
+### 修改 7：`routes.py` 渲染缓存下载 `/download-file/{filename}`（第 1393-1399 行）
 
 ```python
 # 修改前
@@ -103,11 +128,7 @@ if speed and speed != 1.0:
     name_parts.append(f"{speed}x")
 ```
 
-#### 2.4 渲染文件名生成（服务器存储用）
-
-**文件**：`backend/api/routes.py` 第 946-952 行
-
-在 render_filename 中加入 speed 信息，以便后续下载时能解析。
+### 修改 8：`routes.py` 渲染文件名生成（第 946-952 行）
 
 ```python
 # 修改前
@@ -119,11 +140,9 @@ speed_tag = f"_{speed}x" if speed and speed != 1.0 else ""
 render_filename = f"{request.task_id}_rendered_{algo_ver}{speed_tag}_{request.sample_rate}_{request.bit_depth}..."
 ```
 
-#### 2.5 前端导出文件名
+### 修改 9：前端 `generateExportFilename`（`src/hooks/useAudioProcessor.ts` 第 111-124 行）
 
-**文件**：`src/hooks/useAudioProcessor.ts` 第 111-124 行
-
-`generateExportFilename` 函数增加可选的 `speed` 参数。
+增加可选的 `speed` 参数：
 
 ```typescript
 export function generateExportFilename(
@@ -132,20 +151,20 @@ export function generateExportFilename(
   sampleRate: number,
   bitDepth: number,
   suffix?: string,
-  speed?: number,  // 新增
+  speed?: number,
 ): string {
   const baseName = audioFileName ? audioFileName.replace(/\.[^/.]+$/, '') : 'audio';
   const ts = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 15);
   const parts = [baseName];
   if (suffix) parts.push(suffix);
   parts.push(algorithmVersion);
-  if (speed && speed !== 1.0) parts.push(`${speed}x`);  // 新增
+  if (speed && speed !== 1.0) parts.push(`${speed}x`);
   parts.push(`${sampleRate / 1000}k`, `${bitDepth}bit`, ts);
   return `${parts.join('_')}.wav`;
 }
 ```
 
-同时更新所有调用处，传递 speed 参数。
+同时更新所有调用处传递 speed 参数。
 
 ---
 

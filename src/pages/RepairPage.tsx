@@ -1022,7 +1022,7 @@ export default function RepairPage() {
                     : (duration || 0);
                   
                   setInstantDownloadInfo({
-                    filename: generateExportFilename(fileName, cacheEntry.algorithm_version, cacheEntry.sample_rate, cacheEntry.bit_depth),
+                    filename: generateExportFilename(fileName, cacheEntry.algorithm_version, cacheEntry.sample_rate, cacheEntry.bit_depth, undefined, dualTrackSpeed),
                     fileSize: `${(cacheEntry.size / (1024 * 1024)).toFixed(2)} MB`,
                     sampleRate: `${cacheEntry.sample_rate / 1000} kHz`,
                     bitDepth: cacheEntry.bit_depth,

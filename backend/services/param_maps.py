@@ -22,7 +22,7 @@ VOCAL_KEY_MAP = {
     "ai_repair_adaptive": "vocal_ai_repair_adaptive",
     "exciter_improved": "vocal_exciter_improved",
     "de_esser_improved": "vocal_de_esser_improved",
-    "speed": "speed",
+    "speed": "vocal_speed",
 }
 
 INST_KEY_MAP = {
@@ -47,7 +47,7 @@ INST_KEY_MAP = {
     "bass_enhance": "inst_bass_enhance",
     "air_texture": "inst_air_texture",
     "clarity": "inst_clarity",
-    "speed": "speed",
+    "speed": "inst_speed",
 }
 
 DUAL_REPAIR_PARAM_KEYS = set(VOCAL_KEY_MAP.values()) | set(INST_KEY_MAP.values()) | {

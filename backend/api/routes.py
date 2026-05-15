@@ -749,10 +749,14 @@ async def repair_dual_audio_endpoint(request: DualRepairRequest):
     params["processing_mode"] = "dual"
 
     if request.vocal_params:
-        params.update(flatten_vocal_params(request.vocal_params))
+        flat_vocal = flatten_vocal_params(request.vocal_params)
+        params["vocal_params"] = flat_vocal
+        params.update(flat_vocal)
 
     if request.accompaniment_params:
-        params.update(flatten_inst_params(request.accompaniment_params))
+        flat_inst = flatten_inst_params(request.accompaniment_params)
+        params["inst_params"] = flat_inst
+        params.update(flat_inst)
 
     if request.mix_ratio is not None:
         params["vocal_ratio"] = request.mix_ratio
@@ -836,10 +840,14 @@ async def repair_dual_from_hash(request: DualRepairFromHashRequest):
     params["processing_mode"] = "dual"
 
     if request.vocal_params:
-        params.update(flatten_vocal_params(request.vocal_params))
+        flat_vocal = flatten_vocal_params(request.vocal_params)
+        params["vocal_params"] = flat_vocal
+        params.update(flat_vocal)
 
     if request.accompaniment_params:
-        params.update(flatten_inst_params(request.accompaniment_params))
+        flat_inst = flatten_inst_params(request.accompaniment_params)
+        params["inst_params"] = flat_inst
+        params.update(flat_inst)
 
     if request.mix_ratio is not None:
         params["vocal_ratio"] = request.mix_ratio
@@ -944,12 +952,14 @@ async def render_audio_endpoint(request: RenderRequest):
             raise HTTPException(status_code=400, detail="修复结果不存在，请先完成修复")
 
     algo_ver = task_params.get("algorithm_version", "v2.0").replace(".", "p")
-    
+    speed = task_params.get("speed", 1.0)
+    speed_tag = f"_{speed}x" if speed and speed != 1.0 else ""
+
     if is_dual_track and request.track_type != "both":
-        render_filename = f"{request.task_id}_rendered_{algo_ver}_{request.sample_rate}_{request.bit_depth}_{request.track_type}.wav"
+        render_filename = f"{request.task_id}_rendered_{algo_ver}{speed_tag}_{request.sample_rate}_{request.bit_depth}_{request.track_type}.wav"
     else:
         merge_suffix = "_merged" if request.merge else ""
-        render_filename = f"{request.task_id}_rendered_{algo_ver}_{request.sample_rate}_{request.bit_depth}{merge_suffix}.wav"
+        render_filename = f"{request.task_id}_rendered_{algo_ver}{speed_tag}_{request.sample_rate}_{request.bit_depth}{merge_suffix}.wav"
     render_path = os.path.join(OUTPUT_DIR, render_filename)
 
     update_task(request.task_id, status="rendering", step="渲染交付规格...", progress=0)
@@ -1324,7 +1334,9 @@ async def download_audio(task_id: str):
     
     original_name = task.get("original_filename", "audio")
     base_name = os.path.splitext(original_name)[0]
-    download_name = f"{base_name}_repaired.wav"
+    speed = task.get("params", {}).get("speed", 1.0)
+    speed_tag = f"{speed}x_" if speed and speed != 1.0 else ""
+    download_name = f"{base_name}_{speed_tag}repaired.wav"
 
     file_size = os.path.getsize(output_path)
     from urllib.parse import quote
@@ -1393,6 +1405,9 @@ async def download_file(filename: str, request: Request):
         name_parts = [original_basename]
         if algo_ver_display:
             name_parts.append(algo_ver_display)
+        speed = task.get("params", {}).get("speed", 1.0) if task else 1.0
+        if speed and speed != 1.0:
+            name_parts.append(f"{speed}x")
         if sr_display and bd_display:
             name_parts.append(f"{sr_display}_{bd_display}")
         name_parts.append(ts)
@@ -1559,7 +1574,9 @@ async def download_mp3(task_id: str, request: Request):
     task = get_task(task_id)
     if task and task.get("original_filename"):
         original_basename = os.path.splitext(task["original_filename"])[0]
-        download_name = f"{original_basename}.mp3"
+        speed = task.get("params", {}).get("speed", 1.0)
+        speed_tag = f"{speed}x_" if speed and speed != 1.0 else ""
+        download_name = f"{original_basename}_{speed_tag}repaired.mp3"
     encoded_name = quote(download_name)
     ascii_name = download_name.encode("ascii", "ignore").decode("ascii") or "audio.mp3"
     disposition = f'attachment; filename="{ascii_name}"; filename*=UTF-8\'\'{encoded_name}'
@@ -2285,10 +2302,14 @@ async def lookup_dual_repair_cache(req: DualRepairCacheLookupRequest):
     flat_params.pop("processing_mode", None)
 
     if req.vocal_params:
-        flat_params.update(flatten_vocal_params(req.vocal_params))
+        flat_vocal = flatten_vocal_params(req.vocal_params)
+        flat_params["vocal_params"] = flat_vocal
+        flat_params.update(flat_vocal)
 
     if req.accompaniment_params:
-        flat_params.update(flatten_inst_params(req.accompaniment_params))
+        flat_inst = flatten_inst_params(req.accompaniment_params)
+        flat_params["inst_params"] = flat_inst
+        flat_params.update(flat_inst)
 
     if req.mix_ratio is not None:
         flat_params["vocal_ratio"] = req.mix_ratio
