@@ -233,6 +233,10 @@ def _vocal_multiband_compressor_lite(y, sr, amount):
 
 
 def process_vocal_track(y, sr, params):
+    speed = params.get('speed', 1.0)
+    if speed != 1.0:
+        from services.time_stretch import time_stretch_hifi
+        y = time_stretch_hifi(y, sr, speed)
     amount = params.get('amount', 1.0)
     y = y.copy().astype(np.float64)
     y = _simple_declip(y, amount * params.get('declip', 0.5))

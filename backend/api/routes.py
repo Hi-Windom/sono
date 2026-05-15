@@ -16,6 +16,7 @@ from services.task_manager import generate_task_id, submit_detect_task, submit_r
 from services.audio_repair import get_available_versions
 from services.ai_detector import get_detector_versions
 from services.memory_guard import get_available_memory_bytes, estimate_repair_memory_bytes, should_use_float32, get_total_memory_bytes
+from services.param_maps import VOCAL_KEY_MAP, INST_KEY_MAP, flatten_vocal_params, flatten_inst_params
 
 logger = logging.getLogger(__name__)
 
@@ -715,6 +716,7 @@ class DualRepairRequest(BaseModel):
     vocal_params: dict | None = None
     accompaniment_params: dict | None = None
     mix_ratio: float | None = None
+    speed: float | None = None
 
 
 @router.post("/repair-dual")
@@ -746,69 +748,18 @@ async def repair_dual_audio_endpoint(request: DualRepairRequest):
     params["accompaniment_task_id"] = request.accompaniment_task_id
     params["processing_mode"] = "dual"
 
-    _VOCAL_KEY_MAP = {
-        "de_clipping": "vocal_declip",
-        "de_pop": "vocal_depop",
-        "de_essing": "vocal_de_ess",
-        "bass_enhance": "vocal_bass_enhance",
-        "clarity": "vocal_air_texture",
-        "air_texture": "vocal_air_texture",
-        "formant_repair": "vocal_formant_repair",
-        "breath_enhance": "vocal_breath_enhance",
-        "ai_repair": "vocal_ai_repair",
-        "exciter": "vocal_exciter",
-        "compressor": "vocal_compressor",
-        "spatial": "vocal_spatial",
-        "warmth": "vocal_warmth",
-        "de_esser_advanced": "vocal_de_esser_advanced",
-        "ai_repair_enhanced": "vocal_ai_repair_enhanced",
-        "ai_repair_enhanced_lite": "vocal_ai_repair_enhanced_lite",
-        "loudness_optimize": "vocal_loudness",
-        "smart_compressor": "vocal_smart_compressor",
-        "transient_aware": "vocal_transient_aware",
-        "resonance_suppress": "vocal_resonance_suppress",
-        "ai_repair_adaptive": "vocal_ai_repair_adaptive",
-        "exciter_improved": "vocal_exciter_improved",
-        "de_esser_improved": "vocal_de_esser_improved",
-    }
-
-    _INST_KEY_MAP = {
-        "de_clipping": "inst_declip",
-        "de_pop": "inst_depop",
-        "noise_reduction": "inst_noise_reduction",
-        "dynamic_range": "inst_dynamic",
-        "spatial_enhance": "inst_spatial",
-        "warmth": "inst_warmth",
-        "timbre_protect": "inst_timbre_protect",
-        "stereo_enhance": "inst_stereo_enhance",
-        "loudness_optimize": "inst_loudness",
-        "exciter": "inst_exciter",
-        "compressor": "inst_compressor",
-        "de_esser_advanced": "inst_de_esser_advanced",
-        "ai_repair_enhanced": "inst_ai_repair_enhanced",
-        "ai_repair_enhanced_lite": "inst_ai_repair_enhanced_lite",
-        "exciter_lite": "inst_exciter_lite",
-        "compressor_lite": "inst_compressor_lite",
-        "transient": "inst_transient",
-        "resonance": "inst_resonance",
-        "bass_enhance": "inst_bass_enhance",
-        "air_texture": "inst_air_texture",
-        "clarity": "inst_clarity",
-    }
-
     if request.vocal_params:
-        for src_key, flat_key in _VOCAL_KEY_MAP.items():
-            if src_key in request.vocal_params:
-                params[flat_key] = request.vocal_params[src_key]
+        params.update(flatten_vocal_params(request.vocal_params))
 
     if request.accompaniment_params:
-        for src_key, flat_key in _INST_KEY_MAP.items():
-            if src_key in request.accompaniment_params:
-                params[flat_key] = request.accompaniment_params[src_key]
+        params.update(flatten_inst_params(request.accompaniment_params))
 
     if request.mix_ratio is not None:
         params["vocal_ratio"] = request.mix_ratio
         params["accompaniment_ratio"] = 1.0
+
+    if request.speed is not None:
+        params["speed"] = request.speed
 
     params["vocal_path"] = vocal_path
     params["accompaniment_path"] = accompaniment_path
@@ -833,6 +784,7 @@ class DualRepairFromHashRequest(BaseModel):
     vocal_params: dict | None = None
     accompaniment_params: dict | None = None
     mix_ratio: float | None = None
+    speed: float | None = None
 
 
 @router.post("/repair-dual-from-hash")
@@ -883,69 +835,18 @@ async def repair_dual_from_hash(request: DualRepairFromHashRequest):
     params["accompaniment_task_id"] = accompaniment_task_id
     params["processing_mode"] = "dual"
 
-    _VOCAL_KEY_MAP = {
-        "de_clipping": "vocal_declip",
-        "de_pop": "vocal_depop",
-        "de_essing": "vocal_de_ess",
-        "bass_enhance": "vocal_bass_enhance",
-        "clarity": "vocal_air_texture",
-        "air_texture": "vocal_air_texture",
-        "formant_repair": "vocal_formant_repair",
-        "breath_enhance": "vocal_breath_enhance",
-        "ai_repair": "vocal_ai_repair",
-        "exciter": "vocal_exciter",
-        "compressor": "vocal_compressor",
-        "spatial": "vocal_spatial",
-        "warmth": "vocal_warmth",
-        "de_esser_advanced": "vocal_de_esser_advanced",
-        "ai_repair_enhanced": "vocal_ai_repair_enhanced",
-        "ai_repair_enhanced_lite": "vocal_ai_repair_enhanced_lite",
-        "loudness_optimize": "vocal_loudness",
-        "smart_compressor": "vocal_smart_compressor",
-        "transient_aware": "vocal_transient_aware",
-        "resonance_suppress": "vocal_resonance_suppress",
-        "ai_repair_adaptive": "vocal_ai_repair_adaptive",
-        "exciter_improved": "vocal_exciter_improved",
-        "de_esser_improved": "vocal_de_esser_improved",
-    }
-
-    _INST_KEY_MAP = {
-        "de_clipping": "inst_declip",
-        "de_pop": "inst_depop",
-        "noise_reduction": "inst_noise_reduction",
-        "dynamic_range": "inst_dynamic",
-        "spatial_enhance": "inst_spatial",
-        "warmth": "inst_warmth",
-        "timbre_protect": "inst_timbre_protect",
-        "stereo_enhance": "inst_stereo_enhance",
-        "loudness_optimize": "inst_loudness",
-        "exciter": "inst_exciter",
-        "compressor": "inst_compressor",
-        "de_esser_advanced": "inst_de_esser_advanced",
-        "ai_repair_enhanced": "inst_ai_repair_enhanced",
-        "ai_repair_enhanced_lite": "inst_ai_repair_enhanced_lite",
-        "exciter_lite": "inst_exciter_lite",
-        "compressor_lite": "inst_compressor_lite",
-        "transient": "inst_transient",
-        "resonance": "inst_resonance",
-        "bass_enhance": "inst_bass_enhance",
-        "air_texture": "inst_air_texture",
-        "clarity": "inst_clarity",
-    }
-
     if request.vocal_params:
-        for src_key, flat_key in _VOCAL_KEY_MAP.items():
-            if src_key in request.vocal_params:
-                params[flat_key] = request.vocal_params[src_key]
+        params.update(flatten_vocal_params(request.vocal_params))
 
     if request.accompaniment_params:
-        for src_key, flat_key in _INST_KEY_MAP.items():
-            if src_key in request.accompaniment_params:
-                params[flat_key] = request.accompaniment_params[src_key]
+        params.update(flatten_inst_params(request.accompaniment_params))
 
     if request.mix_ratio is not None:
         params["vocal_ratio"] = request.mix_ratio
         params["accompaniment_ratio"] = 1.0
+
+    if request.speed is not None:
+        params["speed"] = request.speed
 
     vocal_output_filename = f"{vocal_task_id}_repaired.wav"
     accompaniment_output_filename = f"{accompaniment_task_id}_repaired.wav"
@@ -2339,6 +2240,7 @@ class DualRepairCacheLookupRequest(BaseModel):
     vocal_params: dict | None = None
     accompaniment_params: dict | None = None
     mix_ratio: float | None = None
+    speed: float | None = None
 
 
 class FileInfoByHashRequest(BaseModel):
@@ -2382,69 +2284,18 @@ async def lookup_dual_repair_cache(req: DualRepairCacheLookupRequest):
     flat_params = req.params.copy()
     flat_params.pop("processing_mode", None)
 
-    _VOCAL_KEY_MAP = {
-        "de_clipping": "vocal_declip",
-        "de_pop": "vocal_depop",
-        "de_essing": "vocal_de_ess",
-        "bass_enhance": "vocal_bass_enhance",
-        "clarity": "vocal_air_texture",
-        "air_texture": "vocal_air_texture",
-        "formant_repair": "vocal_formant_repair",
-        "breath_enhance": "vocal_breath_enhance",
-        "ai_repair": "vocal_ai_repair",
-        "exciter": "vocal_exciter",
-        "compressor": "vocal_compressor",
-        "spatial": "vocal_spatial",
-        "warmth": "vocal_warmth",
-        "de_esser_advanced": "vocal_de_esser_advanced",
-        "ai_repair_enhanced": "vocal_ai_repair_enhanced",
-        "ai_repair_enhanced_lite": "vocal_ai_repair_enhanced_lite",
-        "loudness_optimize": "vocal_loudness",
-        "smart_compressor": "vocal_smart_compressor",
-        "transient_aware": "vocal_transient_aware",
-        "resonance_suppress": "vocal_resonance_suppress",
-        "ai_repair_adaptive": "vocal_ai_repair_adaptive",
-        "exciter_improved": "vocal_exciter_improved",
-        "de_esser_improved": "vocal_de_esser_improved",
-    }
-
-    _INST_KEY_MAP = {
-        "de_clipping": "inst_declip",
-        "de_pop": "inst_depop",
-        "noise_reduction": "inst_noise_reduction",
-        "dynamic_range": "inst_dynamic",
-        "spatial_enhance": "inst_spatial",
-        "warmth": "inst_warmth",
-        "timbre_protect": "inst_timbre_protect",
-        "stereo_enhance": "inst_stereo_enhance",
-        "loudness_optimize": "inst_loudness",
-        "exciter": "inst_exciter",
-        "compressor": "inst_compressor",
-        "de_esser_advanced": "inst_de_esser_advanced",
-        "ai_repair_enhanced": "inst_ai_repair_enhanced",
-        "ai_repair_enhanced_lite": "inst_ai_repair_enhanced_lite",
-        "exciter_lite": "inst_exciter_lite",
-        "compressor_lite": "inst_compressor_lite",
-        "transient": "inst_transient",
-        "resonance": "inst_resonance",
-        "bass_enhance": "inst_bass_enhance",
-        "air_texture": "inst_air_texture",
-        "clarity": "inst_clarity",
-    }
-
     if req.vocal_params:
-        for src_key, flat_key in _VOCAL_KEY_MAP.items():
-            if src_key in req.vocal_params:
-                flat_params[flat_key] = req.vocal_params[src_key]
+        flat_params.update(flatten_vocal_params(req.vocal_params))
 
     if req.accompaniment_params:
-        for src_key, flat_key in _INST_KEY_MAP.items():
-            if src_key in req.accompaniment_params:
-                flat_params[flat_key] = req.accompaniment_params[src_key]
+        flat_params.update(flatten_inst_params(req.accompaniment_params))
 
     if req.mix_ratio is not None:
         flat_params["vocal_ratio"] = req.mix_ratio
         flat_params["accompaniment_ratio"] = 1.0
+
+    if req.speed is not None:
+        flat_params["speed"] = req.speed
 
     logger.info(f"[cache-lookup-dual] input flat_params keys: {sorted(flat_params.keys())}")
     logger.info(f"[cache-lookup-dual] input flat_params: {json.dumps(flat_params, sort_keys=True)[:500]}")

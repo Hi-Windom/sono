@@ -134,6 +134,10 @@ def _istft(D, hop_length, length):
     return y
 
 def process_vocal_track(y, sr, params):
+    speed = params.get('speed', 1.0)
+    if speed != 1.0:
+        from services.time_stretch import time_stretch_hifi
+        y = time_stretch_hifi(y, sr, speed)
     amount = params.get('amount', 1.0)
     y = y.copy().astype(np.float64)
     y = _tanh_declip(y, amount * params.get('declip', 0.5))
