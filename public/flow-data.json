@@ -1279,11 +1279,20 @@
       "description": "算法版本 v3.2a"
     },
     {
-      "id": "repair-module-__pycache__",
-      "label": "__pycache__",
+      "id": "algo-v3.3",
+      "label": "算法 v3.3",
       "type": "module",
       "layer": "backend",
-      "filePath": "/workspace/backend/services/repair/__pycache__"
+      "filePath": "/workspace/backend/services/audio_repair.py",
+      "description": "算法版本 v3.3"
+    },
+    {
+      "id": "algo-v3.3a",
+      "label": "算法 v3.3a",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/audio_repair.py",
+      "description": "算法版本 v3.3a"
     },
     {
       "id": "repair-module-repair_v2_0",
@@ -1648,6 +1657,97 @@
       "type": "module",
       "layer": "backend",
       "filePath": "/workspace/backend/services/repair/repair_v3_2p"
+    },
+    {
+      "id": "repair-module-repair_v3_3",
+      "label": "repair_v3_3",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/repair/repair_v3_3"
+    },
+    {
+      "id": "repair-module-repair_v3_3-config",
+      "label": "repair_v3_3/config",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/repair/repair_v3_3/config.py"
+    },
+    {
+      "id": "repair-module-repair_v3_3-dynamic",
+      "label": "repair_v3_3/dynamic",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/repair/repair_v3_3/dynamic.py"
+    },
+    {
+      "id": "repair-module-repair_v3_3-phase",
+      "label": "repair_v3_3/phase",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/repair/repair_v3_3/phase.py"
+    },
+    {
+      "id": "repair-module-repair_v3_3-spectral",
+      "label": "repair_v3_3/spectral",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/repair/repair_v3_3/spectral.py"
+    },
+    {
+      "id": "repair-module-repair_v3_3-transient",
+      "label": "repair_v3_3/transient",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/repair/repair_v3_3/transient.py"
+    },
+    {
+      "id": "repair-module-repair_v3_3-utils",
+      "label": "repair_v3_3/utils",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/repair/repair_v3_3/utils.py"
+    },
+    {
+      "id": "repair-module-repair_v3_3a",
+      "label": "repair_v3_3a",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/repair/repair_v3_3a"
+    },
+    {
+      "id": "repair-module-repair_v3_3a-config",
+      "label": "repair_v3_3a/config",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/repair/repair_v3_3a/config.py"
+    },
+    {
+      "id": "repair-module-repair_v3_3ap",
+      "label": "repair_v3_3ap",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/repair/repair_v3_3ap"
+    },
+    {
+      "id": "repair-module-repair_v3_3ap-config",
+      "label": "repair_v3_3ap/config",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/repair/repair_v3_3ap/config.py"
+    },
+    {
+      "id": "repair-module-repair_v3_3p",
+      "label": "repair_v3_3p",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/repair/repair_v3_3p"
+    },
+    {
+      "id": "repair-module-repair_v3_3p-config",
+      "label": "repair_v3_3p/config",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/repair/repair_v3_3p/config.py"
     },
     {
       "id": "dataflow-upload",
@@ -2947,9 +3047,15 @@
     },
     {
       "source": "backend-services-audio_repair.py",
-      "target": "repair-module-__pycache__",
-      "label": "动态加载",
-      "type": "call"
+      "target": "algo-v3.3",
+      "label": "算法版本",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-services-audio_repair.py",
+      "target": "algo-v3.3a",
+      "label": "算法版本",
+      "type": "data-flow"
     },
     {
       "source": "backend-services-audio_repair.py",
@@ -3262,6 +3368,84 @@
       "target": "repair-module-repair_v3_2p",
       "label": "动态加载",
       "type": "call"
+    },
+    {
+      "source": "backend-services-audio_repair.py",
+      "target": "repair-module-repair_v3_3",
+      "label": "动态加载",
+      "type": "call"
+    },
+    {
+      "source": "repair-module-repair_v3_3",
+      "target": "repair-module-repair_v3_3-config",
+      "label": "子模块",
+      "type": "import"
+    },
+    {
+      "source": "repair-module-repair_v3_3",
+      "target": "repair-module-repair_v3_3-dynamic",
+      "label": "子模块",
+      "type": "import"
+    },
+    {
+      "source": "repair-module-repair_v3_3",
+      "target": "repair-module-repair_v3_3-phase",
+      "label": "子模块",
+      "type": "import"
+    },
+    {
+      "source": "repair-module-repair_v3_3",
+      "target": "repair-module-repair_v3_3-spectral",
+      "label": "子模块",
+      "type": "import"
+    },
+    {
+      "source": "repair-module-repair_v3_3",
+      "target": "repair-module-repair_v3_3-transient",
+      "label": "子模块",
+      "type": "import"
+    },
+    {
+      "source": "repair-module-repair_v3_3",
+      "target": "repair-module-repair_v3_3-utils",
+      "label": "子模块",
+      "type": "import"
+    },
+    {
+      "source": "backend-services-audio_repair.py",
+      "target": "repair-module-repair_v3_3a",
+      "label": "动态加载",
+      "type": "call"
+    },
+    {
+      "source": "repair-module-repair_v3_3a",
+      "target": "repair-module-repair_v3_3a-config",
+      "label": "子模块",
+      "type": "import"
+    },
+    {
+      "source": "backend-services-audio_repair.py",
+      "target": "repair-module-repair_v3_3ap",
+      "label": "动态加载",
+      "type": "call"
+    },
+    {
+      "source": "repair-module-repair_v3_3ap",
+      "target": "repair-module-repair_v3_3ap-config",
+      "label": "子模块",
+      "type": "import"
+    },
+    {
+      "source": "backend-services-audio_repair.py",
+      "target": "repair-module-repair_v3_3p",
+      "label": "动态加载",
+      "type": "call"
+    },
+    {
+      "source": "repair-module-repair_v3_3p",
+      "target": "repair-module-repair_v3_3p-config",
+      "label": "子模块",
+      "type": "import"
     },
     {
       "source": "dataflow-upload",
