@@ -12,7 +12,7 @@ from concurrent.futures import Future, ThreadPoolExecutor, TimeoutError as Futur
 import numpy as np
 from typing import Any
 
-from config import MAX_WORKERS, MAX_CONCURRENT_TASKS, MOBILE_MODE, OUTPUT_DIR
+from config import MAX_WORKERS, MAX_CONCURRENT_TASKS, MOBILE_MODE, OUTPUT_DIR, UPLOAD_DIR
 from database import TaskDict, create_task, get_task, update_task
 from services.ai_detector import detect_ai_audio
 from services.audio_repair import ALGORITHM_VERSIONS, DEFAULT_VERSION, repair_audio
