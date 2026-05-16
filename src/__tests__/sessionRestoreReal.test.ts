@@ -316,7 +316,7 @@ describe('sessionRestore - 真实场景模拟', () => {
 
     // 新逻辑: 先尝试后端下载，失败后才回退到 IndexedDB File
     // 模拟后端下载失败
-    let backendDownloadOk = false;
+    const backendDownloadOk = false;
     let usedIndexedDBFallback = false;
 
     if (!backendDownloadOk && loaded!.file && loaded!.file.size > 0) {

@@ -19,7 +19,7 @@ async function calculateFileHash(file: File): Promise<string> {
 }
 
 export default function TrainingUploadPage() {
-  const navigate = useNavigate();
+  const _navigate = useNavigate();
   const [isUploading, setIsUploading] = useState(false);
   const [uploadingFiles, setUploadingFiles] = useState<UploadingFile[]>([]);
   const [uploadedFiles, setUploadedFiles] = useState<string[]>([]);

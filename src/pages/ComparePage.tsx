@@ -5,7 +5,6 @@ import { SpectrumVisualizer } from '../components/SpectrumVisualizer';
 import { WaveformVisualizer } from '../components/WaveformVisualizer';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import { connectCacheWS } from '../services/backendApi';
-import type { CacheUpdateEvent } from '../services/backendApi';
 
 type CompareMode = 'original' | 'repaired';
 type DualTrackMode = 'vocal' | 'accompaniment' | 'merged';

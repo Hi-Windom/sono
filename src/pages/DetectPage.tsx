@@ -69,7 +69,7 @@ function getFileTypeLabel(t: string): string {
 }
 
 export default function DetectPage() {
-  const { backendAvailable: globalBackendAvailable } = useBackend();
+  const useBackendResult = useBackend();
   const [slotA, setSlotA] = useState<DetectSlotState>(createEmptySlot());
   const [slotB, setSlotB] = useState<DetectSlotState>(createEmptySlot());
   const [serverFiles, setServerFiles] = useState<AudioFileInfo[]>([]);
