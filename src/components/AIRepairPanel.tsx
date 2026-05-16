@@ -186,18 +186,21 @@ export function AIRepairPanel({
   const [selectedCache, setSelectedCache] = useState<RenderCacheEntry | null>(null);
   const cacheCheckRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   
-  // 当 isDualTrackMode 变化时，清空渲染缓存，避免污染
+  // 当 persistedRenderCaches 变化时，更新 renderCaches（在 isDualTrackMode 清空之前）
   useEffect(() => {
-    setRenderCaches([]);
+    if (isDualTrackMode) {
+      if (persistedRenderCaches) {
+        setRenderCaches(persistedRenderCaches);
+      } else {
+        setRenderCaches([]);
+      }
+    }
+  }, [isDualTrackMode, persistedRenderCaches]);
+
+  // 当 isDualTrackMode 变化时，清空选中的缓存项
+  useEffect(() => {
     setSelectedCache(null);
   }, [isDualTrackMode]);
-
-  // 当 persistedRenderCaches 变化时，更新 renderCaches
-  useEffect(() => {
-    if (persistedRenderCaches && persistedRenderCaches.length > 0) {
-      setRenderCaches(persistedRenderCaches);
-    }
-  }, [persistedRenderCaches]);
 
   useEffect(() => {
     if (!backendAvailable) {
