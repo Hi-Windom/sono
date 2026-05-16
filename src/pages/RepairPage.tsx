@@ -71,6 +71,7 @@ export default function RepairPage() {
     showDownloadModal,
     setShowDownloadModal,
     autoRenderInfo,
+    setAutoRenderInfo,
     showRepairCacheModal,
     setShowRepairCacheModal,
     cacheHitInfo,
@@ -185,9 +186,9 @@ export default function RepairPage() {
         setProcessingProgress(event.progress);
         setProcessingStep(event.step);
       },
-      onComplete: async (status) => {
+      onComplete: async (event) => {
         sessionActions.setDualTrackProcessed(true);
-        setDualTrackRepairResult(status);
+        setDualTrackRepairResult(event.repair_result);
         const downloadUrl = getDownloadUrl(taskId);
         setDualTrackDownloadUrl(downloadUrl);
         setTaskId(taskId);
@@ -196,12 +197,14 @@ export default function RepairPage() {
         setProcessingStep('');
         
         // 设置自动渲染信息
-        setAutoRenderInfo({
-          output_sample_rate: status.output_sample_rate || 48000,
-          output_bit_depth: status.output_bit_depth || 24,
-          duration: status.duration || 0,
-          channels: status.channels || 2,
-        });
+        if (event.repair_result) {
+          setAutoRenderInfo({
+            output_sample_rate: event.repair_result.output_sample_rate || 48000,
+            output_bit_depth: event.repair_result.output_bit_depth || 24,
+            duration: event.repair_result.duration || 0,
+            channels: event.repair_result.channels || 2,
+          });
+        }
         
         // 触发缓存刷新
         setCacheTriggerKey(k => k + 1);

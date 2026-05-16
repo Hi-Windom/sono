@@ -2073,6 +2073,7 @@ export function useAudioProcessor() {
     showDownloadModal,
     setShowDownloadModal,
     autoRenderInfo,
+    setAutoRenderInfo,
     showRepairCacheModal,
     setShowRepairCacheModal,
     cacheHitInfo,
