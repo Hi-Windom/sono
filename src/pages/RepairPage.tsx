@@ -1118,7 +1118,7 @@ export default function RepairPage() {
                 onRenderCachesLoaded={(caches) => { dualTrackRenderCachesRef.current = caches; sessionActions.setDualTrackRenderCaches(caches); }}
                 persistedRenderCaches={isDualTrackMode ? (persistedRenderCaches as RenderCacheEntry[]) : undefined}
                 isRepairing={isProcessing || isDualTrackProcessing}
-                onCancel={cancelCurrentTask}
+                onCancel={() => { setIsDualTrackProcessing(false); cancelCurrentTask(); }}
               />
 
               {profileSaveMsg && (

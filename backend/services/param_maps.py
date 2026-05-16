@@ -56,6 +56,7 @@ SKIPPED_INST_KEYS = {"de_essing", "bass_enhance", "harmonic_enhance", "softness"
 
 DUAL_REPAIR_PARAM_KEYS = set(VOCAL_KEY_MAP.values()) | set(INST_KEY_MAP.values()) | {
     "vocal_ratio", "accompaniment_ratio", "mastering_style", "algorithm_version", "speed",
+    "target_sample_rate", "target_bit_depth",
 }
 
 SINGLE_REPAIR_PARAM_KEYS = {
@@ -67,6 +68,7 @@ SINGLE_REPAIR_PARAM_KEYS = {
     "ai_repair", "air_texture", "dynamic", "spatial", "loudness",
     "exciter", "compressor", "stereo_enhance", "mastering_style",
     "de_esser_advanced", "ai_repair_enhanced", "ai_repair_enhanced_lite",
+    "target_sample_rate", "target_bit_depth",
 }
 
 
