@@ -7,6 +7,7 @@
 3. **"打包安卓" = `bash scripts/build_android_release.sh`，不是手动 npm build + cp**
 4. **"重启dev" = 先停旧服务，再用 `bash scripts/start_dev.sh` 启动完整开发环境（前端+后端），不是只启动后端**
 5. **遇到用户指令与已有脚本功能匹配时，直接调用脚本，不要自己拆解步骤**
+6. **任何对代码或项目文件的修改都必须先向用户展示修改计划，获得用户明确批准后才能执行**
 
 ## Build & Deploy Commands
 
