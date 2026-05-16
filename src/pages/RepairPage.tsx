@@ -131,6 +131,7 @@ export default function RepairPage() {
   const [dualTrackAccompanimentInfo, setDualTrackAccompanimentInfo] = useState<{ sample_rate: number; channels: number; duration: number } | null>(null);
   const [dualCacheHitInfo, setDualCacheHitInfo] = useState<CacheHitInfo | null>(null);
   const [showDualRepairCacheModal, setShowDualRepairCacheModal] = useState(false);
+  const [isDualTrackProcessing, setIsDualTrackProcessing] = useState(false);
   const forceDualReRepairRef = useRef(false);
 
   const [dualTrackVocalParams, setDualTrackVocalParams] = useState<VocalRepairParams>(() => {
@@ -191,11 +192,23 @@ export default function RepairPage() {
         setDualTrackDownloadUrl(downloadUrl);
         setTaskId(taskId);
         setIsProcessing(false);
+        setIsDualTrackProcessing(false);
         setProcessingStep('');
-        // 不再自动调用 renderAndDownload，靠用户点击秒下
+        
+        // 设置自动渲染信息
+        setAutoRenderInfo({
+          output_sample_rate: status.output_sample_rate || 48000,
+          output_bit_depth: status.output_bit_depth || 24,
+          duration: status.duration || 0,
+          channels: status.channels || 2,
+        });
+        
+        // 触发缓存刷新
+        setCacheTriggerKey(k => k + 1);
       },
       onError: (error) => {
         setIsProcessing(false);
+        setIsDualTrackProcessing(false);
         setBackendError(error.message || '双轨处理失败');
       },
       onStuck: (info) => {
@@ -209,11 +222,12 @@ export default function RepairPage() {
         setQueueStatus(queue);
       },
     });
-  }, [stopDualTrackPolling, setProcessingProgress, setProcessingStep, setIsProcessing, setBackendError, setIsTaskStuck, setStuckInfo, setQueueStatus, setTaskId, sessionActions]);
+  }, [stopDualTrackPolling, setProcessingProgress, setProcessingStep, setIsProcessing, setBackendError, setIsTaskStuck, setStuckInfo, setQueueStatus, setTaskId, sessionActions, setAutoRenderInfo]);
 
   const handleDualTrackUpload = useCallback(async (vocalFile: File, accompanimentFile: File) => {
     try {
       setIsProcessing(true);
+      setIsDualTrackProcessing(true);
       setProcessingStep('计算文件哈希...');
       setProcessingSource('backend');
       setDualTrackVocalFile(vocalFile);
@@ -251,6 +265,7 @@ export default function RepairPage() {
       setDualTrackAccompanimentInfo(uploadResult.accompaniment_info || null);
       sessionActions.setDualTrackFileInfo(uploadResult.vocal_info || null, uploadResult.accompaniment_info || null);
       setIsProcessing(false);
+      setIsDualTrackProcessing(false);
       setProcessingStep('');
       setProcessingProgress(0);
 
@@ -258,6 +273,7 @@ export default function RepairPage() {
       console.error('双轨上传失败:', error);
       setBackendError(error instanceof Error ? error.message : '双轨上传失败');
       setIsProcessing(false);
+      setIsDualTrackProcessing(false);
     }
   }, [setIsProcessing, setProcessingStep, setProcessingProgress, setProcessingSource, setBackendError, sessionActions]);
 
@@ -433,6 +449,7 @@ export default function RepairPage() {
 
     try {
       setIsProcessing(true);
+      setIsDualTrackProcessing(true);
       setProcessingStep('开始双轨修复...');
       setProcessingSource('backend');
       sessionActions.setDualTrackProcessed(false);
@@ -479,16 +496,19 @@ export default function RepairPage() {
             setBackendError(error instanceof Error ? error.message : '双轨修复失败');
           }
           setIsProcessing(false);
+          setIsDualTrackProcessing(false);
           return;
         }
       } else {
         setBackendError('请先上传人声和伴奏文件');
         setIsProcessing(false);
+        setIsDualTrackProcessing(false);
       }
     } catch (error) {
       console.error('双轨修复失败:', error);
       setBackendError(error instanceof Error ? error.message : '双轨修复失败');
       setIsProcessing(false);
+      setIsDualTrackProcessing(false);
     }
   }, [dualTrackVocalFile, dualTrackAccompanimentFile, dualTrackVocalFileHash, dualTrackAccompanimentFileHash, dualTrackVocalFileName, dualTrackAccompanimentFileName, dualTrackTaskId, dualTrackVocalTaskId, dualTrackAccompanimentTaskId, params, processingOptions, algorithmVersion, dualTrackVocalParams, dualTrackAccompanimentParams, mixRatio, setIsProcessing, setProcessingStep, setProcessingSource, setBackendError, startDualTrackPolling, sessionActions]);
 
@@ -501,13 +521,30 @@ export default function RepairPage() {
 
     if (cache?.repair_result) {
       setDualTrackRepairResult(cache.repair_result);
+      
+      // 设置自动渲染信息
+      setAutoRenderInfo({
+        output_sample_rate: cache.repair_result.output_sample_rate || 48000,
+        output_bit_depth: cache.repair_result.output_bit_depth || 24,
+        duration: cache.repair_result.duration || 0,
+        channels: cache.repair_result.channels || 2,
+      });
+    }
+
+    // 尝试获取渲染缓存
+    try {
+      const renderCaches = await fetchRenderCache(cachedTaskId);
+      dualTrackRenderCachesRef.current = renderCaches;
+      sessionActions.setDualTrackRenderCaches(renderCaches);
+    } catch (e) {
+      console.warn('[双轨] 获取渲染缓存失败', e);
     }
 
     sessionActions.setDualTrackProcessed(true);
     setIsProcessing(false);
     setProcessingStep('');
     setCacheTriggerKey(k => k + 1);
-  }, [dualCacheHitInfo, processingOptions.sampleRate, renderAndDownload, sessionActions, setTaskId, algorithmVersion]);
+  }, [dualCacheHitInfo, processingOptions.sampleRate, renderAndDownload, sessionActions, setTaskId, algorithmVersion, setAutoRenderInfo]);
 
   const handleDualReRepair = useCallback(() => {
     setShowDualRepairCacheModal(false);
@@ -547,6 +584,23 @@ export default function RepairPage() {
           if (cacheResult.repair_result) {
             setDualTrackRepairResult(cacheResult.repair_result);
             sessionActions.setDualTrackProcessed(true);
+            
+            // 设置自动渲染信息
+            setAutoRenderInfo({
+              output_sample_rate: cacheResult.repair_result.output_sample_rate || 48000,
+              output_bit_depth: cacheResult.repair_result.output_bit_depth || 24,
+              duration: cacheResult.repair_result.duration || 0,
+              channels: cacheResult.repair_result.channels || 2,
+            });
+            
+            // 尝试获取渲染缓存
+            try {
+              const renderCaches = await fetchRenderCache(cacheResult.task_id);
+              dualTrackRenderCachesRef.current = renderCaches;
+              sessionActions.setDualTrackRenderCaches(renderCaches);
+            } catch (e) {
+              console.warn('[双轨] mount 获取渲染缓存失败', e);
+            }
           }
         }
       } catch (e) {
@@ -569,7 +623,7 @@ export default function RepairPage() {
       }
     })();
     return () => { cancelled = true; };
-  }, [isDualTrackMode, dualTrackVocalFileHash, dualTrackAccompanimentFileHash, dualTrackTaskId]);
+  }, [isDualTrackMode, dualTrackVocalFileHash, dualTrackAccompanimentFileHash, dualTrackTaskId, setAutoRenderInfo]);
 
   // 持久 WebSocket 连接：监听缓存更新事件，同时服务于单轨和双轨模式
   const wsControlRef = useRef<{ close: () => void } | null>(null);
@@ -816,7 +870,7 @@ export default function RepairPage() {
             <div className="lg:col-span-7 space-y-6">
               {isDualTrackMode ? (
                 <>
-                  <div className={`bg-gradient-to-br from-pink-500/10 to-dark/60 border border-pink-500/20 rounded-xl p-4${isProcessing ? ' audio-card-loading' : ''}`}>
+                  <div className={`bg-gradient-to-br from-pink-500/10 to-dark/60 border border-pink-500/20 rounded-xl p-4${isDualTrackProcessing ? ' audio-card-loading' : ''}`}>
                     <div className="flex items-center justify-between gap-3">
                       <div className="flex items-center gap-3 min-w-0 flex-1">
                         <div className="w-9 h-9 bg-pink-500/20 rounded-lg flex items-center justify-center border border-pink-400/20 shrink-0">
@@ -848,7 +902,7 @@ export default function RepairPage() {
                       </label>
                     </div>
                   </div>
-                  <div className={`bg-gradient-to-br from-purple-500/10 to-dark/60 border border-purple-500/20 rounded-xl p-4${isProcessing ? ' audio-card-loading' : ''}`}>
+                  <div className={`bg-gradient-to-br from-purple-500/10 to-dark/60 border border-purple-500/20 rounded-xl p-4${isDualTrackProcessing ? ' audio-card-loading' : ''}`}>
                     <div className="flex items-center justify-between gap-3">
                       <div className="flex items-center gap-3 min-w-0 flex-1">
                         <div className="w-9 h-9 bg-purple-500/20 rounded-lg flex items-center justify-center border border-purple-400/20 shrink-0">
