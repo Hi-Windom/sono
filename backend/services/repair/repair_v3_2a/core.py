@@ -655,8 +655,8 @@ def process_vocal_track(y, sr, params):
     if params.get("exciter", 0) > 0:
         y = _vocal_exciter_lite(y, sr, params["exciter"])
 
-    if params.get("compressor", 0) > 0:
-        y = _vocal_smart_compressor_lite(y, sr, params["compressor"])
+    if params.get("compressor", 0) > 0 or params.get("smart_compressor", 0) > 0:
+        y = _vocal_smart_compressor_lite(y, sr, params.get("compressor", params.get("smart_compressor", 0)))
 
     if params.get("transient", 0) > 0:
         y = _transient_aware_process_lite(y, sr, params["transient"])
@@ -768,6 +768,13 @@ def _repair_single_track(input_path: str, output_path: str, params: dict, progre
         "de_clipping": "declip", "de_pop": "depop", "de_essing": "de_ess",
         "dynamic_range": "dynamic", "spatial_enhance": "spatial",
         "loudness_optimize": "loudness",
+        "ai_repair_adaptive_lite": "ai_repair_adaptive_lite",
+        "exciter": "exciter",
+        "transient": "transient",
+        "resonance": "resonance",
+        "bass_enhance": "bass_enhance",
+        "air_texture": "air_texture",
+        "noise_reduction": "noise_reduction",
     }
     for _sk, _dk in _SINGLE_KEY_MAP.items():
         if _sk in single_params and _dk not in single_params:
@@ -801,8 +808,8 @@ def _repair_single_track(input_path: str, output_path: str, params: dict, progre
     if single_params.get("exciter", 0) > 0:
         y = _vocal_exciter_lite(y, sr, single_params["exciter"])
 
-    if single_params.get("compressor", 0) > 0:
-        y = _vocal_smart_compressor_lite(y, sr, single_params["compressor"])
+    if single_params.get("compressor", 0) > 0 or single_params.get("smart_compressor", 0) > 0:
+        y = _vocal_smart_compressor_lite(y, sr, single_params.get("compressor", single_params.get("smart_compressor", 0)))
 
     if single_params.get("transient", 0) > 0:
         y = _transient_aware_process_lite(y, sr, single_params["transient"])

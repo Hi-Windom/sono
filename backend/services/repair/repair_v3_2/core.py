@@ -694,6 +694,13 @@ def _mastering_standard(y, sr):
     if peak > 0.99:
         y *= 0.99 / peak
 
+    rms_val = np.sqrt(np.mean(y.astype(np.float64)**2))
+    if rms_val > 1e-10:
+        target_rms = 10 ** (-14.0 / 20.0)
+        gain = target_rms / rms_val
+        gain = np.clip(gain, 0.2, 5.0)
+        y = (y.astype(np.float64) * gain).astype(y.dtype)
+
     return y
 
 
@@ -732,6 +739,13 @@ def _mastering_powerful(y, sr):
     if peak > 0.99:
         y *= 0.99 / peak
 
+    rms_val = np.sqrt(np.mean(y.astype(np.float64)**2))
+    if rms_val > 1e-10:
+        target_rms = 10 ** (-12.0 / 20.0)
+        gain = target_rms / rms_val
+        gain = np.clip(gain, 0.2, 5.0)
+        y = (y.astype(np.float64) * gain).astype(y.dtype)
+
     return y
 
 
@@ -749,6 +763,13 @@ def _mastering_warm(y, sr):
     peak = np.max(np.abs(y))
     if peak > 0.99:
         y *= 0.99 / peak
+
+    rms_val = np.sqrt(np.mean(y.astype(np.float64)**2))
+    if rms_val > 1e-10:
+        target_rms = 10 ** (-14.0 / 20.0)
+        gain = target_rms / rms_val
+        gain = np.clip(gain, 0.2, 5.0)
+        y = (y.astype(np.float64) * gain).astype(y.dtype)
 
     return y
 
@@ -956,8 +977,8 @@ def process_vocal_track(y, sr, params):
     if params.get("exciter_improved", 0) > 0:
         y = _vocal_exciter_improved(y, sr, params["exciter_improved"])
 
-    if params.get("compressor", 0) > 0:
-        y = _vocal_smart_compressor(y, sr, params["compressor"])
+    if params.get("compressor", 0) > 0 or params.get("smart_compressor", 0) > 0:
+        y = _vocal_smart_compressor(y, sr, params.get("compressor", params.get("smart_compressor", 0)))
 
     if params.get("transient_aware", 0) > 0:
         y = _transient_aware_process(y, sr, params["transient_aware"])
@@ -1094,6 +1115,19 @@ def _repair_single_track(input_path: str, output_path: str, params: dict, progre
         "de_clipping": "declip", "de_pop": "depop", "de_essing": "de_ess",
         "dynamic_range": "dynamic", "spatial_enhance": "spatial",
         "loudness_optimize": "loudness",
+        "de_esser_improved": "de_esser_improved",
+        "ai_repair_adaptive": "ai_repair_adaptive",
+        "exciter_improved": "exciter_improved",
+        "resonance_suppress": "resonance_suppress",
+        "transient_aware": "transient_aware",
+        "stereo_enhance": "stereo_enhance",
+        "warmth": "warmth",
+        "air_texture": "air_texture",
+        "bass_enhance": "bass_enhance",
+        "formant_repair": "formant_repair",
+        "breath_enhance": "breath_enhance",
+        "ai_repair": "ai_repair",
+        "noise_reduction": "noise_reduction",
     }
     for _sk, _dk in _SINGLE_KEY_MAP.items():
         if _sk in single_params and _dk not in single_params:
@@ -1169,8 +1203,8 @@ def _repair_single_track(input_path: str, output_path: str, params: dict, progre
         except Exception:
             pass
 
-    if single_params.get("compressor", 0) > 0:
-        y = _vocal_smart_compressor(y, sr, single_params["compressor"])
+    if single_params.get("compressor", 0) > 0 or single_params.get("smart_compressor", 0) > 0:
+        y = _vocal_smart_compressor(y, sr, single_params.get("compressor", single_params.get("smart_compressor", 0)))
 
     if single_params.get("transient_aware", 0) > 0:
         y = _transient_aware_process(y, sr, single_params["transient_aware"])
