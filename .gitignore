@@ -47,3 +47,8 @@ android-app/
 
 # 思路笔记 (local only)
 思路.md
+
+# Playwright
+playwright-report/
+test-results/
+playwright/.cache/
