@@ -206,6 +206,15 @@ export default function RepairPage() {
           });
         }
         
+        // 尝试获取渲染缓存
+        try {
+          const renderCaches = await fetchRenderCache(taskId);
+          dualTrackRenderCachesRef.current = renderCaches;
+          sessionActions.setDualTrackRenderCaches(renderCaches);
+        } catch (e) {
+          console.warn('[双轨] 获取渲染缓存失败', e);
+        }
+        
         // 触发缓存刷新
         setCacheTriggerKey(k => k + 1);
       },

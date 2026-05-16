@@ -750,12 +750,10 @@ async def repair_dual_audio_endpoint(request: DualRepairRequest):
 
     if request.vocal_params:
         flat_vocal = flatten_vocal_params(request.vocal_params)
-        params["vocal_params"] = flat_vocal
         params.update(flat_vocal)
 
     if request.accompaniment_params:
         flat_inst = flatten_inst_params(request.accompaniment_params)
-        params["inst_params"] = flat_inst
         params.update(flat_inst)
 
     if request.mix_ratio is not None:
@@ -841,12 +839,10 @@ async def repair_dual_from_hash(request: DualRepairFromHashRequest):
 
     if request.vocal_params:
         flat_vocal = flatten_vocal_params(request.vocal_params)
-        params["vocal_params"] = flat_vocal
         params.update(flat_vocal)
 
     if request.accompaniment_params:
         flat_inst = flatten_inst_params(request.accompaniment_params)
-        params["inst_params"] = flat_inst
         params.update(flat_inst)
 
     if request.mix_ratio is not None:

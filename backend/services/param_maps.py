@@ -50,6 +50,10 @@ INST_KEY_MAP = {
     "speed": "inst_speed",
 }
 
+# Keys that should be skipped (not flattened) for vocal/inst params
+SKIPPED_VOCAL_KEYS = {"noise_reduction", "harmonic_enhance", "dynamic_range", "softness", "presence_boost", "spatial_enhance", "transient_repair", "de_crackle"}
+SKIPPED_INST_KEYS = {"de_essing", "bass_enhance", "harmonic_enhance", "softness", "presence_boost", "transient_repair", "clarity", "de_crackle"}
+
 DUAL_REPAIR_PARAM_KEYS = set(VOCAL_KEY_MAP.values()) | set(INST_KEY_MAP.values()) | {
     "vocal_ratio", "accompaniment_ratio", "mastering_style", "algorithm_version", "speed",
 }
@@ -69,10 +73,10 @@ SINGLE_REPAIR_PARAM_KEYS = {
 def flatten_vocal_params(vocal_params: dict) -> dict:
     return {flat_key: vocal_params[src_key]
             for src_key, flat_key in VOCAL_KEY_MAP.items()
-            if src_key in vocal_params}
+            if src_key in vocal_params and src_key not in SKIPPED_VOCAL_KEYS}
 
 
 def flatten_inst_params(inst_params: dict) -> dict:
     return {flat_key: inst_params[src_key]
             for src_key, flat_key in INST_KEY_MAP.items()
-            if src_key in inst_params}
+            if src_key in inst_params and src_key not in SKIPPED_INST_KEYS}

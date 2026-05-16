@@ -13,6 +13,7 @@ os.environ["TESTING"] = "1"
 @pytest.fixture()
 def fresh_db():
     from database import init_db, get_db, create_task, get_task, update_task
+    from services.task_manager import _active_tasks, _active_tasks_lock
 
     db_fd, db_path = tempfile.mkstemp(suffix=".db")
     os.close(db_fd)
@@ -24,6 +25,10 @@ def fresh_db():
         config.DB_PATH = db_path
     except Exception:
         pass
+    
+    # 清空 active_tasks
+    with _active_tasks_lock:
+        _active_tasks.clear()
 
     init_db()
     yield {"db_path": db_path, "get_db": get_db, "create_task": create_task, "get_task": get_task, "update_task": update_task}
