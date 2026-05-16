@@ -192,6 +192,13 @@ export function AIRepairPanel({
     setSelectedCache(null);
   }, [isDualTrackMode]);
 
+  // 当 persistedRenderCaches 变化时，更新 renderCaches
+  useEffect(() => {
+    if (persistedRenderCaches && persistedRenderCaches.length > 0) {
+      setRenderCaches(persistedRenderCaches);
+    }
+  }, [persistedRenderCaches]);
+
   useEffect(() => {
     if (!backendAvailable) {
       setMemoryInfo(null);
