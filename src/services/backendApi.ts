@@ -271,8 +271,8 @@ export interface DetectorVersion {
   description: string;
 }
 
-export function mapParamsToBackend(params: AIRepairParams, _options?: ProcessingOptions, algorithmVersion?: string): Record<string, unknown> {
-  return {
+export function mapParamsToBackend(params: AIRepairParams, options?: ProcessingOptions, algorithmVersion?: string): Record<string, unknown> {
+  const result: Record<string, unknown> = {
     de_clipping: params.deClipping,
     noise_reduction: params.noiseReduction,
     de_essing: params.deEssing,
@@ -289,6 +289,13 @@ export function mapParamsToBackend(params: AIRepairParams, _options?: Processing
     clarity: params.clarity,
     algorithm_version: algorithmVersion || 'v2.0',
   };
+  
+  if (options) {
+    result.target_sample_rate = options.sampleRate;
+    result.target_bit_depth = options.bitDepth;
+  }
+  
+  return result;
 }
 
 export function mapVocalParamsToBackend(params: VocalRepairParams, _options?: ProcessingOptions, algorithmVersion?: string): Record<string, unknown> {

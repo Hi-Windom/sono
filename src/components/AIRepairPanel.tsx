@@ -55,6 +55,8 @@ interface AIRepairPanelProps {
   persistedRenderCaches?: RenderCacheEntry[];
   v33Params?: V33RepairParams | null;
   onV33ParamChange?: (key: keyof V33RepairParams, value: number | string) => void;
+  isRepairing?: boolean;
+  onCancel?: () => void;
 }
 
 const sampleRateOptions = [
@@ -156,6 +158,8 @@ export function AIRepairPanel({
   persistedRenderCaches,
   v33Params,
   onV33ParamChange,
+  isRepairing = false,
+  onCancel,
 }: AIRepairPanelProps) {
   const effectiveDuration = useMemo(() => {
     if (isDualTrackMode && dualTrackVocalInfo && dualTrackAccompanimentInfo) {
@@ -1210,22 +1214,48 @@ export function AIRepairPanel({
 
       <div className="grid grid-cols-2 gap-3">
         <button
-          onClick={onReset}
-          disabled={disabled}
-          className={`px-4 py-2.5 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition text-sm
-            ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
+          onClick={isRepairing ? onCancel : onReset}
+          disabled={disabled && !isRepairing}
+          className={`px-4 py-2.5 text-white rounded-lg transition text-sm font-medium flex items-center justify-center gap-2
+            ${isRepairing 
+              ? 'bg-red-500 hover:bg-red-600 cursor-pointer animate-pulse' 
+              : `bg-gray-700 hover:bg-gray-600 ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`
+            }
           `}
         >
-          重置
+          {isRepairing ? (
+            <>
+              <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              取消
+            </>
+          ) : (
+            '重置'
+          )}
         </button>
         <button
-          onClick={isDualTrackMode ? onDualTrackRepair : onApply}
-          disabled={disabled || (isDualTrackMode && !onDualTrackRepair)}
-          className={`px-4 py-2.5 bg-gradient-to-r ${isDualTrackMode ? 'from-pink-500 to-purple-500 hover:from-pink-400 hover:to-purple-400 shadow-pink-500/20' : 'from-cyan-500 to-purple-500 hover:from-cyan-400 hover:to-purple-400 shadow-cyan-500/20'} text-white rounded-lg transition shadow-lg text-sm font-medium
-            ${disabled || (isDualTrackMode && !onDualTrackRepair) ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
+          onClick={isRepairing ? onCancel : (isDualTrackMode ? onDualTrackRepair : onApply)}
+          disabled={disabled && !isRepairing || (isDualTrackMode && !onDualTrackRepair && !isRepairing)}
+          className={`px-4 py-2.5 text-white rounded-lg transition text-sm font-medium flex items-center justify-center gap-2
+            ${isRepairing 
+              ? 'bg-red-500 hover:bg-red-600 cursor-pointer animate-pulse' 
+              : `bg-gradient-to-r ${isDualTrackMode ? 'from-pink-500 to-purple-500 hover:from-pink-400 hover:to-purple-400 shadow-pink-500/20' : 'from-cyan-500 to-purple-500 hover:from-cyan-400 hover:to-purple-400 shadow-cyan-500/20'} ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'} shadow-lg`
+            }
           `}
         >
-          {isDualTrackMode ? '双轨修复' : '开始修复'}
+          {isRepairing ? (
+            <>
+              <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              取消
+            </>
+          ) : (
+            isDualTrackMode ? '双轨修复' : '开始修复'
+          )}
         </button>
       </div>
     </div>

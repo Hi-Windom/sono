@@ -837,7 +837,7 @@ export default function RepairPage() {
 
       <div className="container mx-auto px-4 py-6 max-w-7xl">
         <div className="w-full max-w-4xl mx-auto mb-6">
-          <div className="flex items-center justify-center gap-4 p-1 bg-dark/80 rounded-xl border border-white/10">
+          <div className={`flex items-center justify-center gap-4 p-1 bg-dark/80 rounded-xl border border-white/10 ${(isProcessing || isDualTrackProcessing) ? 'opacity-50 pointer-events-none' : ''}`}>
             <button
               onClick={() => {
                 if (isDualTrackMode) {
@@ -1053,7 +1053,7 @@ export default function RepairPage() {
                 onModeSelect={applyRepairMode}
                 onApply={isDualTrackMode ? undefined : applySettings}
                 onOptionsChange={setProcessingOptions}
-                disabled={isProcessing}
+                disabled={isProcessing || isDualTrackProcessing}
                 duration={duration}
                 channels={audioBuffer?.numberOfChannels ?? 2}
                 backendAvailable={globalBackendAvailable}
@@ -1117,6 +1117,8 @@ export default function RepairPage() {
                 dualTrackAccompanimentInfo={dualTrackAccompanimentInfo}
                 onRenderCachesLoaded={(caches) => { dualTrackRenderCachesRef.current = caches; sessionActions.setDualTrackRenderCaches(caches); }}
                 persistedRenderCaches={isDualTrackMode ? (persistedRenderCaches as RenderCacheEntry[]) : undefined}
+                isRepairing={isProcessing || isDualTrackProcessing}
+                onCancel={cancelCurrentTask}
               />
 
               {profileSaveMsg && (

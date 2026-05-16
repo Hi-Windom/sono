@@ -329,7 +329,25 @@ def _run_repair(task_id: str, audio_path: str, params: dict[str, Any], mobile_mo
         if not os.path.exists(audio_path):
             raise FileNotFoundError(f"音频文件不存在: {audio_path}")
 
-        file_size = os.path.getsize(audio_path)
+        target_sr = params.get("target_sample_rate")
+        target_bd = params.get("target_bit_depth")
+        processing_audio_path = audio_path
+
+        if target_sr and target_bd:
+            try:
+                from services.render import render_output
+                converted_path = os.path.join(UPLOAD_DIR, f"{task_id}_converted.wav")
+                logger.info(f"[repair] 转换交付规格: task_id={task_id} sr={target_sr} bd={target_bd}")
+                update_task(task_id, progress=0, step="转换交付规格...")
+                _ws_send_progress(task_id, {"task_id": task_id, "status": "repairing", "progress": 0, "step": "转换交付规格..."})
+                render_output(audio_path, converted_path, target_sr, target_bd, progress_callback=None)
+                processing_audio_path = converted_path
+                logger.info(f"[repair] 转换完成: task_id={task_id} converted_path={converted_path}")
+            except Exception as e:
+                logger.error(f"[repair] 转换失败: task_id={task_id} error={e}")
+                raise RuntimeError(f"转换交付规格失败: {str(e)}")
+
+        file_size = os.path.getsize(processing_audio_path)
         logger.info(f"[repair] 音频文件 task_id={task_id} size={file_size/1024/1024:.2f}MB")
 
         active_params = {k: v for k, v in params.items() if isinstance(v, (int, float)) and v > 0}
@@ -338,7 +356,7 @@ def _run_repair(task_id: str, audio_path: str, params: dict[str, Any], mobile_mo
         if "source_bit_depth" not in params:
             try:
                 from services.audio_loader import load_audio_with_fallback
-                _, _, src_bd = load_audio_with_fallback(audio_path, sr=None, mono=False, return_bit_depth=True)
+                _, _, src_bd = load_audio_with_fallback(processing_audio_path, sr=None, mono=False, return_bit_depth=True)
                 params["source_bit_depth"] = src_bd
             except Exception:
                 params["source_bit_depth"] = 24
@@ -356,7 +374,7 @@ def _run_repair(task_id: str, audio_path: str, params: dict[str, Any], mobile_mo
             _ws_send_progress(task_id, {"task_id": task_id, "status": "repairing", "progress": p, "step": s})
 
         repair_result = repair_audio(
-            audio_path,
+            processing_audio_path,
             output_path,
             params,
             progress_callback,

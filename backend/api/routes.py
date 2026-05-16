@@ -385,7 +385,12 @@ async def check_file_hash(request: CheckHashRequest):
     return {"exists": False}
 
 @router.post("/upload")
-async def upload_audio(file: UploadFile = File(...), file_hash: str = Form("")):
+async def upload_audio(
+    file: UploadFile = File(...),
+    file_hash: str = Form(""),
+    target_sample_rate: int = Form(None),
+    target_bit_depth: int = Form(None)
+):
     ext = os.path.splitext(file.filename or '')[1].lower()
     if ext not in ALLOWED_EXTENSIONS:
         raise HTTPException(status_code=400, detail=f"不支持的文件格式: {ext}")
@@ -419,7 +424,14 @@ async def upload_audio(file: UploadFile = File(...), file_hash: str = Form("")):
     except OSError:
         pass
 
-    create_task(task_id, file.filename or "audio", upload_path, {}, file_hash, file_size)
+    params = {}
+    if target_sample_rate and target_bit_depth:
+        params = {
+            "target_sample_rate": target_sample_rate,
+            "target_bit_depth": target_bit_depth,
+        }
+
+    create_task(task_id, file.filename or "audio", upload_path, params, file_hash, file_size)
     logger.info(f"[/upload] task_id={task_id} file_hash={file_hash or 'none'}")
 
     audio_info = _get_audio_info(upload_path)
@@ -741,12 +753,31 @@ async def repair_dual_audio_endpoint(request: DualRepairRequest):
     if not accompaniment_path or not os.path.exists(accompaniment_path):
         raise HTTPException(status_code=400, detail="伴奏音频不存在")
 
+    vocal_task_params = vocal_task.get("params", {})
+    if isinstance(vocal_task_params, str):
+        try:
+            vocal_task_params = json.loads(vocal_task_params)
+        except Exception:
+            vocal_task_params = {}
+
+    accompaniment_task_params = accompaniment_task.get("params", {})
+    if isinstance(accompaniment_task_params, str):
+        try:
+            accompaniment_task_params = json.loads(accompaniment_task_params)
+        except Exception:
+            accompaniment_task_params = {}
+
     params = request.params.copy()
     params["vocal_path"] = vocal_path
     params["accompaniment_path"] = accompaniment_path
     params["vocal_task_id"] = request.vocal_task_id
     params["accompaniment_task_id"] = request.accompaniment_task_id
     params["processing_mode"] = "dual"
+
+    if vocal_task_params.get("converted"):
+        params["target_sample_rate"] = vocal_task_params.get("target_sample_rate")
+        params["target_bit_depth"] = vocal_task_params.get("target_bit_depth")
+        logger.info(f"[/repair-dual] 使用转换后的人声音频: sr={params['target_sample_rate']} bd={params['target_bit_depth']}")
 
     if request.vocal_params:
         flat_vocal = flatten_vocal_params(request.vocal_params)
@@ -762,9 +793,6 @@ async def repair_dual_audio_endpoint(request: DualRepairRequest):
 
     if request.speed is not None:
         params["speed"] = request.speed
-
-    params["vocal_path"] = vocal_path
-    params["accompaniment_path"] = accompaniment_path
 
     vocal_output_filename = f"{request.vocal_task_id}_repaired.wav"
     accompaniment_output_filename = f"{request.accompaniment_task_id}_repaired.wav"
