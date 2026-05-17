@@ -218,7 +218,7 @@ def _loudness_normalize(y, sr, target_lufs=-16.0):
     return y
 
 
-def _spectral_denoise(y, sr, amount):
+def spectral_denoise(y, sr, amount):
     if amount <= 0:
         return y
 
@@ -443,7 +443,7 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
     if params.get("noise_reduction", 0) > 0:
         if progress_callback:
             progress_callback(0.30, "v2.3a 频谱降噪...")
-        y = _spectral_denoise(y, sr, params["noise_reduction"])
+        y = spectral_denoise(y, sr, params["noise_reduction"])
         issues_found.append("频谱降噪")
         gc.collect()
 
@@ -512,4 +512,4 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
     }
 
 
-spectral_denoise = _spectral_denoise
+

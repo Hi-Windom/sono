@@ -229,13 +229,13 @@ def _diff_clamp_depop(y, sr, amount):
     return y
 
 
-def _soft_peak_limit(y, threshold=0.9):
+def soft_peak_limit(y, threshold=0.9):
     abs_max = np.max(np.abs(y))
     if abs_max <= threshold:
         return y
     if y.ndim == 1:
         y = y.reshape(1, -1)
-        _soft_peak_limit(y, threshold)
+        soft_peak_limit(y, threshold)
         return y[0]
     for ch in range(y.shape[0]):
         abs_data = np.abs(y[ch])
@@ -398,12 +398,12 @@ def _vocal_exciter_improved(y, sr, amount):
     return y
 
 
-def _vocal_smart_compressor(y, sr, amount):
+def vocal_smart_compressor(y, sr, amount):
     if amount <= 0:
         return y
     if y.ndim == 1:
         y = y.reshape(1, -1)
-        _vocal_smart_compressor(y, sr, amount)
+        vocal_smart_compressor(y, sr, amount)
         return y[0]
 
     amount_enhanced = logarithmic_boost(amount, base=1.8)
@@ -1171,7 +1171,7 @@ def mix_tracks(vocal, accompaniment, vocal_ratio=1.0, accompaniment_ratio=1.0):
     return mixed
 
 
-def _repair_single_track(input_path: str, output_path: str, params: dict, progress_callback=None) -> dict:
+def repair_single_track(input_path: str, output_path: str, params: dict, progress_callback=None) -> dict:
     if progress_callback:
         progress_callback(0.05, "v3.2 加载音频...")
 
@@ -1378,7 +1378,7 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
     processing_mode = params.get("processing_mode", "single")
 
     if processing_mode == "single":
-        return _repair_single_track(input_path, output_path, params, progress_callback)
+        return repair_single_track(input_path, output_path, params, progress_callback)
 
     vocal_path = params.get("vocal_path", input_path)
     accompaniment_path = params.get("accompaniment_path", input_path)
@@ -1553,8 +1553,3 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
     if accompaniment_output_path:
         result["accompaniment_output_path"] = accompaniment_output_path
     return result
-
-
-repair_single_track = _repair_single_track
-vocal_smart_compressor = _vocal_smart_compressor
-soft_peak_limit = _soft_peak_limit

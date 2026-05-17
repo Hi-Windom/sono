@@ -11,7 +11,7 @@ N_FFT = 2048
 HOP_LENGTH = 512
 
 
-def _simple_declip(y, amount):
+def simple_declip(y, amount):
     if amount <= 0:
         return y
     threshold = 0.90
@@ -26,12 +26,12 @@ def _simple_declip(y, amount):
     return y
 
 
-def _simple_depop(y, sr, amount):
+def simple_depop(y, sr, amount):
     if amount <= 0:
         return y
     if y.ndim == 1:
         y = y.reshape(1, -1)
-        _simple_depop(y, sr, amount)
+        simple_depop(y, sr, amount)
         return y[0]
 
     for ch in range(y.shape[0]):
@@ -58,12 +58,12 @@ def _simple_depop(y, sr, amount):
     return y
 
 
-def _de_ess(y, sr, amount):
+def de_ess(y, sr, amount):
     if amount <= 0:
         return y
     if y.ndim == 1:
         y = y.reshape(1, -1)
-        _de_ess(y, sr, amount)
+        de_ess(y, sr, amount)
         return y[0]
 
     nyq = sr / 2
@@ -84,22 +84,22 @@ def _de_ess(y, sr, amount):
     return y
 
 
-def _spectral_denoise(y, sr, amount):
+def spectral_denoise(y, sr, amount):
     if amount <= 0:
         return y
 
     if y.ndim == 1:
         y = y.reshape(1, -1)
-        _spectral_denoise(y, sr, amount)
+        spectral_denoise(y, sr, amount)
         return y[0]
 
     for ch in range(y.shape[0]):
-        result = _spectral_denoise_1d(y[ch], sr, amount)
+        result = spectral_denoise_1d(y[ch], sr, amount)
         y[ch] = result
     return y
 
 
-def _spectral_denoise_1d(data, sr, amount):
+def spectral_denoise_1d(data, sr, amount):
     n_samples = len(data)
     use_streaming = n_samples > 5 * 60 * sr
 
@@ -165,13 +165,13 @@ def _spectral_denoise_1d(data, sr, amount):
     return y_out
 
 
-def _transparent_compress(y, sr, amount):
+def transparent_compress(y, sr, amount):
     if amount <= 0:
         return y
 
     if y.ndim == 1:
         y = y.reshape(1, -1)
-        _transparent_compress(y, sr, amount)
+        transparent_compress(y, sr, amount)
         return y[0]
 
     for ch in range(y.shape[0]):
@@ -194,14 +194,14 @@ def _transparent_compress(y, sr, amount):
     return y
 
 
-def _soft_peak_limit(y, threshold=0.9):
+def soft_peak_limit(y, threshold=0.9):
     abs_max = np.max(np.abs(y))
     if abs_max <= threshold:
         return y
 
     if y.ndim == 1:
         y = y.reshape(1, -1)
-        _soft_peak_limit(y, threshold)
+        soft_peak_limit(y, threshold)
         return y[0]
 
     for ch in range(y.shape[0]):
@@ -215,10 +215,10 @@ def _soft_peak_limit(y, threshold=0.9):
     return y
 
 
-def _loudness_normalize(y, sr, target_lufs=-14.0):
+def loudness_normalize(y, sr, target_lufs=-14.0):
     if y.ndim == 1:
         y = y.reshape(1, -1)
-        _loudness_normalize(y, sr, target_lufs)
+        loudness_normalize(y, sr, target_lufs)
         return y[0]
 
     for ch in range(y.shape[0]):
@@ -233,13 +233,12 @@ def _loudness_normalize(y, sr, target_lufs=-14.0):
     return y
 
 
-def _vocal_ai_repair_adaptive_lite(y, sr, strength):
+def vocal_ai_repair_adaptive_lite(y, sr, strength):
     if strength <= 0:
         return y
-
     if y.ndim == 1:
         y = y.reshape(1, -1)
-        _vocal_ai_repair_adaptive_lite(y, sr, strength)
+        vocal_ai_repair_adaptive_lite(y, sr, strength)
         return y[0]
 
     lite_n_fft = 1024
@@ -285,13 +284,12 @@ def _vocal_ai_repair_adaptive_lite(y, sr, strength):
     return y
 
 
-def _vocal_exciter_lite(y, sr, amount):
+def vocal_exciter_lite(y, sr, amount):
     if amount <= 0:
         return y
-
     if y.ndim == 1:
         y = y.reshape(1, -1)
-        _vocal_exciter_lite(y, sr, amount)
+        vocal_exciter_lite(y, sr, amount)
         return y[0]
 
     nyq = sr / 2
@@ -317,13 +315,12 @@ def _vocal_exciter_lite(y, sr, amount):
     return y
 
 
-def _vocal_smart_compressor_lite(y, sr, amount):
+def vocal_smart_compressor_lite(y, sr, amount):
     if amount <= 0:
         return y
-
     if y.ndim == 1:
         y = y.reshape(1, -1)
-        _vocal_smart_compressor_lite(y, sr, amount)
+        vocal_smart_compressor_lite(y, sr, amount)
         return y[0]
 
     threshold = 0.3 + (1 - amount) * 0.4
@@ -357,13 +354,13 @@ def _vocal_smart_compressor_lite(y, sr, amount):
     return y
 
 
-def _transient_aware_process_lite(y, sr, amount):
+def transient_aware_process_lite(y, sr, amount):
     if amount <= 0:
         return y
 
     if y.ndim == 1:
         y = y.reshape(1, -1)
-        result = _transient_aware_process_lite(y, sr, amount)
+        result = transient_aware_process_lite(y, sr, amount)
         return result[0]
 
     frame_len = HOP_LENGTH
@@ -405,13 +402,12 @@ def _transient_aware_process_lite(y, sr, amount):
     return y
 
 
-def _resonance_suppress_lite(y, sr, amount):
+def resonance_suppress_lite(y, sr, amount):
     if amount <= 0:
         return y
-
     if y.ndim == 1:
         y = y.reshape(1, -1)
-        _resonance_suppress_lite(y, sr, amount)
+        resonance_suppress_lite(y, sr, amount)
         return y[0]
 
     for ch in range(y.shape[0]):
@@ -580,12 +576,12 @@ def _mastering_adaptive_lite(y, sr):
     return _soft_peak_limit(y, threshold=0.95)
 
 
-def _apply_bass_enhance_lite(y, sr, amount):
+def apply_bass_enhance_lite(y, sr, amount):
     if amount <= 0:
         return y
     if y.ndim == 1:
         y = y.reshape(1, -1)
-        _apply_bass_enhance_lite(y, sr, amount)
+        apply_bass_enhance_lite(y, sr, amount)
         return y[0]
 
     nyq = sr / 2
@@ -605,12 +601,12 @@ def _apply_bass_enhance_lite(y, sr, amount):
     return y
 
 
-def _apply_air_texture_lite(y, sr, amount):
+def apply_air_texture_lite(y, sr, amount):
     if amount <= 0:
         return y
     if y.ndim == 1:
         y = y.reshape(1, -1)
-        _apply_air_texture_lite(y, sr, amount)
+        apply_air_texture_lite(y, sr, amount)
         return y[0]
 
     nyq = sr / 2
@@ -725,7 +721,7 @@ def mix_tracks(vocal, accompaniment, vocal_ratio=1.0, accompaniment_ratio=1.0):
     return mixed
 
 
-def _repair_single_track(input_path: str, output_path: str, params: dict, progress_callback=None) -> dict:
+def repair_single_track(input_path: str, output_path: str, params: dict, progress_callback=None) -> dict:
     if progress_callback:
         progress_callback(0.05, "v3.2a 加载音频...")
 
@@ -886,7 +882,7 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
     processing_mode = params.get("processing_mode", "single")
 
     if processing_mode == "single":
-        return _repair_single_track(input_path, output_path, params, progress_callback)
+        return repair_single_track(input_path, output_path, params, progress_callback)
 
     vocal_path = params.get("vocal_path", input_path)
     accompaniment_path = params.get("accompaniment_path", input_path)
@@ -1054,19 +1050,3 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
     return result
 
 
-# Public API for reuse by other modules
-# These are public functions that can be safely imported
-simple_declip = _simple_declip
-simple_depop = _simple_depop
-de_ess = _de_ess
-spectral_denoise = _spectral_denoise
-transient_aware_process_lite = _transient_aware_process_lite
-apply_bass_enhance_lite = _apply_bass_enhance_lite
-apply_air_texture_lite = _apply_air_texture_lite
-transparent_compress = _transparent_compress
-loudness_normalize = _loudness_normalize
-soft_peak_limit = _soft_peak_limit
-resonance_suppress_lite = _resonance_suppress_lite
-vocal_exciter_lite = _vocal_exciter_lite
-vocal_smart_compressor_lite = _vocal_smart_compressor_lite
-repair_single_track = _repair_single_track
