@@ -3,17 +3,16 @@ from scipy import signal
 from scipy.signal import butter, sosfiltfilt
 
 from ..repair_v3_2a.core import (
-    _simple_declip, _simple_depop, _de_ess, _spectral_denoise,
-    _transient_aware_process_lite, _apply_bass_enhance_lite,
-    _apply_air_texture_lite, _transparent_compress, _loudness_normalize,
-    _soft_peak_limit, _resonance_suppress_lite, _vocal_exciter_lite,
-    _vocal_smart_compressor_lite, load_audio_with_fallback,
-    resample_poly, stft, istft, sf, gc,
+    simple_declip, simple_depop, de_ess, spectral_denoise,
+    transient_aware_process_lite, apply_bass_enhance_lite,
+    apply_air_texture_lite, transparent_compress, loudness_normalize,
+    soft_peak_limit, resonance_suppress_lite, vocal_exciter_lite,
+    vocal_smart_compressor_lite, repair_single_track,
+    load_audio_with_fallback, resample_poly, stft, istft, sf, gc,
 )
 from ..repair_v3_2a.core import repair_audio as _v3_2a_repair_audio
 from ..repair_v3_2a.core import process_vocal_track as _v3_2a_process_vocal_track
 from ..repair_v3_2a.core import process_instrument_track as _v3_2a_process_instrument_track
-from ..repair_v3_2a.core import _repair_single_track as _v3_2a_repair_single_track
 from ..repair_v3_2a.core import mix_tracks as _v3_2a_mix_tracks
 
 MOBILE_WORKING_SR = 48000
@@ -248,7 +247,7 @@ def _mastering_standard_hifi(y, sr):
     y = _high_freq_smoother(y, sr, amount=0.2)
     y = _spatial_image_enhancer(y, sr, amount=0.15)
 
-    return _soft_peak_limit(y, threshold=0.95)
+    return soft_peak_limit(y, threshold=0.95)
 
 
 def _mastering_powerful_hifi(y, sr):
@@ -290,7 +289,7 @@ def _mastering_powerful_hifi(y, sr):
     y = _analog_tape_warmth(y, sr, amount=0.2)
     y = _spatial_image_enhancer(y, sr, amount=0.25)
 
-    return _soft_peak_limit(y, threshold=0.93)
+    return soft_peak_limit(y, threshold=0.93)
 
 
 def _mastering_warm_hifi(y, sr):
@@ -331,7 +330,7 @@ def _mastering_warm_hifi(y, sr):
     y = _analog_tape_warmth(y, sr, amount=0.25)
     y = _high_freq_smoother(y, sr, amount=0.15)
 
-    return _soft_peak_limit(y, threshold=0.94)
+    return soft_peak_limit(y, threshold=0.94)
 
 
 def _mastering_adaptive_hifi(y, sr):
@@ -384,8 +383,8 @@ def _lookahead_compressor_lite(y, sr, amount):
     lookahead_ms = 10
     lookahead_samples = int(0.001 * lookahead_ms * sr)
     if lookahead_samples < 1:
-        from ..repair_v3_2a.core import _vocal_smart_compressor_lite
-        return _vocal_smart_compressor_lite(y, sr, amount)
+        from ..repair_v3_2a.core import vocal_smart_compressor_lite
+        return vocal_smart_compressor_lite(y, sr, amount)
 
     for ch in range(y.shape[0]):
         data = y[ch].astype(np.float64)
@@ -599,21 +598,21 @@ def process_vocal_track(y, sr, params):
         y = time_stretch_hifi(y, sr, speed)
     amount = params.get('amount', 1.0)
     y = y.copy().astype(np.float64)
-    y = _simple_declip(y, amount * params.get('declip', 0.5))
-    y = _simple_depop(y, sr, amount * params.get('depop', 0.5))
-    y = _de_ess(y, sr, amount * params.get('de_ess', 0.5))
+    y = simple_declip(y, amount * params.get('declip', 0.5))
+    y = simple_depop(y, sr, amount * params.get('depop', 0.5))
+    y = de_ess(y, sr, amount * params.get('de_ess', 0.5))
     y = _vocal_ai_repair_adaptive_lite(y, sr, amount * params.get('ai_repair_adaptive_lite', 0.5))
     y = _resonance_suppress_enhanced_lite(y, sr, amount * params.get('resonance_suppress', 0.3))
-    y = _vocal_exciter_lite(y, sr, amount * params.get('exciter_improved', 0.3))
+    y = vocal_exciter_lite(y, sr, amount * params.get('exciter_improved', 0.3))
     y = _lookahead_compressor_lite(y, sr, amount * params.get('smart_compressor', 0.5))
     y = _vocal_multiband_compressor_lite(y, sr, amount * params.get('multiband_compressor', 0.3))
-    y = _transient_aware_process_lite(y, sr, amount * params.get('transient_aware', 0.3))
-    y = _apply_bass_enhance_lite(y, sr, amount * params.get('bass_enhance', 0.3))
-    y = _apply_air_texture_lite(y, sr, amount * params.get('air_texture', 0.3))
+    y = transient_aware_process_lite(y, sr, amount * params.get('transient_aware', 0.3))
+    y = apply_bass_enhance_lite(y, sr, amount * params.get('bass_enhance', 0.3))
+    y = apply_air_texture_lite(y, sr, amount * params.get('air_texture', 0.3))
     y = _vocal_spatial_lite_enhanced(y, sr, amount * params.get('vocal_spatial', 0.3))
-    y = _transparent_compress(y, sr, amount * params.get('compressor', 0.3))
-    y = _loudness_normalize(y, sr)
-    y = _soft_peak_limit(y)
+    y = transparent_compress(y, sr, amount * params.get('compressor', 0.3))
+    y = loudness_normalize(y, sr)
+    y = soft_peak_limit(y)
     return np.clip(y, -1, 1)
 
 
@@ -684,16 +683,16 @@ def _repair_single_track(input_path, output_path, params, progress_callback=None
         progress_callback(0.10, "v3.2a+ 处理音频...")
 
     if single_params.get("declip", 0) > 0:
-        y = _simple_declip(y, single_params["declip"])
+        y = simple_declip(y, single_params["declip"])
 
     if single_params.get("depop", 0) > 0:
-        y = _simple_depop(y, sr, single_params["depop"])
+        y = simple_depop(y, sr, single_params["depop"])
 
     if single_params.get("de_ess", 0) > 0:
-        y = _de_ess(y, sr, single_params["de_ess"])
+        y = de_ess(y, sr, single_params["de_ess"])
 
     if single_params.get("noise_reduction", 0) > 0:
-        y = _spectral_denoise(y, sr, single_params["noise_reduction"])
+        y = spectral_denoise(y, sr, single_params["noise_reduction"])
 
     if single_params.get("ai_repair", 0) > 0:
         from services.repair.repair_v2_3a.core import _spectral_denoise as _ai_denoise
@@ -706,19 +705,19 @@ def _repair_single_track(input_path, output_path, params, progress_callback=None
         y = _vocal_ai_repair_adaptive_lite(y, sr, single_params["ai_repair_adaptive_lite"])
 
     if single_params.get("exciter", 0) > 0:
-        y = _vocal_exciter_lite(y, sr, single_params["exciter"])
+        y = vocal_exciter_lite(y, sr, single_params["exciter"])
 
     if single_params.get("compressor", 0) > 0 or single_params.get("smart_compressor", 0) > 0:
-        y = _vocal_smart_compressor_lite(y, sr, single_params.get("compressor", single_params.get("smart_compressor", 0)))
+        y = vocal_smart_compressor_lite(y, sr, single_params.get("compressor", single_params.get("smart_compressor", 0)))
 
     if single_params.get("transient", 0) > 0:
-        y = _transient_aware_process_lite(y, sr, single_params["transient"])
+        y = transient_aware_process_lite(y, sr, single_params["transient"])
 
     if single_params.get("resonance", 0) > 0:
-        y = _resonance_suppress_lite(y, sr, single_params["resonance"])
+        y = resonance_suppress_lite(y, sr, single_params["resonance"])
 
     if single_params.get("bass_enhance", 0) > 0:
-        y = _apply_bass_enhance_lite(y, sr, single_params["bass_enhance"])
+        y = apply_bass_enhance_lite(y, sr, single_params["bass_enhance"])
 
     if single_params.get("air_texture", 0) > 0:
         y = _apply_air_texture_lite(y, sr, single_params["air_texture"])

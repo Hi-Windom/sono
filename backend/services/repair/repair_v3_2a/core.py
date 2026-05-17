@@ -1052,3 +1052,21 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
     if accompaniment_output_path:
         result["accompaniment_output_path"] = accompaniment_output_path
     return result
+
+
+# Public API for reuse by other modules
+# These are public functions that can be safely imported
+simple_declip = _simple_declip
+simple_depop = _simple_depop
+de_ess = _de_ess
+spectral_denoise = _spectral_denoise
+transient_aware_process_lite = _transient_aware_process_lite
+apply_bass_enhance_lite = _apply_bass_enhance_lite
+apply_air_texture_lite = _apply_air_texture_lite
+transparent_compress = _transparent_compress
+loudness_normalize = _loudness_normalize
+soft_peak_limit = _soft_peak_limit
+resonance_suppress_lite = _resonance_suppress_lite
+vocal_exciter_lite = _vocal_exciter_lite
+vocal_smart_compressor_lite = _vocal_smart_compressor_lite
+repair_single_track = _repair_single_track
