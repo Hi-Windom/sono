@@ -198,7 +198,7 @@ export default function CacheManagerPage() {
   const fetchFrontendCacheInfo = useCallback(async () => {
     // 估算 session 大小
     try {
-      const db = await indexedDB.open('audio_repair_session');
+      await indexedDB.open('audio_repair_session');
       const estimate = await navigator.storage?.estimate?.();
       setSessionSize(estimate?.usage ?? 0);
     } catch { setSessionSize(0); }
@@ -255,7 +255,7 @@ export default function CacheManagerPage() {
     try {
       const data = await fetchDeliveryFiles();
       setDeliveryFiles(data.files || []);
-    } catch (err) {
+    } catch {
       setDeliveryError('获取交付渲染文件失败');
       setDeliveryFiles([]);
     } finally {

@@ -245,13 +245,19 @@ def _soft_peak_limit(y, threshold=0.9):
     return y
 
 
-def _harmonic_bass_enhance(y, sr, amount, music_type):
+def harmonic_bass_enhance(y, sr, amount, music_type):
     if amount <= 0:
         return y
     if y.ndim == 1:
         y_2d = y.reshape(1, -1)
-        _harmonic_bass_enhance(y_2d, sr, amount, music_type)
-        return y
+        harmonic_bass_enhance(y_2d, sr, amount, music_type)
+        return y_2d[0]
+    for ch in range(y.shape[0]):
+        y[ch] = _harmonic_bass_enhance_impl(y[ch], sr, amount, music_type)
+    return y
+
+
+def _harmonic_bass_enhance_impl(y, sr, amount, music_type):
     nyq = sr / 2
     low_cut = min(250, nyq * 0.9)
     sos_low = butter(4, low_cut / nyq, btype='low', output='sos')
@@ -261,30 +267,28 @@ def _harmonic_bass_enhance(y, sr, amount, music_type):
         sos_body = butter(4, [body_high / nyq, body_low / nyq], btype='band', output='sos')
     else:
         sos_body = None
-    for ch in range(y.shape[0]):
-        low_band = sosfiltfilt(sos_low, y[ch])
-        half_len = len(low_band) // 2
-        averaged = (low_band[0::2][:half_len] + low_band[1::2][:half_len]) * 0.5
-        x_short = np.linspace(0, 1, len(averaged))
-        x_long = np.linspace(0, 1, len(low_band))
-        sub_harmonic = np.interp(x_long, x_short, averaged)
-        sub_harmonic = sosfiltfilt(sos_low, sub_harmonic)
-        excited = np.tanh(low_band * 1.5) * np.max(np.abs(low_band)) / (np.max(np.abs(np.tanh(low_band * 1.5))) + 1e-10)
-        body = np.zeros_like(y[ch])
-        if sos_body is not None:
-            body = sosfiltfilt(sos_body, y[ch])
-        y[ch] += sub_harmonic * amount * 0.15 + excited * amount * 0.1 + body * (10 ** (1.5 / 20) - 1) * amount
-        del low_band, sub_harmonic, excited, body
+    low_band = sosfiltfilt(sos_low, y)
+    half_len = len(low_band) // 2
+    averaged = (low_band[0::2][:half_len] + low_band[1::2][:half_len]) * 0.5
+    x_short = np.linspace(0, 1, len(averaged))
+    x_long = np.linspace(0, 1, len(low_band))
+    sub_harmonic = np.interp(x_long, x_short, averaged)
+    sub_harmonic = sosfiltfilt(sos_low, sub_harmonic)
+    excited = np.tanh(low_band * 1.5) * np.max(np.abs(low_band)) / (np.max(np.abs(np.tanh(low_band * 1.5))) + 1e-10)
+    body = np.zeros_like(y)
+    if sos_body is not None:
+        body = sosfiltfilt(sos_body, y)
+    y = y + sub_harmonic * amount * 0.15 + excited * amount * 0.1 + body * (10 ** (1.5 / 20) - 1) * amount
     return y
 
 
-def _air_texture_reconstruct(y, sr, amount, music_type):
+def air_texture_reconstruct(y, sr, amount, music_type):
     if amount <= 0:
         return y
     if y.ndim == 1:
         y_2d = y.reshape(1, -1)
-        _air_texture_reconstruct(y_2d, sr, amount, music_type)
-        return y
+        air_texture_reconstruct(y_2d, sr, amount, music_type)
+        return y_2d[0]
     for ch in range(y.shape[0]):
         n_samples = y.shape[1]
         if n_samples < N_FFT:
@@ -372,13 +376,13 @@ def process_vocal_track(y, sr, params):
 
     if params.get("bass_enhance", 0) > 0:
         try:
-            y = _harmonic_bass_enhance(y, sr, params["bass_enhance"], "vocal")
+            y = harmonic_bass_enhance(y, sr, params["bass_enhance"], "vocal")
         except Exception:
             pass
 
     if params.get("air_texture", 0) > 0:
         try:
-            y = _air_texture_reconstruct(y, sr, params["air_texture"], "vocal")
+            y = air_texture_reconstruct(y, sr, params["air_texture"], "vocal")
         except Exception:
             pass
 
@@ -588,13 +592,13 @@ def _repair_single_track(input_path: str, output_path: str, params: dict, progre
 
     if single_params.get("bass_enhance", 0) > 0:
         try:
-            y = _harmonic_bass_enhance(y, sr, single_params["bass_enhance"], "generic")
+            y = harmonic_bass_enhance(y, sr, single_params["bass_enhance"], "generic")
         except Exception:
             pass
 
     if single_params.get("air_texture", 0) > 0:
         try:
-            y = _air_texture_reconstruct(y, sr, single_params["air_texture"], "generic")
+            y = air_texture_reconstruct(y, sr, single_params["air_texture"], "generic")
         except Exception:
             pass
 
@@ -816,3 +820,5 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
     if accompaniment_output_path:
         result["accompaniment_output_path"] = accompaniment_output_path
     return result
+
+

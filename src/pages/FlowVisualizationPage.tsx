@@ -58,7 +58,7 @@ export default function FlowVisualizationPage() {
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const layoutVersionRef = useRef(0);
-  const [layoutVersion, setLayoutVersion] = useState(0);
+  const [_layoutVersion, setLayoutVersion] = useState(0);
   const isInitialLayoutRef = useRef(true);
 
   useEffect(() => {

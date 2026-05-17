@@ -244,9 +244,9 @@ def process_vocal_track(y, sr, params):
         y = _de_ess(y, sr, params["de_ess"])
 
     if params.get("ai_repair", 0) > 0:
-        from services.repair.repair_v2_3a.core import _spectral_denoise
+        from services.repair.repair_v2_3a.core import spectral_denoise
         try:
-            y = _spectral_denoise(y, sr, params["ai_repair"])
+            y = spectral_denoise(y, sr, params["ai_repair"])
         except Exception:
             pass
 
@@ -449,9 +449,9 @@ def _repair_single_track(input_path: str, output_path: str, params: dict, progre
         y = _spectral_denoise(y, sr, single_params["noise_reduction"])
 
     if single_params.get("ai_repair", 0) > 0:
-        from services.repair.repair_v2_3a.core import _spectral_denoise as _ai_denoise
+        from services.repair.repair_v2_3a.core import spectral_denoise as ai_denoise
         try:
-            y = _ai_denoise(y, sr, single_params["ai_repair"])
+            y = ai_denoise(y, sr, single_params["ai_repair"])
         except Exception:
             pass
 

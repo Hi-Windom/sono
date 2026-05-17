@@ -34,7 +34,7 @@ import {
 import { CacheHitInfo } from '../components/RepairCacheModal';
 
 function writeLog(message: string) {
-  // eslint-disable-next-line no-console
+   
   console.log(message);
 }
 

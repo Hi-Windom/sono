@@ -901,7 +901,7 @@ export function pollProgress(
   let lastProgress = -1;
   let lastProgressTime = Date.now();
   let lastStep = '';
-  let pollStartTime = Date.now();
+  const pollStartTime = Date.now();
   let isStuck = false;
   let queueCheckInterval: number | null = null;
 
@@ -1522,7 +1522,7 @@ export function connectProgressWS(
       console.warn(`[WS] 连接错误 task_id=${taskId}`, e);
     };
 
-    ws.onclose = (event) => {
+    ws.onclose = (_event) => {
       clearTimeout(connectTimeout);
       if (closed) return;
 

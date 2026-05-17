@@ -5,6 +5,8 @@ from scipy.signal import butter, sosfiltfilt, resample_poly
 
 from services.audio_loader import load_audio_with_fallback
 from services.dsp_utils import stft, istft
+from .param_validator import validate_single_params, validate_vocal_params, validate_inst_params
+from .param_curves import logarithmic_boost, aggressive_boost, steep_sigmoid
 
 DESKTOP_WORKING_SR = 48000
 N_FFT = 2048
@@ -227,13 +229,13 @@ def _diff_clamp_depop(y, sr, amount):
     return y
 
 
-def _soft_peak_limit(y, threshold=0.9):
+def soft_peak_limit(y, threshold=0.9):
     abs_max = np.max(np.abs(y))
     if abs_max <= threshold:
         return y
     if y.ndim == 1:
         y = y.reshape(1, -1)
-        _soft_peak_limit(y, threshold)
+        soft_peak_limit(y, threshold)
         return y[0]
     for ch in range(y.shape[0]):
         abs_data = np.abs(y[ch])
@@ -359,6 +361,8 @@ def _vocal_exciter_improved(y, sr, amount):
         _vocal_exciter_improved(y, sr, amount)
         return y[0]
 
+    amount_enhanced = logarithmic_boost(amount, base=2.0)
+
     nyq = sr / 2
     crossover_hz = 2000
     if crossover_hz >= nyq:
@@ -379,7 +383,7 @@ def _vocal_exciter_improved(y, sr, amount):
         harmonics = harmonic2 + harmonic3 + (pos_sat - high_band * 0.5 + neg_sat - high_band * 0.5) * 0.25
         harmonics = harmonics / (np.max(np.abs(harmonics)) + 1e-10)
 
-        wet_high = high_band + harmonics * amount * 0.4
+        wet_high = high_band + harmonics * amount_enhanced * 0.8
         peak_wet = np.max(np.abs(wet_high))
         if peak_wet > 0.99:
             wet_high *= 0.99 / peak_wet
@@ -394,20 +398,20 @@ def _vocal_exciter_improved(y, sr, amount):
     return y
 
 
-def _vocal_smart_compressor(y, sr, amount):
+def vocal_smart_compressor(y, sr, amount):
     if amount <= 0:
         return y
     if y.ndim == 1:
         y = y.reshape(1, -1)
-        _vocal_smart_compressor(y, sr, amount)
+        vocal_smart_compressor(y, sr, amount)
         return y[0]
 
-    attack_ms = 10.0
+    amount_enhanced = logarithmic_boost(amount, base=1.8)
+    ratio = 1.0 + amount_enhanced * 2.0
+    threshold_db = -18.0 + (1.0 - amount_enhanced) * 8.0
+    knee_width = 8.0
+    attack_ms = 15.0
     attack_gamma = np.exp(-1000.0 / (attack_ms * sr / HOP_LENGTH + 1e-10))
-
-    ratio = 1.0 + amount * 3.0
-    threshold_db = -24.0 + (1.0 - amount) * 12.0
-    knee_width = 6.0
 
     for ch in range(y.shape[0]):
         data = y[ch].astype(np.float64)
@@ -496,6 +500,8 @@ def _de_esser_improved(y, sr, amount):
         _de_esser_improved(y, sr, amount)
         return y[0]
 
+    amount_enhanced = logarithmic_boost(amount, base=2.5)
+
     nyq = sr / 2
     low_sib_hz, high_sib_hz = 4000, 8000
     if high_sib_hz >= nyq:
@@ -533,7 +539,7 @@ def _de_esser_improved(y, sr, amount):
             sib_energy_history[history_idx] = sib_rms
             history_idx = (history_idx + 1) % 20
             running_avg = np.mean(sib_energy_history) + 1e-10
-            adaptive_threshold = (0.2 + running_avg * 1.5) * (1.0 - amount * 0.3)
+            adaptive_threshold = (0.2 + running_avg * 1.5) * (1.0 - amount_enhanced * 0.4)
 
             segment = sibilance_band[start:end]
             segment_fft = np.fft.rfft(segment)
@@ -589,8 +595,9 @@ def _vocal_spatial(y, sr, amount):
         _vocal_spatial(y, sr, amount)
         return y[0]
 
+    amount_enhanced = logarithmic_boost(amount, base=2.0)
     delay_samples = int(0.015 * sr)
-    decay = 0.3 * amount
+    decay = 0.5 * amount_enhanced
 
     for ch in range(y.shape[0]):
         data = y[ch].astype(np.float64)
@@ -603,10 +610,10 @@ def _vocal_spatial(y, sr, amount):
         reverb_tail = np.zeros(reverb_len)
         for i in range(1, reverb_len):
             reverb_tail[i] = data[i] * 0.3 + reverb_tail[i-1] * 0.7
-        reverb_tail *= decay * 0.5
+        reverb_tail *= decay * 0.7
 
         wet = delayed
-        wet[:reverb_len] += reverb_tail * amount
+        wet[:reverb_len] += reverb_tail * amount_enhanced
 
         mix = data * (1.0 - amount * 0.4) + wet * amount * 0.4
         peak = np.max(np.abs(mix))
@@ -626,6 +633,8 @@ def _vocal_warmth(y, sr, amount):
         _vocal_warmth(y, sr, amount)
         return y[0]
 
+    amount_enhanced = logarithmic_boost(amount, base=2.5)
+
     nyq = sr / 2
     sos_warm = butter(4, [200/nyq, min(800, nyq*0.95)/nyq], btype='band', output='sos')
 
@@ -634,13 +643,13 @@ def _vocal_warmth(y, sr, amount):
 
         warm_band = sosfiltfilt(sos_warm, dry)
 
-        drive = 1.0 + amount * 2.0
+        drive = 1.0 + amount_enhanced * 3.0
         saturated = np.tanh(warm_band * drive) / np.tanh(drive)
 
         harmonic = saturated - warm_band * 0.3
         harmonic = np.tanh(harmonic * 1.5) * 0.5
 
-        mix = dry + harmonic * amount * 0.3
+        mix = dry + harmonic * amount_enhanced * 0.5
         peak = np.max(np.abs(mix))
         if peak > 0.99:
             mix *= 0.99 / peak
@@ -680,6 +689,80 @@ def _instrument_stereo_enhance(y, sr, amount):
     return y
 
 
+def _apply_dynamic_expansion(y, sr, amount=0.3):
+    """
+    应用动态扩展处理，增强响度对比度，恢复动态感
+
+    参数:
+        y: 音频数据
+        sr: 采样率
+        amount: 扩展强度 (0.0-1.0)，值越大动态对比越强
+    """
+    if amount <= 0:
+        return y
+
+    if y.ndim == 1:
+        y = y.reshape(1, -1)
+        _apply_dynamic_expansion(y, sr, amount)
+        return y[0]
+
+    exp_ratio = 1.0 + amount * 0.8
+    threshold_ratio = 0.3 + amount * 0.2
+
+    for ch in range(y.shape[0]):
+        data = y[ch].astype(np.float64)
+
+        frame_len = HOP_LENGTH
+        n_frames = (len(data) - frame_len) // (frame_len // 2) + 1
+        if n_frames < 2:
+            continue
+
+        rms_envelope = np.zeros(n_frames)
+        for i in range(n_frames):
+            start = i * (frame_len // 2)
+            end = min(start + frame_len, len(data))
+            frame = data[start:end]
+            rms_envelope[i] = np.sqrt(np.mean(frame**2) + 1e-10)
+
+        rms_mean = np.mean(rms_envelope)
+        threshold_rms = rms_mean * threshold_ratio
+
+        gain_map = np.ones(n_frames)
+        for i in range(n_frames):
+            if rms_envelope[i] < threshold_rms:
+                below_ratio = rms_envelope[i] / (threshold_rms + 1e-10)
+                gain_map[i] = below_ratio ** (exp_ratio - 1.0)
+            else:
+                above_ratio = rms_envelope[i] / (rms_mean + 1e-10)
+                if above_ratio > 1.0:
+                    gain_map[i] = 1.0 + (above_ratio - 1.0) * amount * 0.5
+
+        smoothing_kernel = np.ones(5) / 5
+        gain_map = np.convolve(gain_map, smoothing_kernel, mode='same')
+
+        result = np.zeros_like(data)
+        for i in range(n_frames):
+            start = i * (frame_len // 2)
+            end = min(start + frame_len, len(data))
+            result[start:end] += data[start:end] * gain_map[i]
+
+        overlap_count = np.zeros(len(data))
+        for i in range(n_frames):
+            start = i * (frame_len // 2)
+            end = min(start + frame_len, len(data))
+            overlap_count[start:end] += 1.0
+        overlap_count[overlap_count < 1] = 1.0
+        result /= overlap_count
+
+        peak = np.max(np.abs(result))
+        if peak > 0.99:
+            result *= 0.99 / peak
+
+        y[ch] = result.astype(y.dtype)
+
+    return y
+
+
 def _mastering_standard(y, sr):
     nyq = sr / 2
 
@@ -688,11 +771,20 @@ def _mastering_standard(y, sr):
 
     sos_presence = butter(4, [3000/nyq, min(4000, nyq*0.95)/nyq], btype='band', output='sos')
     presence_band = sosfiltfilt(sos_presence, y, axis=-1)
-    y = y.astype(np.float64) + presence_band * 0.06
+    y = y.astype(np.float64) + presence_band * 0.12
 
     peak = np.max(np.abs(y))
     if peak > 0.99:
         y *= 0.99 / peak
+
+    rms_val = np.sqrt(np.mean(y.astype(np.float64)**2))
+    if rms_val > 1e-10:
+        target_rms = 10 ** (-15.0 / 20.0)
+        gain = target_rms / rms_val
+        gain = np.clip(gain, 0.2, 5.0)
+        y = (y.astype(np.float64) * gain).astype(y.dtype)
+
+    y = _apply_dynamic_expansion(y, sr, amount=0.3)
 
     return y
 
@@ -732,6 +824,15 @@ def _mastering_powerful(y, sr):
     if peak > 0.99:
         y *= 0.99 / peak
 
+    rms_val = np.sqrt(np.mean(y.astype(np.float64)**2))
+    if rms_val > 1e-10:
+        target_rms = 10 ** (-13.0 / 20.0)
+        gain = target_rms / rms_val
+        gain = np.clip(gain, 0.2, 5.0)
+        y = (y.astype(np.float64) * gain).astype(y.dtype)
+
+    y = _apply_dynamic_expansion(y, sr, amount=0.25)
+
     return y
 
 
@@ -744,11 +845,20 @@ def _mastering_warm(y, sr):
     sos_low_mid = butter(4, [200/nyq, min(500, nyq*0.95)/nyq], btype='band', output='sos')
     low_mid_band = sosfiltfilt(sos_low_mid, y, axis=-1)
     saturated = np.tanh(low_mid_band * 1.5) * 0.4
-    y = y.astype(np.float64) + saturated * 0.2
+    y = y.astype(np.float64) + saturated * 0.25
 
     peak = np.max(np.abs(y))
     if peak > 0.99:
         y *= 0.99 / peak
+
+    rms_val = np.sqrt(np.mean(y.astype(np.float64)**2))
+    if rms_val > 1e-10:
+        target_rms = 10 ** (-15.0 / 20.0)
+        gain = target_rms / rms_val
+        gain = np.clip(gain, 0.2, 5.0)
+        y = (y.astype(np.float64) * gain).astype(y.dtype)
+
+    y = _apply_dynamic_expansion(y, sr, amount=0.35)
 
     return y
 
@@ -811,6 +921,8 @@ def _resonance_suppress(y, sr, amount):
         _resonance_suppress(y, sr, amount)
         return y[0]
 
+    amount_enhanced = logarithmic_boost(amount, base=2.0)
+
     for ch in range(y.shape[0]):
         data = y[ch].astype(np.float64)
         S = stft(data, n_fft=N_FFT, hop_length=HOP_LENGTH)
@@ -823,7 +935,7 @@ def _resonance_suppress(y, sr, amount):
             for b in range(2, n_bins - 2):
                 local_median = np.median(magnitude[b-2:b+3, f])
                 if local_median > 1e-10 and magnitude[b, f] > 2.0 * local_median:
-                    gain_map[b, f] = 1.0 - amount * 0.5
+                    gain_map[b, f] = 1.0 - amount_enhanced * 0.7
 
         smoothing_frames = max(2, int(0.02 * sr / HOP_LENGTH))
         kernel = np.ones(smoothing_frames) / smoothing_frames
@@ -851,6 +963,8 @@ def _transient_aware_process(y, sr, amount):
         _transient_aware_process(y, sr, amount)
         return y[0]
 
+    amount_enhanced = aggressive_boost(amount, power=0.5, multiplier=2.0)
+
     for ch in range(y.shape[0]):
         data = y[ch].astype(np.float64)
         S = stft(data, n_fft=N_FFT, hop_length=HOP_LENGTH)
@@ -874,7 +988,7 @@ def _transient_aware_process(y, sr, amount):
         gain_envelope = np.ones(n_frames)
         for f in range(n_frames):
             if transient_mask[f]:
-                gain_envelope[f] = 1.0 - amount * 0.5
+                gain_envelope[f] = 1.0 + amount_enhanced * 0.5
 
         smoothing_kernel = np.ones(3) / 3
         gain_envelope = np.convolve(gain_envelope, smoothing_kernel, mode='same')
@@ -900,6 +1014,9 @@ def _transient_aware_process(y, sr, amount):
 
 
 def process_vocal_track(y, sr, params):
+    # 验证参数：如果发现未定义的参数，立即抛出错误
+    validate_vocal_params(params)
+
     speed = params.get('speed', 1.0)
     if speed != 1.0:
         from services.time_stretch import time_stretch_hifi
@@ -937,16 +1054,16 @@ def process_vocal_track(y, sr, params):
         y = _vocal_ai_repair_adaptive(y, sr, params["ai_repair_adaptive"])
 
     if params.get("bass_enhance", 0) > 0:
-        from services.repair.repair_v3_0.core import _harmonic_bass_enhance
+        from services.repair.repair_v3_0.core import harmonic_bass_enhance
         try:
-            y = _harmonic_bass_enhance(y, sr, params["bass_enhance"], "vocal")
+            y = harmonic_bass_enhance(y, sr, params["bass_enhance"], "vocal")
         except Exception:
             pass
 
     if params.get("air_texture", 0) > 0:
-        from services.repair.repair_v3_0.core import _air_texture_reconstruct
+        from services.repair.repair_v3_0.core import air_texture_reconstruct
         try:
-            y = _air_texture_reconstruct(y, sr, params["air_texture"], "vocal")
+            y = air_texture_reconstruct(y, sr, params["air_texture"], "vocal")
         except Exception:
             pass
 
@@ -956,8 +1073,8 @@ def process_vocal_track(y, sr, params):
     if params.get("exciter_improved", 0) > 0:
         y = _vocal_exciter_improved(y, sr, params["exciter_improved"])
 
-    if params.get("compressor", 0) > 0:
-        y = _vocal_smart_compressor(y, sr, params["compressor"])
+    if params.get("compressor", 0) > 0 or params.get("smart_compressor", 0) > 0:
+        y = _vocal_smart_compressor(y, sr, params.get("compressor", params.get("smart_compressor", 0)))
 
     if params.get("transient_aware", 0) > 0:
         y = _transient_aware_process(y, sr, params["transient_aware"])
@@ -976,6 +1093,9 @@ def process_vocal_track(y, sr, params):
 
 
 def process_instrument_track(y, sr, params):
+    # 验证参数：如果发现未定义的参数，立即抛出错误
+    validate_inst_params(params)
+
     speed = params.get('speed', 1.0)
     if speed != 1.0:
         from services.time_stretch import time_stretch_hifi
@@ -1051,7 +1171,7 @@ def mix_tracks(vocal, accompaniment, vocal_ratio=1.0, accompaniment_ratio=1.0):
     return mixed
 
 
-def _repair_single_track(input_path: str, output_path: str, params: dict, progress_callback=None) -> dict:
+def repair_single_track(input_path: str, output_path: str, params: dict, progress_callback=None) -> dict:
     if progress_callback:
         progress_callback(0.05, "v3.2 加载音频...")
 
@@ -1094,11 +1214,29 @@ def _repair_single_track(input_path: str, output_path: str, params: dict, progre
         "de_clipping": "declip", "de_pop": "depop", "de_essing": "de_ess",
         "dynamic_range": "dynamic", "spatial_enhance": "spatial",
         "loudness_optimize": "loudness",
+        "de_esser_improved": "de_esser_improved",
+        "ai_repair_adaptive": "ai_repair_adaptive",
+        "exciter_improved": "exciter_improved",
+        "resonance_suppress": "resonance_suppress",
+        "transient_aware": "transient_aware",
+        "smart_compressor": "smart_compressor",
+        "compressor": "compressor",
+        "stereo_enhance": "stereo_enhance",
+        "warmth": "warmth",
+        "air_texture": "air_texture",
+        "bass_enhance": "bass_enhance",
+        "formant_repair": "formant_repair",
+        "breath_enhance": "breath_enhance",
+        "ai_repair": "ai_repair",
+        "noise_reduction": "noise_reduction",
     }
     for _sk, _dk in _SINGLE_KEY_MAP.items():
         if _sk in single_params and _dk not in single_params:
             single_params[_dk] = single_params[_sk]
     single_params["_issues"] = issues_found
+
+    # 验证参数：如果发现未定义的参数，立即抛出错误
+    validate_single_params(single_params)
 
     if progress_callback:
         progress_callback(0.10, "v3.2 处理音频...")
@@ -1143,16 +1281,16 @@ def _repair_single_track(input_path: str, output_path: str, params: dict, progre
         y = _vocal_breath_enhance(y, sr, single_params["breath_enhance"])
 
     if single_params.get("bass_enhance", 0) > 0:
-        from services.repair.repair_v3_0.core import _harmonic_bass_enhance
+        from services.repair.repair_v3_0.core import harmonic_bass_enhance
         try:
-            y = _harmonic_bass_enhance(y, sr, single_params["bass_enhance"], "generic")
+            y = harmonic_bass_enhance(y, sr, single_params["bass_enhance"], "generic")
         except Exception:
             pass
 
     if single_params.get("air_texture", 0) > 0:
-        from services.repair.repair_v3_0.core import _air_texture_reconstruct
+        from services.repair.repair_v3_0.core import air_texture_reconstruct
         try:
-            y = _air_texture_reconstruct(y, sr, single_params["air_texture"], "generic")
+            y = air_texture_reconstruct(y, sr, single_params["air_texture"], "generic")
         except Exception:
             pass
 
@@ -1169,8 +1307,8 @@ def _repair_single_track(input_path: str, output_path: str, params: dict, progre
         except Exception:
             pass
 
-    if single_params.get("compressor", 0) > 0:
-        y = _vocal_smart_compressor(y, sr, single_params["compressor"])
+    if single_params.get("compressor", 0) > 0 or single_params.get("smart_compressor", 0) > 0:
+        y = _vocal_smart_compressor(y, sr, single_params.get("compressor", single_params.get("smart_compressor", 0)))
 
     if single_params.get("transient_aware", 0) > 0:
         y = _transient_aware_process(y, sr, single_params["transient_aware"])
@@ -1240,7 +1378,7 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
     processing_mode = params.get("processing_mode", "single")
 
     if processing_mode == "single":
-        return _repair_single_track(input_path, output_path, params, progress_callback)
+        return repair_single_track(input_path, output_path, params, progress_callback)
 
     vocal_path = params.get("vocal_path", input_path)
     accompaniment_path = params.get("accompaniment_path", input_path)

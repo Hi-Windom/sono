@@ -76,7 +76,7 @@ export class StemMixer {
     this.sampleRate = originalBuffer.sampleRate;
   }
 
-  async mix(options: {
+  async mix(_options: {
     vocalGain: number;
     instrumentalGain: number;
     vocalPan: number;

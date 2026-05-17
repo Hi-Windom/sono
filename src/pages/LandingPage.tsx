@@ -3,14 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import { Header } from '../components/Header';
 import { useBackend } from '../contexts/BackendContext';
 
-interface CacheInfo {
-  total_size: number;
-  upload_size: number;
-  output_size: number;
-  task_count: number;
-  tasks: CacheTask[];
-}
-
 interface CacheTask {
   id: string;
   filename: string;
@@ -19,7 +11,7 @@ interface CacheTask {
 
 export default function LandingPage() {
   const navigate = useNavigate();
-  const { backendAvailable } = useBackend();
+  const { backendAvailable: _backendAvailable } = useBackend();
   const [algorithmVersions, setAlgorithmVersions] = useState<{ name: string; description?: string }[]>([]);
   const [detectorVersions, setDetectorVersions] = useState<{ name: string; description?: string }[]>([]);
   const [deployDays, setDeployDays] = useState<number | null>(null);
