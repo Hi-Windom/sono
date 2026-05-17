@@ -61,16 +61,19 @@ mkdir -p "$TMPDIR"
 export CARGO_TARGET_DIR="$HOME/.cargo-target"
 mkdir -p "$CARGO_TARGET_DIR"
 
-echo "  numpy/scipy 已通过 pkg 预编译安装。"
-echo "  安装构建工具..."
-pip install -q setuptools wheel -i "$PYPI_MIRROR_URL" --trusted-host "$PYPI_MIRROR_HOST" 2>/dev/null || true
-echo "  使用 --no-build-isolation 避免重复编译 C 扩展..."
-echo "  TMPDIR=$TMPDIR (避免 Text file busy 错误)"
+echo "  升级 pip 和安装构建工具..."
+pip install --upgrade pip setuptools wheel -i "$PYPI_MIRROR_URL" --trusted-host "$PYPI_MIRROR_HOST" || {
+    echo -e "${YELLOW}  镜像源安装失败，尝试官方源...${NC}"
+    pip install --upgrade pip setuptools wheel
+}
 
-if ! pip install --no-build-isolation -r requirements_android.txt -i "$PYPI_MIRROR_URL" --trusted-host "$PYPI_MIRROR_HOST"; then
+echo "  TMPDIR=$TMPDIR (避免 Text file busy 错误)"
+echo "  安装 requirements_android.txt 中的依赖..."
+
+pip install -r requirements_android.txt -i "$PYPI_MIRROR_URL" --trusted-host "$PYPI_MIRROR_HOST" || {
     echo -e "${YELLOW}  镜像源安装失败，回退到官方 PyPI...${NC}"
-    pip install --no-build-isolation -r requirements_android.txt
-fi
+    pip install -r requirements_android.txt
+}
 
 cd ..
 
