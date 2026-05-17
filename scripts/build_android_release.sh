@@ -107,6 +107,11 @@ if [ -n "$INCOMPATIBLE_FOUND" ]; then
 fi
 echo "  依赖检查通过。"
 
+echo "  清理 Python 缓存文件..."
+find "$PROJECT_ROOT/backend" -name "*.pyc" -delete
+find "$PROJECT_ROOT/backend" -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
+echo "  Python 缓存已清理。"
+
 echo "  预编译 .pyc 文件..."
 python -m compileall -q backend/ 2>/dev/null || echo "  预编译跳过（非关键）"
 
