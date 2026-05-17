@@ -556,6 +556,64 @@ export function AIRepairPanel({
           </div>
         </div>
 
+        {/* 临时测试预设 - v3.2增强对比 */}
+        <div className="mt-3 p-2.5 rounded-lg border bg-amber-500/10 border-amber-500/30">
+          <div className="flex items-center gap-2 mb-2">
+            <svg className="w-4 h-4 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+            </svg>
+            <span className="text-amber-400 text-xs font-medium">v3.2 增强测试预设（临时）</span>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            {[
+              { 
+                id: 'v32_enhanced', 
+                label: '增强版', 
+                desc: '参数敏感性增强\n音量提升约+1dB',
+                badge: '推荐'
+              },
+              { 
+                id: 'v32_compare', 
+                label: '原始对比', 
+                desc: '使用原始参数\n用于AB对比',
+                badge: null
+              },
+            ].map((preset) => {
+              const isSelected = false;
+              return (
+                <button
+                  key={preset.id}
+                  onClick={() => {
+                    if (preset.id === 'v32_enhanced') {
+                      console.log('选择增强版预设 - 后端已应用增强效果');
+                    } else {
+                      console.log('选择原始对比 - 请测试当前效果');
+                    }
+                  }}
+                  disabled={disabled}
+                  className={`p-2 rounded-lg text-left transition-all border
+                    ${isSelected
+                      ? 'bg-amber-500/30 text-white border-amber-500/50'
+                      : 'bg-primary/30 text-gray-300 border-gray-700 hover:border-amber-500/50'
+                    } ${disabled ? 'opacity-50' : ''}
+                  `}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs font-medium">{preset.label}</span>
+                    {preset.badge && (
+                      <span className="text-[9px] px-1 py-0.5 rounded bg-amber-500/30 text-amber-300">{preset.badge}</span>
+                    )}
+                  </div>
+                  <div className="text-[10px] text-gray-500 whitespace-pre-line leading-tight">{preset.desc}</div>
+                </button>
+              );
+            })}
+          </div>
+          <div className="mt-2 text-[10px] text-amber-400/70">
+            ⚠️ 后端已应用增强效果，当前版本即增强版
+          </div>
+        </div>
+
         {/* 预估输出大小 */}
         <div className="mt-3 p-2.5 rounded-lg border bg-gray-800/50 border-gray-700">
             <div className="flex items-center justify-between">

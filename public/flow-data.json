@@ -1622,6 +1622,13 @@
       "filePath": "/workspace/backend/services/repair/repair_v3_2"
     },
     {
+      "id": "repair-module-repair_v3_2-param_curves",
+      "label": "repair_v3_2/param_curves",
+      "type": "module",
+      "layer": "backend",
+      "filePath": "/workspace/backend/services/repair/repair_v3_2/param_curves.py"
+    },
+    {
       "id": "repair-module-repair_v3_2-param_validator",
       "label": "repair_v3_2/param_validator",
       "type": "module",
@@ -3238,6 +3245,12 @@
       "target": "repair-module-repair_v3_2",
       "label": "动态加载",
       "type": "call"
+    },
+    {
+      "source": "repair-module-repair_v3_2",
+      "target": "repair-module-repair_v3_2-param_curves",
+      "label": "子模块",
+      "type": "import"
     },
     {
       "source": "repair-module-repair_v3_2",
