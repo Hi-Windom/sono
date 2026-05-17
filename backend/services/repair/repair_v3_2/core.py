@@ -5,6 +5,7 @@ from scipy.signal import butter, sosfiltfilt, resample_poly
 
 from services.audio_loader import load_audio_with_fallback
 from services.dsp_utils import stft, istft
+from .param_validator import validate_single_params, validate_vocal_params, validate_inst_params
 
 DESKTOP_WORKING_SR = 48000
 N_FFT = 2048
@@ -921,6 +922,9 @@ def _transient_aware_process(y, sr, amount):
 
 
 def process_vocal_track(y, sr, params):
+    # 验证参数：如果发现未定义的参数，立即抛出错误
+    validate_vocal_params(params)
+
     speed = params.get('speed', 1.0)
     if speed != 1.0:
         from services.time_stretch import time_stretch_hifi
@@ -997,6 +1001,9 @@ def process_vocal_track(y, sr, params):
 
 
 def process_instrument_track(y, sr, params):
+    # 验证参数：如果发现未定义的参数，立即抛出错误
+    validate_inst_params(params)
+
     speed = params.get('speed', 1.0)
     if speed != 1.0:
         from services.time_stretch import time_stretch_hifi
@@ -1133,6 +1140,9 @@ def _repair_single_track(input_path: str, output_path: str, params: dict, progre
         if _sk in single_params and _dk not in single_params:
             single_params[_dk] = single_params[_sk]
     single_params["_issues"] = issues_found
+
+    # 验证参数：如果发现未定义的参数，立即抛出错误
+    validate_single_params(single_params)
 
     if progress_callback:
         progress_callback(0.10, "v3.2 处理音频...")
