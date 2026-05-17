@@ -816,3 +816,7 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
     if accompaniment_output_path:
         result["accompaniment_output_path"] = accompaniment_output_path
     return result
+
+
+harmonic_bass_enhance = _harmonic_bass_enhance
+air_texture_reconstruct = _air_texture_reconstruct

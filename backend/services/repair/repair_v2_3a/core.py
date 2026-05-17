@@ -510,3 +510,6 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
         "quality_mode": params.get("quality", "standard"),
         "algorithm_version": "v2.3a",
     }
+
+
+spectral_denoise = _spectral_denoise

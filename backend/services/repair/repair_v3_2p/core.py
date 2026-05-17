@@ -14,7 +14,7 @@ def _lookahead_compressor(y, sr, amount):
     lookahead_ms = 5
     lookahead_samples = int(0.001 * lookahead_ms * sr)
     if lookahead_samples < 1:
-        return _vocal_smart_compressor(y, sr, amount)
+        return vocal_smart_compressor(y, sr, amount)
     shifted = np.pad(y, (lookahead_samples, 0))[:-lookahead_samples]
     window_size = int(0.01 * sr)
     env = np.zeros_like(y)
@@ -153,7 +153,7 @@ def process_vocal_track(y, sr, params):
     y = _vocal_warmth(y, sr, amount * params.get('vocal_warmth', 0.3))
     y = _vocal_spatial_enhanced(y, sr, amount * params.get('vocal_spatial', 0.3))
     y = _adaptive_loudness_normalize(y, sr)
-    y = _soft_peak_limit(y)
+    y = soft_peak_limit(y)
     return np.clip(y, -1, 1)
 
 def process_instrument_track(y, sr, params):

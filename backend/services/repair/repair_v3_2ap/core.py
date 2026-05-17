@@ -695,9 +695,9 @@ def _repair_single_track(input_path, output_path, params, progress_callback=None
         y = spectral_denoise(y, sr, single_params["noise_reduction"])
 
     if single_params.get("ai_repair", 0) > 0:
-        from services.repair.repair_v2_3a.core import _spectral_denoise as _ai_denoise
+        from services.repair.repair_v2_3a.core import spectral_denoise as ai_denoise
         try:
-            y = _ai_denoise(y, sr, single_params["ai_repair"])
+            y = ai_denoise(y, sr, single_params["ai_repair"])
         except Exception:
             pass
 
@@ -720,13 +720,13 @@ def _repair_single_track(input_path, output_path, params, progress_callback=None
         y = apply_bass_enhance_lite(y, sr, single_params["bass_enhance"])
 
     if single_params.get("air_texture", 0) > 0:
-        y = _apply_air_texture_lite(y, sr, single_params["air_texture"])
+        y = apply_air_texture_lite(y, sr, single_params["air_texture"])
 
     if single_params.get("dynamic", 0) > 0:
-        y = _transparent_compress(y, sr, single_params["dynamic"])
+        y = transparent_compress(y, sr, single_params["dynamic"])
 
     if single_params.get("loudness", 0) > 0:
-        y = _loudness_normalize(y, sr, -14.0)
+        y = loudness_normalize(y, sr, -14.0)
 
     mastering_style = single_params.get("mastering_style", "none")
     if mastering_style == "standard":
@@ -753,7 +753,7 @@ def _repair_single_track(input_path, output_path, params, progress_callback=None
     if progress_callback:
         progress_callback(0.90, "v3.2a+ 导出...")
 
-    y = _soft_peak_limit(y, threshold=0.9)
+    y = soft_peak_limit(y, threshold=0.9)
 
     bit_depth = single_params.get("bit_depth", 24)
     subtype_map = {16: "PCM_16", 24: "PCM_24", 32: "PCM_32"}
@@ -877,7 +877,7 @@ def repair_audio(input_path, output_path, params, progress_callback=None):
 
     vocal_output_path = params.get("vocal_output_path")
     if vocal_output_path:
-        vocal_out = _soft_peak_limit(vocal_y, threshold=0.9)
+        vocal_out = soft_peak_limit(vocal_y, threshold=0.9)
         if vocal_out.dtype == np.float32:
             vocal_out = vocal_out.astype(np.float64)
         sf.write(vocal_output_path, vocal_out.T if vocal_out.ndim > 1 else vocal_out, working_sr, subtype=subtype)
@@ -887,7 +887,7 @@ def repair_audio(input_path, output_path, params, progress_callback=None):
 
     accompaniment_output_path = params.get("accompaniment_output_path")
     if accompaniment_output_path:
-        acc_out = _soft_peak_limit(accompaniment_y, threshold=0.9)
+        acc_out = soft_peak_limit(accompaniment_y, threshold=0.9)
         if acc_out.dtype == np.float32:
             acc_out = acc_out.astype(np.float64)
         sf.write(accompaniment_output_path, acc_out.T if acc_out.ndim > 1 else acc_out, working_sr, subtype=subtype)
@@ -926,7 +926,7 @@ def repair_audio(input_path, output_path, params, progress_callback=None):
     if progress_callback:
         progress_callback(0.90, "v3.2a+ 导出...")
 
-    mixed = _soft_peak_limit(mixed, threshold=0.9)
+    mixed = soft_peak_limit(mixed, threshold=0.9)
 
     if mixed.dtype == np.float32:
         mixed = mixed.astype(np.float64)

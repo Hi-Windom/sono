@@ -715,16 +715,16 @@ def process_vocal_track(y, sr, params):
         y = _vocal_ai_repair_enhanced(y, sr, params["ai_repair_enhanced"])
 
     if params.get("bass_enhance", 0) > 0:
-        from services.repair.repair_v3_0.core import _harmonic_bass_enhance
+        from services.repair.repair_v3_0.core import harmonic_bass_enhance
         try:
-            y = _harmonic_bass_enhance(y, sr, params["bass_enhance"], "vocal")
+            y = harmonic_bass_enhance(y, sr, params["bass_enhance"], "vocal")
         except Exception:
             pass
 
     if params.get("air_texture", 0) > 0:
-        from services.repair.repair_v3_0.core import _air_texture_reconstruct
+        from services.repair.repair_v3_0.core import air_texture_reconstruct
         try:
-            y = _air_texture_reconstruct(y, sr, params["air_texture"], "vocal")
+            y = air_texture_reconstruct(y, sr, params["air_texture"], "vocal")
         except Exception:
             pass
 
@@ -911,16 +911,16 @@ def _repair_single_track(input_path: str, output_path: str, params: dict, progre
         y = _vocal_breath_enhance(y, sr, single_params["breath_enhance"])
 
     if single_params.get("bass_enhance", 0) > 0:
-        from services.repair.repair_v3_0.core import _harmonic_bass_enhance
+        from services.repair.repair_v3_0.core import harmonic_bass_enhance
         try:
-            y = _harmonic_bass_enhance(y, sr, single_params["bass_enhance"], "generic")
+            y = harmonic_bass_enhance(y, sr, single_params["bass_enhance"], "generic")
         except Exception:
             pass
 
     if single_params.get("air_texture", 0) > 0:
-        from services.repair.repair_v3_0.core import _air_texture_reconstruct
+        from services.repair.repair_v3_0.core import air_texture_reconstruct
         try:
-            y = _air_texture_reconstruct(y, sr, single_params["air_texture"], "generic")
+            y = air_texture_reconstruct(y, sr, single_params["air_texture"], "generic")
         except Exception:
             pass
 
