@@ -14,10 +14,11 @@ from ..repair_v3_2a.core import repair_audio as _v3_2a_repair_audio
 from ..repair_v3_2a.core import process_vocal_track as _v3_2a_process_vocal_track
 from ..repair_v3_2a.core import process_instrument_track as _v3_2a_process_instrument_track
 from ..repair_v3_2a.core import mix_tracks as _v3_2a_mix_tracks
+from ..repair_v3_2a.core import REVERSE_VOCAL_MAP, REVERSE_INST_MAP
 
 MOBILE_WORKING_SR = 48000
-N_FFT = 4096
-HOP_LENGTH = 1024
+N_FFT = 2048
+HOP_LENGTH = 512
 
 
 def _soft_clip_saturation(y, threshold=0.9, drive=1.1):
@@ -390,27 +391,38 @@ def _lookahead_compressor_lite(y, sr, amount):
         data = y[ch].astype(np.float64)
         shifted = np.pad(data, (lookahead_samples, 0))[:-lookahead_samples]
         window_size = int(0.01 * sr)
-        env = np.zeros_like(data)
-        for i in range(len(data)):
-            start = max(0, i - window_size)
-            chunk = shifted[start:i + 1]
-            rms = np.sqrt(np.mean(chunk ** 2) + 1e-10)
-            peak = np.abs(shifted[i])
-            env[i] = 0.6 * rms + 0.4 * peak
+
+        padded = np.pad(shifted.astype(np.float64), (window_size, 0), mode='reflect')
+        squared = padded ** 2
+        cumsum = np.cumsum(squared)
+        n = len(data)
+        start_idx = np.arange(n)
+        end_idx = start_idx + window_size + 1
+        valid = end_idx <= len(cumsum) - 1
+        rms_vals = np.zeros(n, dtype=np.float64)
+        rms_vals[valid] = np.sqrt((cumsum[end_idx[valid]] - cumsum[start_idx[valid]]) / (window_size + 1) + 1e-10)
+        rms_vals[~valid] = np.sqrt(np.mean(data[~valid].astype(np.float64) ** 2) + 1e-10)
+        peak_vals = np.abs(shifted)
+        env = 0.6 * rms_vals + 0.4 * peak_vals
 
         threshold = np.median(np.abs(data)) * 2.0
         ratio = 4.0
         knee = 6.0
-        gain = np.ones_like(data)
+        gain = np.ones(len(data), dtype=np.float64)
 
-        for i in range(len(data)):
-            e = env[i]
-            if e > threshold - knee / 2:
-                if e < threshold + knee / 2:
-                    g = 1.0 - (1.0 / ratio) * ((e - threshold + knee / 2) / knee) ** 2
-                else:
-                    g = 1.0 - (1.0 - 1.0 / ratio) * (1.0 - (threshold - knee / 2) / e)
-                gain[i] = 1.0 - (1.0 - g) * amount
+        over_knee = env > threshold - knee / 2
+        if np.any(over_knee):
+            e = env[over_knee]
+            g = np.ones(len(e), dtype=np.float64)
+            soft_knee_mask = (e >= threshold - knee / 2) & (e < threshold + knee / 2)
+            hard_knee_mask = e >= threshold + knee / 2
+
+            if np.any(soft_knee_mask):
+                g[soft_knee_mask] = 1.0 - (1.0 / ratio) * ((e[soft_knee_mask] - threshold + knee / 2) / knee) ** 2
+            if np.any(hard_knee_mask):
+                g[hard_knee_mask] = 1.0 - (1.0 - 1.0 / ratio) * (1.0 - (threshold - knee / 2) / e[hard_knee_mask])
+
+            gain[over_knee] = 1.0 - (1.0 - g) * amount
 
         y[ch] = (data * gain).astype(y.dtype)
 
@@ -516,13 +528,23 @@ def _resonance_suppress_enhanced_lite(y, sr, amount):
         n_bins = magnitude.shape[0]
         gain = np.ones_like(magnitude)
 
-        for i in range(magnitude.shape[1]):
-            for j in range(2, n_bins - 2):
-                neighbors = magnitude[j-2:j+3, i]
-                median_val = np.median(neighbors)
-                if magnitude[j, i] > median_val * 2.5 and median_val > 1e-10:
-                    reduction = 1.0 - amount * 0.6 * (1.0 - median_val / (magnitude[j, i] + 1e-10))
-                    gain[j, i] = max(reduction, 0.25)
+        if n_bins > 4 and magnitude.shape[1] > 0:
+            padded = np.pad(magnitude, ((2, 2), (0, 0)), mode='edge')
+            window_stack = np.stack([
+                padded[0:-4, :],
+                padded[1:-3, :],
+                padded[2:-2, :],
+                padded[3:-1, :],
+                padded[4:, :]
+            ], axis=0)
+            median_vals = np.median(window_stack, axis=0)
+
+            peak_mask = (magnitude > median_vals * 2.5) & (median_vals > 1e-10)
+            if np.any(peak_mask):
+                ratio = median_vals / (magnitude + 1e-10)
+                reduction = 1.0 - amount * 0.6 * (1.0 - ratio)
+                reduction = np.clip(reduction, 0.25, 1.0)
+                gain = np.where(peak_mask, reduction, gain)
 
         alpha = 0.3
         gain_smooth = np.zeros_like(gain)
@@ -567,23 +589,27 @@ def _vocal_multiband_compressor_lite(y, sr, amount):
             if threshold < 1e-10:
                 continue
 
-            env = np.zeros_like(band)
             window = int(0.01 * sr)
-            for i in range(len(band)):
-                start = max(0, i - window)
-                chunk = band[start:i+1]
-                env[i] = np.sqrt(np.mean(chunk ** 2) + 1e-10)
+            padded = np.pad(band.astype(np.float64), (window, 0), mode='reflect')
+            squared = padded ** 2
+            cumsum = np.cumsum(squared)
+            n = len(band)
+            start_idx = np.arange(n)
+            end_idx = start_idx + window + 1
+            valid = end_idx <= len(cumsum) - 1
+            rms_vals = np.zeros(n, dtype=np.float64)
+            rms_vals[valid] = np.sqrt((cumsum[end_idx[valid]] - cumsum[start_idx[valid]]) / (window + 1) + 1e-10)
+            rms_vals[~valid] = np.sqrt(np.mean(band[~valid].astype(np.float64) ** 2) + 1e-10)
 
-            gain = np.ones_like(band)
-            for i in range(len(band)):
-                e = env[i]
-                if e > threshold:
-                    db_over = 20 * np.log10(e / threshold + 1e-10)
-                    g_db = -db_over * (1 - 1 / ratio)
-                    g = 10 ** (g_db / 20.0)
-                    gain[i] = 1.0 - (1.0 - g) * amount
+            gain = np.ones(len(band), dtype=np.float64)
+            over_mask = rms_vals > threshold
+            if np.any(over_mask):
+                db_over = 20 * np.log10(rms_vals[over_mask] / threshold + 1e-10)
+                g_db = -db_over * (1 - 1 / ratio)
+                g = 10 ** (g_db / 20.0)
+                gain[over_mask] = 1.0 - (1.0 - g) * amount
 
-            band[:] *= gain
+            band *= gain
 
         y_out = low_band + mid_band + high_band
         y[ch] = y_out.astype(y.dtype)
@@ -846,8 +872,15 @@ def repair_audio(input_path, output_path, params, progress_callback=None):
 
     gc.collect()
 
-    vocal_params = params.get("vocal_params", {}).copy()
-    inst_params = params.get("inst_params", {}).copy()
+    vocal_params = {}
+    for flat_key, short_key in REVERSE_VOCAL_MAP.items():
+        if flat_key in params:
+            vocal_params[short_key] = params[flat_key]
+
+    inst_params = {}
+    for flat_key, short_key in REVERSE_INST_MAP.items():
+        if flat_key in params:
+            inst_params[short_key] = params[flat_key]
 
     for shared_key in ("speed",):
         if shared_key in params:
