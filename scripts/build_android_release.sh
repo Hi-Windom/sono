@@ -46,7 +46,45 @@ if [ ! -d "backend" ] || [ ! -f "backend/main.py" ]; then
 fi
 echo "  后端代码确认: backend/"
 
-echo -e "${YELLOW}[3.5/4] 检查 Termux 不兼容依赖...${NC}"
+echo -e "${YELLOW}[3.5/4] 验证 Python 模块导入...${NC}"
+PYTHON_CHECK_FAILED=0
+cd backend
+python -c "
+import sys
+import os
+
+errors = []
+
+# 检查核心模块导入
+modules_to_check = [
+    'services.repair.repair_v3_2ap.core',
+    'services.repair.repair_v3_2.core',
+    'services.repair.repair_v3_2a.core',
+]
+
+for module_name in modules_to_check:
+    try:
+        __import__(module_name)
+        print(f'  OK: {module_name}')
+    except Exception as e:
+        print(f'  ERROR: {module_name}: {e}')
+        errors.append((module_name, str(e)))
+
+if errors:
+    print('')
+    print('模块导入检查失败！')
+    for mod, err in errors:
+        print(f'  - {mod}: {err}')
+    sys.exit(1)
+" || PYTHON_CHECK_FAILED=1
+cd ..
+if [ $PYTHON_CHECK_FAILED -eq 1 ]; then
+    echo -e "${RED}错误: Python 模块导入检查失败，请修复后再打包。${NC}"
+    exit 1
+fi
+echo "  模块导入检查通过。"
+
+echo -e "${YELLOW}[4/4] 检查 Termux 不兼容依赖...${NC}"
 KNOWN_INCOMPATIBLE="psutil lameenc"
 INCOMPATIBLE_FOUND=""
 while IFS= read -r line; do

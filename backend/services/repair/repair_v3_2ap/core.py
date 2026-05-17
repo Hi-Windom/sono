@@ -1,7 +1,15 @@
 import numpy as np
 from scipy import signal
 from scipy.signal import butter, sosfiltfilt
-from ..repair_v3_2a.core import *
+
+from ..repair_v3_2a.core import (
+    _simple_declip, _simple_depop, _de_ess, _spectral_denoise,
+    _transient_aware_process_lite, _apply_bass_enhance_lite,
+    _apply_air_texture_lite, _transparent_compress, _loudness_normalize,
+    _soft_peak_limit, _resonance_suppress_lite, _vocal_exciter_lite,
+    _vocal_smart_compressor_lite, load_audio_with_fallback,
+    resample_poly, stft, istft, sf, gc,
+)
 from ..repair_v3_2a.core import repair_audio as _v3_2a_repair_audio
 from ..repair_v3_2a.core import process_vocal_track as _v3_2a_process_vocal_track
 from ..repair_v3_2a.core import process_instrument_track as _v3_2a_process_instrument_track
