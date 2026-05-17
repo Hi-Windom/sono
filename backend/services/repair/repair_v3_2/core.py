@@ -406,13 +406,12 @@ def _vocal_smart_compressor(y, sr, amount):
         _vocal_smart_compressor(y, sr, amount)
         return y[0]
 
-    attack_ms = 10.0
+    amount_enhanced = logarithmic_boost(amount, base=1.8)
+    ratio = 1.0 + amount_enhanced * 2.0
+    threshold_db = -18.0 + (1.0 - amount_enhanced) * 8.0
+    knee_width = 8.0
+    attack_ms = 15.0
     attack_gamma = np.exp(-1000.0 / (attack_ms * sr / HOP_LENGTH + 1e-10))
-
-    amount_enhanced = logarithmic_boost(amount, base=2.5)
-    ratio = 1.0 + amount_enhanced * 6.0
-    threshold_db = -28.0 + (1.0 - amount_enhanced) * 16.0
-    knee_width = 4.0
 
     for ch in range(y.shape[0]):
         data = y[ch].astype(np.float64)
@@ -690,6 +689,80 @@ def _instrument_stereo_enhance(y, sr, amount):
     return y
 
 
+def _apply_dynamic_expansion(y, sr, amount=0.3):
+    """
+    应用动态扩展处理，增强响度对比度，恢复动态感
+
+    参数:
+        y: 音频数据
+        sr: 采样率
+        amount: 扩展强度 (0.0-1.0)，值越大动态对比越强
+    """
+    if amount <= 0:
+        return y
+
+    if y.ndim == 1:
+        y = y.reshape(1, -1)
+        _apply_dynamic_expansion(y, sr, amount)
+        return y[0]
+
+    exp_ratio = 1.0 + amount * 0.8
+    threshold_ratio = 0.3 + amount * 0.2
+
+    for ch in range(y.shape[0]):
+        data = y[ch].astype(np.float64)
+
+        frame_len = HOP_LENGTH
+        n_frames = (len(data) - frame_len) // (frame_len // 2) + 1
+        if n_frames < 2:
+            continue
+
+        rms_envelope = np.zeros(n_frames)
+        for i in range(n_frames):
+            start = i * (frame_len // 2)
+            end = min(start + frame_len, len(data))
+            frame = data[start:end]
+            rms_envelope[i] = np.sqrt(np.mean(frame**2) + 1e-10)
+
+        rms_mean = np.mean(rms_envelope)
+        threshold_rms = rms_mean * threshold_ratio
+
+        gain_map = np.ones(n_frames)
+        for i in range(n_frames):
+            if rms_envelope[i] < threshold_rms:
+                below_ratio = rms_envelope[i] / (threshold_rms + 1e-10)
+                gain_map[i] = below_ratio ** (exp_ratio - 1.0)
+            else:
+                above_ratio = rms_envelope[i] / (rms_mean + 1e-10)
+                if above_ratio > 1.0:
+                    gain_map[i] = 1.0 + (above_ratio - 1.0) * amount * 0.5
+
+        smoothing_kernel = np.ones(5) / 5
+        gain_map = np.convolve(gain_map, smoothing_kernel, mode='same')
+
+        result = np.zeros_like(data)
+        for i in range(n_frames):
+            start = i * (frame_len // 2)
+            end = min(start + frame_len, len(data))
+            result[start:end] += data[start:end] * gain_map[i]
+
+        overlap_count = np.zeros(len(data))
+        for i in range(n_frames):
+            start = i * (frame_len // 2)
+            end = min(start + frame_len, len(data))
+            overlap_count[start:end] += 1.0
+        overlap_count[overlap_count < 1] = 1.0
+        result /= overlap_count
+
+        peak = np.max(np.abs(result))
+        if peak > 0.99:
+            result *= 0.99 / peak
+
+        y[ch] = result.astype(y.dtype)
+
+    return y
+
+
 def _mastering_standard(y, sr):
     nyq = sr / 2
 
@@ -698,7 +771,7 @@ def _mastering_standard(y, sr):
 
     sos_presence = butter(4, [3000/nyq, min(4000, nyq*0.95)/nyq], btype='band', output='sos')
     presence_band = sosfiltfilt(sos_presence, y, axis=-1)
-    y = y.astype(np.float64) + presence_band * 0.18
+    y = y.astype(np.float64) + presence_band * 0.12
 
     peak = np.max(np.abs(y))
     if peak > 0.99:
@@ -706,10 +779,12 @@ def _mastering_standard(y, sr):
 
     rms_val = np.sqrt(np.mean(y.astype(np.float64)**2))
     if rms_val > 1e-10:
-        target_rms = 10 ** (-12.0 / 20.0)
+        target_rms = 10 ** (-15.0 / 20.0)
         gain = target_rms / rms_val
         gain = np.clip(gain, 0.2, 5.0)
         y = (y.astype(np.float64) * gain).astype(y.dtype)
+
+    y = _apply_dynamic_expansion(y, sr, amount=0.3)
 
     return y
 
@@ -722,20 +797,20 @@ def _mastering_powerful(y, sr):
 
     sos_bass = butter(4, [60/nyq, min(100, nyq*0.95)/nyq], btype='band', output='sos')
     bass_band = sosfiltfilt(sos_bass, y, axis=-1)
-    y = y.astype(np.float64) + bass_band * 0.45
+    y = y.astype(np.float64) + bass_band * 0.25
 
     sos_low_mid = butter(4, [200/nyq, min(500, nyq*0.95)/nyq], btype='band', output='sos')
     low_mid_band = sosfiltfilt(sos_low_mid, y, axis=-1)
-    y = y.astype(np.float64) + low_mid_band * 0.2
+    y = y.astype(np.float64) + low_mid_band * 0.1
 
     sos_presence = butter(4, [3000/nyq, min(6000, nyq*0.95)/nyq], btype='band', output='sos')
     presence_band = sosfiltfilt(sos_presence, y, axis=-1)
-    y = y.astype(np.float64) + presence_band * 0.2
+    y = y.astype(np.float64) + presence_band * 0.1
 
     if y.ndim > 1 and y.shape[0] >= 2:
         mid = (y[0] + y[1]) * 0.5
         side = (y[0] - y[1]) * 0.5
-        side *= 1.5
+        side *= 1.2
         new_left = mid + side
         new_right = mid - side
         peak = max(np.max(np.abs(new_left)), np.max(np.abs(new_right)))
@@ -751,10 +826,12 @@ def _mastering_powerful(y, sr):
 
     rms_val = np.sqrt(np.mean(y.astype(np.float64)**2))
     if rms_val > 1e-10:
-        target_rms = 10 ** (-11.0 / 20.0)
+        target_rms = 10 ** (-13.0 / 20.0)
         gain = target_rms / rms_val
         gain = np.clip(gain, 0.2, 5.0)
         y = (y.astype(np.float64) * gain).astype(y.dtype)
+
+    y = _apply_dynamic_expansion(y, sr, amount=0.25)
 
     return y
 
@@ -768,7 +845,7 @@ def _mastering_warm(y, sr):
     sos_low_mid = butter(4, [200/nyq, min(500, nyq*0.95)/nyq], btype='band', output='sos')
     low_mid_band = sosfiltfilt(sos_low_mid, y, axis=-1)
     saturated = np.tanh(low_mid_band * 1.5) * 0.4
-    y = y.astype(np.float64) + saturated * 0.4
+    y = y.astype(np.float64) + saturated * 0.25
 
     peak = np.max(np.abs(y))
     if peak > 0.99:
@@ -776,10 +853,12 @@ def _mastering_warm(y, sr):
 
     rms_val = np.sqrt(np.mean(y.astype(np.float64)**2))
     if rms_val > 1e-10:
-        target_rms = 10 ** (-12.5 / 20.0)
+        target_rms = 10 ** (-15.0 / 20.0)
         gain = target_rms / rms_val
         gain = np.clip(gain, 0.2, 5.0)
         y = (y.astype(np.float64) * gain).astype(y.dtype)
+
+    y = _apply_dynamic_expansion(y, sr, amount=0.35)
 
     return y
 
@@ -807,18 +886,18 @@ def _mastering_adaptive(y, sr):
     if low_energy < 0.20:
         sos_low_shelf = butter(4, 250 / nyq, btype='low', output='sos')
         y = sosfiltfilt(sos_low_shelf, y, axis=-1)
-        boost_gain = 1.0 + (0.20 - low_energy) * 1.0
+        boost_gain = 1.0 + (0.20 - low_energy) * 0.5
         y = y.astype(np.float64) * boost_gain
 
     if high_energy < 0.15:
         sos_high_shelf = butter(4, 4000 / nyq, btype='high', output='sos')
         high_shelf = sosfiltfilt(sos_high_shelf, y, axis=-1)
-        y = y.astype(np.float64) + high_shelf * (0.15 - high_energy) * 0.6
+        y = y.astype(np.float64) + high_shelf * (0.15 - high_energy) * 0.3
 
     if mid_energy > 0.60:
         sos_mid_cut = butter(4, [250/nyq, 4000/nyq], btype='band', output='sos')
         mid_band = sosfiltfilt(sos_mid_cut, y, axis=-1)
-        y = y.astype(np.float64) - mid_band * (mid_energy - 0.60) * 0.5
+        y = y.astype(np.float64) - mid_band * (mid_energy - 0.60) * 0.2
 
     peak = np.max(np.abs(y))
     if peak > 0.99:
@@ -826,7 +905,7 @@ def _mastering_adaptive(y, sr):
 
     rms_val = np.sqrt(np.mean(y.astype(np.float64)**2))
     if rms_val > 1e-10:
-        target_rms = 10 ** (-12.0 / 20.0)
+        target_rms = 10 ** (-14.0 / 20.0)
         gain = target_rms / rms_val
         gain = np.clip(gain, 0.2, 5.0)
         y = (y.astype(np.float64) * gain).astype(y.dtype)
