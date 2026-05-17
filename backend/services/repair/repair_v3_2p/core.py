@@ -4,7 +4,6 @@ from ..repair_v3_2.core import *
 from ..repair_v3_2.core import repair_audio as _v3_2_repair_audio
 from ..repair_v3_2.core import process_vocal_track as _v3_2_process_vocal_track
 from ..repair_v3_2.core import process_instrument_track as _v3_2_process_instrument_track
-from ..repair_v3_2.core import _repair_single_track as _v3_2_repair_single_track
 from ..repair_v3_2.core import mix_tracks as _v3_2_mix_tracks
 
 DESKTOP_WORKING_SR = 48000
@@ -164,7 +163,8 @@ def mix_tracks(vocal, accompaniment, vocal_ratio=1.0, accompaniment_ratio=1.0):
     return _v3_2_mix_tracks(vocal, accompaniment, vocal_ratio, accompaniment_ratio)
 
 def _repair_single_track(input_path, output_path, params, progress_callback=None):
-    return _v3_2_repair_single_track(input_path, output_path, params, progress_callback)
+    from ..repair_v3_2.core import repair_single_track
+    return repair_single_track(input_path, output_path, params, progress_callback)
 
 def repair_audio(input_path, output_path, params, progress_callback=None):
     return _v3_2_repair_audio(input_path, output_path, params, progress_callback)

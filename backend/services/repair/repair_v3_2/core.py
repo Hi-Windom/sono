@@ -1553,3 +1553,6 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
     if accompaniment_output_path:
         result["accompaniment_output_path"] = accompaniment_output_path
     return result
+
+
+repair_single_track = _repair_single_track
