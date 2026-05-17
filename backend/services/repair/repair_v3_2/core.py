@@ -6,7 +6,7 @@ from scipy.signal import butter, sosfiltfilt, resample_poly
 from services.audio_loader import load_audio_with_fallback
 from services.dsp_utils import stft, istft
 from .param_validator import validate_single_params, validate_vocal_params, validate_inst_params
-from .param_curves import parametric_curve, enhance_amount, exponential_boost
+from .param_curves import logarithmic_boost, aggressive_boost, steep_sigmoid
 
 DESKTOP_WORKING_SR = 48000
 N_FFT = 2048
@@ -361,7 +361,7 @@ def _vocal_exciter_improved(y, sr, amount):
         _vocal_exciter_improved(y, sr, amount)
         return y[0]
 
-    amount_enhanced = enhance_amount(amount, multiplier=1.5)
+    amount_enhanced = logarithmic_boost(amount, base=2.0)
 
     nyq = sr / 2
     crossover_hz = 2000
@@ -383,7 +383,7 @@ def _vocal_exciter_improved(y, sr, amount):
         harmonics = harmonic2 + harmonic3 + (pos_sat - high_band * 0.5 + neg_sat - high_band * 0.5) * 0.25
         harmonics = harmonics / (np.max(np.abs(harmonics)) + 1e-10)
 
-        wet_high = high_band + harmonics * amount_enhanced * 0.5
+        wet_high = high_band + harmonics * amount_enhanced * 0.8
         peak_wet = np.max(np.abs(wet_high))
         if peak_wet > 0.99:
             wet_high *= 0.99 / peak_wet
@@ -409,10 +409,10 @@ def _vocal_smart_compressor(y, sr, amount):
     attack_ms = 10.0
     attack_gamma = np.exp(-1000.0 / (attack_ms * sr / HOP_LENGTH + 1e-10))
 
-    amount_enhanced = enhance_amount(amount, multiplier=1.5)
-    ratio = 1.0 + amount_enhanced * 4.0
-    threshold_db = -26.0 + (1.0 - amount_enhanced) * 14.0
-    knee_width = 6.0
+    amount_enhanced = logarithmic_boost(amount, base=2.5)
+    ratio = 1.0 + amount_enhanced * 6.0
+    threshold_db = -28.0 + (1.0 - amount_enhanced) * 16.0
+    knee_width = 4.0
 
     for ch in range(y.shape[0]):
         data = y[ch].astype(np.float64)
@@ -501,7 +501,7 @@ def _de_esser_improved(y, sr, amount):
         _de_esser_improved(y, sr, amount)
         return y[0]
 
-    amount_enhanced = enhance_amount(amount, multiplier=1.5)
+    amount_enhanced = logarithmic_boost(amount, base=2.5)
 
     nyq = sr / 2
     low_sib_hz, high_sib_hz = 4000, 8000
@@ -540,7 +540,7 @@ def _de_esser_improved(y, sr, amount):
             sib_energy_history[history_idx] = sib_rms
             history_idx = (history_idx + 1) % 20
             running_avg = np.mean(sib_energy_history) + 1e-10
-            adaptive_threshold = (0.2 + running_avg * 1.5) * (1.0 - amount_enhanced * 0.35)
+            adaptive_threshold = (0.2 + running_avg * 1.5) * (1.0 - amount_enhanced * 0.4)
 
             segment = sibilance_band[start:end]
             segment_fft = np.fft.rfft(segment)
@@ -596,9 +596,9 @@ def _vocal_spatial(y, sr, amount):
         _vocal_spatial(y, sr, amount)
         return y[0]
 
-    amount_enhanced = exponential_boost(amount, power=1.8, threshold=0.15)
+    amount_enhanced = logarithmic_boost(amount, base=2.0)
     delay_samples = int(0.015 * sr)
-    decay = 0.4 * amount_enhanced
+    decay = 0.5 * amount_enhanced
 
     for ch in range(y.shape[0]):
         data = y[ch].astype(np.float64)
@@ -611,7 +611,7 @@ def _vocal_spatial(y, sr, amount):
         reverb_tail = np.zeros(reverb_len)
         for i in range(1, reverb_len):
             reverb_tail[i] = data[i] * 0.3 + reverb_tail[i-1] * 0.7
-        reverb_tail *= decay * 0.6
+        reverb_tail *= decay * 0.7
 
         wet = delayed
         wet[:reverb_len] += reverb_tail * amount_enhanced
@@ -634,7 +634,7 @@ def _vocal_warmth(y, sr, amount):
         _vocal_warmth(y, sr, amount)
         return y[0]
 
-    amount_enhanced = enhance_amount(amount, multiplier=1.5)
+    amount_enhanced = logarithmic_boost(amount, base=2.5)
 
     nyq = sr / 2
     sos_warm = butter(4, [200/nyq, min(800, nyq*0.95)/nyq], btype='band', output='sos')
@@ -644,13 +644,13 @@ def _vocal_warmth(y, sr, amount):
 
         warm_band = sosfiltfilt(sos_warm, dry)
 
-        drive = 1.0 + amount_enhanced * 2.5
+        drive = 1.0 + amount_enhanced * 3.0
         saturated = np.tanh(warm_band * drive) / np.tanh(drive)
 
         harmonic = saturated - warm_band * 0.3
         harmonic = np.tanh(harmonic * 1.5) * 0.5
 
-        mix = dry + harmonic * amount_enhanced * 0.4
+        mix = dry + harmonic * amount_enhanced * 0.5
         peak = np.max(np.abs(mix))
         if peak > 0.99:
             mix *= 0.99 / peak
@@ -698,7 +698,7 @@ def _mastering_standard(y, sr):
 
     sos_presence = butter(4, [3000/nyq, min(4000, nyq*0.95)/nyq], btype='band', output='sos')
     presence_band = sosfiltfilt(sos_presence, y, axis=-1)
-    y = y.astype(np.float64) + presence_band * 0.12
+    y = y.astype(np.float64) + presence_band * 0.18
 
     peak = np.max(np.abs(y))
     if peak > 0.99:
@@ -706,7 +706,7 @@ def _mastering_standard(y, sr):
 
     rms_val = np.sqrt(np.mean(y.astype(np.float64)**2))
     if rms_val > 1e-10:
-        target_rms = 10 ** (-13.5 / 20.0)
+        target_rms = 10 ** (-12.0 / 20.0)
         gain = target_rms / rms_val
         gain = np.clip(gain, 0.2, 5.0)
         y = (y.astype(np.float64) * gain).astype(y.dtype)
@@ -722,20 +722,20 @@ def _mastering_powerful(y, sr):
 
     sos_bass = butter(4, [60/nyq, min(100, nyq*0.95)/nyq], btype='band', output='sos')
     bass_band = sosfiltfilt(sos_bass, y, axis=-1)
-    y = y.astype(np.float64) + bass_band * 0.35
+    y = y.astype(np.float64) + bass_band * 0.45
 
     sos_low_mid = butter(4, [200/nyq, min(500, nyq*0.95)/nyq], btype='band', output='sos')
     low_mid_band = sosfiltfilt(sos_low_mid, y, axis=-1)
-    y = y.astype(np.float64) + low_mid_band * 0.15
+    y = y.astype(np.float64) + low_mid_band * 0.2
 
     sos_presence = butter(4, [3000/nyq, min(6000, nyq*0.95)/nyq], btype='band', output='sos')
     presence_band = sosfiltfilt(sos_presence, y, axis=-1)
-    y = y.astype(np.float64) + presence_band * 0.15
+    y = y.astype(np.float64) + presence_band * 0.2
 
     if y.ndim > 1 and y.shape[0] >= 2:
         mid = (y[0] + y[1]) * 0.5
         side = (y[0] - y[1]) * 0.5
-        side *= 1.35
+        side *= 1.5
         new_left = mid + side
         new_right = mid - side
         peak = max(np.max(np.abs(new_left)), np.max(np.abs(new_right)))
@@ -751,7 +751,7 @@ def _mastering_powerful(y, sr):
 
     rms_val = np.sqrt(np.mean(y.astype(np.float64)**2))
     if rms_val > 1e-10:
-        target_rms = 10 ** (-11.5 / 20.0)
+        target_rms = 10 ** (-11.0 / 20.0)
         gain = target_rms / rms_val
         gain = np.clip(gain, 0.2, 5.0)
         y = (y.astype(np.float64) * gain).astype(y.dtype)
@@ -768,7 +768,7 @@ def _mastering_warm(y, sr):
     sos_low_mid = butter(4, [200/nyq, min(500, nyq*0.95)/nyq], btype='band', output='sos')
     low_mid_band = sosfiltfilt(sos_low_mid, y, axis=-1)
     saturated = np.tanh(low_mid_band * 1.5) * 0.4
-    y = y.astype(np.float64) + saturated * 0.3
+    y = y.astype(np.float64) + saturated * 0.4
 
     peak = np.max(np.abs(y))
     if peak > 0.99:
@@ -776,7 +776,7 @@ def _mastering_warm(y, sr):
 
     rms_val = np.sqrt(np.mean(y.astype(np.float64)**2))
     if rms_val > 1e-10:
-        target_rms = 10 ** (-13.5 / 20.0)
+        target_rms = 10 ** (-12.5 / 20.0)
         gain = target_rms / rms_val
         gain = np.clip(gain, 0.2, 5.0)
         y = (y.astype(np.float64) * gain).astype(y.dtype)
@@ -807,18 +807,18 @@ def _mastering_adaptive(y, sr):
     if low_energy < 0.20:
         sos_low_shelf = butter(4, 250 / nyq, btype='low', output='sos')
         y = sosfiltfilt(sos_low_shelf, y, axis=-1)
-        boost_gain = 1.0 + (0.20 - low_energy) * 0.7
+        boost_gain = 1.0 + (0.20 - low_energy) * 1.0
         y = y.astype(np.float64) * boost_gain
 
     if high_energy < 0.15:
         sos_high_shelf = butter(4, 4000 / nyq, btype='high', output='sos')
         high_shelf = sosfiltfilt(sos_high_shelf, y, axis=-1)
-        y = y.astype(np.float64) + high_shelf * (0.15 - high_energy) * 0.4
+        y = y.astype(np.float64) + high_shelf * (0.15 - high_energy) * 0.6
 
     if mid_energy > 0.60:
         sos_mid_cut = butter(4, [250/nyq, 4000/nyq], btype='band', output='sos')
         mid_band = sosfiltfilt(sos_mid_cut, y, axis=-1)
-        y = y.astype(np.float64) - mid_band * (mid_energy - 0.60) * 0.3
+        y = y.astype(np.float64) - mid_band * (mid_energy - 0.60) * 0.5
 
     peak = np.max(np.abs(y))
     if peak > 0.99:
@@ -826,7 +826,7 @@ def _mastering_adaptive(y, sr):
 
     rms_val = np.sqrt(np.mean(y.astype(np.float64)**2))
     if rms_val > 1e-10:
-        target_rms = 10 ** (-13.0 / 20.0)
+        target_rms = 10 ** (-12.0 / 20.0)
         gain = target_rms / rms_val
         gain = np.clip(gain, 0.2, 5.0)
         y = (y.astype(np.float64) * gain).astype(y.dtype)
@@ -842,7 +842,7 @@ def _resonance_suppress(y, sr, amount):
         _resonance_suppress(y, sr, amount)
         return y[0]
 
-    amount_enhanced = enhance_amount(amount, multiplier=1.5)
+    amount_enhanced = logarithmic_boost(amount, base=2.0)
 
     for ch in range(y.shape[0]):
         data = y[ch].astype(np.float64)
@@ -856,7 +856,7 @@ def _resonance_suppress(y, sr, amount):
             for b in range(2, n_bins - 2):
                 local_median = np.median(magnitude[b-2:b+3, f])
                 if local_median > 1e-10 and magnitude[b, f] > 2.0 * local_median:
-                    gain_map[b, f] = 1.0 - amount_enhanced * 0.6
+                    gain_map[b, f] = 1.0 - amount_enhanced * 0.7
 
         smoothing_frames = max(2, int(0.02 * sr / HOP_LENGTH))
         kernel = np.ones(smoothing_frames) / smoothing_frames
@@ -884,7 +884,7 @@ def _transient_aware_process(y, sr, amount):
         _transient_aware_process(y, sr, amount)
         return y[0]
 
-    amount_enhanced = parametric_curve(amount, steepness=2.5, midpoint=0.5)
+    amount_enhanced = aggressive_boost(amount, power=0.5, multiplier=2.0)
 
     for ch in range(y.shape[0]):
         data = y[ch].astype(np.float64)
@@ -909,7 +909,7 @@ def _transient_aware_process(y, sr, amount):
         gain_envelope = np.ones(n_frames)
         for f in range(n_frames):
             if transient_mask[f]:
-                gain_envelope[f] = 1.0 + amount_enhanced * 0.4
+                gain_envelope[f] = 1.0 + amount_enhanced * 0.5
 
         smoothing_kernel = np.ones(3) / 3
         gain_envelope = np.convolve(gain_envelope, smoothing_kernel, mode='same')

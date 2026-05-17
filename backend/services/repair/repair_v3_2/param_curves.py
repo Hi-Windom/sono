@@ -6,67 +6,67 @@ v3.2 参数响应曲线模块
 import numpy as np
 
 
-def parametric_curve(amount, steepness=2.5, midpoint=0.5):
+def logarithmic_boost(amount, base=2.0, threshold=0.05):
     """
-    S曲线参数响应函数，使小参数值也有明显效果
+    对数增强函数 - 使小参数值也有显著效果
 
-    参数:
-        amount: 原始参数值 (0.0 - 1.0)
-        steepness: 曲线陡峭度，值越大曲线越陡 (建议 2.0 - 3.5)
-        midpoint: 曲线中点，值越小低参数效果越强 (建议 0.4 - 0.6)
+    曲线特性:
+    - amount=0.1 → 输出 ~0.45-0.5
+    - amount=0.2 → 输出 ~0.6-0.65
+    - amount=0.5 → 输出 ~0.85-0.9
+    - amount=1.0 → 输出 ~1.0
 
-    返回:
-        增强后的参数值 (0.0 - 1.0+)
-    """
-    if amount <= 0:
-        return 0.0
-
-    # Sigmoid 曲线
-    sigmoid = 1.0 / (1.0 + np.exp(-steepness * (amount - midpoint)))
-
-    # 归一化到 [0, 1] 范围，但保留曲线特性
-    enhanced = sigmoid * 1.5  # 放大曲线效果
-
-    return min(enhanced, 1.0)
-
-
-def enhance_amount(amount, multiplier=1.5):
-    """
-    简单增强参数效果
-
-    参数:
-        amount: 原始参数值 (0.0 - 1.0)
-        multiplier: 增强倍数 (建议 1.5 - 2.5)
-
-    返回:
-        增强后的参数值
+    适合: compressor, exciter, spatial, warmth 等需要明显效果的处理
     """
     if amount <= 0:
         return 0.0
-
-    # 使用平方根曲线，使小值也有效果
-    enhanced = np.sqrt(amount) * multiplier
-
-    return min(enhanced, 1.0)
-
-
-def exponential_boost(amount, power=2.0, threshold=0.2):
-    """
-    指数增强函数，特别增强中高参数值
-
-    参数:
-        amount: 原始参数值
-        power: 指数幂，值越大高参数效果越强 (建议 1.5 - 3.0)
-        threshold: 阈值，低于此值的参数增强幅度较小
-
-    返回:
-        增强后的参数值
-    """
     if amount <= threshold:
-        # 低参数值线性增强
+        return amount * 2.0
+    normalized = (amount - threshold) / (1.0 - threshold)
+    log_val = np.log1p(normalized * (base - 1)) / np.log(base)
+    result = threshold + (1.0 - threshold) * log_val * 1.2
+    return min(result, 1.0)
+
+
+def aggressive_boost(amount, power=0.5, multiplier=1.8):
+    """
+    激进增强函数 - 适用于需要强烈效果的处理
+
+    使用平方根或更低的幂次，使低值有更明显的效果
+
+    曲线特性:
+    - amount=0.1 → 输出 ~0.57
+    - amount=0.2 → 输出 ~0.80
+    - amount=0.5 → 输出 ~1.27 (clamp to 1.0)
+    """
+    if amount <= 0:
+        return 0.0
+    result = np.power(amount, power) * multiplier
+    return min(result, 1.0)
+
+
+def steep_sigmoid(amount, steepness=4.0, midpoint=0.3):
+    """
+    陡峭S曲线 - 适用于需要锐利效果增强的处理
+
+    曲线中点前移，让低参数值也能触发效果
+    """
+    if amount <= 0:
+        return 0.0
+    sigmoid = 1.0 / (1.0 + np.exp(-steepness * (amount - midpoint)))
+    enhanced = sigmoid * 1.5
+    return min(enhanced, 1.0)
+
+
+def linear_then_exponential(amount, threshold=0.3, power=2.5):
+    """
+    线性-指数混合曲线
+
+    低于阈值线性增长，高于阈值指数增长
+    """
+    if amount <= 0:
+        return 0.0
+    if amount <= threshold:
         return amount * 1.5
-    else:
-        # 高参数值指数增强
-        excess = amount - threshold
-        enhanced = threshold + excess ** power
-        return min(enhanced, 1.0)
+    excess = amount - threshold
+    return threshold * 1.5 + np.power(excess, power) * 0.5
