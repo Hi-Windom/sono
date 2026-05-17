@@ -45,36 +45,36 @@ jobs:
             ## Sono ${{ inputs.version }} - Android (Termux)
 
             ### 安装步骤
-1. 下载 `release_android.tar.gz`
-2. 打开 Termux，先完成初始化配置：
-   ```bash
-   # 更新包管理器
-   pkg update && pkg upgrade -y
-   
-   # 授予存储访问权限（允许 Termux 访问手机存储）
-   termux-setup-storage
-   
-   # 等待授权弹窗出现，点击"允许"
-   # 验证存储权限（会看到 storage 目录）
-   ls -la ~/
-   
-   # 进入下载目录（根据文件位置调整）
-   cd ~/storage/downloads
-   # 或者使用 /sdcard/Download（注意部分机型路径可能不同）
-   # cd /sdcard/Download
-   ```
-3. 在 Termux 中执行安装：
-   ```bash
-   # 解压安装包
-   tar -xzf release_android.tar.gz && cd sono-android && bash setup_android.sh
-   ```
-4. 之后每次启动：`cd sono-android && ./start_android.sh`
-5. 浏览器访问 http://localhost:8000
+            1. 下载 `release_android.tar.gz`
+            2. 打开 Termux，先完成初始化配置：
+               ```bash
+               # 更新包管理器
+               pkg update && pkg upgrade -y
+               
+               # 授予存储访问权限（允许 Termux 访问手机存储）
+               termux-setup-storage
+               
+               # 等待授权弹窗出现，点击"允许"
+               # 验证存储权限（会看到 storage 目录）
+               ls -la ~/
+               
+               # 进入下载目录（根据文件位置调整）
+               cd ~/storage/downloads
+               # 或者使用 /sdcard/Download（注意部分机型路径可能不同）
+               # cd /sdcard/Download
+               ```
+            3. 在 Termux 中执行安装：
+               ```bash
+               # 解压安装包
+               tar -xzf release_android.tar.gz && cd sono-android && bash setup_android.sh
+               ```
+            4. 之后每次启动：`cd sono-android && ./start_android.sh`
+            5. 浏览器访问 http://localhost:8000
 
-### 注意事项
-- 需要 Termux（从 F-Droid 或 GitHub 下载，不要从 Google Play 下载）
-- 必须先运行 `termux-setup-storage` 并授予权限
-- 建议关闭 Termux 电池优化
-- 如果找不到文件，检查文件是否确实在下载目录
+            ### 注意事项
+            - 需要 Termux（从 F-Droid 或 GitHub 下载，不要从 Google Play 下载）
+            - 必须先运行 `termux-setup-storage` 并授予权限
+            - 建议关闭 Termux 电池优化
+            - 如果找不到文件，检查文件是否确实在下载目录
           files: |
             release_android.tar.gz
