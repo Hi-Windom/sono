@@ -39,7 +39,7 @@ apt --fix-broken install -y 2>/dev/null || true
 
 MISSING_PKGS=""
 for pkg in python clang make pkg-config libc++ libffi openssl curl ca-certificates \
-    python-numpy python-scipy python-setuptools python-wheel rust lame libsndfile; do
+    python-numpy python-scipy rust lame libsndfile; do
     if ! dpkg -s "$pkg" &>/dev/null 2>&1; then
         MISSING_PKGS="$MISSING_PKGS $pkg"
     fi
@@ -62,6 +62,8 @@ export CARGO_TARGET_DIR="$HOME/.cargo-target"
 mkdir -p "$CARGO_TARGET_DIR"
 
 echo "  numpy/scipy 已通过 pkg 预编译安装。"
+echo "  安装构建工具..."
+pip install -q setuptools wheel -i "$PYPI_MIRROR_URL" --trusted-host "$PYPI_MIRROR_HOST" 2>/dev/null || true
 echo "  使用 --no-build-isolation 避免重复编译 C 扩展..."
 echo "  TMPDIR=$TMPDIR (避免 Text file busy 错误)"
 
