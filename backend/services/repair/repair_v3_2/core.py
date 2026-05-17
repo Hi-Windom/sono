@@ -1127,6 +1127,8 @@ def _repair_single_track(input_path: str, output_path: str, params: dict, progre
         "exciter_improved": "exciter_improved",
         "resonance_suppress": "resonance_suppress",
         "transient_aware": "transient_aware",
+        "smart_compressor": "smart_compressor",
+        "compressor": "compressor",
         "stereo_enhance": "stereo_enhance",
         "warmth": "warmth",
         "air_texture": "air_texture",
