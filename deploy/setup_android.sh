@@ -62,18 +62,12 @@ export CARGO_TARGET_DIR="$HOME/.cargo-target"
 mkdir -p "$CARGO_TARGET_DIR"
 
 echo "  升级 pip 和安装构建工具..."
-pip install --upgrade pip setuptools wheel -i "$PYPI_MIRROR_URL" --trusted-host "$PYPI_MIRROR_HOST" || {
-    echo -e "${YELLOW}  镜像源安装失败，尝试官方源...${NC}"
-    pip install --upgrade pip setuptools wheel
-}
+pip install --upgrade pip setuptools wheel
 
 echo "  TMPDIR=$TMPDIR (避免 Text file busy 错误)"
 echo "  安装 requirements_android.txt 中的依赖..."
 
-pip install -r requirements_android.txt -i "$PYPI_MIRROR_URL" --trusted-host "$PYPI_MIRROR_HOST" || {
-    echo -e "${YELLOW}  镜像源安装失败，回退到官方 PyPI...${NC}"
-    pip install -r requirements_android.txt
-}
+pip install -r requirements_android.txt
 
 cd ..
 
