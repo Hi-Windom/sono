@@ -49,8 +49,8 @@ echo "  后端代码确认: backend/"
 echo -e "${YELLOW}[3.5/4] 验证 Python 模块导入...${NC}"
 PYTHON_CHECK_FAILED=0
 cd backend
-echo "  安装必要的依赖用于检查..."
-pip install -q numpy scipy soundfile 2>/dev/null || echo "  依赖安装警告（将尝试继续检查）"
+echo "  检查并安装依赖..."
+python check_deps.py 2>/dev/null || echo "  依赖检查继续..."
 python -c "
 import sys
 import os
