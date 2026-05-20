@@ -849,6 +849,14 @@
       "description": "GET /download-mp3/{task_id}"
     },
     {
+      "id": "route-GET--download-m4a--task_id-",
+      "label": "GET /download-m4a/{task_id}",
+      "type": "api",
+      "layer": "backend",
+      "filePath": "/workspace/backend/api/routes.py",
+      "description": "GET /download-m4a/{task_id}"
+    },
+    {
       "id": "route-GET--render-cache--task_id-",
       "label": "GET /render-cache/{task_id}",
       "type": "api",
@@ -1277,13 +1285,6 @@
       "layer": "backend",
       "filePath": "/workspace/backend/services/audio_repair.py",
       "description": "算法版本 v3.2a"
-    },
-    {
-      "id": "repair-module-__pycache__",
-      "label": "__pycache__",
-      "type": "module",
-      "layer": "backend",
-      "filePath": "/workspace/backend/services/repair/__pycache__"
     },
     {
       "id": "repair-module-repair_v2_0",
@@ -2625,6 +2626,12 @@
     },
     {
       "source": "backend-api-routes.py",
+      "target": "route-GET--download-m4a--task_id-",
+      "label": "路由注册",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-api-routes.py",
       "target": "route-GET--render-cache--task_id-",
       "label": "路由注册",
       "type": "data-flow"
@@ -2958,12 +2965,6 @@
       "target": "algo-v3.2a",
       "label": "算法版本",
       "type": "data-flow"
-    },
-    {
-      "source": "backend-services-audio_repair.py",
-      "target": "repair-module-__pycache__",
-      "label": "动态加载",
-      "type": "call"
     },
     {
       "source": "backend-services-audio_repair.py",
