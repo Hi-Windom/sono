@@ -67,6 +67,8 @@ export function DownloadModal({
   const [dlSpeed, setDlSpeed] = useState(0);
   const [mp3Loading, setMp3Loading] = useState(false);
   const [mp3Error, setMp3Error] = useState<string | null>(null);
+  const [m4aLoading, setM4aLoading] = useState(false);
+  const [m4aError, setM4aError] = useState<string | null>(null);
   const [editingBackendName, setEditingBackendName] = useState(false);
   const [backendFilename, setBackendFilename] = useState('');
   const abortRef = useRef<AbortController | null>(null);
@@ -88,6 +90,8 @@ export function DownloadModal({
       setDlSpeed(0);
       setMp3Loading(false);
       setMp3Error(null);
+      setM4aLoading(false);
+      setM4aError(null);
     }
   }, [isOpen]);
 
@@ -146,6 +150,56 @@ export function DownloadModal({
       }
     } finally {
       setMp3Loading(false);
+    }
+  }, []);
+
+  const handleDownloadM4a = useCallback(async (taskId: string) => {
+    setM4aLoading(true);
+    setM4aError(null);
+    try {
+      const res = await fetch(`/api/v1/download-m4a/${taskId}`);
+      if (!res.ok) {
+        if (res.status === 404) throw new Error('WAV音频文件不存在，请先完成修复');
+        if (res.status === 501) throw new Error('服务器不支持M4A编码（ffmpeg未安装）');
+        if (res.status === 500) throw new Error('M4A编码失败，请检查服务器日志');
+        throw new Error(`服务器错误 (HTTP ${res.status})`);
+      }
+      const contentType = res.headers.get('content-type') || '';
+      if (!contentType.includes('audio/')) {
+        throw new Error(`服务器返回了非音频内容 (${contentType})，请重试`);
+      }
+      const disposition = res.headers.get('Content-Disposition');
+      let downloadName = `${taskId}.m4a`;
+      if (disposition) {
+        const utf8Match = disposition.match(/filename\*=UTF-8''(.+)/);
+        if (utf8Match) {
+          downloadName = decodeURIComponent(utf8Match[1]);
+        } else {
+          const asciiMatch = disposition.match(/filename="?(.+?)"?$/);
+          if (asciiMatch) downloadName = asciiMatch[1];
+        }
+      }
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = downloadName;
+      a.style.display = 'none';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        URL.revokeObjectURL(blobUrl);
+        document.body.removeChild(a);
+      }, 5000);
+    } catch (e) {
+      if (e instanceof TypeError) {
+        setM4aError('网络连接失败，请检查网络后重试');
+      } else {
+        const msg = e instanceof Error ? e.message : String(e);
+        setM4aError(msg);
+      }
+    } finally {
+      setM4aLoading(false);
     }
   }, []);
 
@@ -338,21 +392,28 @@ export function DownloadModal({
                     disabled={(!dualTrackUrls.merged && !backendDownloadUrl) || downloading || isBackendLoading}
                     className="flex-1 py-2 bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/30 rounded-lg text-cyan-400 text-xs font-medium transition disabled:opacity-50"
                   >
-                    {downloading ? `下载中 ${Math.round(dlProgress * 100)}%` : '⬇ 下载 WAV'}
+                    {downloading ? `下载中 ${Math.round(dlProgress * 100)}%` : '⬇ WAV'}
+                  </button>
+                  <button
+                    onClick={() => handleDownloadM4a(dualTrackTaskId!)}
+                    disabled={(!dualTrackUrls.merged && !backendDownloadUrl) || m4aLoading || downloading || isBackendLoading}
+                    className="flex-1 py-2 bg-orange-500/20 hover:bg-orange-500/30 border border-orange-500/30 rounded-lg text-orange-400 text-xs font-medium transition disabled:opacity-50"
+                  >
+                    {m4aLoading ? '编码中...' : '⬇ M4A'}
                   </button>
                   <button
                     onClick={() => handleDownloadMp3(dualTrackTaskId!)}
                     disabled={(!dualTrackUrls.merged && !backendDownloadUrl) || mp3Loading || downloading || isBackendLoading}
                     className="flex-1 py-2 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 rounded-lg text-emerald-400 text-xs font-medium transition disabled:opacity-50"
                   >
-                    {mp3Loading ? '编码中...' : '⬇ 下载 MP3 (128k)'}
+                    {mp3Loading ? '编码中...' : '⬇ MP3'}
                   </button>
                   <button
                     onClick={() => handleCopyLink(dualTrackUrls.merged || backendDownloadUrl!)}
                     disabled={!dualTrackUrls.merged && !backendDownloadUrl}
                     className="px-3 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-gray-400 text-xs transition disabled:opacity-50"
                   >
-                    {copySuccess ? '✓ 已复制' : '📋 复制链接'}
+                    {copySuccess ? '✓ 已复制' : '📋'}
                   </button>
                 </div>
               </div>
@@ -368,20 +429,27 @@ export function DownloadModal({
                       disabled={downloading || isBackendLoading}
                       className="flex-1 py-2 bg-purple-500/20 hover:bg-purple-500/30 border border-purple-500/30 rounded-lg text-purple-400 text-xs font-medium transition disabled:opacity-50"
                     >
-                      {downloading ? `下载中 ${Math.round(dlProgress * 100)}%` : '⬇ 下载 WAV'}
+                      {downloading ? `下载中 ${Math.round(dlProgress * 100)}%` : '⬇ WAV'}
+                    </button>
+                    <button
+                      onClick={() => handleDownloadM4a(dualTrackVocalTaskId!)}
+                      disabled={m4aLoading || downloading || isBackendLoading}
+                      className="flex-1 py-2 bg-orange-500/20 hover:bg-orange-500/30 border border-orange-500/30 rounded-lg text-orange-400 text-xs font-medium transition disabled:opacity-50"
+                    >
+                      {m4aLoading ? '编码中...' : '⬇ M4A'}
                     </button>
                     <button
                       onClick={() => handleDownloadMp3(dualTrackVocalTaskId!)}
                       disabled={mp3Loading || downloading || isBackendLoading}
                       className="flex-1 py-2 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 rounded-lg text-emerald-400 text-xs font-medium transition disabled:opacity-50"
                     >
-                      {mp3Loading ? '编码中...' : '⬇ 下载 MP3 (128k)'}
+                      {mp3Loading ? '编码中...' : '⬇ MP3'}
                     </button>
                     <button
                       onClick={() => handleCopyLink(dualTrackUrls.vocal!)}
                       className="px-3 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-gray-400 text-xs transition"
                     >
-                      {copySuccess ? '✓ 已复制' : '📋 复制链接'}
+                      {copySuccess ? '✓ 已复制' : '📋'}
                     </button>
                   </div>
                 </div>
@@ -398,27 +466,36 @@ export function DownloadModal({
                       disabled={downloading || isBackendLoading}
                       className="flex-1 py-2 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/30 rounded-lg text-amber-400 text-xs font-medium transition disabled:opacity-50"
                     >
-                      {downloading ? `下载中 ${Math.round(dlProgress * 100)}%` : '⬇ 下载 WAV'}
+                      {downloading ? `下载中 ${Math.round(dlProgress * 100)}%` : '⬇ WAV'}
+                    </button>
+                    <button
+                      onClick={() => handleDownloadM4a(dualTrackAccompanimentTaskId!)}
+                      disabled={m4aLoading || downloading || isBackendLoading}
+                      className="flex-1 py-2 bg-orange-500/20 hover:bg-orange-500/30 border border-orange-500/30 rounded-lg text-orange-400 text-xs font-medium transition disabled:opacity-50"
+                    >
+                      {m4aLoading ? '编码中...' : '⬇ M4A'}
                     </button>
                     <button
                       onClick={() => handleDownloadMp3(dualTrackAccompanimentTaskId!)}
                       disabled={mp3Loading || downloading || isBackendLoading}
                       className="flex-1 py-2 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 rounded-lg text-emerald-400 text-xs font-medium transition disabled:opacity-50"
                     >
-                      {mp3Loading ? '编码中...' : '⬇ 下载 MP3 (128k)'}
+                      {mp3Loading ? '编码中...' : '⬇ MP3'}
                     </button>
                     <button
                       onClick={() => handleCopyLink(dualTrackUrls.accompaniment!)}
                       className="px-3 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-gray-400 text-xs transition"
                     >
-                      {copySuccess ? '✓ 已复制' : '📋 复制链接'}
+                      {copySuccess ? '✓ 已复制' : '📋'}
                     </button>
                   </div>
                 </div>
               )}
-              {mp3Error && (
+              {(mp3Error || m4aError) && (
                 <div className="mt-2 text-red-400 text-[10px] text-center">
-                  MP3 转换失败: {mp3Error}
+                  {mp3Error && `MP3 转换失败: ${mp3Error}`}
+                  {mp3Error && m4aError && ' | '}
+                  {m4aError && `M4A 转换失败: ${m4aError}`}
                 </div>
               )}
             </>
@@ -515,26 +592,35 @@ export function DownloadModal({
                     disabled={downloading || isBackendLoading}
                     className="flex-1 py-2 bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/30 rounded-lg text-cyan-400 text-xs font-medium transition disabled:opacity-50"
                   >
-                    {downloading ? `下载中 ${Math.round(dlProgress * 100)}%` : '⬇ 下载 WAV'}
+                    {downloading ? `下载中 ${Math.round(dlProgress * 100)}%` : '⬇ WAV'}
+                  </button>
+                  <button
+                    onClick={() => handleDownloadM4a(taskId!)}
+                    disabled={m4aLoading || downloading || isBackendLoading}
+                    className="flex-1 py-2 bg-orange-500/20 hover:bg-orange-500/30 border border-orange-500/30 rounded-lg text-orange-400 text-xs font-medium transition disabled:opacity-50"
+                  >
+                    {m4aLoading ? '编码中...' : '⬇ M4A'}
                   </button>
                   <button
                     onClick={() => handleDownloadMp3(taskId!)}
                     disabled={mp3Loading || downloading || isBackendLoading}
                     className="flex-1 py-2 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 rounded-lg text-emerald-400 text-xs font-medium transition disabled:opacity-50"
                   >
-                    {mp3Loading ? '编码中...' : '⬇ 下载 MP3 (128k)'}
+                    {mp3Loading ? '编码中...' : '⬇ MP3'}
                   </button>
                   <button
                     onClick={() => handleCopyLink(backendDownloadUrl)}
                     className="px-3 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-gray-400 text-xs transition"
                   >
-                    {copySuccess ? '✓ 已复制' : '📋 复制链接'}
+                    {copySuccess ? '✓ 已复制' : '📋'}
                   </button>
                 </div>
               )}
-              {mp3Error && (
+              {(mp3Error || m4aError) && (
                 <div className="mt-2 text-red-400 text-[10px] text-center">
-                  MP3 转换失败: {mp3Error}
+                  {mp3Error && `MP3 转换失败: ${mp3Error}`}
+                  {mp3Error && m4aError && ' | '}
+                  {m4aError && `M4A 转换失败: ${m4aError}`}
                 </div>
               )}
               {!backendDownloadUrl && backendDownloadAction && (
