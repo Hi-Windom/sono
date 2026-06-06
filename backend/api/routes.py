@@ -1759,6 +1759,185 @@ async def download_m4a(task_id: str, request: Request):
     )
 
 
+@router.get("/download-mp3-file/{filename}")
+async def download_mp3_file(filename: str, request: Request):
+    """按具体渲染产物文件名转码 MP3，确保采样率与用户选定的渲染规格一致（如 96kHz）。"""
+    if not filename.endswith(".wav"):
+        raise HTTPException(status_code=400, detail="仅支持 .wav 源文件")
+
+    wav_path = os.path.join(OUTPUT_DIR, filename)
+    if not os.path.exists(wav_path):
+        raise HTTPException(status_code=404, detail="音频文件不存在")
+
+    base_name = filename[:-4]
+    mp3_path = os.path.join(OUTPUT_DIR, f"{base_name}.mp3")
+    if not os.path.exists(mp3_path):
+        try:
+            _wav_to_mp3(wav_path, mp3_path)
+        except FileNotFoundError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+        except (ImportError, RuntimeError) as e:
+            raise HTTPException(status_code=500, detail=f"MP3编码库未安装: {e}")
+        except ValueError as e:
+            raise HTTPException(status_code=500, detail=f"音频格式不支持: {e}")
+        except Exception as e:
+            logger.error(f"[DOWNLOAD-MP3-FILE] 转码失败 filename={filename}: {e}")
+            raise HTTPException(status_code=500, detail=f"MP3转码失败: {e}")
+
+    file_size = os.path.getsize(mp3_path)
+    from urllib.parse import quote
+    download_name = f"{base_name}.mp3"
+    encoded_name = quote(download_name)
+    ascii_name = download_name.encode("ascii", "ignore").decode("ascii") or "audio.mp3"
+    disposition = f'attachment; filename="{ascii_name}"; filename*=UTF-8\'\'{encoded_name}'
+
+    range_header = request.headers.get("range")
+    if range_header:
+        range_match = __import__("re").match(r"bytes=(\d+)-(\d*)", range_header)
+        if range_match:
+            start = int(range_match.group(1))
+            end = int(range_match.group(2)) if range_match.group(2) else file_size - 1
+            if start >= file_size:
+                from fastapi.responses import Response
+                return Response(status_code=416, headers={"Content-Range": f"bytes */{file_size}"})
+            end = min(end, file_size - 1)
+            chunk_size = end - start + 1
+            def iter_file():
+                with open(mp3_path, "rb") as f:
+                    f.seek(start)
+                    remaining = chunk_size
+                    while remaining > 0:
+                        read_size = min(8192, remaining)
+                        data = f.read(read_size)
+                        if not data:
+                            break
+                        remaining -= len(data)
+                        yield data
+            from fastapi.responses import StreamingResponse
+            return StreamingResponse(
+                iter_file(),
+                status_code=206,
+                media_type="audio/mpeg",
+                headers={
+                    "Content-Range": f"bytes {start}-{end}/{file_size}",
+                    "Content-Length": str(chunk_size),
+                    "Accept-Ranges": "bytes",
+                    "Content-Disposition": disposition,
+                },
+            )
+
+    def iter_full_file():
+        with open(mp3_path, "rb") as f:
+            while True:
+                data = f.read(65536)
+                if not data:
+                    break
+                yield data
+
+    from fastapi.responses import StreamingResponse
+    return StreamingResponse(
+        iter_full_file(),
+        media_type="audio/mpeg",
+        headers={
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(file_size),
+            "Content-Disposition": disposition,
+        },
+    )
+
+
+@router.get("/download-m4a-file/{filename}")
+async def download_m4a_file(filename: str, request: Request):
+    """按具体渲染产物文件名转码 M4A/ALAC，确保采样率与用户选定的渲染规格一致（如 96kHz）。"""
+    from services.m4a_encoder import encode_m4a, is_available as m4a_available
+
+    if not m4a_available():
+        raise HTTPException(status_code=501, detail="ffmpeg 未安装，M4A/ALAC 编码不可用")
+
+    if not filename.endswith(".wav"):
+        raise HTTPException(status_code=400, detail="仅支持 .wav 源文件")
+
+    wav_path = os.path.join(OUTPUT_DIR, filename)
+    if not os.path.exists(wav_path):
+        raise HTTPException(status_code=404, detail="音频文件不存在")
+
+    base_name = filename[:-4]
+    m4a_path = os.path.join(OUTPUT_DIR, f"{base_name}.m4a")
+    if not os.path.exists(m4a_path):
+        try:
+            encode_m4a(wav_path, m4a_path)
+        except FileNotFoundError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+        except RuntimeError as e:
+            raise HTTPException(status_code=500, detail=f"M4A编码失败: {e}")
+        except ValueError as e:
+            raise HTTPException(status_code=500, detail=f"音频格式不支持: {e}")
+        except Exception as e:
+            logger.error(f"[DOWNLOAD-M4A-FILE] 转码失败 filename={filename}: {e}")
+            raise HTTPException(status_code=500, detail=f"M4A转码失败: {e}")
+
+    file_size = os.path.getsize(m4a_path)
+    from urllib.parse import quote
+    download_name = f"{base_name}.m4a"
+    encoded_name = quote(download_name)
+    ascii_name = download_name.encode("ascii", "ignore").decode("ascii") or "audio.m4a"
+    disposition = f'attachment; filename="{ascii_name}"; filename*=UTF-8\'\'{encoded_name}'
+
+    range_header = request.headers.get("range")
+    if range_header:
+        range_match = __import__("re").match(r"bytes=(\d+)-(\d*)", range_header)
+        if range_match:
+            start = int(range_match.group(1))
+            end = int(range_match.group(2)) if range_match.group(2) else file_size - 1
+            if start >= file_size:
+                from fastapi.responses import Response
+                return Response(status_code=416, headers={"Content-Range": f"bytes */{file_size}"})
+            end = min(end, file_size - 1)
+            chunk_size = end - start + 1
+            def iter_file():
+                with open(m4a_path, "rb") as f:
+                    f.seek(start)
+                    remaining = chunk_size
+                    while remaining > 0:
+                        read_size = min(8192, remaining)
+                        data = f.read(read_size)
+                        if not data:
+                            break
+                        remaining -= len(data)
+                        yield data
+            from fastapi.responses import StreamingResponse
+            return StreamingResponse(
+                iter_file(),
+                status_code=206,
+                media_type="audio/mp4",
+                headers={
+                    "Content-Range": f"bytes {start}-{end}/{file_size}",
+                    "Content-Length": str(chunk_size),
+                    "Accept-Ranges": "bytes",
+                    "Content-Disposition": disposition,
+                },
+            )
+
+    def iter_full_file():
+        with open(m4a_path, "rb") as f:
+            while True:
+                data = f.read(65536)
+                if not data:
+                    break
+                yield data
+
+    from fastapi.responses import StreamingResponse
+    return StreamingResponse(
+        iter_full_file(),
+        media_type="audio/mp4",
+        headers={
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(file_size),
+            "Content-Disposition": disposition,
+        },
+    )
+
+
 @router.get("/render-cache/{task_id}")
 async def get_render_cache(task_id: str):
     """查询某个任务已有的渲染交付规格缓存"""

@@ -115,11 +115,35 @@ export function DownloadModal({
     }
   }, []);
 
-  const handleDownloadMp3 = useCallback(async (taskId: string) => {
+  const extractFilenameFromDownloadUrl = useCallback((url: string): string | null => {
+    if (!url) return null;
+    const m = url.match(/\/download-file\/(.+?)(?:\?|$)/);
+    if (m && m[1]) {
+      try {
+        return decodeURIComponent(m[1]);
+      } catch {
+        return m[1];
+      }
+    }
+    return null;
+  }, []);
+
+  const handleDownloadMp3 = useCallback(async (source: { taskId?: string; url?: string }) => {
     setMp3Loading(true);
     setMp3Error(null);
     try {
-      const res = await fetch(`/api/v1/download-mp3/${taskId}`);
+      let res: Response;
+      if (source.url) {
+        const filename = extractFilenameFromDownloadUrl(source.url);
+        if (!filename) {
+          throw new Error('无法从下载 URL 解析文件名');
+        }
+        res = await fetch(`/api/v1/download-mp3-file/${encodeURIComponent(filename)}`);
+      } else if (source.taskId) {
+        res = await fetch(`/api/v1/download-mp3/${source.taskId}`);
+      } else {
+        throw new Error('缺少 taskId 或 url');
+      }
       if (!res.ok) {
         if (res.status === 404) throw new Error('WAV音频文件不存在，请先完成修复');
         if (res.status === 500) throw new Error('MP3编码失败，请检查服务器日志');
@@ -133,7 +157,7 @@ export function DownloadModal({
       const blobUrl = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = blobUrl;
-      a.download = `${taskId}.mp3`;
+      a.download = `${(source.taskId || 'audio')}.mp3`;
       a.style.display = 'none';
       document.body.appendChild(a);
       a.click();
@@ -153,11 +177,22 @@ export function DownloadModal({
     }
   }, []);
 
-  const handleDownloadM4a = useCallback(async (taskId: string) => {
+  const handleDownloadM4a = useCallback(async (source: { taskId?: string; url?: string }) => {
     setM4aLoading(true);
     setM4aError(null);
     try {
-      const res = await fetch(`/api/v1/download-m4a/${taskId}`);
+      let res: Response;
+      if (source.url) {
+        const filename = extractFilenameFromDownloadUrl(source.url);
+        if (!filename) {
+          throw new Error('无法从下载 URL 解析文件名');
+        }
+        res = await fetch(`/api/v1/download-m4a-file/${encodeURIComponent(filename)}`);
+      } else if (source.taskId) {
+        res = await fetch(`/api/v1/download-m4a/${source.taskId}`);
+      } else {
+        throw new Error('缺少 taskId 或 url');
+      }
       if (!res.ok) {
         if (res.status === 404) throw new Error('WAV音频文件不存在，请先完成修复');
         if (res.status === 501) throw new Error('服务器不支持M4A编码（ffmpeg未安装）');
@@ -169,7 +204,7 @@ export function DownloadModal({
         throw new Error(`服务器返回了非音频内容 (${contentType})，请重试`);
       }
       const disposition = res.headers.get('Content-Disposition');
-      let downloadName = `${taskId}.m4a`;
+      let downloadName = `${(source.taskId || 'audio')}.m4a`;
       if (disposition) {
         const utf8Match = disposition.match(/filename\*=UTF-8''(.+)/);
         if (utf8Match) {
@@ -395,14 +430,14 @@ export function DownloadModal({
                     {downloading ? `下载中 ${Math.round(dlProgress * 100)}%` : '⬇ WAV'}
                   </button>
                   <button
-                    onClick={() => handleDownloadM4a(dualTrackTaskId!)}
+                    onClick={() => handleDownloadM4a({ taskId: dualTrackTaskId ?? undefined, url: dualTrackUrls.merged ?? backendDownloadUrl ?? undefined })}
                     disabled={(!dualTrackUrls.merged && !backendDownloadUrl) || m4aLoading || downloading || isBackendLoading}
                     className="flex-1 py-2 bg-orange-500/20 hover:bg-orange-500/30 border border-orange-500/30 rounded-lg text-orange-400 text-xs font-medium transition disabled:opacity-50"
                   >
                     {m4aLoading ? '编码中...' : '⬇ M4A'}
                   </button>
                   <button
-                    onClick={() => handleDownloadMp3(dualTrackTaskId!)}
+                    onClick={() => handleDownloadMp3({ taskId: dualTrackTaskId ?? undefined, url: dualTrackUrls.merged ?? backendDownloadUrl ?? undefined })}
                     disabled={(!dualTrackUrls.merged && !backendDownloadUrl) || mp3Loading || downloading || isBackendLoading}
                     className="flex-1 py-2 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 rounded-lg text-emerald-400 text-xs font-medium transition disabled:opacity-50"
                   >
@@ -432,14 +467,14 @@ export function DownloadModal({
                       {downloading ? `下载中 ${Math.round(dlProgress * 100)}%` : '⬇ WAV'}
                     </button>
                     <button
-                      onClick={() => handleDownloadM4a(dualTrackVocalTaskId!)}
+                      onClick={() => handleDownloadM4a({ taskId: dualTrackVocalTaskId ?? undefined, url: dualTrackUrls.vocal ?? undefined })}
                       disabled={m4aLoading || downloading || isBackendLoading}
                       className="flex-1 py-2 bg-orange-500/20 hover:bg-orange-500/30 border border-orange-500/30 rounded-lg text-orange-400 text-xs font-medium transition disabled:opacity-50"
                     >
                       {m4aLoading ? '编码中...' : '⬇ M4A'}
                     </button>
                     <button
-                      onClick={() => handleDownloadMp3(dualTrackVocalTaskId!)}
+                      onClick={() => handleDownloadMp3({ taskId: dualTrackVocalTaskId ?? undefined, url: dualTrackUrls.vocal ?? undefined })}
                       disabled={mp3Loading || downloading || isBackendLoading}
                       className="flex-1 py-2 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 rounded-lg text-emerald-400 text-xs font-medium transition disabled:opacity-50"
                     >
@@ -469,14 +504,14 @@ export function DownloadModal({
                       {downloading ? `下载中 ${Math.round(dlProgress * 100)}%` : '⬇ WAV'}
                     </button>
                     <button
-                      onClick={() => handleDownloadM4a(dualTrackAccompanimentTaskId!)}
+                      onClick={() => handleDownloadM4a({ taskId: dualTrackAccompanimentTaskId ?? undefined, url: dualTrackUrls.accompaniment ?? undefined })}
                       disabled={m4aLoading || downloading || isBackendLoading}
                       className="flex-1 py-2 bg-orange-500/20 hover:bg-orange-500/30 border border-orange-500/30 rounded-lg text-orange-400 text-xs font-medium transition disabled:opacity-50"
                     >
                       {m4aLoading ? '编码中...' : '⬇ M4A'}
                     </button>
                     <button
-                      onClick={() => handleDownloadMp3(dualTrackAccompanimentTaskId!)}
+                      onClick={() => handleDownloadMp3({ taskId: dualTrackAccompanimentTaskId ?? undefined, url: dualTrackUrls.accompaniment ?? undefined })}
                       disabled={mp3Loading || downloading || isBackendLoading}
                       className="flex-1 py-2 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 rounded-lg text-emerald-400 text-xs font-medium transition disabled:opacity-50"
                     >
@@ -595,14 +630,14 @@ export function DownloadModal({
                     {downloading ? `下载中 ${Math.round(dlProgress * 100)}%` : '⬇ WAV'}
                   </button>
                   <button
-                    onClick={() => handleDownloadM4a(taskId!)}
+                    onClick={() => handleDownloadM4a({ taskId: taskId ?? undefined, url: backendDownloadUrl ?? undefined })}
                     disabled={m4aLoading || downloading || isBackendLoading}
                     className="flex-1 py-2 bg-orange-500/20 hover:bg-orange-500/30 border border-orange-500/30 rounded-lg text-orange-400 text-xs font-medium transition disabled:opacity-50"
                   >
                     {m4aLoading ? '编码中...' : '⬇ M4A'}
                   </button>
                   <button
-                    onClick={() => handleDownloadMp3(taskId!)}
+                    onClick={() => handleDownloadMp3({ taskId: taskId ?? undefined, url: backendDownloadUrl ?? undefined })}
                     disabled={mp3Loading || downloading || isBackendLoading}
                     className="flex-1 py-2 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 rounded-lg text-emerald-400 text-xs font-medium transition disabled:opacity-50"
                   >
