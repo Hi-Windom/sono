@@ -6,6 +6,7 @@ import sqlite3
 from typing import Any
 
 import config
+from services.param_maps import DUAL_REPAIR_PARAM_KEYS, SINGLE_REPAIR_PARAM_KEYS
 
 TaskDict = dict[str, Any]
 
@@ -123,6 +124,9 @@ def get_task(task_id: str) -> TaskDict | None:
     if row is None:
         return None
     result: TaskDict = dict(row)
+    for ts_field in ("created_at", "updated_at", "completed_at"):
+        if ts_field in result:
+            result[ts_field] = _format_timestamp(result[ts_field])
     _parse_json_fields(result)
     return result
 
@@ -194,16 +198,112 @@ def find_repair_cache(file_hash: str, params: dict) -> TaskDict | None:
             continue
         
         stored_json = json.dumps(parsed, sort_keys=True, ensure_ascii=False)
-        
-        if stored_json == params_json:
-            logger.info(f"[cache-lookup] ✅ MATCH task#{i} id={task_id} status={task_status} size={size}")
+
+        # 单轨缓存请求不应匹配双轨任务
+        if parsed.get("processing_mode") == "dual":
+            logger.info(f"[cache-lookup] task#{i} id={task_id} status={task_status} SKIP: dual mode")
+            continue
+
+        stored_subset = {k: v for k, v in parsed.items() if k in SINGLE_REPAIR_PARAM_KEYS}
+        input_subset = {k: v for k, v in params.items() if k in SINGLE_REPAIR_PARAM_KEYS}
+        common_keys = stored_subset.keys() & input_subset.keys()
+        if not common_keys:
+            logger.info(f"[cache-lookup] task#{i} id={task_id} status={task_status} EMPTY_INTERSECTION stored_keys={sorted(stored_subset.keys())} input_keys={sorted(input_subset.keys())}")
+        if common_keys and all(stored_subset[k] == input_subset[k] for k in common_keys):
+            logger.info(f"[cache-lookup] ✅ MATCH task#{i} id={task_id} status={task_status} size={size} keys={sorted(common_keys)}")
             result["output_size"] = size
             _parse_json_fields(result)
             return result
         else:
-            logger.info(f"[cache-lookup] task#{i} id={task_id} status={task_status} MISMATCH stored={stored_json}")
+            logger.info(f"[cache-lookup] task#{i} id={task_id} status={task_status} MISMATCH stored_keys={sorted(stored_subset.keys())} input_keys={sorted(input_subset.keys())}")
     
     logger.info(f"[cache-lookup] ❌ NO MATCH for hash={file_hash}")
+    return None
+
+def find_dual_repair_cache(vocal_file_hash: str, accompaniment_file_hash: str, params: dict) -> TaskDict | None:
+    import logging
+    logger = logging.getLogger(__name__)
+
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT * FROM tasks WHERE json_extract(params, '$.processing_mode') = 'dual' ORDER BY updated_at DESC"
+    ).fetchall()
+    conn.close()
+    logger.info(f"[cache-lookup-dual] vocal_hash={vocal_file_hash} acc_hash={accompaniment_file_hash} found {len(rows)} dual tasks")
+
+    params_json = json.dumps(params, sort_keys=True, ensure_ascii=False)
+    logger.info(f"[cache-lookup-dual] input_params={params_json}")
+
+    for i, row in enumerate(rows):
+        result: TaskDict = dict(row)
+        output_path = result.get("output_path")
+        task_id = result.get("id", "?")
+        task_status = result.get("status", "?")
+
+        if not output_path:
+            logger.info(f"[cache-lookup-dual] task#{i} id={task_id} status={task_status} SKIP: no output_path")
+            continue
+        if not os.path.exists(output_path):
+            logger.info(f"[cache-lookup-dual] task#{i} id={task_id} status={task_status} SKIP: file not exists path={output_path}")
+            continue
+        try:
+            size = os.path.getsize(output_path)
+        except OSError as e:
+            logger.info(f"[cache-lookup-dual] task#{i} id={task_id} status={task_status} SKIP: getsize error {e}")
+            continue
+        if size < 10240:
+            logger.info(f"[cache-lookup-dual] task#{i} id={task_id} status={task_status} SKIP: too small {size}B")
+            continue
+
+        stored_params = result.get("params")
+        if stored_params and isinstance(stored_params, str):
+            try:
+                parsed = json.loads(stored_params)
+            except (json.JSONDecodeError, TypeError) as e:
+                logger.info(f"[cache-lookup-dual] task#{i} id={task_id} status={task_status} SKIP: json parse error {e}")
+                continue
+        elif isinstance(stored_params, dict):
+            parsed = stored_params
+        else:
+            logger.info(f"[cache-lookup-dual] task#{i} id={task_id} status={task_status} SKIP: params type={type(stored_params)}")
+            continue
+
+        stored_vocal_hash = parsed.get("vocal_file_hash", "")
+        stored_acc_hash = parsed.get("accompaniment_file_hash", "")
+        if stored_vocal_hash != vocal_file_hash or stored_acc_hash != accompaniment_file_hash:
+            logger.info(f"[cache-lookup-dual] task#{i} id={task_id} HASH MISMATCH stored_vocal={stored_vocal_hash} stored_acc={stored_acc_hash}")
+            continue
+
+        filter_keys = {"vocal_file_hash", "accompaniment_file_hash", "vocal_task_id", "accompaniment_task_id",
+                       "vocal_filename", "accompaniment_filename", "processing_mode",
+                       "vocal_path", "accompaniment_path", "vocal_output_path", "accompaniment_output_path",
+                       "_issues", "source_bit_depth", "file_size", "file_hash",
+                       "original_filename", "original_path", "output_path",
+                       "status", "error", "progress", "step",
+                       "detection_result", "repair_result",
+                       "vocal_params", "accompaniment_params",
+                       "waveform_peaks", "source_sample_rate", "source_channels"}
+        filtered_stored = {k: v for k, v in parsed.items() if k not in filter_keys}
+
+        # 只比较影响修复结果的参数子集（交集比较，避免两边key集合不一致导致漏匹配）
+        stored_subset = {k: v for k, v in filtered_stored.items() if k in DUAL_REPAIR_PARAM_KEYS}
+        input_subset = {k: v for k, v in params.items() if k in DUAL_REPAIR_PARAM_KEYS}
+
+        common_keys = stored_subset.keys() & input_subset.keys()
+        if common_keys and all(stored_subset[k] == input_subset[k] for k in common_keys):
+            logger.info(f"[cache-lookup-dual] task#{i} id={task_id} status={task_status} size={size}")
+            result["output_size"] = size
+            _parse_json_fields(result)
+            return result
+        else:
+            stored_keys = set(stored_subset.keys())
+            input_keys = set(input_subset.keys())
+            logger.info(f"[cache-lookup-dual] task#{i} id={task_id} MISMATCH: stored_extra={stored_keys - input_keys} input_extra={input_keys - stored_keys}")
+            for k in stored_keys & input_keys:
+                if stored_subset[k] != input_subset[k]:
+                    logger.info(f"[cache-lookup-dual] task#{i} id={task_id} key={k} stored={stored_subset[k]} != input={input_subset[k]}")
+
+    logger.info(f"[cache-lookup-dual] NO MATCH for vocal_hash={vocal_file_hash} acc_hash={accompaniment_file_hash}")
     return None
 
 def get_all_tasks_ordered() -> list[TaskDict]:
@@ -313,6 +413,15 @@ def clear_all_analysis_cache() -> int:
     conn.commit()
     conn.close()
     return count
+
+
+def _format_timestamp(ts: str | None) -> str | None:
+    if ts is None:
+        return None
+    ts_str = str(ts).replace(" ", "T")
+    if not ts_str.endswith("Z") and "+" not in ts_str and "Z" not in ts_str:
+        ts_str += "Z"
+    return ts_str
 
 
 def _parse_json_fields(result: TaskDict) -> None:

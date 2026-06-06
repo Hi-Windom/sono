@@ -194,7 +194,7 @@ def benchmark_step(step_fn, *args, repeat=3):
     return min(times)
 
 
-ACTIVE_VERSIONS = ["v2.0", "v2.1", "v2.2", "v2.2a", "v2.3", "v2.3a", "v2.4", "v2.4a"]
+ACTIVE_VERSIONS = ["v2.0", "v2.1", "v2.2", "v2.2a", "v2.3", "v2.3a", "v2.4", "v2.4a", "v3.0", "v3.0a", "v3.1", "v3.1a"]
 
 
 @pytest.fixture(params=ACTIVE_VERSIONS)
@@ -224,6 +224,14 @@ def repair_fn(repair_version):
                 from services.repair.repair_v2_4 import repair_audio as fn
             elif repair_version == "v2.4a":
                 from services.repair.repair_v2_4a import repair_audio as fn
+            elif repair_version == "v3.0":
+                from services.repair.repair_v3_0 import repair_audio as fn
+            elif repair_version == "v3.0a":
+                from services.repair.repair_v3_0a import repair_audio as fn
+            elif repair_version == "v3.1":
+                from services.repair.repair_v3_1 import repair_audio as fn
+            elif repair_version == "v3.1a":
+                from services.repair.repair_v3_1a import repair_audio as fn
             else:
                 pytest.skip(f"Unknown version: {repair_version}")
             yield fn

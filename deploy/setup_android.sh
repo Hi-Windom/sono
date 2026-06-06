@@ -35,10 +35,11 @@ echo "  Termux 环境确认。"
 
 echo -e "${YELLOW}[3/5] 安装系统依赖（含预编译 C/Rust 扩展包）...${NC}"
 pkg update -y 2>/dev/null || true
+apt --fix-broken install -y 2>/dev/null || true
 
 MISSING_PKGS=""
 for pkg in python clang make pkg-config libc++ libffi openssl curl ca-certificates \
-    python-numpy python-scipy rust; do
+    python-numpy python-scipy rust lame libsndfile; do
     if ! dpkg -s "$pkg" &>/dev/null 2>&1; then
         MISSING_PKGS="$MISSING_PKGS $pkg"
     fi
@@ -60,14 +61,13 @@ mkdir -p "$TMPDIR"
 export CARGO_TARGET_DIR="$HOME/.cargo-target"
 mkdir -p "$CARGO_TARGET_DIR"
 
-echo "  numpy/scipy 已通过 pkg 预编译安装。"
-echo "  使用 --no-build-isolation 避免重复编译 C 扩展..."
-echo "  TMPDIR=$TMPDIR (避免 Text file busy 错误)"
+echo "  升级 pip 和安装构建工具..."
+pip install --upgrade pip setuptools wheel
 
-if ! pip install --no-build-isolation -r requirements_android.txt -i "$PYPI_MIRROR_URL" --trusted-host "$PYPI_MIRROR_HOST"; then
-    echo -e "${YELLOW}  镜像源安装失败，回退到官方 PyPI...${NC}"
-    pip install --no-build-isolation -r requirements_android.txt
-fi
+echo "  TMPDIR=$TMPDIR (避免 Text file busy 错误)"
+echo "  安装 requirements_android.txt 中的依赖..."
+
+pip install -r requirements_android.txt
 
 cd ..
 
@@ -80,6 +80,7 @@ python -c "import fastapi; print(f'  fastapi {fastapi.__version__} OK')" 2>/dev/
 python -c "import miniaudio; print(f'  miniaudio {miniaudio.__version__} OK')" 2>/dev/null || echo -e "${RED}  miniaudio 未安装！音频加载将不可用${NC}"
 python -c "import soundfile; print(f'  soundfile {soundfile.__version__} OK')" 2>/dev/null || echo -e "${RED}  soundfile 未安装！${NC}"
 python -c "import pytest; print(f'  pytest {pytest.__version__} OK')" 2>/dev/null || echo -e "${RED}  pytest 未安装！质量测试将不可用${NC}"
+command -v lame &>/dev/null && echo "  lame OK (MP3编码器)" || echo -e "${RED}  lame 未安装！MP3编码将不可用${NC}"
 
 echo -e "${YELLOW}  编译 DSP 原生加速库...${NC}"
 if [ -d "services/dsp_native" ] && command -v make &>/dev/null && command -v gcc &>/dev/null; then

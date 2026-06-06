@@ -46,6 +46,74 @@ if [ ! -d "backend" ] || [ ! -f "backend/main.py" ]; then
 fi
 echo "  后端代码确认: backend/"
 
+echo -e "${YELLOW}[3.5/4] 验证 Python 模块导入...${NC}"
+PYTHON_CHECK_FAILED=0
+cd backend
+echo "  检查并安装依赖..."
+python check_deps.py 2>/dev/null || echo "  依赖检查继续..."
+python -c "
+import sys
+import os
+
+errors = []
+
+# 检查核心模块导入
+modules_to_check = [
+    'services.repair.repair_v3_2ap.core',
+    'services.repair.repair_v3_2.core',
+    'services.repair.repair_v3_2a.core',
+]
+
+for module_name in modules_to_check:
+    try:
+        __import__(module_name)
+        print(f'  OK: {module_name}')
+    except Exception as e:
+        print(f'  ERROR: {module_name}: {e}')
+        errors.append((module_name, str(e)))
+
+if errors:
+    print('')
+    print('模块导入检查失败！')
+    for mod, err in errors:
+        print(f'  - {mod}: {err}')
+    sys.exit(1)
+" || PYTHON_CHECK_FAILED=1
+cd ..
+if [ $PYTHON_CHECK_FAILED -eq 1 ]; then
+    echo -e "${RED}错误: Python 模块导入检查失败，请修复后再打包。${NC}"
+    exit 1
+fi
+echo "  模块导入检查通过。"
+
+echo -e "${YELLOW}[4/4] 检查 Termux 不兼容依赖...${NC}"
+KNOWN_INCOMPATIBLE="psutil lameenc"
+INCOMPATIBLE_FOUND=""
+while IFS= read -r line; do
+    line="$(echo "$line" | sed 's/#.*//' | xargs)"
+    [ -z "$line" ] && continue
+    for pkg in $KNOWN_INCOMPATIBLE; do
+        if echo "$line" | grep -qi "^${pkg}"; then
+            INCOMPATIBLE_FOUND="$INCOMPATIBLE $pkg"
+        fi
+    done
+done < backend/requirements_android.txt
+
+if [ -n "$INCOMPATIBLE_FOUND" ]; then
+    echo -e "${RED}错误: requirements_android.txt 包含 Termux 不支持的依赖:${NC}"
+    for pkg in $INCOMPATIBLE_FOUND; do
+        echo -e "${RED}  - $pkg${NC}"
+    done
+    echo -e "${RED}请从 requirements_android.txt 中移除后再打包。${NC}"
+    exit 1
+fi
+echo "  依赖检查通过。"
+
+echo "  清理 Python 缓存文件..."
+find "$PROJECT_ROOT/backend" -name "*.pyc" -delete
+find "$PROJECT_ROOT/backend" -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
+echo "  Python 缓存已清理。"
+
 echo "  预编译 .pyc 文件..."
 python -m compileall -q backend/ 2>/dev/null || echo "  预编译跳过（非关键）"
 
@@ -61,9 +129,16 @@ cp -r backend "$PKG_DIR/"
 cp -r dist "$PKG_DIR/backend/dist"
 cp deploy/setup_android.sh "$PKG_DIR/"
 
-rm -rf "$PKG_DIR/backend/__pycache__"
-rm -rf "$PKG_DIR/backend/api/__pycache__"
-rm -rf "$PKG_DIR/backend/services/__pycache__"
+# 删除开发/测试相关文件（设备上不需要）
+rm -rf "$PKG_DIR/backend/tests"
+# 删除开发数据库（设备上会重新创建）
+rm -f "$PKG_DIR/backend/sono.db"
+# 删除非必要的开发文件
+rm -f "$PKG_DIR/backend/services/dsp_native/Makefile"
+rm -f "$PKG_DIR/backend/services/dsp_native/dsp_core.c"
+rm -f "$PKG_DIR/backend/services/repair/QUALITY_RULES.md"
+rm -f "$PKG_DIR/backend/watchdog.sh"
+# 删除运行时不需要的目录和文件
 rm -rf "$PKG_DIR/backend/storage"
 rm -rf "$PKG_DIR/backend/training"
 rm -f "$PKG_DIR/backend/server.log"

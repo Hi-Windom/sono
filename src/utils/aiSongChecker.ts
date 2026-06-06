@@ -402,7 +402,7 @@ export class AISongChecker {
 
     const avgDiff = diffs.reduce((a, b) => a + b, 0) / diffs.length;
     const variance = diffs.reduce((sum, d) => sum + Math.pow(d - avgDiff, 2), 0) / diffs.length;
-    const stdDev = Math.sqrt(variance);
+    const _stdDev = Math.sqrt(variance);
 
     const vibratoRate = numWindows / (windowSize * numWindows / this.sampleRate);
     const vibratoDepth = avgDiff / frequencies[0];
@@ -456,7 +456,6 @@ export class AISongChecker {
   private calculateHarmonicSpectralCentroid(data: Float32Array): number {
     const spectrum = this.calculateSpectrum(data.slice(0, 4096), 4096);
     
-    let harmonicSum = 0;
     let totalSum = 0;
     let weightedSum = 0;
 

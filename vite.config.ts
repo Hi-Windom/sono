@@ -3,6 +3,7 @@ import react from '@vitejs/plugin-react'
 import tsconfigPaths from "vite-tsconfig-paths";
 import fs from 'fs';
 import path from 'path';
+import { configDefaults } from 'vitest/config';
 
 const LOG_FILE = path.join(process.cwd(), 'logs', 'app.log');
 
@@ -115,6 +116,13 @@ export default defineConfig(({ mode }) => {
   const apiUrl = env.VITE_API_URL || 'http://localhost:8000';
 
   return {
+    test: {
+      // Exclude E2E tests from Vitest
+      exclude: [...configDefaults.exclude, 'tests/e2e/**'],
+      include: ['src/__tests__/**/*.{test,spec}.{ts,tsx}'],
+      environment: 'jsdom',
+      globals: true,
+    },
     define: {
       '__BUILD_TIME__': JSON.stringify(new Date().toISOString()),
     },
@@ -130,6 +138,9 @@ export default defineConfig(({ mode }) => {
     },
     server: {
       allowedHosts: true,
+      watch: {
+        ignored: ['**/backend/storage/**', '**/node_modules/**'],
+      },
       proxy: {
         '/api': {
           target: apiUrl,

@@ -1,6 +1,13 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { AIRepairParams, RepairMode } from '../utils/advancedAudioProcessing';
-import { ProcessingOptions, AlgorithmVersion, fetchMemoryInfo, MemoryInfoResult, fetchStorageEstimate, StorageEstimateResult, fetchRenderCache, RenderCacheEntry } from '../services/backendApi';
+import { ProcessingOptions, AlgorithmVersion, fetchMemoryInfo, MemoryInfoResult, fetchStorageEstimate, StorageEstimateResult, fetchRenderCache, RenderCacheEntry, VocalRepairParams, InstrumentRepairParams, defaultVocalRepairParams, defaultInstrumentRepairParams } from '../services/backendApi';
+import AlgorithmSelector from './AlgorithmSelector';
+
+interface DualTrackAudioInfo {
+  sample_rate: number;
+  channels: number;
+  duration: number;
+}
 
 interface AIRepairPanelProps {
   params: AIRepairParams;
@@ -27,11 +34,25 @@ interface AIRepairPanelProps {
   duration?: number;
   channels?: number;
   backendAvailable?: boolean;
-  onSaveProfile?: () => void;
+  onSaveProfile?: (name: string) => void;
   taskId?: string | null;
   onRenderCacheRefresh?: (fn: () => Promise<void>) => void;
   cacheTriggerKey?: number;
   onInstantDownload?: (cacheEntry: RenderCacheEntry) => void;
+  onRenderCachesLoaded?: (caches: RenderCacheEntry[]) => void;
+  isDualTrackMode?: boolean;
+  vocalParams?: VocalRepairParams;
+  accompanimentParams?: InstrumentRepairParams;
+  mixRatio?: number;
+  onVocalParamChange?: (key: keyof VocalRepairParams, value: number) => void;
+  onAccompanimentParamChange?: (key: keyof InstrumentRepairParams, value: number) => void;
+  onMixRatioChange?: (ratio: number) => void;
+  speed?: number;
+  onSpeedChange?: (speed: number) => void;
+  onDualTrackRepair?: () => void;
+  dualTrackVocalInfo?: DualTrackAudioInfo | null;
+  dualTrackAccompanimentInfo?: DualTrackAudioInfo | null;
+  persistedRenderCaches?: RenderCacheEntry[];
 }
 
 const sampleRateOptions = [
@@ -117,14 +138,47 @@ export function AIRepairPanel({
   onRenderCacheRefresh,
   cacheTriggerKey,
   onInstantDownload,
+  onRenderCachesLoaded,
+  isDualTrackMode = false,
+  vocalParams,
+  accompanimentParams,
+  mixRatio = 0.5,
+  speed = 1.0,
+  onVocalParamChange,
+  onAccompanimentParamChange,
+  onMixRatioChange,
+  onSpeedChange,
+  onDualTrackRepair,
+  dualTrackVocalInfo,
+  dualTrackAccompanimentInfo,
+  persistedRenderCaches,
 }: AIRepairPanelProps) {
-  const [showParams, setShowParams] = useState(false);
+  const effectiveDuration = useMemo(() => {
+    if (isDualTrackMode && dualTrackVocalInfo && dualTrackAccompanimentInfo) {
+      return Math.max(dualTrackVocalInfo.duration, dualTrackAccompanimentInfo.duration);
+    }
+    return duration;
+  }, [isDualTrackMode, duration, dualTrackVocalInfo, dualTrackAccompanimentInfo]);
+
+  const effectiveChannels = useMemo(() => {
+    if (isDualTrackMode && dualTrackVocalInfo && dualTrackAccompanimentInfo) {
+      return Math.max(dualTrackVocalInfo.channels, dualTrackAccompanimentInfo.channels);
+    }
+    return channels;
+  }, [isDualTrackMode, channels, dualTrackVocalInfo, dualTrackAccompanimentInfo]);
+  const filteredAlgorithms = useMemo(() => {
+    if (isDualTrackMode) {
+      return availableAlgorithms.filter(a => a.supportsDualTrack === true);
+    }
+    return availableAlgorithms;
+  }, [isDualTrackMode, availableAlgorithms]);
+  const [showParams, setShowParams] = useState<boolean | string>(false);
   const [memoryInfo, setMemoryInfo] = useState<MemoryInfoResult | null>(null);
   const [storageEstimate, setStorageEstimate] = useState<StorageEstimateResult | null>(null);
   const memoryFetchRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const storageFetchRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // 渲染缓存状态
-  const [renderCaches, setRenderCaches] = useState<RenderCacheEntry[]>([]);
+  const [renderCaches, setRenderCaches] = useState<RenderCacheEntry[]>(persistedRenderCaches || []);
   const [selectedCache, setSelectedCache] = useState<RenderCacheEntry | null>(null);
   const cacheCheckRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -133,42 +187,41 @@ export function AIRepairPanel({
       setMemoryInfo(null);
       return;
     }
-    const fetchDuration = duration > 0 ? duration : 300;
-    const fetchChannels = channels > 0 ? channels : 2;
+    const fetchDuration = effectiveDuration > 0 ? effectiveDuration : 300;
+    const fetchChannels = effectiveChannels > 0 ? effectiveChannels : 2;
     if (memoryFetchRef.current) clearTimeout(memoryFetchRef.current);
     memoryFetchRef.current = setTimeout(() => {
       fetchMemoryInfo(fetchDuration, fetchChannels, processingOptions.sampleRate, algorithmVersion).then(setMemoryInfo);
     }, 300);
     return () => { if (memoryFetchRef.current) clearTimeout(memoryFetchRef.current); };
-  }, [duration, channels, processingOptions.sampleRate, algorithmVersion, backendAvailable]);
+  }, [effectiveDuration, effectiveChannels, processingOptions.sampleRate, algorithmVersion, backendAvailable]);
 
   useEffect(() => {
     if (!backendAvailable) {
       setStorageEstimate(null);
       return;
     }
-    const fetchDuration = duration > 0 ? duration : 300;
-    const fetchChannels = channels > 0 ? channels : 2;
+    const fetchDuration = effectiveDuration > 0 ? effectiveDuration : 300;
+    const fetchChannels = effectiveChannels > 0 ? effectiveChannels : 2;
     if (storageFetchRef.current) clearTimeout(storageFetchRef.current);
     storageFetchRef.current = setTimeout(() => {
       fetchStorageEstimate(fetchDuration, fetchChannels, processingOptions.sampleRate, processingOptions.bitDepth).then(setStorageEstimate);
     }, 300);
     return () => { if (storageFetchRef.current) clearTimeout(storageFetchRef.current); };
-  }, [duration, channels, processingOptions.sampleRate, processingOptions.bitDepth, backendAvailable]);
+  }, [effectiveDuration, effectiveChannels, processingOptions.sampleRate, processingOptions.bitDepth, backendAvailable]);
 
   // 查询渲染交付规格缓存（算法版本变化/修复完成时也会刷新）
   const refreshRenderCache = useCallback(async () => {
     if (!taskId || !backendAvailable) {
-      setRenderCaches([]);
       return;
     }
     const caches = await fetchRenderCache(taskId);
     setRenderCaches(caches);
+    onRenderCachesLoaded?.(caches);
   }, [taskId, backendAvailable]);
 
   useEffect(() => {
     if (!taskId || !backendAvailable) {
-      setRenderCaches([]);
       return;
     }
     if (cacheCheckRef.current) clearTimeout(cacheCheckRef.current);
@@ -182,6 +235,44 @@ export function AIRepairPanel({
   useEffect(() => {
     if (onRenderCacheRefresh) onRenderCacheRefresh(refreshRenderCache);
   }, [refreshRenderCache, onRenderCacheRefresh]);
+
+  const vocalParamLabels: Record<keyof VocalRepairParams, string> = {
+    deClipping: '去削波',
+    dePop: '去爆音',
+    formantRepair: '口型修复',
+    deEssing: '齿音抑制',
+    breathEnhance: '气息增强',
+    aiRepair: 'AI 修复',
+    bassEnhance: '低音增强',
+    airTexture: '空气质感',
+    loudness: '响度优化',
+    exciter: '激励器',
+    compressor: '压缩器',
+    spatial: '空间感',
+    warmth: '温暖度',
+    smartCompressor: '智能压缩',
+    transientAware: '瞬态感知',
+    resonanceSuppress: '共振抑制',
+    aiRepairAdaptive: '自适应AI修复',
+    exciterImproved: '改进激励器',
+    deEsserImproved: '改进齿音抑制',
+    speed: '速度',
+  };
+  const vocalParamKeys = (Object.keys(vocalParamLabels) as (keyof VocalRepairParams)[]).filter(k => k !== 'speed');
+
+  const instParamLabels: Record<keyof InstrumentRepairParams, string> = {
+    deClipping: '去削波',
+    dePop: '去爆音',
+    timbreProtect: '音色保护',
+    dynamicRange: '动态控制',
+    noiseReduction: '降噪',
+    spatialEnhance: '空间增强',
+    warmth: '温暖度',
+    loudness: '响度优化',
+    stereo_enhance: '立体声增强',
+    speed: '速度',
+  };
+  const instParamKeys = (Object.keys(instParamLabels) as (keyof InstrumentRepairParams)[]).filter(k => k !== 'speed');
 
   const paramLabels: Record<keyof AIRepairParams, string> = {
     deClipping: '去削波',
@@ -204,18 +295,18 @@ export function AIRepairPanel({
 
   // 计算当前预估大小
   const currentEstimate = useMemo(() => {
-    if (duration <= 0) return null;
+    if (effectiveDuration <= 0) return null;
     return estimateFileSize(
-      duration,
+      effectiveDuration,
       processingOptions.sampleRate,
       processingOptions.bitDepth,
-      channels
+      effectiveChannels
     );
-  }, [duration, processingOptions.sampleRate, processingOptions.bitDepth, channels]);
+  }, [effectiveDuration, effectiveChannels, processingOptions.sampleRate, processingOptions.bitDepth]);
 
   // 计算所有组合的预估大小
   const allEstimates = useMemo(() => {
-    if (duration <= 0) return [];
+    if (effectiveDuration <= 0) return [];
     const estimates: Array<{
       sampleRate: number;
       bitDepth: number;
@@ -228,7 +319,7 @@ export function AIRepairPanel({
 
     for (const sr of sampleRateOptions) {
       for (const bd of bitDepthOptions) {
-        const est = estimateFileSize(duration, sr.value, bd.value, channels);
+        const est = estimateFileSize(effectiveDuration, sr.value, bd.value, effectiveChannels);
         estimates.push({
           sampleRate: sr.value,
           bitDepth: bd.value,
@@ -239,7 +330,7 @@ export function AIRepairPanel({
       }
     }
     return estimates;
-  }, [duration, channels]);
+  }, [effectiveDuration, effectiveChannels]);
 
   // 检查当前选择是否警告
   const isCurrentWarning = currentEstimate ? currentEstimate.size > WARNING_THRESHOLD_MB : false;
@@ -290,7 +381,7 @@ export function AIRepairPanel({
         </div>
       )}
 
-      {availableAlgorithms.length > 0 ? (
+      {filteredAlgorithms.length > 0 ? (
         <div className="mb-4 p-3 bg-gradient-to-r from-cyan-900/30 to-purple-900/30 rounded-lg border border-cyan-500/20">
           <div className="flex items-center justify-between gap-2">
             <h4 className="text-cyan-400 text-sm font-medium flex items-center gap-1.5 shrink-0">
@@ -299,22 +390,13 @@ export function AIRepairPanel({
               </svg>
               算法版本
             </h4>
-            <div className="relative max-w-[200px] sm:max-w-none">
-              <select
+            <div className="max-w-[240px] sm:max-w-none">
+              <AlgorithmSelector
                 value={algorithmVersion}
-                onChange={(e) => onAlgorithmChange(e.target.value)}
+                algorithms={filteredAlgorithms}
+                onChange={onAlgorithmChange}
                 disabled={disabled}
-                className="appearance-none bg-cyan-500/20 text-white text-sm font-medium py-1.5 pl-3 pr-8 rounded-lg border border-cyan-400/40 focus:outline-none focus:border-cyan-400 cursor-pointer hover:bg-cyan-500/30 transition disabled:opacity-50 disabled:cursor-not-allowed w-full truncate"
-              >
-                {[...availableAlgorithms].reverse().map((algo) => (
-                  <option key={algo.name} value={algo.name} className="bg-gray-900 text-white">
-                    {algo.label} — {algo.description}
-                  </option>
-                ))}
-              </select>
-              <svg className="w-4 h-4 text-cyan-400 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-              </svg>
+              />
             </div>
           </div>
         </div>
@@ -439,6 +521,41 @@ export function AIRepairPanel({
           </div>
         </div>
 
+        {/* 母带风格 */}
+        <div className="mt-3">
+          <label className="text-gray-400 text-xs mb-2 block">母带风格</label>
+          <div className="flex gap-2">
+            {[
+              { value: 'standard' as const, label: '标准母带', recommended: true },
+              { value: 'powerful' as const, label: '强力母带' },
+              { value: 'warm' as const, label: '温暖母带' },
+              { value: 'adaptive' as const, label: '自适应' },
+            ].map((option) => {
+              const isSelected = (processingOptions.masteringStyle || 'standard') === option.value;
+              return (
+                <button
+                  key={option.value}
+                  onClick={() => onOptionsChange?.({ ...processingOptions, masteringStyle: option.value })}
+                  disabled={disabled}
+                  className={`flex-1 py-1.5 px-2 rounded-lg text-xs transition-all relative
+                    ${isSelected
+                      ? 'bg-secondary/30 text-white border border-secondary/50'
+                      : option.recommended
+                        ? 'bg-primary/30 text-gray-300 border border-emerald-500/30 hover:border-emerald-400/50'
+                        : 'bg-primary/30 text-gray-400 border border-gray-700 hover:border-secondary/30'
+                    } ${disabled ? 'opacity-50' : ''}
+                  `}
+                >
+                  {option.label}
+                  {!isSelected && option.recommended && (
+                    <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-emerald-500 rounded-full" />
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
         {/* 预估输出大小 */}
         <div className="mt-3 p-2.5 rounded-lg border bg-gray-800/50 border-gray-700">
             <div className="flex items-center justify-between">
@@ -458,11 +575,11 @@ export function AIRepairPanel({
             </div>
 
             {/* 各组合大小参考 */}
-            {allEstimates.length > 0 ? (
+            {allEstimates.length > 0 || isDualTrackMode ? (
             <div className="mt-3 pt-2 border-t border-gray-700/50">
               <div className="text-[10px] text-gray-500 mb-1.5">各组合预估大小参考（🟢 = 可秒下）：</div>
               <div className="grid grid-cols-3 gap-1 text-[10px]">
-                {allEstimates.map((est) => {
+                {allEstimates.length > 0 ? allEstimates.map((est) => {
                   const isCurrent = est.sampleRate === processingOptions.sampleRate && est.bitDepth === processingOptions.bitDepth;
                   const cacheKey = `${est.sampleRate}-${est.bitDepth}`;
                   // 只匹配当前算法版本的缓存
@@ -499,14 +616,25 @@ export function AIRepairPanel({
                       {isCached && <div className="text-[8px] text-emerald-400">可秒下</div>}
                     </div>
                   );
-                })}
+                }) : (
+                  // 双轨模式但还没有预估数据，显示占位格子
+                  <>
+                    {sampleRateOptions.flatMap((sr) =>
+                      bitDepthOptions.map((bd) => (
+                        <div
+                          key={`${sr.value}-${bd.value}`}
+                          className="px-1.5 py-1 rounded text-center bg-gray-800/30 text-gray-600"
+                        >
+                          <div className="font-medium">{sr.value / 1000}k/{bd.value}bit</div>
+                          <div>—</div>
+                        </div>
+                      ))
+                    )}
+                  </>
+                )}
               </div>
             </div>
-            ) : (
-              <div className="mt-3 pt-2 border-t border-gray-700/50 text-center text-gray-500 text-[10px] py-2">
-                加载音频后显示预估大小
-              </div>
-            )}
+            ) : null}
 
             {/* 缓存详情弹窗 */}
             {selectedCache && (
@@ -725,52 +853,207 @@ export function AIRepairPanel({
         <p className="text-gray-500 text-xs mt-2">交付规格在导出时应用，修改后即时渲染无需重新修复</p>
       </div>
 
-      <div className="mb-4">
-        <button
-          onClick={() => setShowParams(!showParams)}
-          className="w-full flex items-center justify-between py-2 px-3 bg-black/20 rounded-lg hover:bg-black/30 transition"
-        >
-          <span className="text-secondary text-sm font-medium">修复参数</span>
-          <svg
-            className={`w-4 h-4 text-gray-400 transition-transform ${showParams ? 'rotate-180' : ''}`}
-            fill="none" stroke="currentColor" viewBox="0 0 24 24"
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-          </svg>
-        </button>
-
-        {showParams && (
-          <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3">
-            {paramKeys.map((key) => (
-              <div key={key}>
-                <div className="flex justify-between items-center mb-1">
-                  <label className="text-gray-300 text-xs font-medium">
-                    {paramLabels[key]}
-                  </label>
-                  <span className="text-secondary text-xs">
-                    {(params[key] ?? 0).toFixed(2)}
-                  </span>
-                </div>
-                <input
-                  type="range"
-                  min="0"
-                  max="1"
-                  step="0.01"
-                  value={params[key] ?? 0}
-                  onChange={(e) => onParamChange(key, parseFloat(e.target.value))}
-                  disabled={disabled}
-                  className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer slider-accent"
-                />
+      {isDualTrackMode ? (
+        <div className="mb-4 space-y-3">
+          <div>
+            <button
+              onClick={() => setShowParams(showParams === 'vocal' ? false : 'vocal')}
+              className="w-full flex items-center justify-between py-2 px-3 bg-pink-500/10 rounded-lg hover:bg-pink-500/15 transition border border-pink-500/20"
+            >
+              <span className="text-pink-400 text-sm font-medium flex items-center gap-1.5">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
+                人声参数
+              </span>
+              <svg
+                className={`w-4 h-4 text-pink-400/60 transition-transform ${showParams === 'vocal' ? 'rotate-180' : ''}`}
+                fill="none" stroke="currentColor" viewBox="0 0 24 24"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+            {showParams === 'vocal' && vocalParams && onVocalParamChange && (
+              <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3">
+                {vocalParamKeys.map((key) => (
+                  <div key={key}>
+                    <div className="flex justify-between items-center mb-1">
+                      <label className="text-pink-300 text-xs font-medium">
+                        {vocalParamLabels[key]}
+                      </label>
+                      <span className="text-pink-400 text-xs">
+                        {(vocalParams[key] ?? 0).toFixed(2)}
+                      </span>
+                    </div>
+                    <input
+                      type="range" min="0" max="1" step="0.01"
+                      value={vocalParams[key] ?? 0}
+                      onChange={(e) => onVocalParamChange(key, parseFloat(e.target.value))}
+                      disabled={disabled}
+                      className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer slider-accent"
+                    />
+                  </div>
+                ))}
               </div>
-            ))}
+            )}
           </div>
-        )}
-      </div>
+
+          <div>
+            <button
+              onClick={() => setShowParams(showParams === 'accompaniment' ? false : 'accompaniment')}
+              className="w-full flex items-center justify-between py-2 px-3 bg-purple-500/10 rounded-lg hover:bg-purple-500/15 transition border border-purple-500/20"
+            >
+              <span className="text-purple-400 text-sm font-medium flex items-center gap-1.5">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" /></svg>
+                伴奏参数
+              </span>
+              <svg
+                className={`w-4 h-4 text-purple-400/60 transition-transform ${showParams === 'accompaniment' ? 'rotate-180' : ''}`}
+                fill="none" stroke="currentColor" viewBox="0 0 24 24"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+            {showParams === 'accompaniment' && accompanimentParams && onAccompanimentParamChange && (
+              <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3">
+                {instParamKeys.map((key) => (
+                  <div key={key}>
+                    <div className="flex justify-between items-center mb-1">
+                      <label className="text-purple-300 text-xs font-medium">
+                        {instParamLabels[key]}
+                      </label>
+                      <span className="text-purple-400 text-xs">
+                        {(accompanimentParams[key] ?? 0).toFixed(2)}
+                      </span>
+                    </div>
+                    <input
+                      type="range" min="0" max="1" step="0.01"
+                      value={accompanimentParams[key] ?? 0}
+                      onChange={(e) => onAccompanimentParamChange(key, parseFloat(e.target.value))}
+                      disabled={disabled}
+                      className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer slider-accent"
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="p-3 bg-gradient-to-r from-cyan-500/5 to-blue-500/5 rounded-lg border border-white/5">
+            <div className="flex justify-between items-center mb-2">
+              <span className="text-gray-300 text-xs font-medium">速度</span>
+              <span className="text-xs text-gray-400">
+                {speed < 0.8 ? '慢速' : speed > 1.2 ? '快速' : '原速'}
+                <span className="ml-1 text-white font-medium">{speed.toFixed(2)}x</span>
+              </span>
+            </div>
+            <div className="relative pt-1 pb-5">
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.001"
+                value={Math.log2(speed / 0.5) / 2}
+                onChange={(e) => {
+                  const pos = parseFloat(e.target.value);
+                  const newSpeed = 0.5 * Math.pow(4, pos);
+                  onSpeedChange?.(Math.round(newSpeed * 100) / 100);
+                }}
+                disabled={disabled}
+                className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer slider-accent"
+              />
+              <div className="absolute left-0 right-0 top-8 text-[10px] text-gray-500 select-none pointer-events-none">
+                {[0.5, 0.75, 1.0, 1.25, 1.5, 2.0].map((tick) => {
+                  const pos = Math.log2(tick / 0.5) / 2;
+                  return (
+                    <div
+                      key={tick}
+                      className="absolute flex flex-col items-center"
+                      style={{ left: `${pos * 100}%`, transform: 'translateX(-50%)' }}
+                    >
+                      <div className="w-px h-1.5 bg-gray-500/40 mb-0.5" />
+                      <span>{tick}x</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          <div className="p-3 bg-gradient-to-r from-pink-500/5 to-purple-500/5 rounded-lg border border-white/5">
+            <div className="flex justify-between items-center mb-2">
+              <span className="text-gray-300 text-xs font-medium">混合比例</span>
+              <span className="text-xs text-gray-400">
+                {mixRatio < 0.3 ? '偏伴奏' : mixRatio > 0.7 ? '偏人声' : '均衡'}
+                <span className="ml-1 text-white font-medium">{(mixRatio * 100).toFixed(0)}%</span>
+              </span>
+            </div>
+            <input
+              type="range"
+              min="0"
+              max="1"
+              step="0.01"
+              value={mixRatio}
+              onChange={(e) => onMixRatioChange?.(parseFloat(e.target.value))}
+              disabled={disabled}
+              className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer slider-accent"
+            />
+            <div className="flex justify-between text-[10px] text-gray-500 mt-1">
+              <span>纯伴奏</span>
+              <span>均衡</span>
+              <span>纯人声</span>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="mb-4">
+          <button
+            onClick={() => setShowParams(!showParams)}
+            className="w-full flex items-center justify-between py-2 px-3 bg-black/20 rounded-lg hover:bg-black/30 transition"
+          >
+            <span className="text-secondary text-sm font-medium">修复参数</span>
+            <svg
+              className={`w-4 h-4 text-gray-400 transition-transform ${showParams ? 'rotate-180' : ''}`}
+              fill="none" stroke="currentColor" viewBox="0 0 24 24"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+
+          {showParams && (
+            <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3">
+              {paramKeys.map((key) => (
+                <div key={key}>
+                  <div className="flex justify-between items-center mb-1">
+                    <label className="text-gray-300 text-xs font-medium">
+                      {paramLabels[key]}
+                    </label>
+                    <span className="text-secondary text-xs">
+                      {(params[key] ?? 0).toFixed(2)}
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.01"
+                    value={params[key] ?? 0}
+                    onChange={(e) => onParamChange(key, parseFloat(e.target.value))}
+                    disabled={disabled}
+                    className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer slider-accent"
+                  />
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* 保存当前参数为配置 */}
       {onSaveProfile && showParams && (
         <button
-          onClick={onSaveProfile}
+          onClick={() => {
+            const name = prompt('请输入配置名称：');
+            if (name) onSaveProfile(name);
+          }}
           className="w-full mb-3 py-2 rounded-lg bg-purple-500/20 hover:bg-purple-500/30 text-purple-400 text-sm font-medium transition"
         >
           💾 保存当前参数为配置
@@ -788,13 +1071,13 @@ export function AIRepairPanel({
           重置
         </button>
         <button
-          onClick={onApply}
-          disabled={disabled}
-          className={`px-4 py-2.5 bg-gradient-to-r from-cyan-500 to-purple-500 hover:from-cyan-400 hover:to-purple-400 text-white rounded-lg transition shadow-lg shadow-cyan-500/20 text-sm font-medium
-            ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
+          onClick={isDualTrackMode ? onDualTrackRepair : onApply}
+          disabled={disabled || (isDualTrackMode && !onDualTrackRepair)}
+          className={`px-4 py-2.5 bg-gradient-to-r ${isDualTrackMode ? 'from-pink-500 to-purple-500 hover:from-pink-400 hover:to-purple-400 shadow-pink-500/20' : 'from-cyan-500 to-purple-500 hover:from-cyan-400 hover:to-purple-400 shadow-cyan-500/20'} text-white rounded-lg transition shadow-lg text-sm font-medium
+            ${disabled || (isDualTrackMode && !onDualTrackRepair) ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
           `}
         >
-          开始修复
+          {isDualTrackMode ? '双轨修复' : '开始修复'}
         </button>
       </div>
     </div>

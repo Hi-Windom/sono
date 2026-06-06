@@ -1,11 +1,13 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { Header } from '../components/Header';
 import { SpectrumVisualizer } from '../components/SpectrumVisualizer';
 import { WaveformVisualizer } from '../components/WaveformVisualizer';
 import { ErrorBoundary } from '../components/ErrorBoundary';
+import { connectCacheWS } from '../services/backendApi';
 
 type CompareMode = 'original' | 'repaired';
+type DualTrackMode = 'vocal' | 'accompaniment' | 'merged';
 
 interface CacheTask {
   id: string;
@@ -94,6 +96,7 @@ export default function ComparePage() {
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [audioReady, setAudioReady] = useState(false);
+  const [dualTrackMode, setDualTrackMode] = useState<DualTrackMode | null>(null);
 
   const [pointA, setPointA] = useState<number | null>(null);
   const [pointB, setPointB] = useState<number | null>(null);
@@ -113,22 +116,82 @@ export default function ComparePage() {
 
   const activeBuffer = compareMode === 'original' ? originalBuffer : repairedBuffer;
 
-  useEffect(() => {
-    if (taskId) return;
-    let cancelled = false;
+  const fetchTaskList = useCallback(async () => {
     setTasksLoading(true);
-    fetch(`${API_BASE}/cache/info`)
-      .then(res => res.ok ? res.json() : Promise.reject(new Error('获取缓存信息失败')))
-      .then(data => {
-        if (!cancelled) {
-          const completed = (data.tasks || []).filter((t: CacheTask) => t.output_exists);
-          setTasks(completed);
-        }
-      })
-      .catch(() => {})
-      .finally(() => { if (!cancelled) setTasksLoading(false); });
-    return () => { cancelled = true };
-  }, [taskId]);
+    try {
+      const res = await fetch(`${API_BASE}/cache/info`);
+      if (res.ok) {
+        const data = await res.json();
+        setTasks(data.tasks || []);
+      }
+    } catch {
+      // ignore
+    } finally {
+      setTasksLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchTaskList();
+  }, [fetchTaskList]);
+
+  const wsControlRef = useRef<{ close: () => void } | null>(null);
+  const taskIdRef = useRef(taskId);
+  taskIdRef.current = taskId;
+  useEffect(() => {
+    if (wsControlRef.current) return;
+    wsControlRef.current = connectCacheWS(() => {
+      if (!taskIdRef.current) {
+        fetchTaskList();
+      }
+    });
+  }, []);
+
+  const dualTrackSubIds = useMemo<{ vocalTaskId: string | null; accompanimentTaskId: string | null }>(() => {
+    if (!taskInfo) return { vocalTaskId: null, accompanimentTaskId: null };
+    const rawParams = taskInfo.params;
+    let parsedParams: Record<string, unknown> = {};
+    if (typeof rawParams === 'string') {
+      try { parsedParams = JSON.parse(rawParams); } catch { parsedParams = {}; }
+    } else if (rawParams && typeof rawParams === 'object') {
+      parsedParams = rawParams as Record<string, unknown>;
+    }
+    return {
+      vocalTaskId: (parsedParams.vocal_task_id ?? taskInfo.vocal_task_id ?? null) as string | null,
+      accompanimentTaskId: (parsedParams.accompaniment_task_id ?? taskInfo.accompaniment_task_id ?? null) as string | null,
+    };
+  }, [taskInfo]);
+
+  const isDualTrackTask = useMemo(() => {
+    if (searchParams.get('mode') === 'dual') return true;
+    if (!taskInfo) return false;
+    const rawParams = taskInfo.params;
+    let parsedParams: Record<string, unknown> = {};
+    if (typeof rawParams === 'string') {
+      try { parsedParams = JSON.parse(rawParams); } catch { parsedParams = {}; }
+    } else if (rawParams && typeof rawParams === 'object') {
+      parsedParams = rawParams as Record<string, unknown>;
+    }
+    if (parsedParams.processing_mode === 'dual') return true;
+    return !!(dualTrackSubIds.vocalTaskId && dualTrackSubIds.accompanimentTaskId);
+  }, [taskInfo, dualTrackSubIds, searchParams]);
+
+  useEffect(() => {
+    if (isDualTrackTask && !dualTrackMode) {
+      setDualTrackMode('merged');
+    } else if (!isDualTrackTask && dualTrackMode) {
+      setDualTrackMode(null);
+    }
+  }, [isDualTrackTask]);
+
+  const effectiveTaskId = useMemo(() => {
+    if (!dualTrackMode) return taskId;
+    switch (dualTrackMode) {
+      case 'vocal': return dualTrackSubIds.vocalTaskId || taskId;
+      case 'accompaniment': return dualTrackSubIds.accompanimentTaskId || taskId;
+      case 'merged': return taskId;
+    }
+  }, [dualTrackMode, dualTrackSubIds, taskId]);
 
   useEffect(() => {
     if (!taskId) {
@@ -179,7 +242,7 @@ export default function ComparePage() {
     }
 
     const audio = audioElRef.current;
-    const url = getPreviewUrl(taskId, compareMode);
+    const url = getPreviewUrl(effectiveTaskId, compareMode);
     audio.src = url;
     audio.load();
     setAudioReady(false);
@@ -233,7 +296,7 @@ export default function ComparePage() {
       audio.removeEventListener('ended', onEnded);
       audio.removeEventListener('error', onError);
     };
-  }, [taskId, compareMode, pointA, pointB]);
+  }, [taskId, effectiveTaskId, compareMode, pointA, pointB]);
 
   useEffect(() => {
     if (!audioElRef.current) return;
@@ -280,7 +343,7 @@ export default function ComparePage() {
   useEffect(() => {
     if (!taskId) return;
 
-    const cached = getCachedBuffer(taskId, 'original');
+    const cached = getCachedBuffer(effectiveTaskId, 'original');
     if (cached) {
       setOriginalBuffer(cached);
       setOriginalLoading(false);
@@ -291,7 +354,7 @@ export default function ComparePage() {
     setOriginalLoading(true);
     setOriginalError(null);
 
-    fetch(getPreviewUrl(taskId, 'original'))
+    fetch(getPreviewUrl(effectiveTaskId, 'original'))
       .then(res => {
         if (!res.ok) throw new Error(`原始音频不可用 (HTTP ${res.status})`);
         return res.arrayBuffer();
@@ -302,7 +365,7 @@ export default function ComparePage() {
       })
       .then(buffer => {
         if (!cancelled) {
-          setCachedBuffer(taskId, 'original', buffer);
+          setCachedBuffer(effectiveTaskId, 'original', buffer);
           setOriginalBuffer(buffer);
         }
       })
@@ -314,12 +377,12 @@ export default function ComparePage() {
       });
 
     return () => { cancelled = true };
-  }, [taskId, getAudioContext]);
+  }, [taskId, effectiveTaskId, getAudioContext]);
 
   useEffect(() => {
     if (!taskId) return;
 
-    const cached = getCachedBuffer(taskId, 'repaired');
+    const cached = getCachedBuffer(effectiveTaskId, 'repaired');
     if (cached) {
       setRepairedBuffer(cached);
       setRepairedLoading(false);
@@ -330,7 +393,7 @@ export default function ComparePage() {
     setRepairedLoading(true);
     setRepairedError(null);
 
-    fetch(getPreviewUrl(taskId, 'repaired'))
+    fetch(getPreviewUrl(effectiveTaskId, 'repaired'))
       .then(res => {
         if (!res.ok) throw new Error(`修复后音频不可用 (HTTP ${res.status})`);
         return res.arrayBuffer();
@@ -341,7 +404,7 @@ export default function ComparePage() {
       })
       .then(buffer => {
         if (!cancelled) {
-          setCachedBuffer(taskId, 'repaired', buffer);
+          setCachedBuffer(effectiveTaskId, 'repaired', buffer);
           setRepairedBuffer(buffer);
         }
       })
@@ -353,7 +416,7 @@ export default function ComparePage() {
       });
 
     return () => { cancelled = true };
-  }, [taskId, getAudioContext]);
+  }, [taskId, effectiveTaskId, getAudioContext]);
 
   const connectAudioGraph = useCallback((audio: HTMLAudioElement) => {
     const ctx = getAudioContext();
@@ -417,6 +480,22 @@ export default function ComparePage() {
     pendingSeekRef.current = savedTime;
     pendingPlayRef.current = wasPlaying;
   }, [compareMode, isPlaying, currentTime]);
+
+  const switchDualTrackMode = useCallback((mode: DualTrackMode) => {
+    if (mode === dualTrackMode) return;
+    setDualTrackMode(mode);
+    setOriginalBuffer(null);
+    setRepairedBuffer(null);
+    setOriginalError(null);
+    setRepairedError(null);
+    setAudioReady(false);
+    setCurrentTime(0);
+    setDuration(0);
+    setPointA(null);
+    setPointB(null);
+    abLoopRef.current = false;
+    setCompareMode('original');
+  }, [dualTrackMode]);
 
   const setMarkA = useCallback(() => {
     setPointA(currentTime);
@@ -521,8 +600,8 @@ export default function ComparePage() {
         tasks.map(task => (
           <button
             key={task.id}
-            onClick={() => selectTask(task.id)}
-            className="w-full flex items-center gap-4 p-4 bg-white/5 border border-white/10 rounded-xl text-left"
+            onClick={() => task.output_exists ? selectTask(task.id) : undefined}
+            className={`w-full flex items-center gap-4 p-4 bg-white/5 border rounded-xl text-left ${task.output_exists ? 'border-white/10 cursor-pointer hover:bg-white/[0.07]' : 'border-white/5 cursor-not-allowed opacity-50'}`}
           >
             <div className="w-10 h-10 bg-gradient-to-br from-cyan-500/20 to-purple-500/20 rounded-lg flex items-center justify-center border border-cyan-400/20 shrink-0">
               <svg className="w-5 h-5 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -534,7 +613,11 @@ export default function ComparePage() {
               <p className="text-gray-500 text-xs mt-0.5">
                 {task.created_at ? new Date(task.created_at).toLocaleString('zh-CN') : ''}
                 {' \u2022 '}
-                <span className="text-green-400">已修复</span>
+                {task.output_exists ? (
+                  <span className="text-green-400">已修复</span>
+                ) : (
+                  <span className="text-yellow-500">文件已过期</span>
+                )}
               </p>
             </div>
             <svg className="w-4 h-4 text-gray-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -585,6 +668,37 @@ export default function ComparePage() {
           </h3>
           <p className="text-gray-500 text-xs">点击卡片切换音频源</p>
         </div>
+
+        {dualTrackMode !== null && (
+          <div className="flex items-center justify-center mb-5">
+            <div className="inline-flex items-center gap-1 p-1 bg-white/5 rounded-xl border border-white/10">
+              {([
+                { mode: 'vocal' as DualTrackMode, label: '🎤 人声', color: '#EC4899' },
+                { mode: 'accompaniment' as DualTrackMode, label: '🎸 伴奏', color: '#A855F7' },
+                { mode: 'merged' as DualTrackMode, label: '🎵 合并', color: '#06B6D4' },
+              ]).map(({ mode, label, color }) => (
+                <button
+                  key={mode}
+                  onClick={() => switchDualTrackMode(mode)}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                    dualTrackMode === mode ? 'shadow-md' : 'text-gray-400 hover:text-gray-200'
+                  }`}
+                  style={dualTrackMode === mode ? {
+                    background: `linear-gradient(135deg, ${color}30, ${color}15)`,
+                    color,
+                    border: `1px solid ${color}50`,
+                    boxShadow: `0 0 12px ${color}20`,
+                  } : {
+                    background: 'transparent',
+                    border: '1px solid transparent',
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         <div className="grid grid-cols-2 gap-3 mb-6">
           {(['original', 'repaired'] as CompareMode[]).map((mode) => {
@@ -862,7 +976,7 @@ export default function ComparePage() {
         </div>
 
         <div className="mt-3 flex items-center justify-between text-xs text-gray-600">
-          <span>{taskId}</span>
+          <span>{effectiveTaskId}</span>
           <span>
             {!audioReady && <span className="text-yellow-500/50 mr-2">缓冲中</span>}
             {originalLoading && <span className="text-yellow-500/50 mr-2">原始波形</span>}
@@ -881,15 +995,6 @@ export default function ComparePage() {
 
         <div className="container mx-auto px-4 max-w-5xl mt-4">
           <div className="flex items-center gap-3 mb-6">
-            <button
-              onClick={() => navigate('/')}
-              className="flex items-center gap-2 text-gray-400"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-              </svg>
-              <span>返回首页</span>
-            </button>
             {taskId && (
               <button
                 onClick={() => setSearchParams({})}

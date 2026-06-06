@@ -40,9 +40,16 @@ cd /workspace/backend && python main.py
 **"重启dev"的正确流程**：
 1. 停止旧服务：`pkill -f "python main.py"` + `pkill -f "vite"`
 2. 启动新服务：`bash scripts/start_dev.sh`（同时启动前端和后端）
-3. 或者用 `npm run dev:full`
+3. **必须使用 `OpenPreview` 工具激活预览**，否则外部无法访问沙箱端口
+4. 或者用 `npm run dev:full`
 
 **绝对禁止**只启动后端 `python main.py` 就当作"重启dev"。
+
+### 预览访问规则（重要！）
+沙箱环境需要特殊命令激活预览才能被外部访问：
+- 启动服务后，**必须使用 `OpenPreview` 工具**激活预览
+- 示例：`OpenPreview(command_id="xxx", preview_url="http://localhost:5173")`
+- 不使用 `OpenPreview` 会导致端口只在容器内部可用，外部无法访问
 
 ### 桌面生产预览（使用打包后的 dist，非开发环境）
 ```bash

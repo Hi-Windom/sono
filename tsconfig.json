@@ -22,7 +22,7 @@
     "noFallthroughCasesInSwitch": false,
     "noUncheckedSideEffectImports": false,
     "forceConsistentCasingInFileNames": false,
-    "baseUrl": "./",
+    "ignoreDeprecations": "5.0",
     "paths": {
       "@/*": [
         "./src/*"

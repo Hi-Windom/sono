@@ -12,15 +12,55 @@ from concurrent.futures import Future, ThreadPoolExecutor, TimeoutError as Futur
 import numpy as np
 from typing import Any
 
-from config import MAX_WORKERS, MOBILE_MODE, OUTPUT_DIR
+from config import MAX_WORKERS, MAX_CONCURRENT_TASKS, MOBILE_MODE, OUTPUT_DIR
 from database import TaskDict, create_task, get_task, update_task
 from services.ai_detector import detect_ai_audio
 from services.audio_repair import ALGORITHM_VERSIONS, DEFAULT_VERSION, repair_audio
+from services.memory_guard import get_available_memory_bytes
 from services.ws_manager import ws_manager
 
 logger = logging.getLogger(__name__)
 
 WAVEFORM_PEAKS_COUNT = 2000
+
+_active_tasks: set[str] = set()
+_active_tasks_lock = threading.Lock()
+
+MIN_MEMORY_FOR_TASK = 512 * 1024 * 1024
+
+
+def get_active_task_count() -> int:
+    with _active_tasks_lock:
+        return len(_active_tasks)
+
+
+def get_active_tasks() -> list[str]:
+    with _active_tasks_lock:
+        return list(_active_tasks)
+
+
+def can_accept_task() -> tuple[bool, str]:
+    active = get_active_task_count()
+    if active >= MAX_CONCURRENT_TASKS:
+        return False, f"系统繁忙（{active}/{MAX_CONCURRENT_TASKS} 任务运行中），请稍后重试"
+    available_mem = get_available_memory_bytes()
+    if available_mem is not None and available_mem < MIN_MEMORY_FOR_TASK:
+        mem_mb = available_mem / 1024 / 1024
+        return False, f"系统内存不足（仅剩 {mem_mb:.0f}MB），请稍后重试"
+    return True, ""
+
+
+def _track_task_start(task_id: str) -> bool:
+    with _active_tasks_lock:
+        if len(_active_tasks) >= MAX_CONCURRENT_TASKS:
+            return False
+        _active_tasks.add(task_id)
+        return True
+
+
+def _track_task_end(task_id: str) -> None:
+    with _active_tasks_lock:
+        _active_tasks.discard(task_id)
 
 
 def _generate_waveform_peaks(output_path: str, num_peaks: int = WAVEFORM_PEAKS_COUNT) -> list[list[float]] | None:
@@ -108,6 +148,11 @@ def generate_task_id() -> str:
 
 def submit_detect_task(task_id: str, audio_path: str, detect_type: str = "original", detector_version: str = "v1.1"):
     logger.info(f"[submit_detect_task] task_id={task_id} type={detect_type} version={detector_version}")
+    if not _track_task_start(task_id):
+        active = get_active_task_count()
+        logger.warning(f"[submit_detect_task] 拒绝任务 task_id={task_id}: 系统繁忙 ({active}/{MAX_CONCURRENT_TASKS})")
+        update_task(task_id, status="error", error=f"系统繁忙（{active}/{MAX_CONCURRENT_TASKS} 任务运行中），请稍后重试", step="系统繁忙")
+        return
     future = executor.submit(_run_detect, task_id, audio_path, detect_type, detector_version)
     future.add_done_callback(lambda f: _handle_future_exception(f, task_id, "detect"))
 
@@ -115,6 +160,11 @@ def submit_detect_task(task_id: str, audio_path: str, detect_type: str = "origin
 def submit_repair_task(task_id: str, audio_path: str, params: dict[str, Any]) -> None:
     logger.info(f"[submit_repair_task] task_id={task_id} params_keys={list(params.keys())}")
     update_task(task_id, params=params)
+    if not _track_task_start(task_id):
+        active = get_active_task_count()
+        logger.warning(f"[submit_repair_task] 拒绝任务 task_id={task_id}: 系统繁忙 ({active}/{MAX_CONCURRENT_TASKS})")
+        update_task(task_id, status="error", error=f"系统繁忙（{active}/{MAX_CONCURRENT_TASKS} 任务运行中），请稍后重试", step="系统繁忙")
+        return
     future = executor.submit(_run_repair, task_id, audio_path, params, MOBILE_MODE)
     future.add_done_callback(lambda f: _handle_future_exception(f, task_id, "repair"))
 
@@ -167,8 +217,18 @@ def _run_detect(task_id: str, audio_path: str, detect_type: str, detector_versio
         label = "修复后" if detect_type == "repaired" else "原始"
         update_task(task_id, status="detecting", progress=0, step=f"开始{label}检测...")
 
-        if not os.path.exists(audio_path):
-            raise FileNotFoundError(f"音频文件不存在: {audio_path}")
+        processing_mode = params.get("processing_mode", "single")
+        if processing_mode == "dual":
+            vocal_path = params.get("vocal_path", "")
+            accompaniment_path = params.get("accompaniment_path", "")
+            if vocal_path and not os.path.exists(vocal_path):
+                raise FileNotFoundError(f"人声音频不存在: {vocal_path}")
+            if accompaniment_path and not os.path.exists(accompaniment_path):
+                raise FileNotFoundError(f"伴奏音频不存在: {accompaniment_path}")
+            audio_path = vocal_path
+        else:
+            if not os.path.exists(audio_path):
+                raise FileNotFoundError(f"音频文件不存在: {audio_path}")
 
         file_size = os.path.getsize(audio_path)
         logger.info(f"[detect] 音频文件 task_id={task_id} size={file_size/1024/1024:.2f}MB")
@@ -214,8 +274,7 @@ def _run_detect(task_id: str, audio_path: str, detect_type: str, detector_versio
         raise
     finally:
         stop_monitor[0] = True
-        with _cancelled_lock:
-            _cancelled_tasks.discard(task_id)
+        _track_task_end(task_id)
         with _cancelled_lock:
             _cancelled_tasks.discard(task_id)
 
@@ -321,6 +380,16 @@ def _run_repair(task_id: str, audio_path: str, params: dict[str, Any], mobile_mo
             output_path=output_path if os.path.exists(output_path) else None,
             repair_result=repair_result
         )
+
+        if repair_result.get("vocal_output_path") and os.path.exists(repair_result["vocal_output_path"]):
+            vocal_task_id = params.get("vocal_task_id")
+            if vocal_task_id:
+                update_task(vocal_task_id, output_path=repair_result["vocal_output_path"], status="completed", progress=1)
+
+        if repair_result.get("accompaniment_output_path") and os.path.exists(repair_result["accompaniment_output_path"]):
+            accompaniment_task_id = params.get("accompaniment_task_id")
+            if accompaniment_task_id:
+                update_task(accompaniment_task_id, output_path=repair_result["accompaniment_output_path"], status="completed", progress=1)
         _ws_send_final(task_id, {"task_id": task_id, "status": "completed", "progress": 1, "step": f"修复完成 ({elapsed:.1f}s)", "repair_result": repair_result})
 
         logger.info(f"[repair] 完成 task_id={task_id} elapsed={elapsed:.1f}s issues={repair_result.get('issues_found', [])}")
@@ -344,6 +413,7 @@ def _run_repair(task_id: str, audio_path: str, params: dict[str, Any], mobile_mo
         raise
     finally:
         stop_monitor[0] = True
+        _track_task_end(task_id)
 
 
 def get_task_status(task_id: str) -> TaskDict | None:

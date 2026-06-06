@@ -19,7 +19,7 @@ async function calculateFileHash(file: File): Promise<string> {
 }
 
 export default function TrainingUploadPage() {
-  const navigate = useNavigate();
+  const _navigate = useNavigate();
   const [isUploading, setIsUploading] = useState(false);
   const [uploadingFiles, setUploadingFiles] = useState<UploadingFile[]>([]);
   const [uploadedFiles, setUploadedFiles] = useState<string[]>([]);
@@ -116,19 +116,6 @@ export default function TrainingUploadPage() {
   return (
     <div className="min-h-screen bg-dark">
       <Header />
-
-      {/* 返回首页按钮 */}
-      <div className="container mx-auto px-4 max-w-7xl mt-4">
-        <button
-          onClick={() => navigate('/')}
-          className="flex items-center gap-2 text-gray-400 hover:text-white transition-colors"
-        >
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-          </svg>
-          <span>返回首页</span>
-        </button>
-      </div>
 
       <div className="container mx-auto px-4 py-8 max-w-4xl">
         <div className="text-center mb-12">
