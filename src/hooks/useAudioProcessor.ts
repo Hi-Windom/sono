@@ -24,6 +24,7 @@ import {
   waitRenderWithWS,
   fetchRenderCache,
   RenderCacheEntry,
+  SignalProfile,
 } from '../services/backendApi';
 import { CacheHitInfo } from '../components/RepairCacheModal';
 
@@ -133,6 +134,8 @@ export function useAudioProcessor() {
     channels: number;
     algorithm_version?: string;
     waveform_peaks?: number[][];
+    processing_mode?: string;
+    signal_profile?: SignalProfile;
     completed_at?: string;
   } | null>(null);
 

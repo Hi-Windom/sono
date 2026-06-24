@@ -256,6 +256,7 @@ export default function Home() {
                   });
                   setShowDownloadModal(true);
                 }}
+                repairProfile={repairResult?.signal_profile ?? null}
               />
 
               {/* CacheManager moved to /cache-manager page */}

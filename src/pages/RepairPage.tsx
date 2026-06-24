@@ -8,7 +8,7 @@ import { ErrorBoundary } from '../components/ErrorBoundary';
 import { DownloadModal, DownloadFileInfo, DualTrackDownloadUrls } from '../components/DownloadModal';
 import { RepairCacheModal, CacheHitInfo } from '../components/RepairCacheModal';
 import { useAudioProcessor, generateExportFilename } from '../hooks/useAudioProcessor';
-import { uploadDualAudio, repairDualAudio, repairDualFromHash, getDownloadUrl, getPreviewUrl, connectProgressWS, WSProgressControl, VocalRepairParams, InstrumentRepairParams, defaultVocalRepairParams, defaultInstrumentRepairParams, fetchRenderCache, lookupDualRepairCache, mapParamsToBackend, mapVocalParamsToBackend, mapInstrumentParamsToBackend, connectCacheWS, CacheUpdateEvent, RenderCacheEntry, fetchFileInfoByHash, checkFileHash } from '../services/backendApi';
+import { uploadDualAudio, repairDualAudio, repairDualFromHash, getDownloadUrl, getPreviewUrl, connectProgressWS, WSProgressControl, VocalRepairParams, InstrumentRepairParams, defaultVocalRepairParams, defaultInstrumentRepairParams, fetchRenderCache, lookupDualRepairCache, mapParamsToBackend, mapVocalParamsToBackend, mapInstrumentParamsToBackend, connectCacheWS, CacheUpdateEvent, RenderCacheEntry, fetchFileInfoByHash, checkFileHash, SignalProfile } from '../services/backendApi';
 import { useBackend } from '../contexts/BackendContext';
 import { saveSettings, loadSettings } from '../utils/settingsStorage';
 import { computeFileHash } from '../utils/fileHash';
@@ -79,6 +79,7 @@ export default function RepairPage() {
     setIsTaskStuck,
     setStuckInfo,
     setQueueStatus,
+    repairResult,
   } = useAudioProcessor();
 
   const [instantDownloadInfo, setInstantDownloadInfo] = useState<DownloadFileInfo | null>(null);
@@ -111,7 +112,7 @@ export default function RepairPage() {
   const [dualTrackVocalFile, setDualTrackVocalFile] = useState<File | null>(null);
   const [dualTrackAccompanimentFile, setDualTrackAccompanimentFile] = useState<File | null>(null);
   const [, setDualTrackDownloadUrl] = useState<string | null>(null);
-  const [, setDualTrackRepairResult] = useState<unknown>(null);
+  const [dualTrackRepairProfile, setDualTrackRepairProfile] = useState<SignalProfile | null>(null);
   const [dualTrackFilesSelected, setDualTrackFilesSelected] = useState(false);
   const [dualTrackVocalInfo, setDualTrackVocalInfo] = useState<{ sample_rate: number; channels: number; duration: number } | null>(null);
   const [dualTrackAccompanimentInfo, setDualTrackAccompanimentInfo] = useState<{ sample_rate: number; channels: number; duration: number } | null>(null);
@@ -172,7 +173,7 @@ export default function RepairPage() {
       },
       onComplete: async (status) => {
         sessionActions.setDualTrackProcessed(true);
-        setDualTrackRepairResult(status);
+        setDualTrackRepairProfile(status?.repair_result?.signal_profile ?? null);
         const downloadUrl = getDownloadUrl(taskId);
         setDualTrackDownloadUrl(downloadUrl);
         setTaskId(taskId);
@@ -265,7 +266,7 @@ export default function RepairPage() {
     setDualTrackVocalTaskId(null);
     setDualTrackAccompanimentTaskId(null);
     setDualTrackDownloadUrl(null);
-    setDualTrackRepairResult(null);
+    setDualTrackRepairProfile(null);
     stopDualTrackPolling();
   }, [stopDualTrackPolling, sessionActions]);
 
@@ -490,7 +491,7 @@ export default function RepairPage() {
 
     const cache = dualCacheHitInfo?.repair;
     if (cache?.repair_result) {
-      setDualTrackRepairResult(cache.repair_result);
+      setDualTrackRepairProfile(cache.repair_result.signal_profile ?? null);
     }
 
     sessionActions.setDualTrackProcessed(true);
@@ -547,7 +548,7 @@ export default function RepairPage() {
           setDualTrackTaskId(cacheResult.task_id);
           setTaskId(cacheResult.task_id);
           if (cacheResult.repair_result) {
-            setDualTrackRepairResult(cacheResult.repair_result);
+            setDualTrackRepairProfile(cacheResult.repair_result.signal_profile ?? null);
             sessionActions.setDualTrackProcessed(true);
           }
         }
@@ -1034,6 +1035,7 @@ export default function RepairPage() {
                 dualTrackAccompanimentInfo={dualTrackAccompanimentInfo}
                 onRenderCachesLoaded={(caches) => { dualTrackRenderCachesRef.current = caches; sessionActions.setDualTrackRenderCaches(caches); }}
                 persistedRenderCaches={isDualTrackMode ? (persistedRenderCaches as RenderCacheEntry[]) : undefined}
+                repairProfile={isDualTrackMode ? dualTrackRepairProfile : (repairResult?.signal_profile ?? null)}
               />
 
               {profileSaveMsg && (

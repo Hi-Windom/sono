@@ -133,6 +133,24 @@ interface BackendDetectionResult {
   detect_type?: string;
 }
 
+/** v4.0 分析驱动管线的信号诊断画像（修复后回传，前端可展示真实检测情况）。 */
+export interface SignalProfile {
+  clip_density_pct: number;
+  peak_db: number;
+  rms_db: number;
+  crest_factor_db: number;
+  noise_floor_db: number;
+  snr_db: number;
+  sibilance_pct: number;
+  transient_density: number;
+  spectral_flatness: number;
+  spectral_centroid_hz: number;
+  lufs: number;
+  dynamic_range_db: number;
+  stereo_width: number;
+  detected_issues: string[];
+}
+
 interface BackendRepairResult {
   issues_found: string[];
   original_sample_rate: number;
@@ -142,6 +160,8 @@ interface BackendRepairResult {
   channels: number;
   algorithm_version?: string;
   waveform_peaks?: number[][];
+  processing_mode?: string;
+  signal_profile?: SignalProfile;
 }
 
 interface ProgressEvent {
