@@ -8,6 +8,7 @@ import { ErrorBoundary } from '../components/ErrorBoundary';
 import { DownloadModal, DownloadFileInfo, DualTrackDownloadUrls } from '../components/DownloadModal';
 import { RepairCacheModal, CacheHitInfo } from '../components/RepairCacheModal';
 import { useAudioProcessor, generateExportFilename } from '../hooks/useAudioProcessor';
+import { RepairMode } from '../utils/advancedAudioProcessing';
 import { uploadDualAudio, repairDualAudio, repairDualFromHash, getDownloadUrl, getPreviewUrl, connectProgressWS, WSProgressControl, VocalRepairParams, InstrumentRepairParams, defaultVocalRepairParams, defaultInstrumentRepairParams, fetchRenderCache, lookupDualRepairCache, mapParamsToBackend, mapVocalParamsToBackend, mapInstrumentParamsToBackend, connectCacheWS, CacheUpdateEvent, RenderCacheEntry, fetchFileInfoByHash, checkFileHash, SignalProfile } from '../services/backendApi';
 import { useBackend } from '../contexts/BackendContext';
 import { saveSettings, loadSettings } from '../utils/settingsStorage';
@@ -283,6 +284,43 @@ export default function RepairPage() {
     setDualTrackVocalParams(prev => ({ ...prev, speed }));
     setDualTrackAccompanimentParams(prev => ({ ...prev, speed }));
   }, []);
+
+  // 预设模式选择：单轨直接套用 mode.params；双轨额外把 vocal_*/inst_* 拆分到各自参数，
+  // 让双轨预设真正驱动人声/伴奏的 DSP（此前双轨预设只影响单轨 params，被忽略）。
+  const handleModeSelect = useCallback((mode: RepairMode) => {
+    applyRepairMode(mode);
+    if (!isDualTrackMode) return;
+    const p = mode.params as unknown as Record<string, number>;
+    setDualTrackVocalParams(prev => ({
+      ...prev,
+      deClipping: p.vocalDeclip ?? prev.deClipping,
+      dePop: p.vocalDepop ?? prev.dePop,
+      deEssing: p.vocalDeEss ?? prev.deEssing,
+      aiRepair: p.vocalAIRepair ?? prev.aiRepair,
+      bassEnhance: p.vocalBassEnhance ?? prev.bassEnhance,
+      airTexture: p.vocalClarity ?? p.vocalAirTexture ?? prev.airTexture,
+      loudness: p.vocalLoudness ?? prev.loudness,
+      exciter: p.vocalExciter ?? prev.exciter,
+      smartCompressor: p.vocalSmartCompressor ?? prev.smartCompressor,
+      transientAware: p.vocalTransientAware ?? prev.transientAware,
+      resonanceSuppress: p.vocalResonanceSuppress ?? prev.resonanceSuppress,
+      aiRepairAdaptive: p.vocalAiRepairAdaptive ?? prev.aiRepairAdaptive,
+    }));
+    setDualTrackAccompanimentParams(prev => ({
+      ...prev,
+      deClipping: p.instDeclip ?? prev.deClipping,
+      dePop: p.instDepop ?? prev.dePop,
+      dynamicRange: p.instDynamic ?? prev.dynamicRange,
+      noiseReduction: p.instNoiseReduction ?? prev.noiseReduction,
+      loudness: p.instLoudness ?? prev.loudness,
+      exciter: p.instExciter ?? prev.exciter,
+      transient: p.instTransient ?? prev.transient,
+      resonance: p.instResonance ?? prev.resonance,
+      bassEnhance: p.instBassEnhance ?? prev.bassEnhance,
+      airTexture: p.instAirTexture ?? prev.airTexture,
+    }));
+    if (p.vocalRatio !== undefined) setMixRatio(p.vocalRatio);
+  }, [applyRepairMode, isDualTrackMode]);
 
   const handleDualTrackFileReplace = useCallback(async (type: 'vocal' | 'accompaniment', newFile: File) => {
     const vocal = type === 'vocal' ? newFile : dualTrackVocalFile;
@@ -970,7 +1008,7 @@ export default function RepairPage() {
                 onAlgorithmChange={applyAlgorithmVersion}
                 onParamChange={updateParam}
                 onReset={resetParams}
-                onModeSelect={applyRepairMode}
+                onModeSelect={handleModeSelect}
                 onApply={isDualTrackMode ? undefined : applySettings}
                 onOptionsChange={setProcessingOptions}
                 disabled={isProcessing}

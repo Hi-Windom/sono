@@ -34,6 +34,12 @@ export interface InstrumentRepairParams {
   warmth: number;
   loudness: number;
   stereo_enhance?: number;
+  // v4.0a+ 伴奏专业参数（可选）
+  exciter?: number;
+  transient?: number;
+  resonance?: number;
+  bassEnhance?: number;
+  airTexture?: number;
   speed?: number;
 }
 
@@ -70,6 +76,11 @@ export const defaultInstrumentRepairParams: InstrumentRepairParams = {
   warmth: 0.25,
   loudness: 0.5,
   stereo_enhance: 0.5,
+  exciter: 0,
+  transient: 0,
+  resonance: 0,
+  bassEnhance: 0,
+  airTexture: 0,
   speed: 1.0,
 };
 
@@ -211,7 +222,7 @@ export interface DetectorVersion {
 }
 
 export function mapParamsToBackend(params: AIRepairParams, _options?: ProcessingOptions, algorithmVersion?: string): Record<string, unknown> {
-  return {
+  const out: Record<string, unknown> = {
     de_clipping: params.deClipping,
     noise_reduction: params.noiseReduction,
     de_essing: params.deEssing,
@@ -228,6 +239,18 @@ export function mapParamsToBackend(params: AIRepairParams, _options?: Processing
     clarity: params.clarity,
     algorithm_version: algorithmVersion || 'v2.0',
   };
+  // v4.0a+ 专业参数（透传，未设置则不发，后端按 0 处理）
+  if (params.airTexture !== undefined) out.air_texture = params.airTexture;
+  if (params.exciter !== undefined) out.exciter = params.exciter;
+  if (params.compressor !== undefined) out.compressor = params.compressor;
+  if (params.smartCompressor !== undefined) out.smart_compressor = params.smartCompressor;
+  if (params.transientAware !== undefined) out.transient_aware = params.transientAware;
+  if (params.resonanceSuppress !== undefined) out.resonance_suppress = params.resonanceSuppress;
+  if (params.aiRepairAdaptive !== undefined) out.ai_repair_adaptive = params.aiRepairAdaptive;
+  if (params.loudnessOptimize !== undefined) out.loudness_optimize = params.loudnessOptimize;
+  // 母带风格由 UI 的 processingOptions 控制，透传到修复管线
+  if (_options?.masteringStyle) out.mastering_style = _options.masteringStyle;
+  return out;
 }
 
 export function mapVocalParamsToBackend(params: VocalRepairParams, _options?: ProcessingOptions, algorithmVersion?: string): Record<string, unknown> {
@@ -257,7 +280,7 @@ export function mapVocalParamsToBackend(params: VocalRepairParams, _options?: Pr
 }
 
 export function mapInstrumentParamsToBackend(params: InstrumentRepairParams, _options?: ProcessingOptions, algorithmVersion?: string): Record<string, unknown> {
-  return {
+  const out: Record<string, unknown> = {
     de_clipping: params.deClipping,
     de_pop: params.dePop,
     timbre_protect: params.timbreProtect,
@@ -270,6 +293,13 @@ export function mapInstrumentParamsToBackend(params: InstrumentRepairParams, _op
     speed: params.speed ?? 1.0,
     algorithm_version: algorithmVersion || 'v3.0',
   };
+  // v4.0a+ 伴奏专业参数透传
+  if (params.exciter !== undefined) out.inst_exciter = params.exciter;
+  if (params.transient !== undefined) out.inst_transient = params.transient;
+  if (params.resonance !== undefined) out.inst_resonance = params.resonance;
+  if (params.bassEnhance !== undefined) out.inst_bass_enhance = params.bassEnhance;
+  if (params.airTexture !== undefined) out.inst_air_texture = params.airTexture;
+  return out;
 }
 
 function mapDetectionResult(backend: BackendDetectionResult): AISongDetectionResult {

@@ -132,7 +132,7 @@ TASK_TIMEOUTS = {
     "repair": 600,
 }
 
-STUCK_THRESHOLD = 60
+STUCK_THRESHOLD = 30
 
 _cancelled_tasks: set[str] = set()
 _cancelled_lock = threading.Lock()

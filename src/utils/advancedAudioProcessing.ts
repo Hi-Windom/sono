@@ -13,6 +13,15 @@ export interface AIRepairParams {
   transientRepair: number;
   warmth: number;
   clarity: number;
+  // v4.0a+ 专业参数（可选，未设置时按 0 处理；仅 v4.0a/v4.0a+ 真正消费）
+  exciter?: number;
+  compressor?: number;
+  smartCompressor?: number;
+  transientAware?: number;
+  resonanceSuppress?: number;
+  aiRepairAdaptive?: number;
+  airTexture?: number;
+  loudnessOptimize?: number;
 }
 
 export const defaultAIRepairParams: AIRepairParams = {

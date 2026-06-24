@@ -44,6 +44,7 @@ from services.repair.repair_v4_0a.core import (
     _map_flat_params,
     _map_single_params,
     _apply_mastering,
+    _make_sub_progress,
     _SINGLE_KEY_MAP,
 )
 from services.repair.repair_v4_0a.analyzer import analyze_signal, profile_summary
@@ -76,37 +77,50 @@ def _lookahead_compress_1d(x: np.ndarray, sr: int, amount: float, lookahead_ms: 
     lookahead = max(1, int(sr * lookahead_ms / 1000.0))
     # 环境友好：长音频用平滑窗估计包络
     win = max(1, int(sr * 0.005))  # 5ms 攻击窗
-    sq = x ** 2
-    # 移动平均包络（近似 RMS）
-    kernel = np.ones(win, dtype=np.float64) / win
-    env = np.convolve(sq, kernel, mode='same')
+    x64 = x.astype(np.float64, copy=False)
+    sq = np.square(x64)
+    # 移动平均包络（近似 RMS）—— 用 cumsum O(n) 替代 convolve，省内存
+    csum = np.concatenate(([0.0], np.cumsum(sq)))
+    env = (csum[win:] - csum[:-win]) / win
+    # 对齐到与输入等长（前 win-1 个用首个有效值填充）
+    if env.size < n:
+        env = np.concatenate((np.full(n - env.size, env[0] if env.size else 0.0), env))
+    else:
+        env = env[:n]
+    del sq, csum
     env_db = 10.0 * np.log10(env + 1e-12)
     # 前视：把包络向后平移 lookahead，使增益在瞬态到达前已就位
     env_db_shifted = np.empty_like(env_db)
     env_db_shifted[:-lookahead] = env_db[lookahead:]
     env_db_shifted[-lookahead:] = env_db[-1]
+    del env, env_db
 
     thr = threshold_db
     over = env_db_shifted > thr
     # 压缩增益（dB）：超阈部分按 ratio 压缩，amount 控制混合比例
     gain_db = np.zeros_like(env_db_shifted)
-    gain_db[over] = -(env_db_shifted[over] - thr) * (1.0 - 1.0 / ratio) * amount
-    # 释放平滑（指数）
-    gain_lin = 10.0 ** (gain_db / 20.0)
-    # 简单一阶平滑避免增益抖动
+    if np.any(over):
+        gain_db[over] = -(env_db_shifted[over] - thr) * (1.0 - 1.0 / ratio) * amount
+    del env_db_shifted
+    gain_lin = np.power(10.0, gain_db / 20.0)
+    del gain_db
+    # 释放平滑（一阶 IIR）—— 向量化：等价于 lfilter([1-smooth],[1,-smooth], gain_lin)
     smooth = 0.85
-    for i in range(1, n):
-        gain_lin[i] = smooth * gain_lin[i - 1] + (1 - smooth) * gain_lin[i]
+    from scipy.signal import lfilter
+    gain_lin = lfilter(np.array([1.0 - smooth]), np.array([1.0, -smooth]), gain_lin)
     # 补偿前视延迟
     out = np.zeros(n, dtype=np.float64)
-    out[lookahead:] = x[:-lookahead] * gain_lin[lookahead:]
-    out[:lookahead] = x[:lookahead] * gain_lin[:lookahead]
+    out[lookahead:] = x64[:-lookahead] * gain_lin[lookahead:]
+    out[:lookahead] = x64[:lookahead] * gain_lin[:lookahead]
     return out
 
 
-def process_track_adaptive_premium(y: np.ndarray, sr: int, intent: dict) -> tuple[np.ndarray, list[str]]:
+def process_track_adaptive_premium(y: np.ndarray, sr: int, intent: dict,
+                                   progress: Any = None) -> tuple[np.ndarray, list[str]]:
     """v4.0a+ 单轨：Analyze→Adapt→Process(pass1)→Re-analyze→Targeted verify(pass2)。"""
     # Pass 1: 自适应修复（与 v4.0a 一致，但 premium=True 触发更激进调制）
+    if progress:
+        progress(0.02, "分析信号画像...")
     profile1 = analyze_signal(y, sr)
     strategy = build_strategy(intent, profile1, premium=True)
     notes = [f"检测: {', '.join(profile1.detected_issues) or '无显著问题'}"] + list(strategy.notes)
@@ -116,61 +130,89 @@ def process_track_adaptive_premium(y: np.ndarray, sr: int, intent: dict) -> tupl
         from services.time_stretch import time_stretch_hifi
         y = time_stretch_hifi(y, sr, speed)
 
-    if strategy.declip > 0:
-        y = _v32a_declip(y, strategy.declip)
-    if strategy.depop > 0:
-        from services.repair.repair_v3_2a.core import simple_depop
-        y = simple_depop(y, sr, strategy.depop)
-    if strategy.de_ess > 0:
-        y = _v32a_de_ess(y, sr, strategy.de_ess)
-    if strategy.noise_reduction > 0:
-        y = _v32a_spectral_denoise(y, sr, strategy.noise_reduction)
-    if strategy.ai_repair_adaptive > 0:
-        from services.repair.repair_v3_2a.core import vocal_ai_repair_adaptive_lite
-        y = vocal_ai_repair_adaptive_lite(y, sr, strategy.ai_repair_adaptive)
-    if strategy.exciter > 0:
-        y = _v32a_exciter(y, sr, strategy.exciter)
-    if strategy.compressor > 0:
-        # v4.0a+ 用前视压缩替代即时压缩
-        y = lookahead_compress(y, sr, strategy.compressor)
-    if strategy.transient > 0:
-        from services.repair.repair_v3_2a.core import transient_aware_process_lite
-        y = transient_aware_process_lite(y, sr, strategy.transient)
-    if strategy.resonance > 0:
-        from services.repair.repair_v3_2a.core import resonance_suppress_lite
-        y = resonance_suppress_lite(y, sr, strategy.resonance)
-    if strategy.bass_enhance > 0:
-        y = _v32a_bass(y, sr, strategy.bass_enhance)
-    if strategy.air_texture > 0:
-        y = _v32a_air(y, sr, strategy.air_texture)
-    if strategy.dynamic > 0:
-        y = _v32a_dynamic(y, sr, strategy.dynamic)
-    if strategy.loudness > 0:
-        y = _v32a_loudness(y, sr, strategy.target_lufs)
+    # 逐原语上报进度（pass1 占 0.05~0.70）
+    _pass1_steps = [
+        ("declip", "去削波", lambda: _v32a_declip(y, strategy.declip)),
+        ("depop", "去爆音", lambda: _depop(y, sr, strategy.depop)),
+        ("de_ess", "去齿音", lambda: _v32a_de_ess(y, sr, strategy.de_ess)),
+        ("noise_reduction", "降噪", lambda: _v32a_spectral_denoise(y, sr, strategy.noise_reduction)),
+        ("ai_repair_adaptive", "自适应AI修复", lambda: _ai_repair(y, sr, strategy.ai_repair_adaptive)),
+        ("exciter", "激励器", lambda: _v32a_exciter(y, sr, strategy.exciter)),
+        ("compressor", "前视压缩", lambda: lookahead_compress(y, sr, strategy.compressor)),
+        ("transient", "瞬态感知", lambda: _transient(y, sr, strategy.transient)),
+        ("resonance", "共振抑制", lambda: _resonance(y, sr, strategy.resonance)),
+        ("bass_enhance", "低音增强", lambda: _v32a_bass(y, sr, strategy.bass_enhance)),
+        ("air_texture", "空气感", lambda: _v32a_air(y, sr, strategy.air_texture)),
+        ("dynamic", "动态控制", lambda: _v32a_dynamic(y, sr, strategy.dynamic)),
+        ("loudness", "响度优化", lambda: _v32a_loudness(y, sr, strategy.target_lufs)),
+    ]
+    active = [(lbl, fn) for (key, lbl, fn) in _pass1_steps if getattr(strategy, key, 0.0) > 0]
+    n_active = max(1, len(active))
+    # 延迟求值：用可变 y，闭包捕获策略值
+    for idx, (lbl, fn) in enumerate(active):
+        if progress:
+            progress(0.05 + 0.65 * (idx / n_active), f"{lbl}...")
+        y = fn()
 
-    # Pass 2: 验证 —— 仅在残差问题超阈值时做针对性校正
+    # Pass 2: 验证 —— 仅在残差问题超阈值时做针对性校正（占 0.72~0.95）
     if strategy.needs_verify and y.size:
+        if progress:
+            progress(0.72, "二遍验证扫描...")
         residual = analyze_signal(y, sr)
         verify_notes: list[str] = []
-        # 残留削波 → 再轻量去削波一次
+        v_idx = 0
         if residual.has_clipping(threshold=0.003) and strategy.declip > 0:
+            if progress:
+                progress(0.78, "二遍清除残留削波...")
             y = _v32a_declip(y, strategy.declip * 0.5)
             verify_notes.append("二遍清除残留削波")
-        # 残留齿音 → 轻量再处理
         if residual.has_sibilance(threshold=0.10) and strategy.de_ess > 0:
+            if progress:
+                progress(0.84, "二遍清除残留齿音...")
             y = _v32a_de_ess(y, sr, strategy.de_ess * 0.4)
             verify_notes.append("二遍清除残留齿音")
-        # 残留噪声 → 轻量再降噪
         if residual.is_noisy(threshold_snr=33.0) and strategy.noise_reduction > 0:
+            if progress:
+                progress(0.90, "二遍清除残留噪声...")
             y = _v32a_spectral_denoise(y, sr, strategy.noise_reduction * 0.4)
             verify_notes.append("二遍清除残留噪声")
         if verify_notes:
             notes.append("二遍验证: " + ", ".join(verify_notes))
         else:
             notes.append("二遍验证通过(无需校正)")
-
+    if progress:
+        progress(0.99, "峰值限制...")
     y = soft_peak_limit(y, threshold=0.9)
     return y, notes
+
+
+# pass1 闭包用的轻量包装（按需 import，避免顶层循环依赖）
+def _depop(y, sr, amount):
+    if amount <= 0:
+        return y
+    from services.repair.repair_v3_2a.core import simple_depop
+    return simple_depop(y, sr, amount)
+
+
+def _ai_repair(y, sr, amount):
+    if amount <= 0:
+        return y
+    from services.repair.repair_v3_2a.core import vocal_ai_repair_adaptive_lite
+    return vocal_ai_repair_adaptive_lite(y, sr, amount)
+
+
+def _transient(y, sr, amount):
+    if amount <= 0:
+        return y
+    from services.repair.repair_v3_2a.core import transient_aware_process_lite
+    return transient_aware_process_lite(y, sr, amount)
+
+
+def _resonance(y, sr, amount):
+    if amount <= 0:
+        return y
+    from services.repair.repair_v3_2a.core import resonance_suppress_lite
+    return resonance_suppress_lite(y, sr, amount)
 
 
 def repair_single_track(input_path: str, output_path: str, params: dict, progress_callback: Any = None) -> dict:
@@ -196,7 +238,8 @@ def repair_single_track(input_path: str, output_path: str, params: dict, progres
     intent = _map_single_params(params)
     if progress_callback:
         progress_callback(0.12, f"{VERSION_TAG} 分析+自适应处理...")
-    y, notes = process_track_adaptive_premium(y, sr, intent)
+    sub = _make_sub_progress(progress_callback, 0.14, 0.83)
+    y, notes = process_track_adaptive_premium(y, sr, intent, progress=sub)
     issues_found = ["单轨·自适应分析(两遍)"] + notes
 
     mastering_style = intent.get("mastering_style", "none")
@@ -221,7 +264,7 @@ def repair_single_track(input_path: str, output_path: str, params: dict, progres
     if progress_callback:
         progress_callback(1.0, f"{VERSION_TAG} 修复完成")
 
-    final_profile = analyze_signal(y, working_sr) if y.size else None
+    final_profile = analyze_signal(y, working_sr, light=True) if y.size else None
     return {
         "issues_found": issues_found,
         "original_sample_rate": original_sr,
@@ -273,11 +316,13 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
 
     if progress_callback:
         progress_callback(0.20, f"{VERSION_TAG} 自适应分析+两遍处理人声轨...")
-    vocal_y, v_notes = process_track_adaptive_premium(vocal_y, vocal_sr, vocal_intent)
+    vocal_y, v_notes = process_track_adaptive_premium(vocal_y, vocal_sr, vocal_intent,
+                                                      progress=_make_sub_progress(progress_callback, 0.20, 0.46))
 
     if progress_callback:
         progress_callback(0.50, f"{VERSION_TAG} 自适应分析+两遍处理伴奏轨...")
-    accompaniment_y, i_notes = process_track_adaptive_premium(accompaniment_y, accompaniment_sr, inst_intent)
+    accompaniment_y, i_notes = process_track_adaptive_premium(accompaniment_y, accompaniment_sr, inst_intent,
+                                                              progress=_make_sub_progress(progress_callback, 0.50, 0.68))
     gc.collect()
 
     bit_depth = int(params.get("bit_depth", 24))
@@ -329,7 +374,7 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
     if progress_callback:
         progress_callback(1.0, f"{VERSION_TAG} 修复完成")
 
-    final_profile = analyze_signal(mixed, working_sr) if mixed.size else None
+    final_profile = analyze_signal(mixed, working_sr, light=True) if mixed.size else None
     return {
         "issues_found": issues_found,
         "original_sample_rate": vocal_sr,

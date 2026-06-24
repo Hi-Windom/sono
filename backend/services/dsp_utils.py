@@ -71,9 +71,16 @@ def istft(S, hop_length=512, length=None, window='hann'):
     windowed = frames * fft_window[np.newaxis, :]
     win_sq = fft_window ** 2
     frame_starts = np.arange(n_frames) * hop_length
-    for i in range(n_fft):
-        y[frame_starts + i] += windowed[:, i]
-        window_sum[frame_starts + i] += win_sq[i]
+    # 分块 overlap-add：块宽 = hop_length，保证块内索引无重复，可用直接赋值累加
+    # （跨块顺序 += 正确累加重叠帧），避免一次性物化 (n_frames, n_fft) 索引矩阵省内存
+    block = max(1, hop_length)
+    cols_template = np.arange(block)
+    for i0 in range(0, n_fft, block):
+        i1 = min(i0 + block, n_fft)
+        cols = cols_template[:i1 - i0]
+        idx = frame_starts[:, None] + cols  # (n_frames, b)，块内无重复
+        y[idx] += windowed[:, i0:i1]
+        window_sum[idx] += win_sq[i0:i1]
     nonzero = window_sum > 1e-10
     y[nonzero] /= window_sum[nonzero]
     pad_length = n_fft // 2
@@ -91,6 +98,8 @@ def istft_chunked(S, hop_length=512, length=None, window='hann', chunk_frames=40
     y = np.zeros(expected_signal_len)
     window_sum = np.zeros(expected_signal_len)
     win_sq = fft_window ** 2
+    block = max(1, hop_length)
+    cols_template = np.arange(block)
     for start in range(0, n_frames, chunk_frames):
         end = min(start + chunk_frames, n_frames)
         S_chunk = S[:, start:end]
@@ -98,9 +107,12 @@ def istft_chunked(S, hop_length=512, length=None, window='hann', chunk_frames=40
         windowed = frames * fft_window[np.newaxis, :]
         chunk_n_frames = end - start
         frame_starts = np.arange(start, end) * hop_length
-        for i in range(n_fft):
-            y[frame_starts + i] += windowed[:, i]
-            window_sum[frame_starts + i] += win_sq[i]
+        for i0 in range(0, n_fft, block):
+            i1 = min(i0 + block, n_fft)
+            cols = cols_template[:i1 - i0]
+            idx = frame_starts[:, None] + cols
+            y[idx] += windowed[:, i0:i1]
+            window_sum[idx] += win_sq[i0:i1]
         del frames, windowed, S_chunk
     nonzero = window_sum > 1e-10
     y[nonzero] /= window_sum[nonzero]

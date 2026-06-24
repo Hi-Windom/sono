@@ -13,20 +13,26 @@ REVERSE_VOCAL_MAP = {
     'vocal_de_ess': 'de_ess',
     'vocal_bass_enhance': 'bass_enhance',
     'vocal_air_texture': 'air_texture',
+    'vocal_clarity': 'air_texture',
     'vocal_formant_repair': 'formant_repair',
     'vocal_breath_enhance': 'breath_enhance',
     'vocal_ai_repair': 'ai_repair',
     'vocal_exciter': 'exciter',
+    'vocal_exciter_improved': 'exciter',
     'vocal_compressor': 'compressor',
     'vocal_smart_compressor': 'smart_compressor',
     'vocal_spatial': 'spatial',
     'vocal_warmth': 'warmth',
     'vocal_de_esser_advanced': 'de_esser_advanced',
+    'vocal_de_esser_improved': 'de_ess',
     'vocal_ai_repair_enhanced': 'ai_repair_enhanced',
     'vocal_ai_repair_enhanced_lite': 'ai_repair_adaptive_lite',
+    'vocal_ai_repair_adaptive': 'ai_repair_adaptive_lite',
     'vocal_loudness': 'loudness',
     'vocal_transient_aware': 'transient',
+    'vocal_transient': 'transient',
     'vocal_resonance_suppress': 'resonance',
+    'vocal_resonance': 'resonance',
     'vocal_speed': 'speed',
 }
 
@@ -44,14 +50,14 @@ REVERSE_INST_MAP = {
     'inst_compressor': 'compressor',
     'inst_de_esser_advanced': 'de_esser_advanced',
     'inst_ai_repair_enhanced': 'ai_repair_enhanced',
-    'inst_ai_repair_enhanced_lite': 'ai_repair_enhanced_lite',
+    'inst_ai_repair_enhanced_lite': 'ai_repair_adaptive_lite',
     'inst_exciter_lite': 'exciter_lite',
     'inst_compressor_lite': 'compressor_lite',
     'inst_transient': 'transient',
     'inst_resonance': 'resonance',
     'inst_bass_enhance': 'bass_enhance',
     'inst_air_texture': 'air_texture',
-    'inst_clarity': 'clarity',
+    'inst_clarity': 'air_texture',
     'inst_speed': 'speed',
 }
 
@@ -490,24 +496,47 @@ def resonance_suppress_lite(y, sr, amount):
 
 
 def mastering_standard_lite(y, sr):
+    """标准母带（已合并自适应母带）：高通去 rumble + 临场感 + 自适应低频再平衡 + 响度归一。
+
+    相对旧版：吸收 mastering_adaptive_lite 的低/高频段能量再平衡（低频过多则收、
+    不足则补），让"标准"本身即按信号自适应，避免对低频本就过厚的混音继续加重。
+    """
     if y.ndim == 1:
         y = y.reshape(1, -1)
         mastering_standard_lite(y, sr)
         return y[0]
 
     nyq = sr / 2
-
     sos_low = butter(2, 60 / nyq, btype='high', output='sos')
     sos_presence = butter(2, [3000 / nyq, 4000 / nyq], btype='band', output='sos')
+    # 自适应低频再平衡的分段滤波（300Hz 以下视为低频）
+    low_cross = min(300, nyq * 0.9)
+    sos_lowband = butter(2, low_cross / nyq, btype='low', output='sos')
+    sos_highband = butter(2, low_cross / nyq, btype='high', output='sos')
 
     for ch in range(y.shape[0]):
         data = y[ch].astype(np.float64)
         data = sosfiltfilt(sos_low, data)
 
+        # 临场感微提
         presence = sosfiltfilt(sos_presence, data)
         data = data + presence * 0.10
 
-        rms = np.sqrt(np.mean(data ** 2))
+        # 自适应低频再平衡（合并自 adaptive）
+        low_band = sosfiltfilt(sos_lowband, data)
+        high_band = sosfiltfilt(sos_highband, data)
+        low_e = np.sqrt(np.dot(low_band, low_band) + 1e-20)
+        high_e = np.sqrt(np.dot(high_band, high_band) + 1e-20)
+        total = low_e + high_e
+        low_ratio = low_e / total
+        if low_ratio < 0.20:
+            data = low_band * (1.0 + (0.20 - low_ratio) * 0.5) + high_band
+        elif low_ratio > 0.50:
+            data = low_band * (1.0 - (low_ratio - 0.50) * 0.3) + high_band
+        else:
+            data = low_band + high_band
+
+        rms = np.sqrt(np.dot(data, data) / data.size)
         if rms > 1e-10:
             target = 0.12
             gain = target / rms
@@ -520,58 +549,81 @@ def mastering_standard_lite(y, sr):
 
 
 def mastering_powerful_lite(y, sr):
+    """强劲母带：去 rumble + 受控低频 + 临场/空气感 + 软限幅响度，避免过糊/过冲。
+
+    优化点：低频增强从 0.30 降到 0.18 并收紧到 120Hz 以下（避免中低频浑浊）；
+    响度目标用软限幅(tanh)而非硬 peak limit，听感更响且不破；临场感分段更细腻。
+    """
     if y.ndim == 1:
         y = y.reshape(1, -1)
         mastering_powerful_lite(y, sr)
         return y[0]
 
     nyq = sr / 2
-
     sos_low = butter(2, 40 / nyq, btype='high', output='sos')
-    sos_bass = butter(2, 150 / nyq, btype='low', output='sos')
+    sos_sub = butter(2, min(120, nyq * 0.9) / nyq, btype='low', output='sos')
     sos_presence = butter(2, [2500 / nyq, 6000 / nyq], btype='band', output='sos')
 
     for ch in range(y.shape[0]):
         data = y[ch].astype(np.float64)
         data = sosfiltfilt(sos_low, data)
 
-        bass = sosfiltfilt(sos_bass, data)
-        data = data + bass * 0.3
+        # 受控低频（次谐波感），强度收敛避免糊
+        sub = sosfiltfilt(sos_sub, data)
+        data = data + sub * 0.18
 
+        # 临场感
         presence = sosfiltfilt(sos_presence, data)
-        data = data + presence * 0.2
+        data = data + presence * 0.16
 
-        rms = np.sqrt(np.mean(data ** 2))
+        rms = np.sqrt(np.dot(data, data) / data.size)
         if rms > 1e-10:
-            target = 0.18
+            target = 0.16
             gain = target / rms
             gain = np.clip(gain, 0.2, 3.0)
             data = data * gain
 
+        # 软限格(tanh)提升响度，避免硬削波过冲
+        peak = np.max(np.abs(data))
+        if peak > 1e-6:
+            drive = max(1.0, peak / 0.90)
+            data = np.tanh(data / drive) * 0.90
+
         y[ch] = data.astype(y.dtype)
 
-    return soft_peak_limit(y, threshold=0.92)
+    return soft_peak_limit(y, threshold=0.95)
 
 
 def mastering_warm_lite(y, sr):
+    """温暖母带：去 rumble + 低频段温暖塑形 + 轻微偶次谐波饱和 + 响度归一。
+
+    优化点：旧版对 800Hz 低通整体 +0.25 易浑浊；改为低频 shelf 式温暖（只塑形
+    250Hz 以下），并对中低频加轻微 tanh 偶次饱和增加"电子管"暖感，高频不衰减。
+    """
     if y.ndim == 1:
         y = y.reshape(1, -1)
         mastering_warm_lite(y, sr)
         return y[0]
 
     nyq = sr / 2
-
     sos_low = butter(2, 30 / nyq, btype='high', output='sos')
-    sos_warm = butter(2, 800 / nyq, btype='low', output='sos')
+    sos_warm = butter(2, min(250, nyq * 0.9) / nyq, btype='low', output='sos')
+    sos_warmmid = butter(2, [250 / nyq, 1200 / nyq], btype='band', output='sos')
 
     for ch in range(y.shape[0]):
         data = y[ch].astype(np.float64)
         data = sosfiltfilt(sos_low, data)
 
+        # 低频温暖塑形（只补 250Hz 以下，不糊中频）
         warm = sosfiltfilt(sos_warm, data)
-        data = data + warm * 0.25
+        data = data + warm * 0.20
 
-        rms = np.sqrt(np.mean(data ** 2))
+        # 中低频偶次谐波饱和（电子管暖感）
+        warmmid = sosfiltfilt(sos_warmmid, data)
+        saturated = np.tanh(warmmid * 1.2) * 0.5
+        data = data + (saturated - warmmid * 0.5) * 0.15
+
+        rms = np.sqrt(np.dot(data, data) / data.size)
         if rms > 1e-10:
             target = 0.14
             gain = target / rms
@@ -584,45 +636,11 @@ def mastering_warm_lite(y, sr):
 
 
 def mastering_adaptive_lite(y, sr):
-    if y.ndim == 1:
-        y = y.reshape(1, -1)
-        mastering_adaptive_lite(y, sr)
-        return y[0]
+    """自适应母带（已合并入标准母带，保留以兼容旧调用/历史参数）。
 
-    nyq = sr / 2
-    low_cross = min(300, nyq * 0.9)
-    sos_low = butter(2, low_cross / nyq, btype='low', output='sos')
-    sos_high = butter(2, low_cross / nyq, btype='high', output='sos')
-
-    for ch in range(y.shape[0]):
-        data = y[ch].astype(np.float64)
-        low_band = sosfiltfilt(sos_low, data)
-        high_band = sosfiltfilt(sos_high, data)
-
-        low_energy = np.sqrt(np.mean(low_band ** 2) + 1e-10)
-        high_energy = np.sqrt(np.mean(high_band ** 2) + 1e-10)
-        total_energy = low_energy + high_energy
-        low_ratio = low_energy / total_energy
-
-        if low_ratio < 0.2:
-            boost = 1.0 + (0.2 - low_ratio) * 0.5
-            data = low_band * boost + high_band
-        elif low_ratio > 0.5:
-            cut = 1.0 - (low_ratio - 0.5) * 0.3
-            data = low_band * cut + high_band
-        else:
-            data = low_band + high_band
-
-        rms = np.sqrt(np.mean(data ** 2))
-        if rms > 1e-10:
-            target = 0.14
-            gain = target / rms
-            gain = np.clip(gain, 0.2, 3.0)
-            data = data * gain
-
-        y[ch] = data.astype(y.dtype)
-
-    return soft_peak_limit(y, threshold=0.95)
+    新版 standard 已内置自适应低频再平衡，故此处直接复用 standard 行为。
+    """
+    return mastering_standard_lite(y, sr)
 
 
 def apply_bass_enhance_lite(y, sr, amount):

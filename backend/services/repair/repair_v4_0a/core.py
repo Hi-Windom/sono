@@ -52,20 +52,21 @@ from .adaptive import build_strategy
 
 VERSION_TAG = "v4.0a"
 
-# 单轨参数键映射（与 v3.2a 一致）
+# 单轨参数键映射（兼容前端 mapParamsToBackend 发送的单轨键 + 专业键）
 _SINGLE_KEY_MAP = {
     "de_clipping": "declip", "de_pop": "depop", "de_essing": "de_ess",
     "dynamic_range": "dynamic", "spatial_enhance": "spatial",
     "loudness_optimize": "loudness",
     "ai_repair_adaptive_lite": "ai_repair_adaptive_lite",
-    "exciter": "exciter",
-    "transient": "transient",
-    "resonance": "resonance",
+    "ai_repair_adaptive": "ai_repair_adaptive_lite",
+    "exciter": "exciter", "exciter_improved": "exciter",
+    "transient": "transient", "transient_repair": "transient", "transient_aware": "transient",
+    "resonance": "resonance", "resonance_suppress": "resonance",
     "bass_enhance": "bass_enhance",
-    "air_texture": "air_texture",
+    "air_texture": "air_texture", "clarity": "air_texture",
     "noise_reduction": "noise_reduction",
-    "smart_compressor": "smart_compressor",
-    "compressor": "compressor",
+    "smart_compressor": "compressor", "compressor": "compressor",
+    "de_esser_improved": "de_ess",
 }
 
 
@@ -82,20 +83,49 @@ def _resample_to_working(y: np.ndarray, sr: int, working_sr: int) -> tuple[np.nd
 
 
 def _apply_mastering(y: np.ndarray, working_sr: int, style: str) -> tuple[np.ndarray, str | None]:
-    if style == "standard":
-        return mastering_standard_lite(y, working_sr), "标准母带"
+    # 自适应母带已与标准母带合并：standard 自身即按信号画像自适应；
+    # 保留 "adaptive" 别名以兼容历史参数/已保存设置，统一走合并后的标准母带。
+    if style in ("standard", "adaptive"):
+        return mastering_standard_lite(y, working_sr), "标准母带(自适应)"
     if style == "powerful":
         return mastering_powerful_lite(y, working_sr), "强劲母带"
     if style == "warm":
         return mastering_warm_lite(y, working_sr), "温暖母带"
-    if style == "adaptive":
-        return mastering_adaptive_lite(y, working_sr), "自适应母带"
     return y, None
 
 
-def process_track_adaptive(y: np.ndarray, sr: int, intent: dict, *, premium: bool = False) -> tuple[np.ndarray, list[str]]:
-    """对单条轨道执行 Analyze→Adapt→Process，返回处理结果与策略说明。"""
+def _make_sub_progress(parent: Any, lo: float, hi: float) -> Any:
+    """把父进度回调映射到 [lo, hi] 子区间，供逐原语进度上报。"""
+    if parent is None:
+        return None
+    span = hi - lo
+
+    def sub(frac: float, step: str):
+        f = lo + span * max(0.0, min(1.0, float(frac)))
+        parent(f, step)
+
+    return sub
+
+
+# 各原语在 process 中的进度权重（顺序即执行顺序），用于细颗粒度上报
+_STEP_LABELS = [
+    ("declip", "去削波"), ("depop", "去爆音"), ("de_ess", "去齿音"),
+    ("noise_reduction", "降噪"), ("ai_repair_adaptive", "自适应AI修复"),
+    ("exciter", "激励器"), ("compressor", "压缩器"), ("transient", "瞬态感知"),
+    ("resonance", "共振抑制"), ("bass_enhance", "低音增强"), ("air_texture", "空气感"),
+    ("dynamic", "动态控制"), ("loudness", "响度优化"),
+]
+
+
+def process_track_adaptive(y: np.ndarray, sr: int, intent: dict, *, premium: bool = False,
+                           progress: Any = None) -> tuple[np.ndarray, list[str]]:
+    """对单条轨道执行 Analyze→Adapt→Process，返回处理结果与策略说明。
+
+    progress: 子进度回调 (frac 0~1, step)，细颗粒度上报，避免前端长间隔无更新。
+    """
     # 1) Analyze
+    if progress:
+        progress(0.02, "分析信号画像...")
     profile = analyze_signal(y, sr)
     # 2) Adapt
     strategy = build_strategy(intent, profile, premium=premium)
@@ -109,6 +139,11 @@ def process_track_adaptive(y: np.ndarray, sr: int, intent: dict, *, premium: boo
     if speed != 1.0:
         from services.time_stretch import time_stretch_hifi
         y = time_stretch_hifi(y, sr, speed)
+
+    # 预建"将执行的原语"队列，按顺序上报进度（即使某原语被自适应跳过也推进一格，
+    # 保证前端在长音频上每若干秒都能收到进度心跳）
+    active = [(k, lbl) for (k, lbl) in _STEP_LABELS if getattr(strategy, k, 0.0) > 0]
+    n_active = max(1, len(active))
 
     if strategy.declip > 0:
         # 自适应阈值通过临时包装实现：v3.2a simple_declip 阈值固定 0.90，
@@ -124,44 +159,40 @@ def process_track_adaptive(y: np.ndarray, sr: int, intent: dict, *, premium: boo
                 y = y / np.maximum(mag, 1e-9) * scale
                 if y.dtype != np.float64:
                     y = y.astype(np.float64)
-        y = _v32a_declip(y, strategy.declip)
 
-    if strategy.depop > 0:
-        y = _v32a_depop(y, sr, strategy.depop)
+    # 进度基线：分析后到末尾分配 0.05~0.98
+    for idx, (key, label) in enumerate(active):
+        if progress:
+            progress(0.05 + 0.93 * (idx / n_active), f"{label}...")
+        if key == "declip":
+            y = _v32a_declip(y, strategy.declip)
+        elif key == "depop":
+            y = _v32a_depop(y, sr, strategy.depop)
+        elif key == "de_ess":
+            y = _v32a_de_ess(y, sr, strategy.de_ess)
+        elif key == "noise_reduction":
+            y = _v32a_spectral_denoise(y, sr, strategy.noise_reduction)
+        elif key == "ai_repair_adaptive":
+            y = _v32a_ai_repair_adaptive(y, sr, strategy.ai_repair_adaptive)
+        elif key == "exciter":
+            y = _v32a_exciter(y, sr, strategy.exciter)
+        elif key == "compressor":
+            y = _v32a_compressor(y, sr, strategy.compressor)
+        elif key == "transient":
+            y = _v32a_transient(y, sr, strategy.transient)
+        elif key == "resonance":
+            y = _v32a_resonance(y, sr, strategy.resonance)
+        elif key == "bass_enhance":
+            y = _v32a_bass(y, sr, strategy.bass_enhance)
+        elif key == "air_texture":
+            y = _v32a_air(y, sr, strategy.air_texture)
+        elif key == "dynamic":
+            y = _v32a_dynamic(y, sr, strategy.dynamic)
+        elif key == "loudness":
+            y = _v32a_loudness(y, sr, strategy.target_lufs)
 
-    if strategy.de_ess > 0:
-        y = _v32a_de_ess(y, sr, strategy.de_ess)
-
-    if strategy.noise_reduction > 0:
-        y = _v32a_spectral_denoise(y, sr, strategy.noise_reduction)
-
-    if strategy.ai_repair_adaptive > 0:
-        y = _v32a_ai_repair_adaptive(y, sr, strategy.ai_repair_adaptive)
-
-    if strategy.exciter > 0:
-        y = _v32a_exciter(y, sr, strategy.exciter)
-
-    if strategy.compressor > 0:
-        y = _v32a_compressor(y, sr, strategy.compressor)
-
-    if strategy.transient > 0:
-        y = _v32a_transient(y, sr, strategy.transient)
-
-    if strategy.resonance > 0:
-        y = _v32a_resonance(y, sr, strategy.resonance)
-
-    if strategy.bass_enhance > 0:
-        y = _v32a_bass(y, sr, strategy.bass_enhance)
-
-    if strategy.air_texture > 0:
-        y = _v32a_air(y, sr, strategy.air_texture)
-
-    if strategy.dynamic > 0:
-        y = _v32a_dynamic(y, sr, strategy.dynamic)
-
-    if strategy.loudness > 0:
-        y = _v32a_loudness(y, sr, strategy.target_lufs)
-
+    if progress:
+        progress(0.99, "峰值限制...")
     y = soft_peak_limit(y, threshold=0.9)
     return y, notes
 
@@ -212,8 +243,8 @@ def repair_single_track(input_path: str, output_path: str, params: dict, progres
 
     if progress_callback:
         progress_callback(0.12, f"{VERSION_TAG} 分析信号画像...")
-
-    y, notes = process_track_adaptive(y, sr, intent, premium=False)
+    sub = _make_sub_progress(progress_callback, 0.14, 0.80)
+    y, notes = process_track_adaptive(y, sr, intent, premium=False, progress=sub)
     issues_found = ["单轨·自适应分析"] + notes
 
     mastering_style = intent.get("mastering_style", "none")
@@ -239,8 +270,8 @@ def repair_single_track(input_path: str, output_path: str, params: dict, progres
     if progress_callback:
         progress_callback(1.0, f"{VERSION_TAG} 修复完成")
 
-    # 回传真实检测画像（前端可展示）
-    final_profile = analyze_signal(y, working_sr) if y.size else None
+    # 回传真实检测画像（前端可展示）—— 轻量复核，不做频谱重采样以省内存
+    final_profile = analyze_signal(y, working_sr, light=True) if y.size else None
     return {
         "issues_found": issues_found,
         "original_sample_rate": original_sr,
@@ -294,11 +325,13 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
 
     if progress_callback:
         progress_callback(0.20, f"{VERSION_TAG} 自适应分析+处理人声轨...")
-    vocal_y, v_notes = process_track_adaptive(vocal_y, vocal_sr, vocal_intent, premium=False)
+    vocal_y, v_notes = process_track_adaptive(vocal_y, vocal_sr, vocal_intent, premium=False,
+                                              progress=_make_sub_progress(progress_callback, 0.20, 0.48))
 
     if progress_callback:
         progress_callback(0.50, f"{VERSION_TAG} 自适应分析+处理伴奏轨...")
-    accompaniment_y, i_notes = process_track_adaptive(accompaniment_y, accompaniment_sr, inst_intent, premium=False)
+    accompaniment_y, i_notes = process_track_adaptive(accompaniment_y, accompaniment_sr, inst_intent, premium=False,
+                                                      progress=_make_sub_progress(progress_callback, 0.50, 0.68))
     gc.collect()
 
     bit_depth = int(params.get("bit_depth", 24))
@@ -351,7 +384,7 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
     if progress_callback:
         progress_callback(1.0, f"{VERSION_TAG} 修复完成")
 
-    final_profile = analyze_signal(mixed, working_sr) if mixed.size else None
+    final_profile = analyze_signal(mixed, working_sr, light=True) if mixed.size else None
     return {
         "issues_found": issues_found,
         "original_sample_rate": vocal_sr,

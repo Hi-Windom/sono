@@ -29,6 +29,14 @@ const PARAM_LABELS: Record<keyof AIRepairParams, string> = {
   transientRepair: '瞬态修复',
   warmth: '温暖度',
   clarity: '清晰度',
+  exciter: '激励器',
+  compressor: '压缩器',
+  smartCompressor: '智能压缩',
+  transientAware: '瞬态感知',
+  resonanceSuppress: '共振抑制',
+  aiRepairAdaptive: '自适应AI修复',
+  airTexture: '空气感',
+  loudnessOptimize: '响度优化',
 };
 
 function paramsSummary(params: AIRepairParams): string[] {
@@ -214,6 +222,9 @@ export default function ProfileManagerPage() {
     dynamicRange: 'dynamic_range', softness: 'softness', presenceBoost: 'presence_boost',
     bassEnhance: 'bass_enhance', spatialEnhance: 'spatial_enhance',
     transientRepair: 'transient_repair', warmth: 'warmth', clarity: 'clarity',
+    exciter: 'exciter', compressor: 'compressor', smartCompressor: 'smart_compressor',
+    transientAware: 'transient_aware', resonanceSuppress: 'resonance_suppress',
+    aiRepairAdaptive: 'ai_repair_adaptive', airTexture: 'air_texture', loudnessOptimize: 'loudness_optimize',
   };
 
   // 获取某参数在当前算法版本中的默认值

@@ -79,8 +79,16 @@ def _db(x: float) -> float:
     return 20.0 * np.log10(x)
 
 
-def analyze_signal(y: np.ndarray, sr: int) -> SignalProfile:
-    """一次扫描提取完整诊断画像。y 可为 (n,) 或 (ch, n)。"""
+# 频谱分析采样率上限与最大分析时长（移动端友好：长音频只取代表窗，控内存/算力）
+ANALYSIS_MAX_SR = 22050
+ANALYSIS_MAX_SECONDS = 30.0
+
+
+def analyze_signal(y: np.ndarray, sr: int, *, light: bool = False) -> SignalProfile:
+    """一次扫描提取完整诊断画像。y 可为 (n,) 或 (ch, n)。
+
+    light=True 时跳过频谱重采样（用于修复后的轻量复核），其余特征仍全量计算。
+    """
     profile = SignalProfile(sample_rate=int(sr))
     if y is None or y.size == 0:
         return profile
@@ -91,84 +99,120 @@ def analyze_signal(y: np.ndarray, sr: int) -> SignalProfile:
     profile.duration = round(n / sr, 3)
     profile.channels = 1 if y.ndim == 1 else int(y.shape[0])
 
-    # —— 削波 / 峰值 / RMS ——
+    # —— 削波 / 峰值 / RMS / 直流（全量，内存友好）——
+    # 用 np.dot 求 sumsq 避免临时平方数组；abs 只生成一份
     abs_y = np.abs(mono)
     profile.peak_abs = float(abs_y.max())
-    profile.rms = float(np.sqrt(np.mean(mono ** 2) + 1e-20))
-    profile.dc_offset = float(np.mean(mono))
-    # 满幅附近样本占比（阈值 0.985，统计硬/软削波）
+    sumsq = float(np.dot(mono, mono))
+    profile.rms = float(np.sqrt(sumsq / n + 1e-20))
+    profile.dc_offset = float(mono.sum() / n)
     profile.clip_density = float(np.mean(abs_y > 0.985))
     profile.crest_factor = _db(profile.peak_abs) - _db(profile.rms) if profile.rms > 1e-6 else 0.0
+    del abs_y
 
-    # —— 本底噪声估计：取信号最安静 10% 分位段的 RMS ——
+    # —— 本底噪声估计：帧 RMS 向量化（替代逐帧 Python 循环）
+    # 用 reshape 视图 + einsum 计算每帧 sumsq，避免物化全长平方数组（省内存）
     frame = 2048
     hop = 2048
     n_frames = max(1, n // hop)
-    frame_rms = np.empty(n_frames, dtype=np.float64)
-    for i in range(n_frames):
-        seg = mono[i * hop:(i + 1) * hop]
-        if seg.size:
-            frame_rms[i] = np.sqrt(np.mean(seg ** 2) + 1e-20)
+    usable = n_frames * hop
+    if usable > 0:
+        frames = mono[:usable].reshape(n_frames, hop)
+        sumsq = np.einsum('ij,ij->i', frames, frames)
+        frame_rms = np.sqrt(sumsq / hop + 1e-20)
+        del frames, sumsq
+    else:
+        frame_rms = np.array([profile.rms], dtype=np.float64)
     quiet_rms = float(np.percentile(frame_rms, 10))
     profile.noise_floor_db = _db(quiet_rms)
     profile.snr_db = _db(profile.rms) - profile.noise_floor_db
 
     # —— 近似响度 (K-weighting 简化为 RMS+高通补偿) ——
-    # 简单二阶高通预滤波近似 K-weighting 头部
     try:
         from scipy.signal import butter, sosfilt
         sos = butter(2, 38.0 / (sr / 2.0), btype='high', output='sos')
         weighted = sosfilt(sos, mono)
-        mean_sq = float(np.mean(weighted ** 2) + 1e-20)
+        mean_sq = float(np.dot(weighted, weighted) / n + 1e-20)
         profile.lufs_approx = -0.691 + 10.0 * np.log10(mean_sq + 1e-20)
+        del weighted
     except Exception:
         profile.lufs_approx = _db(profile.rms) - 0.691
 
-    # 动态范围：响 90 分位 - 静 10 分位（dB）
-    loud_frames_db = np.array([_db(r) for r in frame_rms])
+    # 动态范围：响 95 分位 - 静 10 分位（dB），向量化
+    with np.errstate(divide='ignore'):
+        loud_frames_db = 20.0 * np.log10(frame_rms + 1e-12)
     profile.dynamic_range_db = float(np.percentile(loud_frames_db, 95) - np.percentile(loud_frames_db, 10))
 
-    # —— 瞬态密度：相邻帧 RMS 一阶差分超阈值的比例 ——
+    # —— 瞬态密度：相邻帧 RMS 一阶差分超阈值的比例（向量化）——
     if n_frames > 2:
         diff = np.abs(np.diff(frame_rms))
         med = float(np.median(diff)) if np.median(diff) > 1e-10 else 1e-10
-        transient_mask = diff > (med * 6.0)
-        profile.transient_density = float(np.mean(transient_mask))
+        profile.transient_density = float(np.mean(diff > (med * 6.0)))
+        del diff
+    del frame_rms, loud_frames_db
 
-    # —— 频谱特征（降采样分析以控内存/算力，移动端友好）——
-    # 分析采样率上限 22050，避免长音频大 FFT
-    analysis_sr = min(sr, 22050)
-    if sr != analysis_sr:
-        from scipy.signal import resample_poly
-        ratio = analysis_sr / sr
-        if ratio >= 1.0:
-            ana = resample_poly(mono, int(analysis_sr), int(sr))
-        else:
-            ana = resample_poly(mono, int(analysis_sr * 100), int(sr * 100))
-    else:
+    # —— 频谱特征（降采样 + 长音频取代表窗，控内存/算力）——
+    if light:
+        # 轻量复核：不做频谱重采样，频谱字段保持默认（0），仅时间域画像
         ana = mono
-    ana_sr = analysis_sr
-
-    n_fft = 2048
-    hop_a = 1024
-    n_ana = len(ana)
-    if n_ana > n_fft:
-        # 滑窗平均幅频，避免一次大 FFT
-        n_win = max(1, (n_ana - n_fft) // hop_a + 1)
-        win = np.hanning(n_fft)
-        mag_sum = np.zeros(n_fft // 2 + 1, dtype=np.float64)
-        for w in range(min(n_win, 64)):  # 最多取 64 窗，移动端友好
-            seg = ana[w * hop_a:w * hop_a + n_fft]
-            if len(seg) < n_fft:
-                seg = np.pad(seg, (0, n_fft - len(seg)))
-            spec = np.abs(np.fft.rfft(seg * win))
-            mag_sum += spec
-        mag = mag_sum / max(1, min(n_win, 64))
+        ana_sr = sr
+        n_fft = 2048
+        hop_a = 1024
+        n_ana = len(ana)
+        if n_ana > n_fft:
+            n_win = max(1, (n_ana - n_fft) // hop_a + 1)
+            win = np.hanning(n_fft)
+            mag_sum = np.zeros(n_fft // 2 + 1, dtype=np.float64)
+            for w in range(min(n_win, 32)):
+                seg = ana[w * hop_a:w * hop_a + n_fft]
+                if len(seg) < n_fft:
+                    seg = np.pad(seg, (0, n_fft - len(seg)))
+                mag_sum += np.abs(np.fft.rfft(seg * win))
+            mag = mag_sum / max(1, min(n_win, 32))
+        else:
+            win = np.hanning(len(ana))
+            mag = np.abs(np.fft.rfft(ana * win))
+        freqs = np.fft.rfftfreq(n_fft, 1.0 / ana_sr)
     else:
-        win = np.hanning(len(ana))
-        mag = np.abs(np.fft.rfft(ana * win))
+        analysis_sr = min(sr, ANALYSIS_MAX_SR)
+        # 长音频只取居中代表窗（最多 ANALYSIS_MAX_SECONDS 秒），避免重采样全长信号
+        cap = int(sr * ANALYSIS_MAX_SECONDS)
+        if n > cap:
+            start = (n - cap) // 2
+            mono_win = mono[start:start + cap]
+        else:
+            mono_win = mono
+        if sr != analysis_sr:
+            from scipy.signal import resample_poly
+            ratio = analysis_sr / sr
+            if ratio >= 1.0:
+                ana = resample_poly(mono_win, int(analysis_sr), int(sr))
+            else:
+                ana = resample_poly(mono_win, int(analysis_sr * 100), int(sr * 100))
+        else:
+            ana = mono_win
+        ana_sr = analysis_sr
 
-    freqs = np.fft.rfftfreq(n_fft, 1.0 / ana_sr)
+        n_fft = 2048
+        hop_a = 1024
+        n_ana = len(ana)
+        if n_ana > n_fft:
+            n_win = max(1, (n_ana - n_fft) // hop_a + 1)
+            win = np.hanning(n_fft)
+            mag_sum = np.zeros(n_fft // 2 + 1, dtype=np.float64)
+            for w in range(min(n_win, 64)):  # 最多取 64 窗，移动端友好
+                seg = ana[w * hop_a:w * hop_a + n_fft]
+                if len(seg) < n_fft:
+                    seg = np.pad(seg, (0, n_fft - len(seg)))
+                spec = np.abs(np.fft.rfft(seg * win))
+                mag_sum += spec
+            mag = mag_sum / max(1, min(n_win, 64))
+        else:
+            win = np.hanning(len(ana))
+            mag = np.abs(np.fft.rfft(ana * win))
+        freqs = np.fft.rfftfreq(n_fft, 1.0 / ana_sr)
+        del ana, mono_win
+
     total_energy = float(np.sum(mag) + 1e-20)
 
     # 频谱质心

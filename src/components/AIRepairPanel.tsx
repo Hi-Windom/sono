@@ -165,6 +165,7 @@ export function AIRepairPanel({
     return availableAlgorithms;
   }, [isDualTrackMode, availableAlgorithms]);
   const [showParams, setShowParams] = useState<boolean | string>(false);
+  const [showProParams, setShowProParams] = useState(false);
   const [memoryInfo, setMemoryInfo] = useState<MemoryInfoResult | null>(null);
   const [storageEstimate, setStorageEstimate] = useState<StorageEstimateResult | null>(null);
   const memoryFetchRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -262,6 +263,11 @@ export function AIRepairPanel({
     warmth: '温暖度',
     loudness: '响度优化',
     stereo_enhance: '立体声增强',
+    exciter: '激励器',
+    transient: '瞬态感知',
+    resonance: '共振抑制',
+    bassEnhance: '低音增强',
+    airTexture: '空气感',
     speed: '速度',
   };
   const instParamKeys = (Object.keys(instParamLabels) as (keyof InstrumentRepairParams)[]).filter(k => k !== 'speed');
@@ -281,9 +287,26 @@ export function AIRepairPanel({
     transientRepair: '瞬态修复',
     warmth: '温暖度',
     clarity: '清晰度',
+    exciter: '激励器',
+    compressor: '压缩器',
+    smartCompressor: '智能压缩',
+    transientAware: '瞬态感知',
+    resonanceSuppress: '共振抑制',
+    aiRepairAdaptive: '自适应AI修复',
+    airTexture: '空气感',
+    loudnessOptimize: '响度优化',
   };
 
-  const paramKeys = Object.keys(paramLabels) as (keyof AIRepairParams)[];
+  // 单轨基础参数（小白用户常用），专业参数折叠在下方
+  const basicParamKeys: (keyof AIRepairParams)[] = [
+    'deClipping', 'noiseReduction', 'deEssing', 'dePop',
+    'bassEnhance', 'dynamicRange', 'transientRepair', 'clarity',
+  ];
+  const proParamKeys: (keyof AIRepairParams)[] = [
+    'exciter', 'compressor', 'smartCompressor', 'transientAware',
+    'resonanceSuppress', 'aiRepairAdaptive', 'airTexture', 'loudnessOptimize',
+    'warmth', 'harmonicEnhance', 'presenceBoost', 'spatialEnhance', 'deCrackle', 'softness',
+  ];
 
   // 计算当前预估大小
   const currentEstimate = useMemo(() => {
@@ -561,9 +584,10 @@ export function AIRepairPanel({
               { value: 'standard' as const, label: '标准母带', recommended: true },
               { value: 'powerful' as const, label: '强力母带' },
               { value: 'warm' as const, label: '温暖母带' },
-              { value: 'adaptive' as const, label: '自适应' },
             ].map((option) => {
-              const isSelected = (processingOptions.masteringStyle || 'standard') === option.value;
+              // 自适应母带已并入标准母带：历史 'adaptive' 设置按 'standard' 显示
+              const effectiveStyle = processingOptions.masteringStyle === 'adaptive' ? 'standard' : (processingOptions.masteringStyle || 'standard');
+              const isSelected = effectiveStyle === option.value;
               return (
                 <button
                   key={option.value}
@@ -1051,29 +1075,72 @@ export function AIRepairPanel({
           </button>
 
           {showParams && (
-            <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3">
-              {paramKeys.map((key) => (
-                <div key={key}>
-                  <div className="flex justify-between items-center mb-1">
-                    <label className="text-gray-300 text-xs font-medium">
-                      {paramLabels[key]}
-                    </label>
-                    <span className="text-secondary text-xs">
-                      {(params[key] ?? 0).toFixed(2)}
-                    </span>
+            <div className="mt-3">
+              <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+                {basicParamKeys.map((key) => (
+                  <div key={key}>
+                    <div className="flex justify-between items-center mb-1">
+                      <label className="text-gray-300 text-xs font-medium">
+                        {paramLabels[key]}
+                      </label>
+                      <span className="text-secondary text-xs">
+                        {(params[key] ?? 0).toFixed(2)}
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0"
+                      max="1"
+                      step="0.01"
+                      value={params[key] ?? 0}
+                      onChange={(e) => onParamChange(key, parseFloat(e.target.value))}
+                      disabled={disabled}
+                      className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer slider-accent"
+                    />
                   </div>
-                  <input
-                    type="range"
-                    min="0"
-                    max="1"
-                    step="0.01"
-                    value={params[key] ?? 0}
-                    onChange={(e) => onParamChange(key, parseFloat(e.target.value))}
-                    disabled={disabled}
-                    className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer slider-accent"
-                  />
+                ))}
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setShowProParams(!showProParams)}
+                className="mt-3 w-full flex items-center justify-between py-1.5 px-2 bg-black/20 rounded-lg hover:bg-black/30 transition text-xs"
+              >
+                <span className="text-cyan-400/80 font-medium">高级参数（专业用户）</span>
+                <svg
+                  className={`w-3.5 h-3.5 text-gray-400 transition-transform ${showProParams ? 'rotate-180' : ''}`}
+                  fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+
+              {showProParams && (
+                <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-3">
+                  {proParamKeys.map((key) => (
+                    <div key={key}>
+                      <div className="flex justify-between items-center mb-1">
+                        <label className="text-gray-400 text-xs font-medium">
+                          {paramLabels[key]}
+                        </label>
+                        <span className="text-secondary text-xs">
+                          {(params[key] ?? 0).toFixed(2)}
+                        </span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0"
+                        max="1"
+                        step="0.01"
+                        value={params[key] ?? 0}
+                        onChange={(e) => onParamChange(key, parseFloat(e.target.value))}
+                        disabled={disabled}
+                        className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer slider-accent"
+                      />
+                    </div>
+                  ))}
                 </div>
-              ))}
+              )}
             </div>
           )}
         </div>
