@@ -1,0 +1,72 @@
+# Sono 远程开发环境自动准备流水线
+#
+# 通过 $.vscode 事件，每次启动「云原生开发」时自动完成环境准备，
+# 新会话无需再手动执行 npm install / 引导 pip / 安装后端依赖。
+#
+# 覆盖本仓库已踩过的环境坑：
+#   1. 默认 NODE_ENV=production 会跳过 devDependencies（tsc/eslint/vitest 缺失）→ 显式 development
+#   2. 默认镜像 Python 未预装 pip/ensurepip → 通过 get-pip.py 引导
+#   3. 仅存在 python3、无 python 命令（build_android_release.sh 等依赖 python）→ 建立软链
+#   4. 后端运行时依赖 + 测试依赖（pytest/httpx）+ 类型检查工具 pyright
+
+$:
+  vscode:
+    - runner:
+        cpus: 4
+      docker:
+        # CNB 默认开发环境镜像（已内置 code-server + Node + Python）
+        image: cnbcool/default-dev-env:latest
+      services:
+        - vscode
+        - docker
+      env:
+        # 关键：默认 NODE_ENV=production 会让 npm install 跳过 devDependencies，
+        # 导致 typescript / eslint / vitest / @playwright/test 等开发工具全部缺失。
+        NODE_ENV: development
+      stages:
+        - name: 安装前端依赖
+          script: |
+            set -e
+            export NODE_ENV=development
+            npm install --include=dev
+
+        - name: 安装后端 Python 依赖
+          script: |
+            set -e
+
+            # 1) 确保 pip 可用（默认镜像可能未预装 pip / ensurepip）
+            if ! python3 -m pip --version >/dev/null 2>&1; then
+              echo "[prepare] pip 缺失，通过 get-pip.py 引导..."
+              if command -v curl >/dev/null 2>&1; then
+                curl -sSf https://bootstrap.pypa.io/get-pip.py -o /tmp/get-pip.py
+              else
+                wget -q https://bootstrap.pypa.io/get-pip.py -O /tmp/get-pip.py
+              fi
+              python3 /tmp/get-pip.py --break-system-packages
+            fi
+
+            # 2) 安装后端运行时依赖（numpy / scipy / fastapi / soundfile 等）
+            python3 -m pip install --break-system-packages -r backend/requirements.txt
+
+            # 3) 安装后端测试依赖
+            python3 -m pip install --break-system-packages pytest httpx
+
+            # 4) python -> python3 兼容（打包脚本等使用 python 命令）
+            ln -sf "$(command -v python3)" /usr/local/bin/python
+
+        - name: 安装类型检查工具
+          script: |
+            # pyright（pyproject.toml 已配置 strict 模式），非关键，失败不影响开发环境可用性
+            npm install --no-save pyright 2>/dev/null \
+              || echo "[prepare] pyright 安装跳过（非关键，可后续手动安装）"
+
+        - name: 环境自检
+          script: |
+            echo "===== Sono 开发环境自检 ====="
+            node -v
+            npm -v
+            python3 --version
+            python3 -m pip --version
+            python3 -c "import numpy, scipy, fastapi; print('backend deps OK: numpy', numpy.__version__, '/ scipy', scipy.__version__)" 2>/dev/null \
+              || echo "[prepare] numpy/scipy/fastapi 未就绪，请检查上一阶段日志"
+            echo "===== 自检完成，开发环境已就绪 ====="
