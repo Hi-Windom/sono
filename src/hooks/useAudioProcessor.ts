@@ -1283,14 +1283,14 @@ export function useAudioProcessor() {
           writeLog('[applySettings] renderAndDownload 已在进行，跳过');
         } else {
           const currentOpts = { ...processingOptions };
+          // 仅后台预热渲染缓存（供「秒下」/手动导出使用），不再自动弹出导出弹窗。
+          // 用户完成修复后可自行点击导出按钮触发下载。
           renderAndDownload(currentOpts, effectiveAlgorithmVersion).then(result => {
             if (result?.downloadUrl) {
               setRenderDownloadUrl(result.downloadUrl);
             }
-            setShowDownloadModal(true);
           }).catch(err => {
             writeLog(`[applySettings] 自动渲染失败: ${err}`);
-            setShowDownloadModal(true);
           });
         }
       }
