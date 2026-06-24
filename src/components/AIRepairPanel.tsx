@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { AIRepairParams, RepairMode } from '../utils/advancedAudioProcessing';
-import { ProcessingOptions, AlgorithmVersion, fetchMemoryInfo, MemoryInfoResult, fetchStorageEstimate, StorageEstimateResult, fetchRenderCache, RenderCacheEntry, VocalRepairParams, InstrumentRepairParams, defaultVocalRepairParams, defaultInstrumentRepairParams } from '../services/backendApi';
+import { ProcessingOptions, AlgorithmVersion, fetchMemoryInfo, MemoryInfoResult, fetchStorageEstimate, StorageEstimateResult, fetchRenderCache, RenderCacheEntry, VocalRepairParams, InstrumentRepairParams } from '../services/backendApi';
 import AlgorithmSelector from './AlgorithmSelector';
 
 interface DualTrackAudioInfo {
@@ -90,16 +90,6 @@ function estimateFileSize(
   return { size, sizeMiB, sizeMB };
 }
 
-// 格式化大小显示
-function formatSize(size: number, sizeMiB: number, sizeMB: number): string {
-  if (isMobile) {
-    // 移动端显示MB（1000进制），因为存储厂商使用此标准
-    return `${sizeMB.toFixed(1)} MB`;
-  }
-  // 桌面端显示MiB（1024进制），因为操作系统使用此标准
-  return `${sizeMiB.toFixed(1)} MiB (${sizeMB.toFixed(1)} MB)`;
-}
-
 // 判断是否为推荐组合
 function isRecommendedCombo(sampleRate: number, bitDepth: number): boolean {
   return sampleRate === 48000 && bitDepth === 24;
@@ -116,7 +106,6 @@ function formatBytes(bytes: number): string {
 
 export function AIRepairPanel({
   params,
-  fileHash,
   analysis,
   selectedMode,
   modes,
@@ -332,14 +321,6 @@ export function AIRepairPanel({
     return estimates;
   }, [effectiveDuration, effectiveChannels]);
 
-  // 检查当前选择是否警告
-  const isCurrentWarning = currentEstimate ? currentEstimate.size > WARNING_THRESHOLD_MB : false;
-
-  // 获取当前选择的详细信息
-  const currentCombo = allEstimates.find(
-    e => e.sampleRate === processingOptions.sampleRate && e.bitDepth === processingOptions.bitDepth
-  );
-
   return (
     <div className="bg-gradient-to-br from-primary/80 to-dark/80 rounded-xl p-5 border border-secondary/20">
       <h3 className="text-white font-bold mb-4 flex items-center gap-2">
@@ -452,8 +433,6 @@ export function AIRepairPanel({
               {sampleRateOptions.map((option) => {
                 const isSelected = processingOptions.sampleRate === option.value;
                 const isRecommended = option.recommended;
-                // 检查与当前位深的组合是否推荐
-                const comboRecommended = isRecommended && processingOptions.bitDepth === 24;
 
                 return (
                   <button
@@ -491,9 +470,6 @@ export function AIRepairPanel({
               {bitDepthOptions.map((option) => {
                 const isSelected = processingOptions.bitDepth === option.value;
                 const isRecommended = option.recommended;
-                // 检查与当前采样率的组合是否推荐
-                const comboRecommended = isRecommended &&
-                  processingOptions.sampleRate === 48000;
 
                 return (
                   <button

@@ -107,7 +107,6 @@ export default function TrainingUploadPage() {
       input.multiple = true;
       input.accept = 'audio/*';
       input.onchange = (ev) => handleFileSelect(ev as unknown as React.ChangeEvent<HTMLInputElement>);
-      // @ts-ignore
       input.files = files;
       input.dispatchEvent(new Event('change'));
     }

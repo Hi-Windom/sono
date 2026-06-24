@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { RenderCacheEntry, fetchRenderCache, BackendRepairResult } from '../services/backendApi';
+import React from 'react';
+import { RenderCacheEntry, BackendRepairResult } from '../services/backendApi';
 import { generateExportFilename } from '../hooks/useAudioProcessor';
 
 interface RepairCacheInfo {
@@ -48,8 +48,6 @@ export function RepairCacheModal({
   if (!isOpen || !cacheHit) return null;
 
   const { repair, renderCaches } = cacheHit;
-  const renderCacheSr = renderCaches[0]?.sample_rate || 48000;
-  const renderCacheBd = renderCaches[0]?.bit_depth || 24;
 
   const handleInstantDownload = (cache: RenderCacheEntry) => {
     const downloadUrl = `/api/v1/download-file/${cache.filename}`;
@@ -130,12 +128,6 @@ export function RepairCacheModal({
               </div>
               <div className="space-y-1.5">
                 {renderCaches.map((cache, idx) => {
-                  const cacheFilename = generateExportFilename(
-                    audioFileName,
-                    cache.algorithm_version || algorithmVersion,
-                    cache.sample_rate,
-                    cache.bit_depth,
-                  );
                   return (
                     <div key={idx} className="flex items-center gap-2 bg-black/20 rounded-lg p-2">
                       <div className="flex-1 min-w-0">

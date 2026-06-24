@@ -368,7 +368,8 @@ class TestParamFlattening:
         assert params.get("vocal_ai_repair") == 0.1
         assert params.get("vocal_loudness") == 0.9
 
-        assert "vocal_params" not in params, "Nested vocal_params should not exist after flattening"
+        # vocal_params 以扁平化字典形式保留（v3.2 双轨修复 core 会读取 params["vocal_params"]）
+        assert "vocal_params" in params, "Nested vocal_params (flattened) should be retained for v3.2 dual-track"
 
     def test_accompaniment_params_flattened_with_inst_prefix(self, api_client, fresh_db):
         wav_bytes = _make_wav_bytes()
@@ -518,9 +519,10 @@ class TestParamFlattening:
                      "vocal_transient_repair", "vocal_de_crackle"]:
             assert key not in params, f"Skipped vocal key {key} should not appear in flattened params"
 
-        for key in ["inst_de_essing", "inst_bass_enhance", "inst_harmonic_enhance",
+        # bass_enhance / clarity 现已是合法的 inst 参数（见 INST_KEY_MAP），不再属于跳过集合
+        for key in ["inst_de_essing", "inst_harmonic_enhance",
                      "inst_softness", "inst_presence_boost", "inst_transient_repair",
-                     "inst_clarity", "inst_de_crackle"]:
+                     "inst_de_crackle"]:
             assert key not in params, f"Skipped inst key {key} should not appear in flattened params"
 
 

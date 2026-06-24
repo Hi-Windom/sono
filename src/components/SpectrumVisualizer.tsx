@@ -67,8 +67,6 @@ export function SpectrumVisualizer({
       return g;
     };
 
-    const binToFreq = (bin: number) => (bin * analyser.context.sampleRate) / analyser.fftSize;
-
     const draw = (timestamp: number) => {
       animationFrameRef.current = requestAnimationFrame(draw);
 

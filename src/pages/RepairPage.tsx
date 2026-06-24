@@ -22,7 +22,6 @@ export default function RepairPage() {
   const {
     audioFile,
     audioBuffer,
-    backendProcessedBuffer,
     isProcessing,
     isDecodingAudio,
     processingProgress,
@@ -36,13 +35,7 @@ export default function RepairPage() {
     processingOptions,
     hasBeenProcessed,
     originalSampleRate,
-    currentSampleRate,
-    backendDiag,
-    runBackendDiag,
     wavInfo,
-    repairResult,
-    backendWaveformPeaks,
-    originalWaveformPeaks,
     algorithmVersion,
     availableAlgorithms,
     applyAlgorithmVersion,
@@ -68,9 +61,7 @@ export default function RepairPage() {
     setRenderDownloadUrl,
     showDownloadModal,
     setShowDownloadModal,
-    autoRenderInfo,
     showRepairCacheModal,
-    setShowRepairCacheModal,
     cacheHitInfo,
     handleUseRepairCache,
     handleRenderCacheDownload,
@@ -81,8 +72,6 @@ export default function RepairPage() {
     setProcessingProgress,
     setProcessingSource,
     setBackendError,
-    setHasBeenProcessed,
-    setRepairResult,
     setBackendProcessedBuffer,
     setBackendWaveformPeaks,
     loadAudioFromUrl,
@@ -92,7 +81,6 @@ export default function RepairPage() {
     setQueueStatus,
   } = useAudioProcessor();
 
-  const [showDiag, setShowDiag] = useState(false);
   const [instantDownloadInfo, setInstantDownloadInfo] = useState<DownloadFileInfo | null>(null);
 
   const isDualTrackMode = useRepairSessionStore(s => s.isDualTrackMode);
@@ -122,8 +110,8 @@ export default function RepairPage() {
   const [dualTrackAccompanimentTaskId, setDualTrackAccompanimentTaskId] = useState<string | null>(null);
   const [dualTrackVocalFile, setDualTrackVocalFile] = useState<File | null>(null);
   const [dualTrackAccompanimentFile, setDualTrackAccompanimentFile] = useState<File | null>(null);
-  const [dualTrackDownloadUrl, setDualTrackDownloadUrl] = useState<string | null>(null);
-  const [dualTrackRepairResult, setDualTrackRepairResult] = useState<any>(null);
+  const [, setDualTrackDownloadUrl] = useState<string | null>(null);
+  const [, setDualTrackRepairResult] = useState<unknown>(null);
   const [dualTrackFilesSelected, setDualTrackFilesSelected] = useState(false);
   const [dualTrackVocalInfo, setDualTrackVocalInfo] = useState<{ sample_rate: number; channels: number; duration: number } | null>(null);
   const [dualTrackAccompanimentInfo, setDualTrackAccompanimentInfo] = useState<{ sample_rate: number; channels: number; duration: number } | null>(null);
@@ -243,7 +231,7 @@ export default function RepairPage() {
       const uploadResult = await uploadDualAudio(
         vocalFile,
         accompanimentFile,
-        (loaded, total, speed) => {
+        (loaded, total, _speed) => {
           const progress = loaded / total;
           setProcessingProgress(progress * 0.1);
           setProcessingStep(`上传中 ${(progress * 100).toFixed(0)}%`);
@@ -356,7 +344,7 @@ export default function RepairPage() {
       const uploadResult = await uploadDualAudio(
         vocal,
         accompaniment,
-        (loaded, total, speed) => {
+        (loaded, total, _speed) => {
           const progress = loaded / total;
           setProcessingProgress(progress * 0.1);
           setProcessingStep(`上传中 ${(progress * 100).toFixed(0)}%`);
@@ -474,7 +462,7 @@ export default function RepairPage() {
           setDualTrackAccompanimentTaskId(result.accompaniment_task_id);
           setProcessingStep('等待处理完成...');
           startDualTrackPolling(result.task_id);
-        } catch (error: any) {
+        } catch (error) {
           if (error?.message?.includes('人声音频不存在') || error?.message?.includes('404')) {
             setBackendError('后端缓存已清除，请重新上传音频文件');
             sessionActions.clearDualTrack();
@@ -612,21 +600,6 @@ export default function RepairPage() {
     }
   }, [isDualTrackMode, dualTrackVocalParams, dualTrackAccompanimentParams, mixRatio]);
 
-  const renderResultInfo = useMemo(() => {
-    if (!autoRenderInfo) return null;
-    return {
-      filename: `${(audioFile?.name || 'audio').replace(/\.[^/.]+$/, '')}_repaired.wav`,
-      fileSize: autoRenderInfo.duration && autoRenderInfo.output_sample_rate && autoRenderInfo.channels && autoRenderInfo.output_bit_depth
-        ? `${((autoRenderInfo.duration * autoRenderInfo.output_sample_rate * autoRenderInfo.channels * (autoRenderInfo.output_bit_depth / 8)) / (1024 * 1024)).toFixed(2)} MB`
-        : '—',
-      sampleRate: autoRenderInfo.output_sample_rate ? `${autoRenderInfo.output_sample_rate / 1000} kHz` : 'N/A',
-      bitDepth: autoRenderInfo.output_bit_depth || 24,
-      channels: autoRenderInfo.channels || 2,
-      duration: autoRenderInfo.duration || 0,
-      algorithmVersion: algorithmVersion,
-    };
-  }, [autoRenderInfo, audioFile, algorithmVersion]);
-
   const renderCacheRefreshRef = useRef<(() => Promise<void>) | null>(null);
   const handleRegisterCacheRefresh = useCallback((fn: () => Promise<void>) => {
     renderCacheRefreshRef.current = fn;
@@ -692,8 +665,6 @@ export default function RepairPage() {
       stopDualTrackPolling();
     };
   }, [stopDualTrackPolling]);
-
-  const hasBackendResult = !!backendProcessedBuffer || !!repairResult;
 
   return (
     <ErrorBoundary>

@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 from pathlib import Path
 
-from backend.tests.conftest import (
+from tests.conftest import (
     generate_pure_sine,
     generate_multi_tone,
     generate_speech_like,
@@ -462,7 +462,7 @@ class TestV23aPerStepQuality:
     @pytest.fixture(autouse=True)
     def import_v23a_functions(self):
         from services.repair.repair_v2_3a.core import (
-            _spectral_denoise,
+            spectral_denoise as _spectral_denoise,
             _de_ess,
         )
         self._spectral_denoise = _spectral_denoise
@@ -744,7 +744,7 @@ class TestV23aPerformance:
         from services.repair.repair_v2_3a.core import (
             _simple_declip,
             _simple_depop,
-            _spectral_denoise,
+            spectral_denoise as _spectral_denoise,
             _de_ess,
             _loudness_normalize,
             _transparent_compress,

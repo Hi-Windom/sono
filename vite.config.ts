@@ -53,7 +53,7 @@ function requestLogPlugin(): Plugin {
       server.middlewares.use((req, res, next) => {
         const start = Date.now();
         const originalEnd = res.end;
-        res.end = function (...args: any[]) {
+        res.end = function (...args: unknown[]) {
           const elapsed = Date.now() - start;
           const logEntry = `[${new Date().toISOString()}] [Vite] ${req.method} ${req.url} → ${res.statusCode} (${elapsed}ms) host=${req.headers.host}\n`;
           fs.appendFileSync(LOG_FILE, logEntry);
@@ -98,7 +98,7 @@ function requestLogPlugin(): Plugin {
       server.middlewares.use((req, res, next) => {
         const start = Date.now();
         const originalEnd = res.end;
-        res.end = function (...args: any[]) {
+        res.end = function (...args: unknown[]) {
           const elapsed = Date.now() - start;
           const logEntry = `[${new Date().toISOString()}] [Vite-Preview] ${req.method} ${req.url} → ${res.statusCode} (${elapsed}ms)\n`;
           fs.appendFileSync(LOG_FILE, logEntry);

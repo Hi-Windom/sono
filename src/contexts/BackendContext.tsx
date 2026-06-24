@@ -48,7 +48,7 @@ const ACTIVITY_DURATION = 800;
 const UNSTABLE_THRESHOLD = 2;
 
 export function getFrontendDiag(errorDetail: string = ''): FrontendDiag {
-  const nav = navigator as any;
+  const nav = navigator as Navigator & { connection?: { effectiveType?: string; type?: string } };
   return {
     user_agent: navigator.userAgent,
     platform: navigator.platform,

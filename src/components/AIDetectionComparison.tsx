@@ -156,9 +156,9 @@ interface AIDetectionComparisonProps {
   repairedDetectTime?: string;
 }
 
-export function AIDetectionComparison({ before, backendAfter, onDetect, isProcessing, detectorVersion, onDetectorVersionChange, availableDetectors, algorithmVersion, originalDetectTime, repairedDetectTime }: AIDetectionComparisonProps) {
+export function AIDetectionComparison({ before, backendAfter, onDetect, isProcessing, detectorVersion, onDetectorVersionChange, availableDetectors, originalDetectTime, repairedDetectTime }: AIDetectionComparisonProps) {
   const [lastDetectedVersion, setLastDetectedVersion] = React.useState<string | null>(null);
-  const [showVersionWarning, setShowVersionWarning] = React.useState(false);
+  const [, setShowVersionWarning] = React.useState(false);
 
   const activeAfter = backendAfter;
   const improvement = before && activeAfter

@@ -3,12 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import { Header } from '../components/Header';
 import { useBackend } from '../contexts/BackendContext';
 
-interface CacheTask {
-  id: string;
-  filename: string;
-  status: string;
-}
-
 export default function LandingPage() {
   const navigate = useNavigate();
   const { backendAvailable: _backendAvailable } = useBackend();

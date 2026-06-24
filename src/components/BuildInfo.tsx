@@ -79,7 +79,7 @@ export function BuildInfo() {
     }, 2000);
     if (newCount >= 3) {
       setClickCount(0);
-      const vc = (window as any).__vconsole__;
+      const vc = (window as unknown as { __vconsole__?: { show: () => void } }).__vconsole__;
       if (vc && vc.show) {
         vc.show();
       }

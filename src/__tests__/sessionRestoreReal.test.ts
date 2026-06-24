@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import 'fake-indexeddb/auto';
 
@@ -188,7 +189,7 @@ describe('sessionRestore - 真实场景模拟', () => {
       processingOptions: '',
     });
 
-    const earlyLoad = await loadSession();
+    await loadSession();
 
     await savePromise;
 

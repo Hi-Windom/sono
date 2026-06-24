@@ -1,5 +1,4 @@
 import React, { useCallback } from 'react';
-import { formatFileSize } from '../utils/audioUtils';
 
 interface AudioUploaderProps {
   onFileSelect: (file: File) => void;

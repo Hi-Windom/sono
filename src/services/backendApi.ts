@@ -536,7 +536,7 @@ export async function repairAudio(taskId: string, params: AIRepairParams, option
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: '修复请求失败' }));
       const detail = Array.isArray(err.detail)
-        ? err.detail.map((e: any) => e.msg || String(e)).join('; ')
+        ? err.detail.map((e: { msg?: string }) => e.msg || String(e)).join('; ')
         : (err.detail || '修复请求失败');
       log('repair', `ERROR: ${detail}`);
       throw new Error(detail);
@@ -600,7 +600,7 @@ export async function repairDualAudio(
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: '双轨修复请求失败' }));
       const detail = Array.isArray(err.detail)
-        ? err.detail.map((e: any) => e.msg || String(e)).join('; ')
+        ? err.detail.map((e: { msg?: string }) => e.msg || String(e)).join('; ')
         : (err.detail || '双轨修复请求失败');
       log('repair-dual', `ERROR: ${detail}`);
       throw new Error(detail);
@@ -668,7 +668,7 @@ export async function repairDualFromHash(
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: '双轨修复请求失败' }));
       const detail = Array.isArray(err.detail)
-        ? err.detail.map((e: any) => e.msg || String(e)).join('; ')
+        ? err.detail.map((e: { msg?: string }) => e.msg || String(e)).join('; ')
         : (err.detail || '双轨修复请求失败');
       log('repair-dual-from-hash', `ERROR: ${detail}`);
       throw new Error(detail);

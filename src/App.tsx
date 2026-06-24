@@ -14,7 +14,7 @@ import { BackendProvider } from "@/contexts/BackendContext";
 
 function VConsoleInit() {
   useEffect(() => {
-    let vc: any;
+    let vc: { show: () => void; destroy: () => void } | undefined;
     import('vconsole').then((VConsole) => {
       vc = new VConsole.default({
         theme: 'dark',
@@ -25,7 +25,7 @@ function VConsoleInit() {
           }
         },
       });
-      (window as any).__vconsole__ = vc;
+      (window as unknown as { __vconsole__?: unknown }).__vconsole__ = vc;
     });
     return () => {
       if (vc) vc.destroy();
@@ -35,7 +35,7 @@ function VConsoleInit() {
 }
 
 function GlobalErrorHandler() {
-  const [fatalError, setFatalError] = useState<string | null>(null);
+  const [fatalError] = useState<string | null>(null);
 
   useEffect(() => {
     const handleUnhandledRejection = (event: PromiseRejectionEvent) => {

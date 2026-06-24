@@ -1,6 +1,8 @@
 import os
 import time
+import asyncio
 import logging
+from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -46,10 +48,20 @@ def create_app() -> FastAPI:
     init_db()
     init_training_db()
 
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        # 在主线程事件循环中缓存 loop，供后台修复线程通过
+        # run_coroutine_threadsafe 投递 WebSocket 进度协程。
+        # 否则后台线程拿到的是「未运行」的 loop，进度消息会静默丢失。
+        from services.task_manager import set_event_loop
+        set_event_loop(asyncio.get_running_loop())
+        yield
+
     app = FastAPI(
         title="Next-Gen AI Audio Repair API",
         version="2.0.0",
         description="AI音频修复与检测后端服务",
+        lifespan=lifespan,
     )
 
     # 添加 /api/log 路由（不带 v1 前缀）
