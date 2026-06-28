@@ -41,10 +41,10 @@ $:
             
             # 使用 uv 安装后端依赖（从 requirements.txt）
             cd backend
-            uv pip install --system -r requirements.txt
+            uv pip install -r requirements.txt
             
             # 安装测试依赖
-            uv pip install --system pytest httpx pyright
+            uv pip install pytest httpx pyright
             
             # 验证关键依赖
             python3 -c "import fastapi, numpy, scipy, soundfile; print('✅ 后端依赖安装成功')"
