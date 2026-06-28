@@ -47,30 +47,6 @@ $:
             export NODE_ENV=development
             npm install --include=dev
 
-        - name: 安装后端 Python 依赖
-          script: |
-            set -e
-
-            # 1) 确保 pip 可用（默认镜像可能未预装 pip / ensurepip）
-            if ! python3 -m pip --version >/dev/null 2>&1; then
-              echo "[prepare] pip 缺失，通过 get-pip.py 引导..."
-              if command -v curl >/dev/null 2>&1; then
-                curl -sSf https://bootstrap.pypa.io/get-pip.py -o /tmp/get-pip.py
-              else
-                wget -q https://bootstrap.pypa.io/get-pip.py -O /tmp/get-pip.py
-              fi
-              python3 /tmp/get-pip.py --break-system-packages
-            fi
-
-            # 2) 安装后端运行时依赖（numpy / scipy / fastapi / soundfile 等）
-            python3 -m pip install --break-system-packages -r backend/requirements.txt
-
-            # 3) 安装后端测试依赖
-            python3 -m pip install --break-system-packages pytest httpx
-
-            # 4) python -> python3 兼容（打包脚本等使用 python 命令）
-            ln -sf "$(command -v python3)" /usr/local/bin/python
-
         - name: 安装类型检查工具
           script: |
             # pyright（pyproject.toml 已配置 strict 模式），非关键，失败不影响开发环境可用性
