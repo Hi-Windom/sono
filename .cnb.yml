@@ -14,8 +14,10 @@ $:
     - runner:
         cpus: 4
       docker:
-        # CNB 默认开发环境镜像（已内置 code-server + Node + Python）
-        image: cnbcool/default-dev-env:latest
+        # 自定义开发环境
+        build:
+          # 指定构建镜像的 Dockerfile 文件
+          dockerfile: .ide/Dockerfile
       services:
         - vscode
         - docker
@@ -58,9 +60,9 @@ $:
             echo "===== Sono 开发环境自检 ====="
             node -v
             npm -v
-            python3 --version
-            python3 -m pip --version
-            python3 -c "import numpy, scipy, fastapi; print('backend deps OK: numpy', numpy.__version__, '/ scipy', scipy.__version__)" 2>/dev/null \
+            python --version
+            python -m pip --version
+            python -c "import numpy, scipy, fastapi; print('backend deps OK: numpy', numpy.__version__, '/ scipy', scipy.__version__)" 2>/dev/null \
               || echo "[prepare] numpy/scipy/fastapi 未就绪，请检查上一阶段日志"
             echo "===== 自检完成，开发环境已就绪 ====="
 
