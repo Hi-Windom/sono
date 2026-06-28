@@ -35,6 +35,20 @@ $:
             export NODE_ENV=development
             npm install --include=dev
 
+        - name: 安装后端 Python 依赖
+          script: |
+            set -e
+            
+            # 使用 uv 安装后端依赖（从 requirements.txt）
+            cd backend
+            uv pip install --system -r requirements.txt
+            
+            # 安装测试依赖
+            uv pip install --system pytest httpx pyright
+            
+            # 验证关键依赖
+            python3 -c "import fastapi, numpy, scipy, soundfile; print('✅ 后端依赖安装成功')"
+
         - name: 安装类型检查工具
           script: |
             # pyright（pyproject.toml 已配置 strict 模式），非关键，失败不影响开发环境可用性
