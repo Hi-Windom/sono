@@ -66,5 +66,5 @@ $:
               || echo "[prepare] numpy/scipy/fastapi 未就绪，请检查上一阶段日志"
             echo "===== 自检完成，开发环境已就绪 ====="
 
-        - name: vscode go
-          type: vscode:go
+        # - name: vscode go
+        #   type: vscode:go
