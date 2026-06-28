@@ -19,6 +19,8 @@ $:
       services:
         - vscode
         - docker
+      # 通过 imports 注入自定义模型环境变量
+      imports: https://cnb.cool/sc.hwd/secrets/-/blob/main/ai/custom-model.yml
       env:
         # 关键：默认 NODE_ENV=production 会让 npm install 跳过 devDependencies，
         # 导致 typescript / eslint / vitest / @playwright/test 等开发工具全部缺失。
