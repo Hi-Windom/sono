@@ -81,3 +81,4 @@ $:
 
         - name: vscode go
           type: vscode:go
+          imports: "https://cnb.cool/sc.hwd/secrets/-/blob/main/ai/custom-model.yml"
