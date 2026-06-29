@@ -8,7 +8,7 @@ $:
       runner:
         cpus: 4
       docker:
-        image: docker.cnb.cool/sc.hwd/happy-cnb/happy-cnb
+        image: docker.cnb.cool/sc.hwd/happy-cnb
         # 自定义开发环境
         # build:
           # 指定构建镜像的 Dockerfile 文件
