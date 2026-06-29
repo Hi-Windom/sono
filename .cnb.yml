@@ -31,6 +31,20 @@ $:
         # 导致 typescript / eslint / vitest / @playwright/test 等开发工具全部缺失。
         NODE_ENV: development
       stages:
+        - name: 配置自定义模型环境变量
+          script: |
+            # 将环境变量写入 .bashrc 和 .profile 以确保持久化
+            echo "export CODEBUDDY_BASE_URL=\"$CODEBUDDY_BASE_URL\"" >> /root/.bashrc
+            echo "export CODEBUDDY_API_KEY=\"$CODEBUDDY_API_KEY\"" >> /root/.bashrc
+            echo "export CODEBUDDY_MODEL=\"$CODEBUDDY_MODEL\"" >> /root/.bashrc
+            echo "export CODEBUDDY_BASE_URL=\"$CODEBUDDY_BASE_URL\"" >> ~/.profile
+            echo "export CODEBUDDY_API_KEY=\"$CODEBUDDY_API_KEY\"" >> ~/.profile
+            echo "export CODEBUDDY_MODEL=\"$CODEBUDDY_MODEL\"" >> ~/.profile
+            # 立即在当前shell中生效
+            export CODEBUDDY_BASE_URL="$CODEBUDDY_BASE_URL"
+            export CODEBUDDY_API_KEY="$CODEBUDDY_API_KEY"
+            export CODEBUDDY_MODEL="$CODEBUDDY_MODEL"
+            echo "自定义模型环境变量已配置"
         - name: 安装前端依赖
           script: |
             set -e
