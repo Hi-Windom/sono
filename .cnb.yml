@@ -12,30 +12,10 @@ $:
         build:
           # 指定构建镜像的 Dockerfile 文件
           dockerfile: .ide/Dockerfile
-          by:
-            - .ide/Dockerfile
       services:
         # - vscode
-        - name: vscode
-          options:
-            onlyPreview: true
-            launch: >-
-              bash -c 'set -e;
-              HAPPY_CNB_DISABLE_DEFAULT_AGENT=1 HAPPY_CNB_APP_PORT=8686 /usr/local/bin/happy-cnb &>/root/.happy-cnb/happy-home/server.log &
-              until curl -sf http://127.0.0.1:8686/ >/dev/null 2>&1; do sleep 0.1; done;
-              echo "[claude] Server ready";
-              npm install -g happy@latest >/dev/null 2>&1;
-              ln -sf /opt/happy-cnb-core/happy-cnb /usr/local/bin/happy;
-              curl -fsSL https://claude.ai/install.sh | sh;
-              export CLAUDE_CODE_PATH=$(command -v claude);
-              export ANTHROPIC_BASE_URL="${ANTHROPIC_BASE_URL:-https://open.bigmodel.cn/api/anthropic}";
-              export ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-$MINIMAX_API_KEY}";
-              export CLAUDE_MODEL="${CLAUDE_MODEL:-glm-5.2[1m]}";
-              export HAPPY_CNB_SERVER_URL=http://localhost:8686;
-              export HAPPY_CNB_HOME_DIR=/root/.happy-cnb/happy-home;
-              /usr/lib/node_modules/happy/dist/index.mjs claude --happy-starting-mode remote --started-by daemon &>/root/.happy-cnb/happy-home/claude.log'
-        
         - docker
+        - vscode
       # 通过 imports 注入自定义模型环境变量
       # imports:
       #  - "https://cnb.cool/sc.hwd/secrets/-/blob/main/ai/custom-model.yml"
