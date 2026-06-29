@@ -13,7 +13,7 @@ $:
           # 指定构建镜像的 Dockerfile 文件
           dockerfile: .ide/Dockerfile
         volumes: 
-          - /root
+          - /opt
       services:
         - vscode
         - docker
