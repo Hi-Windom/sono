@@ -1,17 +1,11 @@
 # Sono 远程开发环境自动准备流水线
 #
 # 通过 $.vscode 事件，每次启动「云原生开发」时自动完成环境准备，
-# 新会话无需再手动执行 npm install / 引导 pip / 安装后端依赖。
-#
-# 覆盖本仓库已踩过的环境坑：
-#   1. 默认 NODE_ENV=production 会跳过 devDependencies（tsc/eslint/vitest 缺失）→ 显式 development
-#   2. 默认镜像 Python 未预装 pip/ensurepip → 通过 get-pip.py 引导
-#   3. 仅存在 python3、无 python 命令（build_android_release.sh 等依赖 python）→ 建立软链
-#   4. 后端运行时依赖 + 测试依赖（pytest/httpx）+ 类型检查工具 pyright
 
 $:
   vscode:
-    - runner:
+    - imports: "https://cnb.cool/sc.hwd/secrets/-/blob/main/ai/custom-model.yml"
+      runner:
         cpus: 4
       docker:
         # 自定义开发环境
@@ -24,8 +18,8 @@ $:
         - vscode
         - docker
       # 通过 imports 注入自定义模型环境变量
-      imports:
-        - "https://cnb.cool/sc.hwd/secrets/-/blob/main/ai/custom-model.yml"
+      # imports:
+      #  - "https://cnb.cool/sc.hwd/secrets/-/blob/main/ai/custom-model.yml"
       env:
         # 关键：默认 NODE_ENV=production 会让 npm install 跳过 devDependencies，
         # 导致 typescript / eslint / vitest / @playwright/test 等开发工具全部缺失。
