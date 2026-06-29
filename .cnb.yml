@@ -34,9 +34,9 @@ $:
         - name: 配置自定义模型环境变量
           script: |
             # 将环境变量写入 .bashrc 和 .profile 以确保持久化
-            echo "export CODEBUDDY_BASE_URL=\"$CODEBUDDY_BASE_URL\"" >> /root/.bashrc
-            echo "export CODEBUDDY_API_KEY=\"$CODEBUDDY_API_KEY\"" >> /root/.bashrc
-            echo "export CODEBUDDY_MODEL=\"$CODEBUDDY_MODEL\"" >> /root/.bashrc
+            echo "export CODEBUDDY_BASE_URL=\"$CODEBUDDY_BASE_URL\"" >> ~/.bashrc
+            echo "export CODEBUDDY_API_KEY=\"$CODEBUDDY_API_KEY\"" >> ~/.bashrc
+            echo "export CODEBUDDY_MODEL=\"$CODEBUDDY_MODEL\"" >> ~/.bashrc
             echo "export CODEBUDDY_BASE_URL=\"$CODEBUDDY_BASE_URL\"" >> ~/.profile
             echo "export CODEBUDDY_API_KEY=\"$CODEBUDDY_API_KEY\"" >> ~/.profile
             echo "export CODEBUDDY_MODEL=\"$CODEBUDDY_MODEL\"" >> ~/.profile
