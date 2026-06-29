@@ -8,7 +8,7 @@ $:
       runner:
         cpus: 4
       docker:
-        image: docker.cnb.cool/sc.hwd/happy-cnb:7968b60235327d7a46549f925d425ac8e31f9986-browser
+        image: docker.cnb.cool/sc.hwd/happy-cnb:latest
         # image: docker.cnb.cool/sc.hwd/happy-cnb
         # 自定义开发环境
         # build:
