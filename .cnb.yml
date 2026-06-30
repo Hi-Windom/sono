@@ -4,7 +4,9 @@
 
 $:
   vscode:
-    - imports: "https://cnb.cool/sc.hwd/secrets/-/blob/main/ai/custom-model.yml"
+    - imports: 
+        - "https://cnb.cool/sc.hwd/secrets/-/blob/main/ai/custom-model.yml"
+        - "https://cnb.cool/sc.hwd/secrets/-/blob/main/git/github.yml"
       runner:
         cpus: 4
       docker:
