@@ -29,6 +29,9 @@ RUN apt-get update && \
         libsndfile1 libsndfile1-dev portaudio19-dev \
     && rm -rf /var/lib/apt/lists/*
 
+COPY .ide/settings.json /root/.vscode-server/data/Machine/settings.json
+COPY .ide/settings.json /root/.local/share/code-server/Machine/settings.json
+
 # ==========================================
 # 2. 开发工具链安装
 # ==========================================
