@@ -8,12 +8,12 @@ $:
       runner:
         cpus: 4
       docker:
-        image: docker.cnb.cool/sc.hwd/happy-cnb:latest
+        # image: docker.cnb.cool/sc.hwd/happy-cnb:latest
         # image: docker.cnb.cool/sc.hwd/happy-cnb
         # 自定义开发环境
-        # build:
+        build:
           # 指定构建镜像的 Dockerfile 文件
-          # dockerfile: .ide/Dockerfile
+          dockerfile: .ide/Dockerfile
       services:
         # docker 写在 vscode 前面
         - docker
