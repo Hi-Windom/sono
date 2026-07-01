@@ -113,7 +113,7 @@ function requestLogPlugin(): Plugin {
 export default defineConfig(({ mode }) => {
   // 加载环境变量
   const env = loadEnv(mode, process.cwd(), '');
-  const apiUrl = env.VITE_API_URL || 'http://localhost:8000';
+  const apiUrl = env.VITE_API_URL || 'http://0.0.0.0:8000';
 
   return {
     test: {
@@ -137,6 +137,7 @@ export default defineConfig(({ mode }) => {
       },
     },
     server: {
+      host: '0.0.0.0',
       allowedHosts: true,
       watch: {
         ignored: ['**/backend/storage/**', '**/node_modules/**'],

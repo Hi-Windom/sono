@@ -11,6 +11,7 @@
 """
 from __future__ import annotations
 
+import os
 from typing import Any
 import gc
 
@@ -118,10 +119,13 @@ _STEP_LABELS = [
 
 
 def process_track_adaptive(y: np.ndarray, sr: int, intent: dict, *, premium: bool = False,
-                           progress: Any = None) -> tuple[np.ndarray, list[str]]:
+                           progress: Any = None,
+                           debug_output_dir: str | None = None) -> tuple[np.ndarray, list[str]]:
     """对单条轨道执行 Analyze→Adapt→Process，返回处理结果与策略说明。
 
     progress: 子进度回调 (frac 0~1, step)，细颗粒度上报，避免前端长间隔无更新。
+    debug_output_dir: 若提供，每完成一个处理阶段后将当前音频保存到该目录
+                     （文件名格式: {idx:02d}_{key}.wav），用于验证管线各环节。
     """
     # 1) Analyze
     if progress:
@@ -144,6 +148,13 @@ def process_track_adaptive(y: np.ndarray, sr: int, intent: dict, *, premium: boo
     # 保证前端在长音频上每若干秒都能收到进度心跳）
     active = [(k, lbl) for (k, lbl) in _STEP_LABELS if getattr(strategy, k, 0.0) > 0]
     n_active = max(1, len(active))
+
+    # 调试：保存原始音频（去削波预处理前）
+    save_idx = 0
+    if debug_output_dir:
+        save_idx += 1
+        sf.write(os.path.join(debug_output_dir, f"{save_idx:02d}_original.wav"),
+                 y.T if y.ndim > 1 else y, sr, subtype="PCM_24")
 
     if strategy.declip > 0:
         # 自适应阈值通过临时包装实现：v3.2a simple_declip 阈值固定 0.90，
@@ -191,9 +202,21 @@ def process_track_adaptive(y: np.ndarray, sr: int, intent: dict, *, premium: boo
         elif key == "loudness":
             y = _v32a_loudness(y, sr, strategy.target_lufs)
 
+        # 调试：每个阶段后保存中间结果
+        if debug_output_dir:
+            save_idx += 1
+            sf.write(os.path.join(debug_output_dir, f"{save_idx:02d}_{key}.wav"),
+                     y.T if y.ndim > 1 else y, sr, subtype="PCM_24")
+
     if progress:
         progress(0.99, "峰值限制...")
     y = soft_peak_limit(y, threshold=0.9)
+
+    if debug_output_dir:
+        save_idx += 1
+        sf.write(os.path.join(debug_output_dir, f"{save_idx:02d}_peak_limit.wav"),
+                 y.T if y.ndim > 1 else y, sr, subtype="PCM_24")
+
     return y, notes
 
 
@@ -240,11 +263,13 @@ def repair_single_track(input_path: str, output_path: str, params: dict, progres
     gc.collect()
 
     intent = _map_single_params(params)
+    debug_output_dir = params.get("_debug_output_dir")
 
     if progress_callback:
         progress_callback(0.12, f"{VERSION_TAG} 分析信号画像...")
     sub = _make_sub_progress(progress_callback, 0.14, 0.80)
-    y, notes = process_track_adaptive(y, sr, intent, premium=False, progress=sub)
+    y, notes = process_track_adaptive(y, sr, intent, premium=False, progress=sub,
+                                      debug_output_dir=debug_output_dir)
     issues_found = ["单轨·自适应分析"] + notes
 
     mastering_style = intent.get("mastering_style", "none")
@@ -254,6 +279,9 @@ def repair_single_track(input_path: str, output_path: str, params: dict, progres
         y, mnote = _apply_mastering(y, working_sr, mastering_style)
         if mnote:
             issues_found.append(mnote)
+        if debug_output_dir:
+            sf.write(os.path.join(debug_output_dir, "99_mastering.wav"),
+                     y.T if y.ndim > 1 else y, working_sr, subtype="PCM_24")
 
     if progress_callback:
         progress_callback(0.90, f"{VERSION_TAG} 导出...")
@@ -262,8 +290,6 @@ def repair_single_track(input_path: str, output_path: str, params: dict, progres
     bit_depth = int(params.get("bit_depth", 24))
     subtype_map = {16: "PCM_16", 24: "PCM_24", 32: "PCM_32"}
     subtype = subtype_map.get(bit_depth, "PCM_24")
-    if y.dtype == np.float32:
-        y = y.astype(np.float64)
     sf.write(output_path, y.T if y.ndim > 1 else y, working_sr, subtype=subtype)
     channels = y.shape[0] if y.ndim > 1 else 1
 
@@ -376,6 +402,13 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
 
     if progress_callback:
         progress_callback(0.90, f"{VERSION_TAG} 导出...")
+
+    # Apply master volume control
+    output_volume_db = params.get("output_volume", 0.0)
+    if output_volume_db != 0.0:
+        volume_gain = 10 ** (output_volume_db / 20.0)
+        mixed = (mixed * volume_gain).astype(mixed.dtype)
+
     mixed = soft_peak_limit(mixed, threshold=0.9)
     if mixed.dtype == np.float32:
         mixed = mixed.astype(np.float64)

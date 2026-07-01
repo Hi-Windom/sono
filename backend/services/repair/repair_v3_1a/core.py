@@ -195,14 +195,15 @@ def _transparent_compress(y, sr, amount):
 
 
 def _soft_peak_limit(y, threshold=0.9):
+    """软峰值限制器（tanh 软拐点），确保输出严格 ≤ 1.0 防止 PCM 硬削波。"""
     abs_max = np.max(np.abs(y))
     if abs_max <= threshold:
-        return y
+        return np.clip(y, -1.0, 1.0)
 
     if y.ndim == 1:
         y = y.reshape(1, -1)
         _soft_peak_limit(y, threshold)
-        return y[0]
+        return np.clip(y[0], -1.0, 1.0)
 
     for ch in range(y.shape[0]):
         abs_data = np.abs(y[ch])
@@ -212,7 +213,7 @@ def _soft_peak_limit(y, threshold=0.9):
         headroom = 1.0 - threshold
         y[ch][mask] = (np.sign(y[ch][mask]) * (threshold + headroom * np.tanh((abs_data[mask] - threshold) / headroom))).astype(y.dtype)
 
-    return y
+    return np.clip(y, -1.0, 1.0)
 
 
 def _loudness_normalize(y, sr, target_lufs=-14.0):
@@ -227,7 +228,7 @@ def _loudness_normalize(y, sr, target_lufs=-14.0):
             continue
         target_rms = 10 ** (target_lufs / 20.0)
         gain = target_rms / rms_val
-        gain = np.clip(gain, 0.2, 5.0)
+        gain = np.clip(gain, 0.5, 2.0)
         y[ch] = (y[ch].astype(np.float64) * gain).astype(y.dtype)
 
     return y
@@ -368,7 +369,7 @@ def _mastering_standard_lite(y, sr):
         if rms > 1e-10:
             target = 0.12
             gain = target / rms
-            gain = np.clip(gain, 0.2, 3.0)
+            gain = np.clip(gain, 0.5, 2.0)
             data = data * gain
 
         y[ch] = data.astype(y.dtype)
@@ -402,7 +403,7 @@ def _mastering_powerful_lite(y, sr):
         if rms > 1e-10:
             target = 0.18
             gain = target / rms
-            gain = np.clip(gain, 0.2, 3.0)
+            gain = np.clip(gain, 0.5, 2.0)
             data = data * gain
 
         y[ch] = data.astype(y.dtype)
@@ -432,7 +433,7 @@ def _mastering_warm_lite(y, sr):
         if rms > 1e-10:
             target = 0.14
             gain = target / rms
-            gain = np.clip(gain, 0.2, 3.0)
+            gain = np.clip(gain, 0.5, 2.0)
             data = data * gain
 
         y[ch] = data.astype(y.dtype)
@@ -682,6 +683,12 @@ def _repair_single_track(input_path: str, output_path: str, params: dict, progre
     if progress_callback:
         progress_callback(0.90, "v3.1a 导出...")
 
+    # Apply master volume control
+    output_volume_db = single_params.get("output_volume", 0.0)
+    if output_volume_db != 0.0:
+        volume_gain = 10 ** (output_volume_db / 20.0)
+        y = (y * volume_gain).astype(y.dtype)
+
     y = _soft_peak_limit(y, threshold=0.9)
 
     bit_depth = single_params.get("bit_depth", 24)
@@ -841,6 +848,12 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
             progress_callback(0.85, "v3.1a 温暖母带...")
         mixed = _mastering_warm_lite(mixed, working_sr)
         issues_found.append("温暖母带")
+
+    # Apply master volume control
+    output_volume_db = params.get("output_volume", 0.0)
+    if output_volume_db != 0.0:
+        volume_gain = 10 ** (output_volume_db / 20.0)
+        mixed = (mixed * volume_gain).astype(mixed.dtype)
 
     if progress_callback:
         progress_callback(0.90, "v3.1a 导出...")

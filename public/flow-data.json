@@ -98,6 +98,17 @@
       "filePath": "/workspace/src/components/ErrorBoundary.tsx"
     },
     {
+      "id": "src-pages-DebugRepairPage",
+      "label": "DebugRepairPage",
+      "type": "page",
+      "layer": "frontend",
+      "filePath": "/workspace/src/pages/DebugRepairPage.tsx",
+      "children": [
+        "src-components-Header",
+        "src-services-backendApi"
+      ]
+    },
+    {
       "id": "src-pages-DetectPage",
       "label": "DetectPage",
       "type": "page",
@@ -713,6 +724,38 @@
       "description": "POST /upload"
     },
     {
+      "id": "route-POST--upload-init",
+      "label": "POST /upload-init",
+      "type": "api",
+      "layer": "backend",
+      "filePath": "/workspace/backend/api/routes.py",
+      "description": "POST /upload-init"
+    },
+    {
+      "id": "route-POST--upload-chunk",
+      "label": "POST /upload-chunk",
+      "type": "api",
+      "layer": "backend",
+      "filePath": "/workspace/backend/api/routes.py",
+      "description": "POST /upload-chunk"
+    },
+    {
+      "id": "route-GET--upload-status",
+      "label": "GET /upload-status",
+      "type": "api",
+      "layer": "backend",
+      "filePath": "/workspace/backend/api/routes.py",
+      "description": "GET /upload-status"
+    },
+    {
+      "id": "route-POST--upload-finalize",
+      "label": "POST /upload-finalize",
+      "type": "api",
+      "layer": "backend",
+      "filePath": "/workspace/backend/api/routes.py",
+      "description": "POST /upload-finalize"
+    },
+    {
       "id": "route-POST--upload-dual",
       "label": "POST /upload-dual",
       "type": "api",
@@ -775,6 +818,22 @@
       "layer": "backend",
       "filePath": "/workspace/backend/api/routes.py",
       "description": "POST /repair-dual-from-hash"
+    },
+    {
+      "id": "route-POST--repair-debug",
+      "label": "POST /repair-debug",
+      "type": "api",
+      "layer": "backend",
+      "filePath": "/workspace/backend/api/routes.py",
+      "description": "POST /repair-debug"
+    },
+    {
+      "id": "route-GET--repair-debug--task_id---filename-",
+      "label": "GET /repair-debug/{task_id}/{filename}",
+      "type": "api",
+      "layer": "backend",
+      "filePath": "/workspace/backend/api/routes.py",
+      "description": "GET /repair-debug/{task_id}/{filename}"
     },
     {
       "id": "route-GET--tracks--task_id-",
@@ -1015,6 +1074,22 @@
       "layer": "backend",
       "filePath": "/workspace/backend/api/routes.py",
       "description": "POST /training/upload"
+    },
+    {
+      "id": "route-POST--training-upload-init",
+      "label": "POST /training/upload-init",
+      "type": "api",
+      "layer": "backend",
+      "filePath": "/workspace/backend/api/routes.py",
+      "description": "POST /training/upload-init"
+    },
+    {
+      "id": "route-POST--training-upload-finalize",
+      "label": "POST /training/upload-finalize",
+      "type": "api",
+      "layer": "backend",
+      "filePath": "/workspace/backend/api/routes.py",
+      "description": "POST /training/upload-finalize"
     },
     {
       "id": "route-GET--cache-info",
@@ -1869,6 +1944,24 @@
     },
     {
       "source": "frontend",
+      "target": "src-pages-DebugRepairPage",
+      "label": "路由页面",
+      "type": "renders"
+    },
+    {
+      "source": "src-pages-DebugRepairPage",
+      "target": "src-components-Header",
+      "label": "渲染",
+      "type": "renders"
+    },
+    {
+      "source": "src-pages-DebugRepairPage",
+      "target": "src-services-backendApi",
+      "label": "使用",
+      "type": "import"
+    },
+    {
+      "source": "frontend",
       "target": "src-pages-DetectPage",
       "label": "路由页面",
       "type": "renders"
@@ -2577,6 +2670,30 @@
     },
     {
       "source": "backend-api-routes.py",
+      "target": "route-POST--upload-init",
+      "label": "路由注册",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-api-routes.py",
+      "target": "route-POST--upload-chunk",
+      "label": "路由注册",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-api-routes.py",
+      "target": "route-GET--upload-status",
+      "label": "路由注册",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-api-routes.py",
+      "target": "route-POST--upload-finalize",
+      "label": "路由注册",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-api-routes.py",
       "target": "route-POST--upload-dual",
       "label": "路由注册",
       "type": "data-flow"
@@ -2620,6 +2737,18 @@
     {
       "source": "backend-api-routes.py",
       "target": "route-POST--repair-dual-from-hash",
+      "label": "路由注册",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-api-routes.py",
+      "target": "route-POST--repair-debug",
+      "label": "路由注册",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-api-routes.py",
+      "target": "route-GET--repair-debug--task_id---filename-",
       "label": "路由注册",
       "type": "data-flow"
     },
@@ -2800,6 +2929,18 @@
     {
       "source": "backend-api-routes.py",
       "target": "route-POST--training-upload",
+      "label": "路由注册",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-api-routes.py",
+      "target": "route-POST--training-upload-init",
+      "label": "路由注册",
+      "type": "data-flow"
+    },
+    {
+      "source": "backend-api-routes.py",
+      "target": "route-POST--training-upload-finalize",
       "label": "路由注册",
       "type": "data-flow"
     },

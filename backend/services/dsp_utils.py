@@ -74,10 +74,9 @@ def istft(S, hop_length=512, length=None, window='hann'):
     # 分块 overlap-add：块宽 = hop_length，保证块内索引无重复，可用直接赋值累加
     # （跨块顺序 += 正确累加重叠帧），避免一次性物化 (n_frames, n_fft) 索引矩阵省内存
     block = max(1, hop_length)
-    cols_template = np.arange(block)
     for i0 in range(0, n_fft, block):
         i1 = min(i0 + block, n_fft)
-        cols = cols_template[:i1 - i0]
+        cols = np.arange(i0, i1)  # offset by i0 so each block writes to correct position
         idx = frame_starts[:, None] + cols  # (n_frames, b)，块内无重复
         y[idx] += windowed[:, i0:i1]
         window_sum[idx] += win_sq[i0:i1]
@@ -99,7 +98,6 @@ def istft_chunked(S, hop_length=512, length=None, window='hann', chunk_frames=40
     window_sum = np.zeros(expected_signal_len)
     win_sq = fft_window ** 2
     block = max(1, hop_length)
-    cols_template = np.arange(block)
     for start in range(0, n_frames, chunk_frames):
         end = min(start + chunk_frames, n_frames)
         S_chunk = S[:, start:end]
@@ -109,7 +107,7 @@ def istft_chunked(S, hop_length=512, length=None, window='hann', chunk_frames=40
         frame_starts = np.arange(start, end) * hop_length
         for i0 in range(0, n_fft, block):
             i1 = min(i0 + block, n_fft)
-            cols = cols_template[:i1 - i0]
+            cols = np.arange(i0, i1)  # offset by i0 so each block writes to correct position
             idx = frame_starts[:, None] + cols
             y[idx] += windowed[:, i0:i1]
             window_sum[idx] += win_sq[i0:i1]

@@ -240,7 +240,7 @@ def _mastering_standard_hifi(y, sr):
         if rms > 1e-10:
             target = 0.11
             gain = target / rms
-            gain = np.clip(gain, 0.2, 3.0)
+            gain = np.clip(gain, 0.5, 2.0)
             data = data * gain
 
         y[ch] = data.astype(y.dtype)
@@ -281,7 +281,7 @@ def _mastering_powerful_hifi(y, sr):
         if rms > 1e-10:
             target = 0.16
             gain = target / rms
-            gain = np.clip(gain, 0.2, 3.0)
+            gain = np.clip(gain, 0.5, 2.0)
             data = data * gain
 
         y[ch] = data.astype(y.dtype)
@@ -322,7 +322,7 @@ def _mastering_warm_hifi(y, sr):
         if rms > 1e-10:
             target = 0.12
             gain = target / rms
-            gain = np.clip(gain, 0.2, 3.0)
+            gain = np.clip(gain, 0.5, 2.0)
             data = data * gain
 
         y[ch] = data.astype(y.dtype)
@@ -624,19 +624,33 @@ def process_vocal_track(y, sr, params):
         y = time_stretch_hifi(y, sr, speed)
     amount = params.get('amount', 1.0)
     y = y.copy().astype(np.float64)
-    y = simple_declip(y, amount * params.get('declip', 0.5))
-    y = simple_depop(y, sr, amount * params.get('depop', 0.5))
-    y = de_ess(y, sr, amount * params.get('de_ess', 0.5))
-    y = _vocal_ai_repair_adaptive_lite(y, sr, amount * params.get('ai_repair_adaptive_lite', 0.5))
-    y = _resonance_suppress_enhanced_lite(y, sr, amount * params.get('resonance_suppress', 0.3))
-    y = vocal_exciter_lite(y, sr, amount * params.get('exciter_improved', 0.3))
-    y = _lookahead_compressor_lite(y, sr, amount * params.get('smart_compressor', 0.5))
-    y = _vocal_multiband_compressor_lite(y, sr, amount * params.get('multiband_compressor', 0.3))
-    y = transient_aware_process_lite(y, sr, amount * params.get('transient_aware', 0.3))
-    y = apply_bass_enhance_lite(y, sr, amount * params.get('bass_enhance', 0.3))
-    y = apply_air_texture_lite(y, sr, amount * params.get('air_texture', 0.3))
-    y = _vocal_spatial_lite_enhanced(y, sr, amount * params.get('vocal_spatial', 0.3))
-    y = transparent_compress(y, sr, amount * params.get('compressor', 0.3))
+    # 仅在参数 > 0 时才激活效果器，避免默认值导致所有效果器同时激活
+    if params.get('declip', 0) > 0:
+        y = simple_declip(y, amount * params['declip'])
+    if params.get('depop', 0) > 0:
+        y = simple_depop(y, sr, amount * params['depop'])
+    if params.get('de_ess', 0) > 0:
+        y = de_ess(y, sr, amount * params['de_ess'])
+    if params.get('ai_repair_adaptive_lite', 0) > 0:
+        y = _vocal_ai_repair_adaptive_lite(y, sr, amount * params['ai_repair_adaptive_lite'])
+    if params.get('resonance_suppress', 0) > 0:
+        y = _resonance_suppress_enhanced_lite(y, sr, amount * params['resonance_suppress'])
+    if params.get('exciter_improved', 0) > 0:
+        y = vocal_exciter_lite(y, sr, amount * params['exciter_improved'])
+    if params.get('smart_compressor', 0) > 0:
+        y = _lookahead_compressor_lite(y, sr, amount * params['smart_compressor'])
+    if params.get('multiband_compressor', 0) > 0:
+        y = _vocal_multiband_compressor_lite(y, sr, amount * params['multiband_compressor'])
+    if params.get('transient_aware', 0) > 0:
+        y = transient_aware_process_lite(y, sr, amount * params['transient_aware'])
+    if params.get('bass_enhance', 0) > 0:
+        y = apply_bass_enhance_lite(y, sr, amount * params['bass_enhance'])
+    if params.get('air_texture', 0) > 0:
+        y = apply_air_texture_lite(y, sr, amount * params['air_texture'])
+    if params.get('vocal_spatial', 0) > 0:
+        y = _vocal_spatial_lite_enhanced(y, sr, amount * params['vocal_spatial'])
+    if params.get('compressor', 0) > 0:
+        y = transparent_compress(y, sr, amount * params['compressor'])
     y = loudness_normalize(y, sr)
     y = soft_peak_limit(y)
     return np.clip(y, -1, 1)
@@ -778,6 +792,12 @@ def _repair_single_track(input_path, output_path, params, progress_callback=None
 
     if progress_callback:
         progress_callback(0.90, "v3.2a+ 导出...")
+
+    # Apply master volume control
+    output_volume_db = single_params.get("output_volume", 0.0)
+    if output_volume_db != 0.0:
+        volume_gain = 10 ** (output_volume_db / 20.0)
+        y = (y * volume_gain).astype(y.dtype)
 
     y = soft_peak_limit(y, threshold=0.9)
 
@@ -955,6 +975,12 @@ def repair_audio(input_path, output_path, params, progress_callback=None):
             progress_callback(0.85, "v3.2a+ 智能母带...")
         mixed = _mastering_adaptive_hifi(mixed, working_sr)
         issues_found.append("智能母带")
+
+    # Apply master volume control
+    output_volume_db = params.get("output_volume", 0.0)
+    if output_volume_db != 0.0:
+        volume_gain = 10 ** (output_volume_db / 20.0)
+        mixed = (mixed * volume_gain).astype(mixed.dtype)
 
     if progress_callback:
         progress_callback(0.90, "v3.2a+ 导出...")
