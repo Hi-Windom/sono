@@ -66,4 +66,4 @@ $:
 
 
 include:
-- .cnb/workflows/sync.yml
+- https://cnb.cool/sc.hwd/cnb-sync/-/blob/main/.cnb/workflows/sync.yml
