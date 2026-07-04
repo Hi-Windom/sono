@@ -64,3 +64,6 @@ $:
             python --version
             echo "===== 自检完成，开发环境已就绪 ====="
 
+
+include:
+- .cnb/workflows/sync.yml
