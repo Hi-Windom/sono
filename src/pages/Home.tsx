@@ -29,7 +29,6 @@ export default function Home() {
     processingOptions,
     hasBeenProcessed,
     originalSampleRate,
-    currentSampleRate,
     backendAvailable,
     backendDiag,
     runBackendDiag,
@@ -53,7 +52,6 @@ export default function Home() {
     clearBackendError,
     renderAndDownload,
     isRenderLoading,
-    taskId,
     renderDownloadUrl,
     setRenderDownloadUrl,
     showDownloadModal,
@@ -258,6 +256,7 @@ export default function Home() {
                   });
                   setShowDownloadModal(true);
                 }}
+                repairProfile={repairResult?.signal_profile ?? null}
               />
 
               {/* CacheManager moved to /cache-manager page */}

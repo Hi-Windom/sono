@@ -62,6 +62,10 @@ modules_to_check = [
     'services.repair.repair_v3_2ap.core',
     'services.repair.repair_v3_2.core',
     'services.repair.repair_v3_2a.core',
+    'services.repair.repair_v4_0a.core',
+    'services.repair.repair_v4_0a.analyzer',
+    'services.repair.repair_v4_0a.adaptive',
+    'services.repair.repair_v4_0ap.core',
 ]
 
 for module_name in modules_to_check:

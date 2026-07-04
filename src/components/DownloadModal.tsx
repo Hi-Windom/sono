@@ -26,6 +26,24 @@ function formatBytes(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
+/**
+ * 去除音频文件名的最后一个后缀（不含后缀名），用于统一各导出格式的文件名。
+ * 例如 "song_repaired.wav" -> "song_repaired"，"【合并_】a.wav" -> "【合并_】a"。
+ * 若 name 为空则回退为 'audio'。
+ */
+export function stripAudioExtension(name: string | null | undefined): string {
+  if (!name) return 'audio';
+  return name.replace(/\.[^/.]+$/, '');
+}
+
+/**
+ * 依据前端展示的统一文件名（不含后缀名）生成目标格式的导出文件名。
+ * displayFilename 通常是展示的 .wav 文件名，去掉后缀后拼接目标扩展名。
+ */
+export function deriveExportFilename(displayFilename: string | null | undefined, ext: 'mp3' | 'm4a'): string {
+  return `${stripAudioExtension(displayFilename)}.${ext}`;
+}
+
 export interface DualTrackDownloadUrls {
   merged?: string;
   vocal?: string;
@@ -128,7 +146,7 @@ export function DownloadModal({
     return null;
   }, []);
 
-  const handleDownloadMp3 = useCallback(async (source: { taskId?: string; url?: string }) => {
+  const handleDownloadMp3 = useCallback(async (source: { taskId?: string; url?: string }, displayFilename?: string) => {
     setMp3Loading(true);
     setMp3Error(null);
     try {
@@ -153,11 +171,13 @@ export function DownloadModal({
       if (!contentType.includes('audio/')) {
         throw new Error(`服务器返回了非音频内容 (${contentType})，请重试`);
       }
+      // 优先使用前端展示的统一文件名（不含后缀名），保证 MP3/M4A 与 WAV 一致
+      const saveName = deriveExportFilename(displayFilename, 'mp3');
       const blob = await res.blob();
       const blobUrl = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = blobUrl;
-      a.download = `${(source.taskId || 'audio')}.mp3`;
+      a.download = saveName;
       a.style.display = 'none';
       document.body.appendChild(a);
       a.click();
@@ -177,7 +197,7 @@ export function DownloadModal({
     }
   }, []);
 
-  const handleDownloadM4a = useCallback(async (source: { taskId?: string; url?: string }) => {
+  const handleDownloadM4a = useCallback(async (source: { taskId?: string; url?: string }, displayFilename?: string) => {
     setM4aLoading(true);
     setM4aError(null);
     try {
@@ -203,15 +223,21 @@ export function DownloadModal({
       if (!contentType.includes('audio/')) {
         throw new Error(`服务器返回了非音频内容 (${contentType})，请重试`);
       }
-      const disposition = res.headers.get('Content-Disposition');
-      let downloadName = `${(source.taskId || 'audio')}.m4a`;
-      if (disposition) {
-        const utf8Match = disposition.match(/filename\*=UTF-8''(.+)/);
-        if (utf8Match) {
-          downloadName = decodeURIComponent(utf8Match[1]);
-        } else {
-          const asciiMatch = disposition.match(/filename="?(.+?)"?$/);
-          if (asciiMatch) downloadName = asciiMatch[1];
+      // 优先使用前端展示的统一文件名；无展示名时回退到 Content-Disposition，再回退到 taskId
+      let downloadName: string;
+      if (displayFilename) {
+        downloadName = deriveExportFilename(displayFilename, 'm4a');
+      } else {
+        const disposition = res.headers.get('Content-Disposition');
+        downloadName = `${(source.taskId || 'audio')}.m4a`;
+        if (disposition) {
+          const utf8Match = disposition.match(/filename\*=UTF-8''(.+)/);
+          if (utf8Match) {
+            downloadName = decodeURIComponent(utf8Match[1]);
+          } else {
+            const asciiMatch = disposition.match(/filename="?(.+?)"?$/);
+            if (asciiMatch) downloadName = asciiMatch[1];
+          }
         }
       }
       const blob = await res.blob();
@@ -430,14 +456,14 @@ export function DownloadModal({
                     {downloading ? `下载中 ${Math.round(dlProgress * 100)}%` : '⬇ WAV'}
                   </button>
                   <button
-                    onClick={() => handleDownloadM4a({ taskId: dualTrackTaskId ?? undefined, url: dualTrackUrls.merged ?? backendDownloadUrl ?? undefined })}
+                    onClick={() => handleDownloadM4a({ taskId: dualTrackTaskId ?? undefined, url: dualTrackUrls.merged ?? backendDownloadUrl ?? undefined }, dualTrackFilename)}
                     disabled={(!dualTrackUrls.merged && !backendDownloadUrl) || m4aLoading || downloading || isBackendLoading}
                     className="flex-1 py-2 bg-orange-500/20 hover:bg-orange-500/30 border border-orange-500/30 rounded-lg text-orange-400 text-xs font-medium transition disabled:opacity-50"
                   >
                     {m4aLoading ? '编码中...' : '⬇ M4A'}
                   </button>
                   <button
-                    onClick={() => handleDownloadMp3({ taskId: dualTrackTaskId ?? undefined, url: dualTrackUrls.merged ?? backendDownloadUrl ?? undefined })}
+                    onClick={() => handleDownloadMp3({ taskId: dualTrackTaskId ?? undefined, url: dualTrackUrls.merged ?? backendDownloadUrl ?? undefined }, dualTrackFilename)}
                     disabled={(!dualTrackUrls.merged && !backendDownloadUrl) || mp3Loading || downloading || isBackendLoading}
                     className="flex-1 py-2 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 rounded-lg text-emerald-400 text-xs font-medium transition disabled:opacity-50"
                   >
@@ -467,14 +493,14 @@ export function DownloadModal({
                       {downloading ? `下载中 ${Math.round(dlProgress * 100)}%` : '⬇ WAV'}
                     </button>
                     <button
-                      onClick={() => handleDownloadM4a({ taskId: dualTrackVocalTaskId ?? undefined, url: dualTrackUrls.vocal ?? undefined })}
+                      onClick={() => handleDownloadM4a({ taskId: dualTrackVocalTaskId ?? undefined, url: dualTrackUrls.vocal ?? undefined }, vocalTrackFilename)}
                       disabled={m4aLoading || downloading || isBackendLoading}
                       className="flex-1 py-2 bg-orange-500/20 hover:bg-orange-500/30 border border-orange-500/30 rounded-lg text-orange-400 text-xs font-medium transition disabled:opacity-50"
                     >
                       {m4aLoading ? '编码中...' : '⬇ M4A'}
                     </button>
                     <button
-                      onClick={() => handleDownloadMp3({ taskId: dualTrackVocalTaskId ?? undefined, url: dualTrackUrls.vocal ?? undefined })}
+                      onClick={() => handleDownloadMp3({ taskId: dualTrackVocalTaskId ?? undefined, url: dualTrackUrls.vocal ?? undefined }, vocalTrackFilename)}
                       disabled={mp3Loading || downloading || isBackendLoading}
                       className="flex-1 py-2 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 rounded-lg text-emerald-400 text-xs font-medium transition disabled:opacity-50"
                     >
@@ -504,14 +530,14 @@ export function DownloadModal({
                       {downloading ? `下载中 ${Math.round(dlProgress * 100)}%` : '⬇ WAV'}
                     </button>
                     <button
-                      onClick={() => handleDownloadM4a({ taskId: dualTrackAccompanimentTaskId ?? undefined, url: dualTrackUrls.accompaniment ?? undefined })}
+                      onClick={() => handleDownloadM4a({ taskId: dualTrackAccompanimentTaskId ?? undefined, url: dualTrackUrls.accompaniment ?? undefined }, accompanimentTrackFilename)}
                       disabled={m4aLoading || downloading || isBackendLoading}
                       className="flex-1 py-2 bg-orange-500/20 hover:bg-orange-500/30 border border-orange-500/30 rounded-lg text-orange-400 text-xs font-medium transition disabled:opacity-50"
                     >
                       {m4aLoading ? '编码中...' : '⬇ M4A'}
                     </button>
                     <button
-                      onClick={() => handleDownloadMp3({ taskId: dualTrackAccompanimentTaskId ?? undefined, url: dualTrackUrls.accompaniment ?? undefined })}
+                      onClick={() => handleDownloadMp3({ taskId: dualTrackAccompanimentTaskId ?? undefined, url: dualTrackUrls.accompaniment ?? undefined }, accompanimentTrackFilename)}
                       disabled={mp3Loading || downloading || isBackendLoading}
                       className="flex-1 py-2 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 rounded-lg text-emerald-400 text-xs font-medium transition disabled:opacity-50"
                     >
@@ -630,14 +656,14 @@ export function DownloadModal({
                     {downloading ? `下载中 ${Math.round(dlProgress * 100)}%` : '⬇ WAV'}
                   </button>
                   <button
-                    onClick={() => handleDownloadM4a({ taskId: taskId ?? undefined, url: backendDownloadUrl ?? undefined })}
+                    onClick={() => handleDownloadM4a({ taskId: taskId ?? undefined, url: backendDownloadUrl ?? undefined }, backendFilename)}
                     disabled={m4aLoading || downloading || isBackendLoading}
                     className="flex-1 py-2 bg-orange-500/20 hover:bg-orange-500/30 border border-orange-500/30 rounded-lg text-orange-400 text-xs font-medium transition disabled:opacity-50"
                   >
                     {m4aLoading ? '编码中...' : '⬇ M4A'}
                   </button>
                   <button
-                    onClick={() => handleDownloadMp3({ taskId: taskId ?? undefined, url: backendDownloadUrl ?? undefined })}
+                    onClick={() => handleDownloadMp3({ taskId: taskId ?? undefined, url: backendDownloadUrl ?? undefined }, backendFilename)}
                     disabled={mp3Loading || downloading || isBackendLoading}
                     className="flex-1 py-2 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 rounded-lg text-emerald-400 text-xs font-medium transition disabled:opacity-50"
                   >

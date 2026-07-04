@@ -9,17 +9,13 @@ import { useRepairSessionStore } from '../store/repairSessionStore';
 import {
   uploadAudio,
   repairAudio,
-  pollProgress,
-  pollProgressLegacy,
   connectProgressWS,
   WSProgressControl,
   getPreviewUrl,
-  getDownloadUrl,
   cancelTask,
   downloadWithProgress,
   mapParamsToBackend,
   lookupRepairCache,
-  RepairCacheLookupResult,
   ProcessingOptions,
   fetchAlgorithmVersions,
   AlgorithmVersion,
@@ -28,8 +24,7 @@ import {
   waitRenderWithWS,
   fetchRenderCache,
   RenderCacheEntry,
-  parseFilenameFromDisposition,
-  BackendRepairResult,
+  SignalProfile,
 } from '../services/backendApi';
 import { CacheHitInfo } from '../components/RepairCacheModal';
 
@@ -68,44 +63,6 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-}
-
-function downloadBlob(blob: Blob, fileName: string) {
-  const blobUrl = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = blobUrl;
-  a.download = fileName;
-  a.style.display = 'none';
-  document.body.appendChild(a);
-  a.click();
-  // 立即移除 a 元素，避免阻塞页面交互
-  document.body.removeChild(a);
-  setTimeout(() => {
-    URL.revokeObjectURL(blobUrl);
-  }, 30000);
-}
-
-function downloadUrl(url: string, fileName: string) {
-  // 使用 fetch+blob 下载，避免 <a href> 直接触发页面导航（用户取消时可能导致页面卡死）
-  // 后备：如果 fetch 失败，回退到 <a> 方式
-  fetch(url)
-    .then(res => {
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return res.blob();
-    })
-    .then(blob => {
-      downloadBlob(blob, fileName);
-    })
-    .catch(() => {
-      // 回退到直接链接（支持 Range 请求和下载器）
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = fileName;
-      a.style.display = 'none';
-      document.body.appendChild(a);
-      a.click();
-      setTimeout(() => { document.body.removeChild(a); }, 5000);
-    });
 }
 
 export function generateExportFilename(
@@ -177,6 +134,8 @@ export function useAudioProcessor() {
     channels: number;
     algorithm_version?: string;
     waveform_peaks?: number[][];
+    processing_mode?: string;
+    signal_profile?: SignalProfile;
     completed_at?: string;
   } | null>(null);
 
@@ -443,7 +402,7 @@ export function useAudioProcessor() {
 
   const getAudioContext = useCallback(() => {
     if (!audioContextRef.current) {
-      audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      audioContextRef.current = new (window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext)();
       analyserRef.current = audioContextRef.current.createAnalyser();
       analyserRef.current.fftSize = 256;
       analyserRef.current.connect(audioContextRef.current.destination);
@@ -1327,14 +1286,14 @@ export function useAudioProcessor() {
           writeLog('[applySettings] renderAndDownload 已在进行，跳过');
         } else {
           const currentOpts = { ...processingOptions };
+          // 仅后台预热渲染缓存（供「秒下」/手动导出使用），不再自动弹出导出弹窗。
+          // 用户完成修复后可自行点击导出按钮触发下载。
           renderAndDownload(currentOpts, effectiveAlgorithmVersion).then(result => {
             if (result?.downloadUrl) {
               setRenderDownloadUrl(result.downloadUrl);
             }
-            setShowDownloadModal(true);
           }).catch(err => {
             writeLog(`[applySettings] 自动渲染失败: ${err}`);
-            setShowDownloadModal(true);
           });
         }
       }
@@ -1436,7 +1395,7 @@ export function useAudioProcessor() {
       lines.push(`状态: ${res.status} ${res.statusText}`);
       lines.push(`耗时: ${Math.round(t1 - t0)}ms`);
       lines.push(`响应: ${text.substring(0, 200)}`);
-    } catch (e: any) {
+    } catch (e) {
       lines.push(`失败: ${e?.message || e}`);
     }
 
@@ -1454,7 +1413,7 @@ export function useAudioProcessor() {
       lines.push(`状态: ${res.status} ${res.statusText}`);
       lines.push(`耗时: ${Math.round(t1 - t0)}ms`);
       lines.push(`响应: ${text.substring(0, 200)}`);
-    } catch (e: any) {
+    } catch (e) {
       lines.push(`失败: ${e?.message || e}`);
     }
 
@@ -1487,13 +1446,13 @@ export function useAudioProcessor() {
             const statusData = await statusRes.json();
             lines.push(`  [${i+1}] status=${statusData.status} progress=${statusData.progress?.toFixed?.(2) ?? statusData.progress} step=${statusData.step} err=${statusData.error || 'none'}`);
             if (['completed', 'detected', 'error'].includes(statusData.status)) break;
-          } catch (e: any) {
+          } catch (e) {
             lines.push(`  [${i+1}] 轮询失败: ${e?.message || e}`);
             break;
           }
         }
       }
-    } catch (e: any) {
+    } catch (e) {
       lines.push(`完整流程失败: ${e?.message || e}`);
     }
 
@@ -1987,7 +1946,7 @@ export function useAudioProcessor() {
     });
   }, [cacheHitInfo, loadAudioFromUrl, wavInfo, renderAndDownload, algorithmVersion]);
 
-  const handleRenderCacheDownload = useCallback((cache: RenderCacheEntry, downloadUrl: string, filename: string) => {
+  const handleRenderCacheDownload = useCallback((cache: RenderCacheEntry, downloadUrl: string, _filename: string) => {
     writeLog(`[handleRenderCacheDownload] 秒下: ${cache.filename}`);
     setRenderDownloadUrl(downloadUrl);
     setAutoRenderInfo({

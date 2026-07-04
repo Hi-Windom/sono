@@ -7,6 +7,26 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+
+@pytest.fixture(autouse=True)
+def _reset_task_manager_state():
+    """每个测试前重置后台任务的全局并发/取消状态。
+
+    API 测试会通过 /repair-dual 等接口投递后台任务，但测试本身不等待其完成。
+    _active_tasks 是模块级集合且跨测试共享，未完成任务的累积会触发
+    can_accept_task() 返回 503，导致后续测试随机失败。这里在每个测试前清空，
+    保证测试隔离。
+    """
+    try:
+        from services import task_manager as _tm
+        with _tm._active_tasks_lock:
+            _tm._active_tasks.clear()
+        with _tm._cancelled_lock:
+            _tm._cancelled_tasks.clear()
+    except Exception:
+        pass
+    yield
+
 try:
     import soundfile as sf
     HAS_SOUNDFILE = True

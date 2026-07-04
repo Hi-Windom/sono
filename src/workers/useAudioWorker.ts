@@ -4,8 +4,8 @@ import { decodeWavPcm } from '../utils/wavParser';
 import { detectAudioIssues } from '../utils/advancedAudioProcessing';
 
 interface PendingRequest {
-  resolve: (value: any) => void;
-  reject: (reason: any) => void;
+  resolve: (value: unknown) => void;
+  reject: (reason: unknown) => void;
 }
 
 export interface AudioWorkerAPI {
@@ -57,7 +57,7 @@ export function useAudioWorker(): AudioWorkerAPI {
     }
   }, []);
 
-  const sendToWorker = useCallback(<T>(msg: { type: string; id: number; [key: string]: any }, transfer?: Transferable[]): Promise<T> => {
+  const sendToWorker = useCallback(<T>(msg: { type: string; id: number; [key: string]: unknown }, transfer?: Transferable[]): Promise<T> => {
     return new Promise((resolve, reject) => {
       const worker = getWorker();
       if (!worker) {

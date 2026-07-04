@@ -53,7 +53,7 @@ function requestLogPlugin(): Plugin {
       server.middlewares.use((req, res, next) => {
         const start = Date.now();
         const originalEnd = res.end;
-        res.end = function (...args: any[]) {
+        res.end = function (...args: unknown[]) {
           const elapsed = Date.now() - start;
           const logEntry = `[${new Date().toISOString()}] [Vite] ${req.method} ${req.url} → ${res.statusCode} (${elapsed}ms) host=${req.headers.host}\n`;
           fs.appendFileSync(LOG_FILE, logEntry);
@@ -98,7 +98,7 @@ function requestLogPlugin(): Plugin {
       server.middlewares.use((req, res, next) => {
         const start = Date.now();
         const originalEnd = res.end;
-        res.end = function (...args: any[]) {
+        res.end = function (...args: unknown[]) {
           const elapsed = Date.now() - start;
           const logEntry = `[${new Date().toISOString()}] [Vite-Preview] ${req.method} ${req.url} → ${res.statusCode} (${elapsed}ms)\n`;
           fs.appendFileSync(LOG_FILE, logEntry);
@@ -113,7 +113,7 @@ function requestLogPlugin(): Plugin {
 export default defineConfig(({ mode }) => {
   // 加载环境变量
   const env = loadEnv(mode, process.cwd(), '');
-  const apiUrl = env.VITE_API_URL || 'http://localhost:8000';
+  const apiUrl = env.VITE_API_URL || 'http://0.0.0.0:8000';
 
   return {
     test: {
@@ -137,6 +137,7 @@ export default defineConfig(({ mode }) => {
       },
     },
     server: {
+      host: '0.0.0.0',
       allowedHosts: true,
       watch: {
         ignored: ['**/backend/storage/**', '**/node_modules/**'],

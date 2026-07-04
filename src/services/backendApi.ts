@@ -34,6 +34,12 @@ export interface InstrumentRepairParams {
   warmth: number;
   loudness: number;
   stereo_enhance?: number;
+  // v4.0a+ 伴奏专业参数（可选）
+  exciter?: number;
+  transient?: number;
+  resonance?: number;
+  bassEnhance?: number;
+  airTexture?: number;
   speed?: number;
 }
 
@@ -70,6 +76,11 @@ export const defaultInstrumentRepairParams: InstrumentRepairParams = {
   warmth: 0.25,
   loudness: 0.5,
   stereo_enhance: 0.5,
+  exciter: 0,
+  transient: 0,
+  resonance: 0,
+  bassEnhance: 0,
+  airTexture: 0,
   speed: 1.0,
 };
 
@@ -78,6 +89,7 @@ export interface ProcessingOptions {
   bitDepth: 16 | 24 | 32;
   masteringStyle?: 'standard' | 'powerful' | 'warm' | 'adaptive';
   qualityMode?: 'standard' | 'fine';
+  outputVolume?: number; // Master volume gain (-12 to +6 dB, default 0)
 }
 
 const API_BASE = '/api/v1';
@@ -133,6 +145,24 @@ interface BackendDetectionResult {
   detect_type?: string;
 }
 
+/** v4.0 分析驱动管线的信号诊断画像（修复后回传，前端可展示真实检测情况）。 */
+export interface SignalProfile {
+  clip_density_pct: number;
+  peak_db: number;
+  rms_db: number;
+  crest_factor_db: number;
+  noise_floor_db: number;
+  snr_db: number;
+  sibilance_pct: number;
+  transient_density: number;
+  spectral_flatness: number;
+  spectral_centroid_hz: number;
+  lufs: number;
+  dynamic_range_db: number;
+  stereo_width: number;
+  detected_issues: string[];
+}
+
 interface BackendRepairResult {
   issues_found: string[];
   original_sample_rate: number;
@@ -142,6 +172,8 @@ interface BackendRepairResult {
   channels: number;
   algorithm_version?: string;
   waveform_peaks?: number[][];
+  processing_mode?: string;
+  signal_profile?: SignalProfile;
 }
 
 interface ProgressEvent {
@@ -191,7 +223,7 @@ export interface DetectorVersion {
 }
 
 export function mapParamsToBackend(params: AIRepairParams, _options?: ProcessingOptions, algorithmVersion?: string): Record<string, unknown> {
-  return {
+  const out: Record<string, unknown> = {
     de_clipping: params.deClipping,
     noise_reduction: params.noiseReduction,
     de_essing: params.deEssing,
@@ -208,10 +240,24 @@ export function mapParamsToBackend(params: AIRepairParams, _options?: Processing
     clarity: params.clarity,
     algorithm_version: algorithmVersion || 'v2.0',
   };
+  // v4.0a+ 专业参数（透传，未设置则不发，后端按 0 处理）
+  if (params.airTexture !== undefined) out.air_texture = params.airTexture;
+  if (params.exciter !== undefined) out.exciter = params.exciter;
+  if (params.compressor !== undefined) out.compressor = params.compressor;
+  if (params.smartCompressor !== undefined) out.smart_compressor = params.smartCompressor;
+  if (params.transientAware !== undefined) out.transient_aware = params.transientAware;
+  if (params.resonanceSuppress !== undefined) out.resonance_suppress = params.resonanceSuppress;
+  if (params.aiRepairAdaptive !== undefined) out.ai_repair_adaptive = params.aiRepairAdaptive;
+  if (params.loudnessOptimize !== undefined) out.loudness_optimize = params.loudnessOptimize;
+  // 母带风格由 UI 的 processingOptions 控制，透传到修复管线
+  if (_options?.masteringStyle) out.mastering_style = _options.masteringStyle;
+  // 输出音量控制
+  if (_options?.outputVolume !== undefined) out.output_volume = _options.outputVolume;
+  return out;
 }
 
 export function mapVocalParamsToBackend(params: VocalRepairParams, _options?: ProcessingOptions, algorithmVersion?: string): Record<string, unknown> {
-  return {
+  const out: Record<string, unknown> = {
     de_clipping: params.deClipping,
     de_pop: params.dePop,
     formant_repair: params.formantRepair,
@@ -221,23 +267,26 @@ export function mapVocalParamsToBackend(params: VocalRepairParams, _options?: Pr
     bass_enhance: params.bassEnhance,
     air_texture: params.airTexture,
     loudness_optimize: params.loudness,
-    exciter: params.exciter ?? 0.5,
-    compressor: params.compressor ?? 0.5,
-    spatial: params.spatial ?? 0.5,
-    warmth: params.warmth ?? 0.5,
-    smart_compressor: params.smartCompressor ?? 0.5,
-    transient_aware: params.transientAware ?? 0.3,
-    resonance_suppress: params.resonanceSuppress ?? 0.3,
-    ai_repair_adaptive: params.aiRepairAdaptive ?? 0.5,
-    exciter_improved: params.exciterImproved ?? 0.5,
-    de_esser_improved: params.deEsserImproved ?? 0.5,
     speed: params.speed ?? 1.0,
     algorithm_version: algorithmVersion || 'v3.0',
+    ...(_options?.outputVolume !== undefined ? { output_volume: _options.outputVolume } : {}),
   };
+  // 专业参数仅在用户设置后才发送，避免默认值导致所有效果器同时激活使信号完全变形
+  if (params.exciter !== undefined) out.exciter = params.exciter;
+  if (params.compressor !== undefined) out.compressor = params.compressor;
+  if (params.spatial !== undefined) out.spatial = params.spatial;
+  if (params.warmth !== undefined) out.warmth = params.warmth;
+  if (params.smartCompressor !== undefined) out.smart_compressor = params.smartCompressor;
+  if (params.transientAware !== undefined) out.transient_aware = params.transientAware;
+  if (params.resonanceSuppress !== undefined) out.resonance_suppress = params.resonanceSuppress;
+  if (params.aiRepairAdaptive !== undefined) out.ai_repair_adaptive = params.aiRepairAdaptive;
+  if (params.exciterImproved !== undefined) out.exciter_improved = params.exciterImproved;
+  if (params.deEsserImproved !== undefined) out.de_esser_improved = params.deEsserImproved;
+  return out;
 }
 
 export function mapInstrumentParamsToBackend(params: InstrumentRepairParams, _options?: ProcessingOptions, algorithmVersion?: string): Record<string, unknown> {
-  return {
+  const out: Record<string, unknown> = {
     de_clipping: params.deClipping,
     de_pop: params.dePop,
     timbre_protect: params.timbreProtect,
@@ -246,10 +295,20 @@ export function mapInstrumentParamsToBackend(params: InstrumentRepairParams, _op
     spatial_enhance: params.spatialEnhance,
     warmth: params.warmth,
     loudness_optimize: params.loudness,
-    stereo_enhance: params.stereo_enhance ?? 0.5,
     speed: params.speed ?? 1.0,
     algorithm_version: algorithmVersion || 'v3.0',
   };
+  // 专业参数仅在用户设置后才发送，避免默认值导致所有效果器同时激活使信号完全变形
+  if (params.stereo_enhance !== undefined) out.stereo_enhance = params.stereo_enhance;
+  // v4.0a+ 伴奏专业参数透传
+  if (params.exciter !== undefined) out.inst_exciter = params.exciter;
+  if (params.transient !== undefined) out.inst_transient = params.transient;
+  if (params.resonance !== undefined) out.inst_resonance = params.resonance;
+  if (params.bassEnhance !== undefined) out.inst_bass_enhance = params.bassEnhance;
+  if (params.airTexture !== undefined) out.inst_air_texture = params.airTexture;
+  // 输出音量控制
+  if (_options?.outputVolume !== undefined) out.output_volume = _options.outputVolume;
+  return out;
 }
 
 function mapDetectionResult(backend: BackendDetectionResult): AISongDetectionResult {
@@ -329,6 +388,176 @@ export async function checkFileHash(fileHash: string): Promise<{ exists: boolean
   }
 }
 
+const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB per chunk
+
+// Core upload function that handles both simple and chunked uploads
+async function uploadFileCore(
+  file: File,
+  endpoint: string,
+  extraFields?: Record<string, string>,
+  onProgress?: ProgressCallback
+): Promise<UploadResponse> {
+  const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+  const useChunked = totalChunks > 1;
+
+  if (!useChunked) {
+    return uploadFileSimple(file, endpoint, extraFields, onProgress);
+  }
+  return uploadFileChunked(file, endpoint, extraFields, onProgress);
+}
+
+// Simple single-request upload (small files)
+async function uploadFileSimple(
+  file: File,
+  endpoint: string,
+  extraFields: Record<string, string> | undefined,
+  onProgress?: ProgressCallback
+): Promise<UploadResponse> {
+  const formData = new FormData();
+  formData.append('file', file);
+  if (extraFields) {
+    Object.entries(extraFields).forEach(([key, value]) => {
+      if (value) formData.append(key, value);
+    });
+  }
+
+  return new Promise<UploadResponse>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', endpoint);
+    xhr.timeout = 300000;
+
+    const startTime = Date.now();
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && onProgress) {
+        const elapsed = (Date.now() - startTime) / 1000;
+        const speed = elapsed > 0 ? e.loaded / elapsed : 0;
+        onProgress(e.loaded, e.total, speed);
+      }
+    };
+
+    xhr.onload = () => {
+      try {
+        const data = JSON.parse(xhr.responseText);
+        if (xhr.status >= 200 && xhr.status < 300) {
+          resolve(data);
+        } else {
+          reject(new Error(data.detail || data.message || '上传失败'));
+        }
+      } catch {
+        reject(new Error('上传响应解析失败'));
+      }
+    };
+
+    xhr.onerror = () => reject(new Error('上传失败'));
+    xhr.ontimeout = () => reject(new Error('上传超时(300s)'));
+    xhr.send(formData);
+  });
+}
+
+// Chunked upload with resume support
+async function uploadFileChunked(
+  file: File,
+  endpoint: string,
+  extraFields: Record<string, string> | undefined,
+  onProgress?: ProgressCallback
+): Promise<UploadResponse> {
+  const fileName = file.name;
+  const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+  const fileHash = extraFields?.file_hash;
+
+  log('upload', `Starting chunked upload: ${totalChunks} chunks, ${file.size} bytes`);
+
+  // Step 1: Initialize session
+  const initFormData = new FormData();
+  initFormData.append('filename', fileName);
+  initFormData.append('total_size', String(file.size));
+  initFormData.append('total_chunks', String(totalChunks));
+  if (fileHash) initFormData.append('file_hash', fileHash);
+
+  let sessionId: string;
+  try {
+    const initResp = await fetch(`${API_BASE}/upload-init`, { method: 'POST', body: initFormData });
+    if (!initResp.ok) throw new Error(`初始化失败: ${initResp.statusText}`);
+    const initData = await initResp.json();
+    sessionId = initData.session_id;
+  } catch (error) {
+    log('upload', `Init failed, falling back to simple upload: ${(error as Error).message}`);
+    return uploadFileSimple(file, endpoint, extraFields, onProgress);
+  }
+
+  // Step 2: Upload chunks with resume
+  const uploadedChunks = new Set<number>();
+  let successfulChunks = 0;
+
+  // Check already uploaded
+  try {
+    const checkResp = await fetch(`${API_BASE}/upload-status?session_id=${sessionId}`);
+    if (checkResp.ok) {
+      const checkData = await checkResp.json();
+      (checkData.uploaded_chunks || []).forEach((i: number) => uploadedChunks.add(i));
+      successfulChunks = uploadedChunks.size;
+    }
+  } catch { /* ignore */ }
+
+  // Upload missing chunks
+  for (let i = 0; i < totalChunks; i++) {
+    if (uploadedChunks.has(i)) continue;
+
+    const start = i * CHUNK_SIZE;
+    const end = Math.min(start + CHUNK_SIZE, file.size);
+    const chunk = file.slice(start, end);
+
+    const chunkFormData = new FormData();
+    chunkFormData.append('session_id', sessionId);
+    chunkFormData.append('chunk_index', String(i));
+    chunkFormData.append('chunk', chunk);
+
+    let retrySuccess = false;
+    for (let retry = 0; retry < 3; retry++) {
+      try {
+        await new Promise(r => setTimeout(r, 1000 * retry));
+        const resp = await fetch(`${API_BASE}/upload-chunk`, { method: 'POST', body: chunkFormData });
+        if (resp.ok) {
+          const data = await resp.json();
+          if (data.success) {
+            uploadedChunks.add(i);
+            successfulChunks++;
+            retrySuccess = true;
+            if (onProgress) onProgress(file.size * (successfulChunks / totalChunks), file.size, 0);
+            break;
+          }
+        }
+      } catch { /* retry */ }
+    }
+
+    if (!retrySuccess) {
+      // Clean up session on failure
+      await fetch(`${API_BASE}/upload-cancel?session_id=${sessionId}`, { method: 'POST' }).catch(() => {});
+      throw new Error(`分片 ${i} 上传失败，已重试3次`);
+    }
+  }
+
+  // Step 3: Finalize
+  const finalizeFormData = new FormData();
+  finalizeFormData.append('session_id', sessionId);
+
+  const finalizeResp = await fetch(`${API_BASE}/upload-finalize`, { method: 'POST', body: finalizeFormData });
+  if (!finalizeResp.ok) {
+    throw new Error(`合并文件失败: ${finalizeResp.statusText}`);
+  }
+
+  const finalizeData = await finalizeResp.json();
+  if (!finalizeData.success) throw new Error(finalizeData.error || '合并文件失败');
+
+  return {
+    task_id: finalizeData.task_id,
+    filename: fileName,
+    size: file.size,
+    message: '上传完成',
+  };
+}
+
+// Public API: Single track upload
 export async function uploadAudio(file: File, onProgress?: ProgressCallback, fileHash?: string): Promise<UploadResponse> {
   if (fileHash) {
     const checkResult = await checkFileHash(fileHash);
@@ -347,56 +576,48 @@ export async function uploadAudio(file: File, onProgress?: ProgressCallback, fil
   const url = `${API_BASE}/upload`;
   log('upload', `POST ${url} file=${file.name} size=${file.size} hash=${fileHash || 'none'}`);
 
-  const formData = new FormData();
-  formData.append('file', file);
-  if (fileHash) {
-    formData.append('file_hash', fileHash);
-  }
+  return uploadFileCore(file, url, fileHash ? { file_hash: fileHash } : undefined, onProgress);
+}
 
-  return new Promise<UploadResponse>((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open('POST', url);
-    xhr.timeout = 120000;
+// Public API: Dual track upload (reuses single track core)
+export async function uploadDualAudio(
+  vocalFile: File,
+  accompanimentFile: File,
+  onProgress?: (loaded: number, total: number, speed: number, type: 'vocal' | 'accompaniment') => void,
+  fileHash?: string,
+  vocalFileHash?: string,
+  accompanimentFileHash?: string
+): Promise<DualUploadResponse> {
+  const totalSize = vocalFile.size + accompanimentFile.size;
 
-    const startTime = Date.now();
+  // Upload vocal track (reuses chunked upload core)
+  const vocalResult = await uploadFileCore(
+    vocalFile,
+    `${API_BASE}/upload`,
+    vocalFileHash ? { file_hash: vocalFileHash } : undefined,
+    onProgress ? (_, total, speed) => onProgress(_, total, speed, 'vocal') : undefined
+  );
 
-    xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable && onProgress) {
-        const elapsed = (Date.now() - startTime) / 1000;
-        const speed = elapsed > 0 ? e.loaded / elapsed : 0;
-        onProgress(e.loaded, e.total, speed);
-      }
-    };
+  // Upload accompaniment track (reuses chunked upload core)
+  const accResult = await uploadFileCore(
+    accompanimentFile,
+    `${API_BASE}/upload`,
+    accompanimentFileHash ? { file_hash: accompanimentFileHash } : undefined,
+    onProgress ? (_, total, speed) => onProgress(_, total, speed, 'accompaniment') : undefined
+  );
 
-    xhr.onload = () => {
-      try {
-        const data = JSON.parse(xhr.responseText);
-        if (xhr.status >= 200 && xhr.status < 300) {
-          log('upload', `success task_id=${data.task_id} cached=${data.cached}`);
-          resolve(data);
-        } else {
-          const detail = data.detail || '上传失败';
-          log('upload', `ERROR: ${detail}`);
-          reject(new Error(detail));
-        }
-      } catch {
-        log('upload', `PARSE ERROR`);
-        reject(new Error('上传响应解析失败'));
-      }
-    };
+  log('upload-dual', `Dual upload complete: vocal=${vocalResult.task_id}, acc=${accResult.task_id}`);
 
-    xhr.onerror = () => {
-      log('upload', `XHR ERROR`);
-      reject(new Error('上传网络错误'));
-    };
-
-    xhr.ontimeout = () => {
-      log('upload', 'TIMEOUT');
-      reject(new Error('上传超时(120s)，请检查网络或后端是否正常运行'));
-    };
-
-    xhr.send(formData);
-  });
+  return {
+    task_id: vocalResult.task_id,
+    vocal_task_id: vocalResult.task_id,
+    accompaniment_task_id: accResult.task_id,
+    vocal_filename: vocalFile.name,
+    accompaniment_filename: accompanimentFile.name,
+    vocal_size: vocalFile.size,
+    accompaniment_size: accompanimentFile.size,
+    message: '双轨上传完成',
+  };
 }
 
 export interface DualUploadResponse {
@@ -409,78 +630,7 @@ export interface DualUploadResponse {
   accompaniment_size: number;
   vocal_info?: AudioInfo | null;
   accompaniment_info?: AudioInfo | null;
-}
-
-export async function uploadDualAudio(
-  vocalFile: File,
-  accompanimentFile: File,
-  onProgress?: (loaded: number, total: number, speed: number, type: 'vocal' | 'accompaniment') => void,
-  fileHash?: string,
-  vocalFileHash?: string,
-  accompanimentFileHash?: string
-): Promise<DualUploadResponse> {
-  const url = `${API_BASE}/upload-dual`;
-  log('upload-dual', `POST ${url} vocal=${vocalFile.name} acc=${accompanimentFile.name}`);
-
-  const formData = new FormData();
-  formData.append('vocal_file', vocalFile);
-  formData.append('accompaniment_file', accompanimentFile);
-  if (fileHash) {
-    formData.append('file_hash', fileHash);
-  }
-  if (vocalFileHash) {
-    formData.append('vocal_file_hash', vocalFileHash);
-  }
-  if (accompanimentFileHash) {
-    formData.append('accompaniment_file_hash', accompanimentFileHash);
-  }
-
-  return new Promise<DualUploadResponse>((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open('POST', url);
-    xhr.timeout = 300000;
-
-    const startTime = Date.now();
-
-    xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable && onProgress) {
-        const elapsed = (Date.now() - startTime) / 1000;
-        const speed = elapsed > 0 ? e.loaded / elapsed : 0;
-        const total = vocalFile.size + accompanimentFile.size;
-        const type = e.loaded <= vocalFile.size ? 'vocal' : 'accompaniment';
-        onProgress(e.loaded, total, speed, type);
-      }
-    };
-
-    xhr.onload = () => {
-      try {
-        const data = JSON.parse(xhr.responseText);
-        if (xhr.status >= 200 && xhr.status < 300) {
-          log('upload-dual', `success task_id=${data.task_id}`);
-          resolve(data);
-        } else {
-          const detail = data.detail || '双轨上传失败';
-          log('upload-dual', `ERROR: ${detail}`);
-          reject(new Error(detail));
-        }
-      } catch {
-        log('upload-dual', `PARSE ERROR`);
-        reject(new Error('双轨上传响应解析失败'));
-      }
-    };
-
-    xhr.onerror = () => {
-      log('upload-dual', `XHR ERROR`);
-      reject(new Error('双轨上传网络错误'));
-    };
-
-    xhr.ontimeout = () => {
-      log('upload-dual', 'TIMEOUT');
-      reject(new Error('双轨上传超时(300s)，请检查网络或后端是否正常运行'));
-    };
-
-    xhr.send(formData);
-  });
+  message?: string;
 }
 
 export interface DetectAudioResponse {
@@ -536,7 +686,7 @@ export async function repairAudio(taskId: string, params: AIRepairParams, option
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: '修复请求失败' }));
       const detail = Array.isArray(err.detail)
-        ? err.detail.map((e: any) => e.msg || String(e)).join('; ')
+        ? err.detail.map((e: { msg?: string }) => e.msg || String(e)).join('; ')
         : (err.detail || '修复请求失败');
       log('repair', `ERROR: ${detail}`);
       throw new Error(detail);
@@ -600,7 +750,7 @@ export async function repairDualAudio(
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: '双轨修复请求失败' }));
       const detail = Array.isArray(err.detail)
-        ? err.detail.map((e: any) => e.msg || String(e)).join('; ')
+        ? err.detail.map((e: { msg?: string }) => e.msg || String(e)).join('; ')
         : (err.detail || '双轨修复请求失败');
       log('repair-dual', `ERROR: ${detail}`);
       throw new Error(detail);
@@ -668,7 +818,7 @@ export async function repairDualFromHash(
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: '双轨修复请求失败' }));
       const detail = Array.isArray(err.detail)
-        ? err.detail.map((e: any) => e.msg || String(e)).join('; ')
+        ? err.detail.map((e: { msg?: string }) => e.msg || String(e)).join('; ')
         : (err.detail || '双轨修复请求失败');
       log('repair-dual-from-hash', `ERROR: ${detail}`);
       throw new Error(detail);
@@ -1239,10 +1389,10 @@ export async function checkTrainingHash(fileHash: string): Promise<{ exists: boo
   }
 }
 
-// 训练素材上传接口（支持进度回调和哈希检测）
+// 训练素材上传接口（统一复用断点续传核心）
 export async function uploadTrainingAudio(
   file: File,
-  onProgress?: (loaded: number, total: number) => void,
+  onProgress?: (loaded: number, total: number, speed?: number) => void,
   fileHash?: string
 ): Promise<{ filename: string; size: number; message: string; cached?: boolean }> {
   const url = `${API_BASE}/training/upload`;
@@ -1263,15 +1413,34 @@ export async function uploadTrainingAudio(
   
   log('trainingUpload', `POST ${url} file=${file.name} size=${file.size} hash=${fileHash || 'none'}`);
 
-  return new Promise((resolve, reject) => {
-    const formData = new FormData();
-    formData.append('file', file);
-    if (fileHash) {
-      formData.append('file_hash', fileHash);
-    }
+  // Check if backend supports chunked upload for training
+  const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+  const useChunked = totalChunks > 1;
 
+  if (!useChunked) {
+    // Small file, use simple upload
+    return uploadTrainingSimple(file, url, fileHash, onProgress);
+  }
+
+  // Chunked upload with resume support
+  return uploadTrainingChunked(file, url, fileHash, onProgress);
+}
+
+async function uploadTrainingSimple(
+  file: File,
+  url: string,
+  fileHash: string | undefined,
+  onProgress: ((loaded: number, total: number) => void) | undefined
+): Promise<{ filename: string; size: number; message: string; cached?: boolean }> {
+  const formData = new FormData();
+  formData.append('file', file);
+  if (fileHash) formData.append('file_hash', fileHash);
+  formData.append('label', 'ai_generated');
+
+  return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open('POST', url);
+    xhr.timeout = 300000;
 
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable && onProgress) {
@@ -1283,26 +1452,125 @@ export async function uploadTrainingAudio(
       try {
         const data = JSON.parse(xhr.responseText);
         if (xhr.status >= 200 && xhr.status < 300) {
-          log('trainingUpload', `success: ${data.message} cached=${data.cached}`);
-          resolve(data);
+          resolve({
+            filename: data.filename || file.name,
+            size: data.size || file.size,
+            message: '上传完成',
+          });
         } else {
-          const detail = data.detail || '上传失败';
-          log('trainingUpload', `ERROR: ${detail}`);
-          reject(new Error(detail));
+          reject(new Error(data.detail || '上传失败'));
         }
       } catch {
-        log('trainingUpload', `PARSE ERROR`);
         reject(new Error('上传响应解析失败'));
       }
     };
 
-    xhr.onerror = () => {
-      log('trainingUpload', `XHR ERROR`);
-      reject(new Error('上传网络错误'));
-    };
-
+    xhr.onerror = () => reject(new Error('上传失败'));
+    xhr.ontimeout = () => reject(new Error('上传超时(300s)'));
     xhr.send(formData);
   });
+}
+
+async function uploadTrainingChunked(
+  file: File,
+  url: string,
+  fileHash: string | undefined,
+  onProgress: ((loaded: number, total: number) => void) | undefined
+): Promise<{ filename: string; size: number; message: string; cached?: boolean }> {
+  const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+  let sessionId: string;
+
+  // Step 1: Initialize
+  const initFormData = new FormData();
+  initFormData.append('filename', file.name);
+  initFormData.append('total_size', String(file.size));
+  initFormData.append('total_chunks', String(totalChunks));
+  if (fileHash) initFormData.append('file_hash', fileHash);
+  initFormData.append('label', 'ai_generated');
+
+  try {
+    const initResp = await fetch(`${API_BASE}/training/upload-init`, {
+      method: 'POST',
+      body: initFormData,
+    });
+    if (!initResp.ok) throw new Error(`初始化失败: ${initResp.statusText}`);
+    const initData = await initResp.json();
+    sessionId = initData.session_id;
+  } catch (error) {
+    log('trainingUpload', `Init failed, falling back to simple upload: ${(error as Error).message}`);
+    return uploadTrainingSimple(file, url, fileHash, onProgress);
+  }
+
+  // Step 2: Upload chunks
+  const uploadedChunks = new Set<number>();
+  let successfulChunks = 0;
+
+  // Check already uploaded
+  try {
+    const checkResp = await fetch(`${API_BASE}/upload-status?session_id=${sessionId}`);
+    if (checkResp.ok) {
+      const checkData = await checkResp.json();
+      (checkData.uploaded_chunks || []).forEach((i: number) => uploadedChunks.add(i));
+      successfulChunks = uploadedChunks.size;
+    }
+  } catch { /* ignore */ }
+
+  // Upload missing chunks
+  for (let i = 0; i < totalChunks; i++) {
+    if (uploadedChunks.has(i)) continue;
+
+    const start = i * CHUNK_SIZE;
+    const end = Math.min(start + CHUNK_SIZE, file.size);
+    const chunk = file.slice(start, end);
+
+    const chunkFormData = new FormData();
+    chunkFormData.append('session_id', sessionId);
+    chunkFormData.append('chunk_index', String(i));
+    chunkFormData.append('chunk', chunk);
+
+    let retrySuccess = false;
+    for (let retry = 0; retry < 3; retry++) {
+      try {
+        await new Promise(r => setTimeout(r, 1000 * retry));
+        const resp = await fetch(`${API_BASE}/upload-chunk`, { method: 'POST', body: chunkFormData });
+        if (resp.ok) {
+          const data = await resp.json();
+          if (data.success) {
+            uploadedChunks.add(i);
+            successfulChunks++;
+            retrySuccess = true;
+            if (onProgress) onProgress(file.size * (successfulChunks / totalChunks), file.size);
+            break;
+          }
+        }
+      } catch { /* retry */ }
+    }
+
+    if (!retrySuccess) {
+      await fetch(`${API_BASE}/upload-cancel?session_id=${sessionId}`, { method: 'POST' }).catch(() => {});
+      throw new Error(`分片 ${i} 上传失败，已重试3次`);
+    }
+  }
+
+  // Step 3: Finalize
+  const finalizeFormData = new FormData();
+  finalizeFormData.append('session_id', sessionId);
+
+  const finalizeResp = await fetch(`${API_BASE}/training/upload-finalize`, {
+    method: 'POST',
+    body: finalizeFormData,
+  });
+
+  if (!finalizeResp.ok) throw new Error(`合并文件失败: ${finalizeResp.statusText}`);
+
+  const finalizeData = await finalizeResp.json();
+  if (finalizeData.status !== 'ok') throw new Error(finalizeData.detail || '合并文件失败');
+
+  return {
+    filename: file.name,
+    size: finalizeData.size || file.size,
+    message: '上传完成',
+  };
 }
 
 export interface WSProgressControl {

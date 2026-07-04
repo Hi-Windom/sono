@@ -92,6 +92,16 @@ def _generate_waveform_peaks(output_path: str, num_peaks: int = WAVEFORM_PEAKS_C
 
 _loop = None
 
+def set_event_loop(loop: asyncio.AbstractEventLoop) -> None:
+    """由应用启动（lifespan）在主线程事件循环中调用，缓存正在运行的 loop。
+
+    后台修复线程通过 _ws_send_* 用 run_coroutine_threadsafe 投递协程，
+    必须投递到「正在运行」的主 loop 上，否则协程永远不会被执行
+    （表现为 WebSocket 进度静默丢失，前端只能退回 HTTP 轮询）。
+    """
+    global _loop
+    _loop = loop
+
 def _get_loop():
     global _loop
     if _loop is None:
@@ -122,7 +132,7 @@ TASK_TIMEOUTS = {
     "repair": 600,
 }
 
-STUCK_THRESHOLD = 60
+STUCK_THRESHOLD = 30
 
 _cancelled_tasks: set[str] = set()
 _cancelled_lock = threading.Lock()
@@ -217,6 +227,9 @@ def _run_detect(task_id: str, audio_path: str, detect_type: str, detector_versio
         label = "修复后" if detect_type == "repaired" else "原始"
         update_task(task_id, status="detecting", progress=0, step=f"开始{label}检测...")
 
+        # 检测任务复用任务记录中的 params（双轨检测时由路由写入），
+        # 不能引用未定义的 params 变量，否则每次检测都会抛 NameError
+        params: dict[str, Any] = (prev_task.get("params") if prev_task else None) or {}
         processing_mode = params.get("processing_mode", "single")
         if processing_mode == "dual":
             vocal_path = params.get("vocal_path", "")

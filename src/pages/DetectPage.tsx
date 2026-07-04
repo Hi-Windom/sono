@@ -3,7 +3,6 @@ import { useBlocker } from 'react-router-dom';
 import { Header } from '../components/Header';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import { LeaveConfirmModal } from '../components/LeaveConfirmModal';
-import { useBackend } from '../contexts/BackendContext';
 import { AIDetectionCard } from '../components/AIDetectionComparison';
 import { AISongDetectionResult } from '../utils/aiSongChecker';
 import {
@@ -69,7 +68,6 @@ function getFileTypeLabel(t: string): string {
 }
 
 export default function DetectPage() {
-  const useBackendResult = useBackend();
   const [slotA, setSlotA] = useState<DetectSlotState>(createEmptySlot());
   const [slotB, setSlotB] = useState<DetectSlotState>(createEmptySlot());
   const [serverFiles, setServerFiles] = useState<AudioFileInfo[]>([]);

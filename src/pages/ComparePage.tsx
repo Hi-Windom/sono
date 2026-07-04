@@ -38,22 +38,23 @@ function setCachedBuffer(taskId: string, type: 'original' | 'repaired', buffer: 
   audioBufferCache.set(`${taskId}:${type}`, { buffer, timestamp: Date.now() });
 }
 
-function formatTime(seconds: number): string {
+export function formatTime(seconds: number): string {
   if (!isFinite(seconds) || seconds < 0) return '0:00';
   const mins = Math.floor(seconds / 60);
   const secs = Math.floor(seconds % 60);
   return `${mins}:${secs.toString().padStart(2, '0')}`;
 }
 
-function formatTimePrecise(seconds: number): string {
+export function formatTimePrecise(seconds: number): string {
   if (!isFinite(seconds) || seconds < 0) return '0:00.0';
   const mins = Math.floor(seconds / 60);
   const secs = Math.floor(seconds % 60);
-  const ms = Math.floor((seconds % 1) * 10);
+  // 加 1e-9 容差抵消浮点误差（如 5.3 % 1 = 0.2999... 会被 floor 成 2）
+  const ms = Math.floor((seconds % 1) * 10 + 1e-9) % 10;
   return `${mins}:${secs.toString().padStart(2, '0')}.${ms}`;
 }
 
-function parseTimeInput(val: string): number | null {
+export function parseTimeInput(val: string): number | null {
   const trimmed = val.trim();
   if (!trimmed) return null;
   const m = trimmed.match(/^(\d+):([0-5]?\d)(?:\.(\d))?$/);
@@ -105,6 +106,15 @@ export default function ComparePage() {
   const [editAVal, setEditAVal] = useState('');
   const [editBVal, setEditBVal] = useState('');
 
+  // 播放增强：变速 / 音量 / AB 循环计数
+  const [playbackRate, setPlaybackRate] = useState(1);
+  const [volume, setVolume] = useState(1);
+  const [muted, setMuted] = useState(false);
+  const [loopCount, setLoopCount] = useState(0);
+  // 循环次数上限：0 表示无限循环
+  const [loopLimit, setLoopLimit] = useState(0);
+  const [showShortcuts, setShowShortcuts] = useState(false);
+
   const audioElRef = useRef<HTMLAudioElement | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const sourceNodeRef = useRef<MediaElementAudioSourceNode | null>(null);
@@ -113,6 +123,11 @@ export default function ComparePage() {
   const abLoopRef = useRef(false);
   const pendingSeekRef = useRef<number | null>(null);
   const pendingPlayRef = useRef(false);
+  const loopCountRef = useRef(0);
+  const loopLimitRef = useRef(0);
+  const playbackRateRef = useRef(1);
+  const volumeRef = useRef(1);
+  const mutedRef = useRef(false);
 
   const activeBuffer = compareMode === 'original' ? originalBuffer : repairedBuffer;
 
@@ -138,6 +153,29 @@ export default function ComparePage() {
   const wsControlRef = useRef<{ close: () => void } | null>(null);
   const taskIdRef = useRef(taskId);
   taskIdRef.current = taskId;
+  // 同步用户可设置的播放参数到 ref，供事件回调读取最新值
+  loopLimitRef.current = loopLimit;
+  playbackRateRef.current = playbackRate;
+  volumeRef.current = volume;
+  mutedRef.current = muted;
+
+  // AB 循环重复一次：累加计数，达到上限则停止循环
+  const advanceLoop = useCallback(() => {
+    loopCountRef.current += 1;
+    setLoopCount(loopCountRef.current);
+    const limit = loopLimitRef.current;
+    if (limit > 0 && loopCountRef.current >= limit) {
+      abLoopRef.current = false;
+      return false;
+    }
+    return true;
+  }, []);
+
+  // 重置循环计数（A/B 区段变更或清除时调用）
+  const resetLoopCount = useCallback(() => {
+    loopCountRef.current = 0;
+    setLoopCount(0);
+  }, []);
   useEffect(() => {
     if (wsControlRef.current) return;
     wsControlRef.current = connectCacheWS(() => {
@@ -269,9 +307,11 @@ export default function ComparePage() {
     };
     const onEnded = () => {
       if (abLoopRef.current && pointA !== null && pointB !== null) {
-        audio.currentTime = pointA;
-        audio.play().catch(() => {});
-        return;
+        if (advanceLoop()) {
+          audio.currentTime = pointA;
+          audio.play().catch(() => {});
+          return;
+        }
       }
       setIsPlaying(false);
       setCurrentTime(audio.duration || 0);
@@ -296,7 +336,7 @@ export default function ComparePage() {
       audio.removeEventListener('ended', onEnded);
       audio.removeEventListener('error', onError);
     };
-  }, [taskId, effectiveTaskId, compareMode, pointA, pointB]);
+  }, [taskId, effectiveTaskId, compareMode, pointA, pointB, advanceLoop]);
 
   useEffect(() => {
     if (!audioElRef.current) return;
@@ -306,7 +346,11 @@ export default function ComparePage() {
         const t = audio.currentTime;
         setCurrentTime(t);
         if (abLoopRef.current && pointB !== null && t >= pointB) {
-          audio.currentTime = pointA ?? 0;
+          if (advanceLoop()) {
+            audio.currentTime = pointA ?? 0;
+          } else {
+            audio.pause();
+          }
         }
         animFrameRef.current = requestAnimationFrame(updateProgress);
       }
@@ -326,7 +370,7 @@ export default function ComparePage() {
       audio.removeEventListener('pause', onPause);
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
     };
-  }, [pointA, pointB]);
+  }, [pointA, pointB, advanceLoop]);
 
   useEffect(() => {
     const handleVisibility = () => {
@@ -481,6 +525,31 @@ export default function ComparePage() {
     pendingPlayRef.current = wasPlaying;
   }, [compareMode, isPlaying, currentTime]);
 
+  // 在原始/修复后之间快速切换（A/B 对比核心操作）
+  const swapMode = useCallback(() => {
+    setCompareMode((m) => {
+      const next = m === 'original' ? 'repaired' : 'original';
+      pendingSeekRef.current = currentTime;
+      pendingPlayRef.current = isPlaying;
+      return next;
+    });
+  }, [currentTime, isPlaying]);
+
+  // 应用播放速率
+  useEffect(() => {
+    const audio = audioElRef.current;
+    if (audio) audio.playbackRate = playbackRate;
+  }, [playbackRate]);
+
+  // 应用音量 / 静音
+  useEffect(() => {
+    const audio = audioElRef.current;
+    if (audio) {
+      audio.muted = muted;
+      audio.volume = muted ? 0 : volume;
+    }
+  }, [volume, muted]);
+
   const switchDualTrackMode = useCallback((mode: DualTrackMode) => {
     if (mode === dualTrackMode) return;
     setDualTrackMode(mode);
@@ -494,8 +563,9 @@ export default function ComparePage() {
     setPointA(null);
     setPointB(null);
     abLoopRef.current = false;
+    resetLoopCount();
     setCompareMode('original');
-  }, [dualTrackMode]);
+  }, [dualTrackMode, resetLoopCount]);
 
   const setMarkA = useCallback(() => {
     setPointA(currentTime);
@@ -503,19 +573,22 @@ export default function ComparePage() {
       setPointB(null);
       abLoopRef.current = false;
     }
-  }, [currentTime, pointB]);
+    resetLoopCount();
+  }, [currentTime, pointB, resetLoopCount]);
 
   const setMarkB = useCallback(() => {
     if (pointA === null) return;
     setPointB(currentTime);
     abLoopRef.current = true;
-  }, [currentTime, pointA]);
+    resetLoopCount();
+  }, [currentTime, pointA, resetLoopCount]);
 
   const clearAB = useCallback(() => {
     setPointA(null);
     setPointB(null);
     abLoopRef.current = false;
-  }, []);
+    resetLoopCount();
+  }, [resetLoopCount]);
 
   const confirmEditA = useCallback(() => {
     const t = parseTimeInput(editAVal);
@@ -525,22 +598,96 @@ export default function ComparePage() {
         setPointB(null);
         abLoopRef.current = false;
       }
+      resetLoopCount();
     }
     setEditingA(false);
-  }, [editAVal, duration, pointB]);
+  }, [editAVal, duration, pointB, resetLoopCount]);
 
   const confirmEditB = useCallback(() => {
     const t = parseTimeInput(editBVal);
     if (t !== null && t >= 0 && t <= (duration || Infinity) && pointA !== null && t > pointA) {
       setPointB(t);
       abLoopRef.current = true;
+      resetLoopCount();
     }
     setEditingB(false);
-  }, [editBVal, duration, pointA]);
+  }, [editBVal, duration, pointA, resetLoopCount]);
 
   const selectTask = useCallback((id: string) => {
     setSearchParams({ taskId: id });
   }, [setSearchParams]);
+
+  // 键盘快捷键：A/B 对比核心工作流
+  useEffect(() => {
+    if (!taskId) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      // 输入框内不拦截
+      const el = document.activeElement;
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || (el as HTMLElement).isContentEditable)) {
+        return;
+      }
+      // 避免与浏览器/修饰键冲突
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+
+      const audio = audioElRef.current;
+      switch (e.key) {
+        case ' ':
+        case 'k':
+          e.preventDefault();
+          if (audio && audioReady) {
+            if (audio.paused) play(); else pause();
+          }
+          break;
+        case 's':
+        case 'S':
+          e.preventDefault();
+          swapMode();
+          break;
+        case 'a':
+        case 'A':
+          e.preventDefault();
+          if (!editingA) setMarkA();
+          break;
+        case 'b':
+        case 'B':
+          e.preventDefault();
+          if (!editingB) setMarkB();
+          break;
+        case 'c':
+        case 'C':
+          e.preventDefault();
+          clearAB();
+          break;
+        case 'l':
+        case 'L':
+          e.preventDefault();
+          if (pointA !== null && pointB !== null) {
+            abLoopRef.current = !abLoopRef.current;
+            if (abLoopRef.current) resetLoopCount();
+          }
+          break;
+        case 'm':
+        case 'M':
+          e.preventDefault();
+          setMuted((m) => !m);
+          break;
+        case 'ArrowLeft': {
+          e.preventDefault();
+          if (audio) seek(audio.currentTime - (e.shiftKey ? 1 : 5));
+          break;
+        }
+        case 'ArrowRight': {
+          e.preventDefault();
+          if (audio) seek(audio.currentTime + (e.shiftKey ? 1 : 5));
+          break;
+        }
+        default:
+          break;
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [taskId, audioReady, play, pause, swapMode, setMarkA, setMarkB, clearAB, editingA, editingB, pointA, pointB, resetLoopCount, seek]);
 
   useEffect(() => {
     return () => {
@@ -938,7 +1085,7 @@ export default function ComparePage() {
                   <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                   </svg>
-                  循环
+                  循环{loopLimit > 0 ? ` ${loopCount}/${loopLimit}` : ` ×${loopCount}`}
                 </span>
               )}
               {(pointA !== null || pointB !== null) && (
@@ -950,6 +1097,99 @@ export default function ComparePage() {
                 </button>
               )}
             </div>
+
+            {/* 播放控制：A/B 快速切换 / 变速 / 音量 / 循环次数 */}
+            <div className="flex flex-wrap items-center justify-center gap-3 mt-1">
+              <button
+                onClick={swapMode}
+                disabled={!audioReady}
+                className="px-3 py-1 rounded-lg text-xs font-medium border transition disabled:opacity-30"
+                style={{
+                  borderColor: color + '50',
+                  background: `linear-gradient(135deg, ${color}25, ${color}10)`,
+                  color,
+                }}
+                title="快捷键 S"
+              >
+                ⇄ 切换 A/B
+              </button>
+
+              <div className="flex items-center gap-1" title="播放速率">
+                <span className="text-gray-500 text-[10px]">速率</span>
+                {[0.5, 0.75, 1, 1.25, 1.5, 2].map((r) => (
+                  <button
+                    key={r}
+                    onClick={() => setPlaybackRate(r)}
+                    className={`px-1.5 py-0.5 rounded text-[10px] font-mono transition ${
+                      playbackRate === r
+                        ? 'bg-cyan-500/25 text-cyan-300 border border-cyan-400/40'
+                        : 'bg-white/5 text-gray-400 border border-white/10 hover:text-gray-200'
+                    }`}
+                  >
+                    {r}×
+                  </button>
+                ))}
+              </div>
+
+              <div className="flex items-center gap-1.5" title="音量（快捷键 M 静音）">
+                <button
+                  onClick={() => setMuted((m) => !m)}
+                  className="text-gray-400 hover:text-white transition"
+                >
+                  {muted || volume === 0 ? (
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15zM17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" /></svg>
+                  ) : (
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.536 8.464a5 5 0 010 7.072M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" /></svg>
+                  )}
+                </button>
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  value={muted ? 0 : volume}
+                  onChange={(e) => { setVolume(parseFloat(e.target.value)); if (parseFloat(e.target.value) > 0) setMuted(false); }}
+                  className="w-16 h-1.5 bg-gray-800 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white"
+                />
+              </div>
+
+              <div className="flex items-center gap-1" title="AB 循环次数上限">
+                <span className="text-gray-500 text-[10px]">循环</span>
+                {[0, 1, 3, 5, 10].map((n) => (
+                  <button
+                    key={n}
+                    onClick={() => { setLoopLimit(n); resetLoopCount(); }}
+                    className={`px-1.5 py-0.5 rounded text-[10px] font-mono transition ${
+                      loopLimit === n
+                        ? 'bg-yellow-500/25 text-yellow-300 border border-yellow-400/40'
+                        : 'bg-white/5 text-gray-400 border border-white/10 hover:text-gray-200'
+                    }`}
+                  >
+                    {n === 0 ? '∞' : n}
+                  </button>
+                ))}
+              </div>
+
+              <button
+                onClick={() => setShowShortcuts((v) => !v)}
+                className="px-2 py-0.5 rounded text-[10px] bg-white/5 text-gray-500 border border-white/10 hover:text-gray-300"
+              >
+                ⌨ 快捷键
+              </button>
+            </div>
+
+            {showShortcuts && (
+              <div className="mt-2 p-3 bg-black/30 border border-white/5 rounded-lg text-[10px] text-gray-400 grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1">
+                <span><kbd className="text-cyan-300">空格</kbd> 播放/暂停</span>
+                <span><kbd className="text-cyan-300">S</kbd> 切换 A/B</span>
+                <span><kbd className="text-cyan-300">A / B</kbd> 标记 A/B 点</span>
+                <span><kbd className="text-cyan-300">C</kbd> 清除标记</span>
+                <span><kbd className="text-cyan-300">L</kbd> 开关循环</span>
+                <span><kbd className="text-cyan-300">M</kbd> 静音</span>
+                <span><kbd className="text-cyan-300">← →</kbd> 快退/快进 5s</span>
+                <span><kbd className="text-cyan-300">Shift+← →</kbd> 1s 微调</span>
+              </div>
+            )}
           </div>
         </div>
 

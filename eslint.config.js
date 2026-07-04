@@ -23,6 +23,14 @@ export default tseslint.config(
         'warn',
         { allowConstantExport: true },
       ],
+      // 允许有意为之的空 catch（音频节点清理、localStorage 容错、防御性 JSON 解析等）
+      'no-empty': ['error', { allowEmptyCatch: true }],
+      // 下划线前缀变量/参数、以及 catch 绑定视为有意不用，不报错
+      '@typescript-eslint/no-unused-vars': ['error', {
+        argsIgnorePattern: '^_',
+        varsIgnorePattern: '^_',
+        caughtErrors: 'none',
+      }],
     },
   },
 )

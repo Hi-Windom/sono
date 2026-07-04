@@ -1,0 +1,69 @@
+# Sono 远程开发环境自动准备流水线
+#
+# 通过 $.vscode 事件，每次启动「云原生开发」时自动完成环境准备，
+
+$:
+  vscode:
+    - imports: 
+        - "https://cnb.cool/sc.hwd/secrets/-/blob/main/ai/custom-model.yml"
+        - "https://cnb.cool/sc.hwd/secrets/-/blob/main/git/github.yml"
+      runner:
+        cpus: 4
+      docker:
+        # image: docker.cnb.cool/sc.hwd/happy-cnb:latest
+        # image: docker.cnb.cool/sc.hwd/happy-cnb
+        # 自定义开发环境
+        build:
+          # 指定构建镜像的 Dockerfile 文件
+          dockerfile: .ide/Dockerfile
+          # 用来声明缓存构建过程中依赖的文件列表。
+          # 注意：如果构建过程有用到其他文件，也需要在此处声明
+          # 参考文档：https://docs.cnb.cool/zh/grammar/pipeline.html#build
+          by:
+            - .ide/settings.json
+      services:
+        # docker 写在 vscode 前面
+        - docker
+        - vscode
+      env:
+        # 关键：默认 NODE_ENV=production 会让 npm install 跳过 devDependencies，
+        # 导致 typescript / eslint / vitest / @playwright/test 等开发工具全部缺失。
+        NODE_ENV: development
+      stages:
+        - name: 安装前端依赖
+          script: |
+            set -e
+            export NODE_ENV=development
+            npm install --include=dev
+
+        - name: 安装后端 Python 依赖
+          script: |
+            set -e
+            
+            # 使用 uv 安装后端依赖（从 requirements.txt）
+            cd backend
+            uv pip install -r requirements.txt
+            
+            # 安装测试依赖
+            uv pip install pytest httpx pyright
+            
+            # 验证关键依赖
+            python3 -c "import fastapi, numpy, scipy, soundfile; print('✅ 后端依赖安装成功')"
+
+        - name: 安装类型检查工具
+          script: |
+            # pyright（pyproject.toml 已配置 strict 模式），非关键，失败不影响开发环境可用性
+            npm install --no-save pyright 2>/dev/null \
+              || echo "[prepare] pyright 安装跳过（非关键，可后续手动安装）"
+
+        - name: 环境自检
+          script: |
+            echo "===== Sono 开发环境自检 ====="
+            node -v
+            npm -v
+            python --version
+            echo "===== 自检完成，开发环境已就绪 ====="
+
+
+include:
+- https://cnb.cool/sc.hwd/cnb-sync/-/blob/main/.cnb/workflows/sync.yml

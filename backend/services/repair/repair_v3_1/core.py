@@ -228,13 +228,14 @@ def _diff_clamp_depop(y, sr, amount):
 
 
 def _soft_peak_limit(y, threshold=0.9):
+    """软峰值限制器（tanh 软拐点），确保输出严格 ≤ 1.0 防止 PCM 硬削波。"""
     abs_max = np.max(np.abs(y))
     if abs_max <= threshold:
-        return y
+        return np.clip(y, -1.0, 1.0)
     if y.ndim == 1:
         y = y.reshape(1, -1)
         _soft_peak_limit(y, threshold)
-        return y[0]
+        return np.clip(y[0], -1.0, 1.0)
     for ch in range(y.shape[0]):
         abs_data = np.abs(y[ch])
         mask = abs_data > threshold
@@ -242,7 +243,7 @@ def _soft_peak_limit(y, threshold=0.9):
             continue
         headroom = 1.0 - threshold
         y[ch][mask] = (np.sign(y[ch][mask]) * (threshold + headroom * np.tanh((abs_data[mask] - threshold) / headroom))).astype(y.dtype)
-    return y
+    return np.clip(y, -1.0, 1.0)
 
 
 def _adaptive_loudness_normalize(y, sr, target_loudness_lu=-14.0):
@@ -257,7 +258,7 @@ def _adaptive_loudness_normalize(y, sr, target_loudness_lu=-14.0):
             continue
         target_rms = 10 ** (target_loudness_lu / 20.0)
         gain = target_rms / rms_val
-        gain = np.clip(gain, 0.2, 5.0)
+        gain = np.clip(gain, 0.5, 2.0)
         y[ch] = (y[ch].astype(np.float64) * gain).astype(y.dtype)
 
     return y
@@ -967,6 +968,12 @@ def _repair_single_track(input_path: str, output_path: str, params: dict, progre
     if progress_callback:
         progress_callback(0.90, "v3.1 导出...")
 
+    # Apply master volume control
+    output_volume_db = single_params.get("output_volume", 0.0)
+    if output_volume_db != 0.0:
+        volume_gain = 10 ** (output_volume_db / 20.0)
+        y = (y * volume_gain).astype(y.dtype)
+
     y = _soft_peak_limit(y, threshold=0.9)
 
     bit_depth = single_params.get("bit_depth", 24)
@@ -1131,6 +1138,12 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
             mixed = _mastering_standard(mixed, working_sr)
             issues_found.append("标准母带")
 
+        # Apply master volume control
+        output_volume_db = params.get("output_volume", 0.0)
+        if output_volume_db != 0.0:
+            volume_gain = 10 ** (output_volume_db / 20.0)
+            mixed = (mixed * volume_gain).astype(mixed.dtype)
+
         if progress_callback:
             progress_callback(0.90, "v3.1 导出...")
 
@@ -1143,6 +1156,12 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
 
         channels = mixed.shape[0] if mixed.ndim > 1 else 1
     else:
+        # Apply master volume control
+        output_volume_db = params.get("output_volume", 0.0)
+        if output_volume_db != 0.0:
+            volume_gain = 10 ** (output_volume_db / 20.0)
+            vocal_y = (vocal_y * volume_gain).astype(vocal_y.dtype)
+
         if progress_callback:
             progress_callback(0.90, "v3.1 导出...")
         sf.write(output_path, vocal_y.T if vocal_y.ndim > 1 else vocal_y, working_sr, subtype=subtype)

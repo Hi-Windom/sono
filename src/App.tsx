@@ -8,13 +8,14 @@ import CacheManagerPage from "@/pages/CacheManagerPage";
 import ComparePage from "@/pages/ComparePage";
 import DetectPage from "@/pages/DetectPage";
 import FlowVisualizationPage from "@/pages/FlowVisualizationPage";
+import DebugRepairPage from "@/pages/DebugRepairPage";
 import { BuildInfo } from "@/components/BuildInfo";
 import { useEffect, useState } from "react";
 import { BackendProvider } from "@/contexts/BackendContext";
 
 function VConsoleInit() {
   useEffect(() => {
-    let vc: any;
+    let vc: { show: () => void; destroy: () => void } | undefined;
     import('vconsole').then((VConsole) => {
       vc = new VConsole.default({
         theme: 'dark',
@@ -25,7 +26,7 @@ function VConsoleInit() {
           }
         },
       });
-      (window as any).__vconsole__ = vc;
+      (window as unknown as { __vconsole__?: unknown }).__vconsole__ = vc;
     });
     return () => {
       if (vc) vc.destroy();
@@ -35,7 +36,7 @@ function VConsoleInit() {
 }
 
 function GlobalErrorHandler() {
-  const [fatalError, setFatalError] = useState<string | null>(null);
+  const [fatalError] = useState<string | null>(null);
 
   useEffect(() => {
     const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
@@ -117,6 +118,7 @@ const router = createBrowserRouter([
       { path: "/compare", element: <ComparePage /> },
       { path: "/detect", element: <DetectPage /> },
       { path: "/flow", element: <FlowVisualizationPage /> },
+      { path: "/debug-repair", element: <DebugRepairPage /> },
     ],
   },
 ]);
