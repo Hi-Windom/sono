@@ -5,12 +5,14 @@ import logging
 import stat
 import subprocess
 import time
+import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from config import ALLOWED_EXTENSIONS, MAX_UPLOAD_SIZE, MOBILE_MODE, OUTPUT_DIR, UPLOAD_DIR, DECODED_DIR, DEPLOY_TIME_FILE
+from config import ALLOWED_EXTENSIONS, MAX_UPLOAD_SIZE, MOBILE_MODE, OUTPUT_DIR, UPLOAD_DIR, DECODED_DIR, DEPLOY_TIME_FILE, BASE_DIR
 from database import create_task, find_task_by_hash, get_queue_status, get_task, update_task, _format_timestamp
 from services.task_manager import generate_task_id, submit_detect_task, submit_repair_task, cancel_task, executor, can_accept_task, get_active_task_count, get_active_tasks
 from services.audio_repair import get_available_versions
@@ -427,6 +429,191 @@ async def upload_audio(file: UploadFile = File(...), file_hash: str = Form("")):
     return {
         "task_id": task_id,
         "filename": file.filename,
+        "size": file_size,
+        "audio_info": audio_info,
+    }
+
+# Define chunk size constant
+CHUNK_SIZE = 5 * 1024 * 1024  # 5MB
+
+# Chunked upload endpoints
+UPLOAD_SESSIONS_DIR = os.path.join(UPLOAD_DIR, "_sessions")
+os.makedirs(UPLOAD_SESSIONS_DIR, exist_ok=True)
+
+@router.post("/upload-init")
+async def upload_init(
+    filename: str = Form(...),
+    total_size: int = Form(...),
+    total_chunks: int = Form(...),
+    file_hash: str = Form(""),
+):
+    """Initialize a chunked upload session"""
+    # Validate file extension
+    ext = os.path.splitext(filename)[1].lower()
+    if ext not in ALLOWED_EXTENSIONS:
+        raise HTTPException(status_code=400, detail=f"不支持的文件格式: {ext}")
+    
+    # Check file size
+    if total_size > MAX_UPLOAD_SIZE:
+        raise HTTPException(status_code=413, detail=f"文件过大，最大支持 {MAX_UPLOAD_SIZE // 1024 // 1024}MB")
+    
+    # Generate session ID
+    session_id = str(uuid.uuid4())
+    session_dir = os.path.join(UPLOAD_SESSIONS_DIR, session_id)
+    os.makedirs(session_dir, exist_ok=True)
+    
+    # Store session metadata
+    session_info = {
+        "filename": filename,
+        "ext": ext,
+        "total_size": total_size,
+        "total_chunks": total_chunks,
+        "file_hash": file_hash,
+        "session_dir": session_dir,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    
+    session_file = os.path.join(session_dir, "session.json")
+    with open(session_file, "w") as f:
+        json.dump(session_info, f, indent=2)
+    
+    logger.info(f"[upload-init] session_id={session_id} file={filename} size={total_size} chunks={total_chunks}")
+    
+    return {
+        "session_id": session_id,
+        "chunk_size": CHUNK_SIZE,
+    }
+
+@router.post("/upload-chunk")
+async def upload_chunk(
+    session_id: str = Form(...),
+    chunk_index: int = Form(...),
+    chunk: UploadFile = File(...),
+):
+    """Upload a single chunk"""
+    session_dir = os.path.join(UPLOAD_SESSIONS_DIR, session_id)
+    session_file = os.path.join(session_dir, "session.json")
+    
+    if not os.path.exists(session_file):
+        raise HTTPException(status_code=404, detail="上传会话不存在或已过期")
+    
+    with open(session_file, "r") as f:
+        session_info = json.load(f)
+    
+    total_chunks = session_info["total_chunks"]
+    
+    # Validate chunk index
+    if chunk_index < 0 or chunk_index >= total_chunks:
+        raise HTTPException(status_code=400, detail=f"无效的分片索引: {chunk_index}")
+    
+    # Read chunk content
+    chunk_content = await chunk.read()
+    
+    # Save chunk
+    chunk_path = os.path.join(session_dir, f"chunk_{chunk_index:06d}")
+    with open(chunk_path, "wb") as f:
+        f.write(chunk_content)
+    
+    logger.debug(f"[upload-chunk] session={session_id} chunk={chunk_index}/{total_chunks} size={len(chunk_content)}")
+    
+    return {
+        "success": True,
+        "chunk_index": chunk_index,
+        "size": len(chunk_content),
+    }
+
+@router.get("/upload-status")
+async def upload_status(session_id: str = ...):
+    """Get upload status for a session"""
+    session_dir = os.path.join(UPLOAD_SESSIONS_DIR, session_id)
+    session_file = os.path.join(session_dir, "session.json")
+    
+    if not os.path.exists(session_file):
+        raise HTTPException(status_code=404, detail="上传会话不存在或已过期")
+    
+    with open(session_file, "r") as f:
+        session_info = json.load(f)
+    
+    total_chunks = session_info["total_chunks"]
+    session_dir_path = session_info["session_dir"]
+    
+    # Count uploaded chunks
+    uploaded_chunks = []
+    for i in range(total_chunks):
+        chunk_path = os.path.join(session_dir_path, f"chunk_{i:06d}")
+        if os.path.exists(chunk_path):
+            uploaded_chunks.append(i)
+    
+    return {
+        "session_id": session_id,
+        "uploaded_chunks": uploaded_chunks,
+        "uploaded_count": len(uploaded_chunks),
+        "total_chunks": total_chunks,
+        "progress": len(uploaded_chunks) / total_chunks * 100,
+    }
+
+@router.post("/upload-finalize")
+async def upload_finalize(session_id: str = Form(...)):
+    """Finalize upload and merge chunks"""
+    session_dir = os.path.join(UPLOAD_SESSIONS_DIR, session_id)
+    session_file = os.path.join(session_dir, "session.json")
+    
+    if not os.path.exists(session_file):
+        raise HTTPException(status_code=404, detail="上传会话不存在或已过期")
+    
+    with open(session_file, "r") as f:
+        session_info = json.load(f)
+    
+    total_chunks = session_info["total_chunks"]
+    session_dir_path = session_info["session_dir"]
+    filename = session_info["filename"]
+    ext = session_info["ext"]
+    file_hash = session_info["file_hash"]
+    
+    # Verify all chunks are uploaded
+    missing_chunks = []
+    for i in range(total_chunks):
+        chunk_path = os.path.join(session_dir_path, f"chunk_{i:06d}")
+        if not os.path.exists(chunk_path):
+            missing_chunks.append(i)
+    
+    if missing_chunks:
+        raise HTTPException(
+            status_code=400,
+            detail=f"缺少分片: {missing_chunks}"
+        )
+    
+    # Merge chunks into final file
+    task_id = generate_task_id()
+    final_path = os.path.join(UPLOAD_DIR, f"{task_id}{ext}")
+    
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+    
+    logger.info(f"[upload-finalize] Merging {total_chunks} chunks into {final_path}")
+    
+    with open(final_path, "wb") as final_file:
+        for i in range(total_chunks):
+            chunk_path = os.path.join(session_dir_path, f"chunk_{i:06d}")
+            with open(chunk_path, "rb") as chunk_file:
+                final_file.write(chunk_file.read())
+    
+    file_size = os.path.getsize(final_path)
+    
+    # Create task in database
+    create_task(task_id, filename, final_path, {}, file_hash, file_size)
+    
+    # Clean up session
+    import shutil
+    shutil.rmtree(session_dir, ignore_errors=True)
+    
+    logger.info(f"[upload-finalize] task_id={task_id} file_size={file_size}")
+    
+    audio_info = _get_audio_info(final_path)
+    
+    return {
+        "success": True,
+        "task_id": task_id,
+        "filename": filename,
         "size": file_size,
         "audio_info": audio_info,
     }
@@ -870,6 +1057,39 @@ async def repair_dual_from_hash(request: DualRepairFromHashRequest):
         "accompaniment_task_id": accompaniment_task_id,
         "status": "pending",
     }
+
+
+# ──── 调试修复：生成多个内部处理变体 ────
+
+class DebugRepairRequest(BaseModel):
+    task_id: str
+    algorithm_version: str | None = None
+
+@router.post("/repair-debug")
+async def repair_debug_endpoint(request: DebugRepairRequest):
+    """对已上传的音频用指定版本+完全一致参数跑一遍完整修复，每个处理阶段保存中间结果，用于验证管线各环节逻辑"""
+    task = get_task(request.task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    audio_path = task.get("original_path")
+    if not audio_path or not os.path.exists(audio_path):
+        raise HTTPException(status_code=400, detail="原始音频不存在")
+
+    debug_dir = os.path.join(OUTPUT_DIR, f"debug_{request.task_id}")
+    from services.repair_debug import run_debug_repair
+    result = run_debug_repair(audio_path, debug_dir, request.algorithm_version)
+    result["task_id"] = request.task_id
+    result["debug_dir"] = debug_dir
+    return result
+
+@router.get("/repair-debug/{task_id}/{filename}")
+async def download_debug_variant(task_id: str, filename: str):
+    """下载调试变体音频文件"""
+    debug_dir = os.path.join(OUTPUT_DIR, f"debug_{task_id}")
+    file_path = os.path.join(debug_dir, filename)
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="调试文件不存在")
+    return FileResponse(file_path, media_type="audio/wav")
 
 
 @router.get("/tracks/{task_id}")
@@ -2418,22 +2638,127 @@ async def preview_audio(task_id: str, type: str = 'repaired'):
 
 @router.post("/training/check-hash")
 async def training_check_hash(request: CheckHashRequest):
-    from services.training_manager import check_training_hash
-    exists = check_training_hash(request.file_hash)
-    return {"exists": exists}
+    """Check if training file with given hash already exists"""
+    training_dir = os.path.join(BASE_DIR, "storage", "training")
+    if not os.path.exists(training_dir):
+        return {"exists": False}
+    
+    # Search for file with this hash in name or filename
+    for filename in os.listdir(training_dir):
+        if request.file_hash in filename:
+            return {"exists": True, "filename": filename}
+    return {"exists": False}
 
 @router.post("/training/upload")
 async def training_upload(
     file: UploadFile = File(...),
-    file_hash: str = Form(...),
-    label: str = Form(...),
+    file_hash: str = Form(""),
+    label: str = Form("ai_generated"),
 ):
     from services.training_manager import save_training_file
     
     ext = os.path.splitext(file.filename)[1].lower() if file.filename else ".wav"
+    content = await file.read()
+    file_size = len(content)
+    
+    # Save to temp file first
+    import io
+    file.file = io.BytesIO(content)
     saved_path = await save_training_file(file, file_hash, label, ext)
     
-    return {"status": "ok", "path": saved_path}
+    return {
+        "status": "ok", 
+        "path": saved_path,
+        "filename": file.filename,
+        "size": file_size,
+    }
+
+@router.post("/training/upload-init")
+async def training_upload_init(
+    filename: str = Form(...),
+    total_size: int = Form(...),
+    total_chunks: int = Form(...),
+    file_hash: str = Form(""),
+    label: str = Form("ai_generated"),
+):
+    """Initialize chunked upload for training files"""
+    ext = os.path.splitext(filename)[1].lower()
+    if ext not in ALLOWED_EXTENSIONS:
+        raise HTTPException(status_code=400, detail=f"不支持的文件格式: {ext}")
+    
+    session_id = str(uuid.uuid4())
+    session_dir = os.path.join(UPLOAD_SESSIONS_DIR, session_id)
+    os.makedirs(session_dir, exist_ok=True)
+    
+    session_info = {
+        "filename": filename,
+        "ext": ext,
+        "total_size": total_size,
+        "total_chunks": total_chunks,
+        "file_hash": file_hash,
+        "label": label,
+        "session_dir": session_dir,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    
+    with open(os.path.join(session_dir, "session.json"), "w") as f:
+        json.dump(session_info, f, indent=2)
+    
+    return {"session_id": session_id}
+
+@router.post("/training/upload-finalize")
+async def training_upload_finalize(
+    session_id: str = Form(...),
+):
+    """Finalize training file upload and save"""
+    session_dir = os.path.join(UPLOAD_SESSIONS_DIR, session_id)
+    session_file = os.path.join(session_dir, "session.json")
+    
+    if not os.path.exists(session_file):
+        raise HTTPException(status_code=404, detail="上传会话不存在")
+    
+    with open(session_file, "r") as f:
+        session_info = json.load(f)
+    
+    total_chunks = session_info["total_chunks"]
+    session_dir_path = session_info["session_dir"]
+    filename = session_info["filename"]
+    ext = session_info["ext"]
+    file_hash = session_info["file_hash"]
+    label = session_info["label"]
+    
+    # Verify all chunks
+    for i in range(total_chunks):
+        chunk_path = os.path.join(session_dir_path, f"chunk_{i:06d}")
+        if not os.path.exists(chunk_path):
+            raise HTTPException(status_code=400, detail=f"缺少分片 {i}")
+    
+    # Merge chunks
+    task_id = generate_task_id()
+    final_path = os.path.join(UPLOAD_DIR, f"{task_id}{ext}")
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+    
+    with open(final_path, "wb") as final_file:
+        for i in range(total_chunks):
+            chunk_path = os.path.join(session_dir_path, f"chunk_{i:06d}")
+            with open(chunk_path, "rb") as chunk_file:
+                final_file.write(chunk_file.read())
+    
+    file_size = os.path.getsize(final_path)
+    
+    # Move to training storage
+    training_dir = os.path.join(BASE_DIR, "storage", "training")
+    os.makedirs(training_dir, exist_ok=True)
+    training_filename = f"{task_id}_{filename}"
+    training_path = os.path.join(training_dir, training_filename)
+    
+    import shutil
+    shutil.move(final_path, training_path)
+    
+    # Cleanup session
+    shutil.rmtree(session_dir, ignore_errors=True)
+    
+    return {"status": "ok", "path": training_path, "size": file_size}
 
 @router.get("/cache/info")
 async def get_cache_info():

@@ -230,13 +230,14 @@ def _diff_clamp_depop(y, sr, amount):
 
 
 def soft_peak_limit(y, threshold=0.9):
+    """软峰值限制器（tanh 软拐点），确保输出严格 ≤ 1.0 防止 PCM 硬削波。"""
     abs_max = np.max(np.abs(y))
     if abs_max <= threshold:
-        return y
+        return np.clip(y, -1.0, 1.0)
     if y.ndim == 1:
         y = y.reshape(1, -1)
         soft_peak_limit(y, threshold)
-        return y[0]
+        return np.clip(y[0], -1.0, 1.0)
     for ch in range(y.shape[0]):
         abs_data = np.abs(y[ch])
         mask = abs_data > threshold
@@ -244,7 +245,7 @@ def soft_peak_limit(y, threshold=0.9):
             continue
         headroom = 1.0 - threshold
         y[ch][mask] = (np.sign(y[ch][mask]) * (threshold + headroom * np.tanh((abs_data[mask] - threshold) / headroom))).astype(y.dtype)
-    return y
+    return np.clip(y, -1.0, 1.0)
 
 
 def _adaptive_loudness_normalize(y, sr, target_loudness_lu=-14.0):
@@ -259,7 +260,7 @@ def _adaptive_loudness_normalize(y, sr, target_loudness_lu=-14.0):
             continue
         target_rms = 10 ** (target_loudness_lu / 20.0)
         gain = target_rms / rms_val
-        gain = np.clip(gain, 0.2, 5.0)
+        gain = np.clip(gain, 0.5, 2.0)
         y[ch] = (y[ch].astype(np.float64) * gain).astype(y.dtype)
 
     return y
@@ -781,7 +782,7 @@ def _mastering_standard(y, sr):
     if rms_val > 1e-10:
         target_rms = 10 ** (-15.0 / 20.0)
         gain = target_rms / rms_val
-        gain = np.clip(gain, 0.2, 5.0)
+        gain = np.clip(gain, 0.5, 2.0)
         y = (y.astype(np.float64) * gain).astype(y.dtype)
 
     y = _apply_dynamic_expansion(y, sr, amount=0.3)
@@ -828,7 +829,7 @@ def _mastering_powerful(y, sr):
     if rms_val > 1e-10:
         target_rms = 10 ** (-13.0 / 20.0)
         gain = target_rms / rms_val
-        gain = np.clip(gain, 0.2, 5.0)
+        gain = np.clip(gain, 0.5, 2.0)
         y = (y.astype(np.float64) * gain).astype(y.dtype)
 
     y = _apply_dynamic_expansion(y, sr, amount=0.25)
@@ -855,7 +856,7 @@ def _mastering_warm(y, sr):
     if rms_val > 1e-10:
         target_rms = 10 ** (-15.0 / 20.0)
         gain = target_rms / rms_val
-        gain = np.clip(gain, 0.2, 5.0)
+        gain = np.clip(gain, 0.5, 2.0)
         y = (y.astype(np.float64) * gain).astype(y.dtype)
 
     y = _apply_dynamic_expansion(y, sr, amount=0.35)
@@ -907,7 +908,7 @@ def _mastering_adaptive(y, sr):
     if rms_val > 1e-10:
         target_rms = 10 ** (-14.0 / 20.0)
         gain = target_rms / rms_val
-        gain = np.clip(gain, 0.2, 5.0)
+        gain = np.clip(gain, 0.5, 2.0)
         y = (y.astype(np.float64) * gain).astype(y.dtype)
 
     return y
@@ -1343,6 +1344,12 @@ def repair_single_track(input_path: str, output_path: str, params: dict, progres
         y = _mastering_standard(y, working_sr)
         issues_found.append("标准母带")
 
+    # Apply master volume control
+    output_volume_db = single_params.get("output_volume", 0.0)
+    if output_volume_db != 0.0:
+        volume_gain = 10 ** (output_volume_db / 20.0)
+        y = (y * volume_gain).astype(y.dtype)
+
     if progress_callback:
         progress_callback(0.90, "v3.2 导出...")
 
@@ -1518,6 +1525,12 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
             mixed = _mastering_standard(mixed, working_sr)
             issues_found.append("标准母带")
 
+        # Apply master volume control
+        output_volume_db = params.get("output_volume", 0.0)
+        if output_volume_db != 0.0:
+            volume_gain = 10 ** (output_volume_db / 20.0)
+            mixed = (mixed * volume_gain).astype(mixed.dtype)
+
         if progress_callback:
             progress_callback(0.90, "v3.2 导出...")
 
@@ -1530,8 +1543,20 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
 
         channels = mixed.shape[0] if mixed.ndim > 1 else 1
     else:
+        # Apply master volume control
+        output_volume_db = params.get("output_volume", 0.0)
+        if output_volume_db != 0.0:
+            volume_gain = 10 ** (output_volume_db / 20.0)
+            vocal_y = (vocal_y * volume_gain).astype(vocal_y.dtype)
+
         if progress_callback:
             progress_callback(0.90, "v3.2 导出...")
+
+        vocal_y = _soft_peak_limit(vocal_y, threshold=0.9)
+
+        if vocal_y.dtype == np.float32:
+            vocal_y = vocal_y.astype(np.float64)
+
         sf.write(output_path, vocal_y.T if vocal_y.ndim > 1 else vocal_y, working_sr, subtype=subtype)
         channels = vocal_y.shape[0] if vocal_y.ndim > 1 else 1
 

@@ -6,8 +6,10 @@ import { uploadTrainingAudio } from '../services/backendApi';
 interface UploadingFile {
   name: string;
   progress: number;
+  speed: number;
   status: 'checking' | 'uploading' | 'success' | 'error' | 'cached';
   error?: string;
+  size: number;
 }
 
 // 计算文件 SHA256 哈希
@@ -16,6 +18,20 @@ async function calculateFileHash(file: File): Promise<string> {
   const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
   const hashArray = Array.from(new Uint8Array(hashBuffer));
   return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+// 格式化文件大小
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
+// 格式化速度
+function formatSpeed(bytesPerSec: number): string {
+  if (bytesPerSec < 1024) return bytesPerSec + ' B/s';
+  if (bytesPerSec < 1024 * 1024) return (bytesPerSec / 1024).toFixed(1) + ' KB/s';
+  return (bytesPerSec / (1024 * 1024)).toFixed(2) + ' MB/s';
 }
 
 export default function TrainingUploadPage() {
@@ -36,7 +52,9 @@ export default function TrainingUploadPage() {
     const initialFiles: UploadingFile[] = Array.from(files).map(file => ({
       name: file.name,
       progress: 0,
+      speed: 0,
       status: 'checking' as const,
+      size: file.size,
     }));
     setUploadingFiles(initialFiles);
 
@@ -55,18 +73,28 @@ export default function TrainingUploadPage() {
         
         const fileHash = await calculateFileHash(file);
         
-        // 上传（带哈希检测）
+        // 上传（带哈希检测和进度回调）
         setUploadingFiles(prev => {
           const updated = [...prev];
           updated[i] = { ...updated[i], status: 'uploading' };
           return updated;
         });
         
-        const result = await uploadTrainingAudio(file, (loaded, total) => {
+        const startTime = Date.now();
+        let lastLoaded = 0;
+
+        const result = await uploadTrainingAudio(file, (loaded, total, speed) => {
           const progress = total > 0 ? (loaded / total) * 100 : 0;
+          const elapsed = (Date.now() - startTime) / 1000;
+          const avgSpeed = elapsed > 0 ? loaded / elapsed : 0;
+          
           setUploadingFiles(prev => {
             const updated = [...prev];
-            updated[i] = { ...updated[i], progress };
+            updated[i] = { 
+              ...updated[i], 
+              progress,
+              speed: speed || avgSpeed,
+            };
             return updated;
           });
         }, fileHash);
@@ -77,7 +105,8 @@ export default function TrainingUploadPage() {
           updated[i] = { 
             ...updated[i], 
             status: result.cached ? 'cached' : 'success', 
-            progress: 100 
+            progress: 100,
+            speed: 0,
           };
           return updated;
         });
@@ -187,6 +216,12 @@ export default function TrainingUploadPage() {
                             style={{ width: `${file.progress}%` }}
                           />
                         </div>
+                        {file.status === 'uploading' && (
+                          <div className="flex justify-between text-xs text-gray-500 mt-1">
+                            <span>{formatFileSize(file.size)}</span>
+                            <span>{formatSpeed(file.speed)}</span>
+                          </div>
+                        )}
                       </div>
                     </div>
                   ))}

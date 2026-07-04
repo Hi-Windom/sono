@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+import os
 from typing import Any
 import gc
 
@@ -116,8 +117,12 @@ def _lookahead_compress_1d(x: np.ndarray, sr: int, amount: float, lookahead_ms: 
 
 
 def process_track_adaptive_premium(y: np.ndarray, sr: int, intent: dict,
-                                   progress: Any = None) -> tuple[np.ndarray, list[str]]:
-    """v4.0a+ 单轨：Analyze→Adapt→Process(pass1)→Re-analyze→Targeted verify(pass2)。"""
+                                   progress: Any = None,
+                                   debug_output_dir: str | None = None) -> tuple[np.ndarray, list[str]]:
+    """v4.0a+ 单轨：Analyze→Adapt→Process(pass1)→Re-analyze→Targeted verify(pass2)。
+
+    debug_output_dir: 若提供，每完成一个处理阶段后将当前音频保存到该目录。
+    """
     # Pass 1: 自适应修复（与 v4.0a 一致，但 premium=True 触发更激进调制）
     if progress:
         progress(0.02, "分析信号画像...")
@@ -129,6 +134,13 @@ def process_track_adaptive_premium(y: np.ndarray, sr: int, intent: dict,
     if speed != 1.0:
         from services.time_stretch import time_stretch_hifi
         y = time_stretch_hifi(y, sr, speed)
+
+    # 调试：保存原始音频
+    save_idx = 0
+    if debug_output_dir:
+        save_idx += 1
+        sf.write(os.path.join(debug_output_dir, f"{save_idx:02d}_original.wav"),
+                 y.T if y.ndim > 1 else y, sr, subtype="PCM_24")
 
     # 逐原语上报进度（pass1 占 0.05~0.70）
     _pass1_steps = [
@@ -146,13 +158,17 @@ def process_track_adaptive_premium(y: np.ndarray, sr: int, intent: dict,
         ("dynamic", "动态控制", lambda: _v32a_dynamic(y, sr, strategy.dynamic)),
         ("loudness", "响度优化", lambda: _v32a_loudness(y, sr, strategy.target_lufs)),
     ]
-    active = [(lbl, fn) for (key, lbl, fn) in _pass1_steps if getattr(strategy, key, 0.0) > 0]
+    active = [(key, lbl, fn) for (key, lbl, fn) in _pass1_steps if getattr(strategy, key, 0.0) > 0]
     n_active = max(1, len(active))
     # 延迟求值：用可变 y，闭包捕获策略值
-    for idx, (lbl, fn) in enumerate(active):
+    for idx, (key, lbl, fn) in enumerate(active):
         if progress:
             progress(0.05 + 0.65 * (idx / n_active), f"{lbl}...")
         y = fn()
+        if debug_output_dir:
+            save_idx += 1
+            sf.write(os.path.join(debug_output_dir, f"{save_idx:02d}_{key}.wav"),
+                     y.T if y.ndim > 1 else y, sr, subtype="PCM_24")
 
     # Pass 2: 验证 —— 仅在残差问题超阈值时做针对性校正（占 0.72~0.95）
     if strategy.needs_verify and y.size:
@@ -166,16 +182,28 @@ def process_track_adaptive_premium(y: np.ndarray, sr: int, intent: dict,
                 progress(0.78, "二遍清除残留削波...")
             y = _v32a_declip(y, strategy.declip * 0.5)
             verify_notes.append("二遍清除残留削波")
+            if debug_output_dir:
+                save_idx += 1
+                sf.write(os.path.join(debug_output_dir, f"{save_idx:02d}_pass2_declip.wav"),
+                         y.T if y.ndim > 1 else y, sr, subtype="PCM_24")
         if residual.has_sibilance(threshold=0.10) and strategy.de_ess > 0:
             if progress:
                 progress(0.84, "二遍清除残留齿音...")
             y = _v32a_de_ess(y, sr, strategy.de_ess * 0.4)
             verify_notes.append("二遍清除残留齿音")
+            if debug_output_dir:
+                save_idx += 1
+                sf.write(os.path.join(debug_output_dir, f"{save_idx:02d}_pass2_deess.wav"),
+                         y.T if y.ndim > 1 else y, sr, subtype="PCM_24")
         if residual.is_noisy(threshold_snr=33.0) and strategy.noise_reduction > 0:
             if progress:
                 progress(0.90, "二遍清除残留噪声...")
             y = _v32a_spectral_denoise(y, sr, strategy.noise_reduction * 0.4)
             verify_notes.append("二遍清除残留噪声")
+            if debug_output_dir:
+                save_idx += 1
+                sf.write(os.path.join(debug_output_dir, f"{save_idx:02d}_pass2_denoise.wav"),
+                         y.T if y.ndim > 1 else y, sr, subtype="PCM_24")
         if verify_notes:
             notes.append("二遍验证: " + ", ".join(verify_notes))
         else:
@@ -183,6 +211,12 @@ def process_track_adaptive_premium(y: np.ndarray, sr: int, intent: dict,
     if progress:
         progress(0.99, "峰值限制...")
     y = soft_peak_limit(y, threshold=0.9)
+
+    if debug_output_dir:
+        save_idx += 1
+        sf.write(os.path.join(debug_output_dir, f"{save_idx:02d}_peak_limit.wav"),
+                 y.T if y.ndim > 1 else y, sr, subtype="PCM_24")
+
     return y, notes
 
 
@@ -236,10 +270,12 @@ def repair_single_track(input_path: str, output_path: str, params: dict, progres
     gc.collect()
 
     intent = _map_single_params(params)
+    debug_output_dir = params.get("_debug_output_dir")
     if progress_callback:
         progress_callback(0.12, f"{VERSION_TAG} 分析+自适应处理...")
     sub = _make_sub_progress(progress_callback, 0.14, 0.83)
-    y, notes = process_track_adaptive_premium(y, sr, intent, progress=sub)
+    y, notes = process_track_adaptive_premium(y, sr, intent, progress=sub,
+                                              debug_output_dir=debug_output_dir)
     issues_found = ["单轨·自适应分析(两遍)"] + notes
 
     mastering_style = intent.get("mastering_style", "none")
@@ -249,6 +285,9 @@ def repair_single_track(input_path: str, output_path: str, params: dict, progres
         y, mnote = _apply_mastering(y, working_sr, mastering_style)
         if mnote:
             issues_found.append(mnote)
+        if debug_output_dir:
+            sf.write(os.path.join(debug_output_dir, "99_mastering.wav"),
+                     y.T if y.ndim > 1 else y, working_sr, subtype="PCM_24")
 
     if progress_callback:
         progress_callback(0.90, f"{VERSION_TAG} 导出...")
@@ -363,6 +402,12 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
         mixed, mnote = _apply_mastering(mixed, working_sr, mastering_style)
         if mnote:
             issues_found.append(mnote)
+
+    # Apply master volume control
+    output_volume_db = params.get("output_volume", 0.0)
+    if output_volume_db != 0.0:
+        volume_gain = 10 ** (output_volume_db / 20.0)
+        mixed = (mixed * volume_gain).astype(mixed.dtype)
 
     if progress_callback:
         progress_callback(0.90, f"{VERSION_TAG} 导出...")

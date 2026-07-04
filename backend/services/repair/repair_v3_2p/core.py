@@ -122,14 +122,20 @@ def _stft(y, n_fft, hop_length):
 
 def _istft(D, hop_length, length):
     n_fft = (D.shape[0] - 1) * 2
-    y = np.zeros(length)
+    expected_len = n_fft + hop_length * (D.shape[1] - 1)
+    y = np.zeros(expected_len)
+    window_sum = np.zeros(expected_len)
     window = np.hanning(n_fft)
+    win_sq = window ** 2
     for i in range(D.shape[1]):
         start = i * hop_length
-        if start + n_fft > length:
-            break
         frame = np.fft.irfft(D[:, i])
         y[start:start + n_fft] += frame * window
+        window_sum[start:start + n_fft] += win_sq
+    nonzero = window_sum > 1e-10
+    y[nonzero] /= window_sum[nonzero]
+    pad = n_fft // 2
+    y = y[pad:pad + length]
     return y
 
 def process_vocal_track(y, sr, params):
@@ -139,19 +145,33 @@ def process_vocal_track(y, sr, params):
         y = time_stretch_hifi(y, sr, speed)
     amount = params.get('amount', 1.0)
     y = y.copy().astype(np.float64)
-    y = _tanh_declip(y, amount * params.get('declip', 0.5))
-    y = _diff_clamp_depop(y, sr, amount * params.get('depop', 0.5))
-    y = _vocal_formant_repair(y, sr, amount * params.get('formant_repair', 0.5))
-    y = _apply_vocal_de_ess(y, sr, amount * params.get('de_ess', 0.5))
-    y = _de_esser_improved(y, sr, amount * params.get('de_esser_improved', 0.5))
-    y = _vocal_ai_repair_dual_resolution(y, sr, amount * params.get('ai_repair_adaptive', 0.5))
-    y = _resonance_suppress_enhanced(y, sr, amount * params.get('resonance_suppress', 0.3))
-    y = _vocal_breath_enhance(y, sr, amount * params.get('breath_enhance', 0.3))
-    y = _vocal_exciter_improved(y, sr, amount * params.get('exciter_improved', 0.3))
-    y = _lookahead_compressor(y, sr, amount * params.get('smart_compressor', 0.5))
-    y = _transient_aware_process(y, sr, amount * params.get('transient_aware', 0.3))
-    y = _vocal_warmth(y, sr, amount * params.get('vocal_warmth', 0.3))
-    y = _vocal_spatial_enhanced(y, sr, amount * params.get('vocal_spatial', 0.3))
+    # 仅在参数 > 0 时才激活效果器，避免默认值导致所有效果器同时激活
+    if params.get('declip', 0) > 0:
+        y = _tanh_declip(y, amount * params['declip'])
+    if params.get('depop', 0) > 0:
+        y = _diff_clamp_depop(y, sr, amount * params['depop'])
+    if params.get('formant_repair', 0) > 0:
+        y = _vocal_formant_repair(y, sr, amount * params['formant_repair'])
+    if params.get('de_ess', 0) > 0:
+        y = _apply_vocal_de_ess(y, sr, amount * params['de_ess'])
+    if params.get('de_esser_improved', 0) > 0:
+        y = _de_esser_improved(y, sr, amount * params['de_esser_improved'])
+    if params.get('ai_repair_adaptive', 0) > 0:
+        y = _vocal_ai_repair_dual_resolution(y, sr, amount * params['ai_repair_adaptive'])
+    if params.get('resonance_suppress', 0) > 0:
+        y = _resonance_suppress_enhanced(y, sr, amount * params['resonance_suppress'])
+    if params.get('breath_enhance', 0) > 0:
+        y = _vocal_breath_enhance(y, sr, amount * params['breath_enhance'])
+    if params.get('exciter_improved', 0) > 0:
+        y = _vocal_exciter_improved(y, sr, amount * params['exciter_improved'])
+    if params.get('smart_compressor', 0) > 0:
+        y = _lookahead_compressor(y, sr, amount * params['smart_compressor'])
+    if params.get('transient_aware', 0) > 0:
+        y = _transient_aware_process(y, sr, amount * params['transient_aware'])
+    if params.get('vocal_warmth', 0) > 0:
+        y = _vocal_warmth(y, sr, amount * params['vocal_warmth'])
+    if params.get('vocal_spatial', 0) > 0:
+        y = _vocal_spatial_enhanced(y, sr, amount * params['vocal_spatial'])
     y = _adaptive_loudness_normalize(y, sr)
     y = soft_peak_limit(y)
     return np.clip(y, -1, 1)

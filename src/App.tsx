@@ -8,6 +8,7 @@ import CacheManagerPage from "@/pages/CacheManagerPage";
 import ComparePage from "@/pages/ComparePage";
 import DetectPage from "@/pages/DetectPage";
 import FlowVisualizationPage from "@/pages/FlowVisualizationPage";
+import DebugRepairPage from "@/pages/DebugRepairPage";
 import { BuildInfo } from "@/components/BuildInfo";
 import { useEffect, useState } from "react";
 import { BackendProvider } from "@/contexts/BackendContext";
@@ -117,6 +118,7 @@ const router = createBrowserRouter([
       { path: "/compare", element: <ComparePage /> },
       { path: "/detect", element: <DetectPage /> },
       { path: "/flow", element: <FlowVisualizationPage /> },
+      { path: "/debug-repair", element: <DebugRepairPage /> },
     ],
   },
 ]);

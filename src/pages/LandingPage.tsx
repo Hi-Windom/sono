@@ -217,6 +217,31 @@ export default function LandingPage() {
             </div>
           </div>
 
+          {/* 调试修复 */}
+          <div
+            onClick={() => navigate('/debug-repair')}
+            className="group bg-primary/50 border border-yellow-500/20 rounded-2xl p-8 cursor-pointer
+                       hover:border-yellow-400/50 hover:bg-primary/70 transition-all duration-300"
+          >
+            <div className="w-16 h-16 bg-gradient-to-br from-yellow-500/20 to-orange-500/20 rounded-xl
+                            flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
+              <svg className="w-8 h-8 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                      d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
+              </svg>
+            </div>
+            <h2 className="text-2xl font-bold text-white mb-3">调试修复</h2>
+            <p className="text-gray-400 mb-4">
+              对同一音频运行多个内部处理链变体，生成对比结果定位 Bug
+            </p>
+            <div className="flex items-center text-yellow-400 group-hover:text-yellow-300">
+              <span className="text-sm font-medium">调试入口</span>
+              <svg className="w-5 h-5 ml-2 group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
+              </svg>
+            </div>
+          </div>
+
           {/* AI检测分析 */}
           <div
             onClick={() => navigate('/detect')}
