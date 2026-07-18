@@ -5,6 +5,20 @@ v3.2 参数验证器 - 确保所有传递的参数都被正确处理
 这确保问题在构建时暴露，而不是运行时才被发现。
 """
 
+# 上层传入的通用/元数据参数，不属于音频处理参数，验证时跳过
+IGNORED_META_PARAMS = {
+    'algorithm_version',
+    'sample_rate',
+    'mastering_mode',
+    'output_gain',
+    'processing_mode',
+    'source_bit_depth',
+    'bit_depth',
+    'vocal_task_id',
+    'accompaniment_task_id',
+    'mix_ratio',
+}
+
 # v3.2 单轨处理允许的参数列表
 ALLOWED_SINGLE_PARAMS = {
     # 基础参数
@@ -58,6 +72,8 @@ def validate_single_params(params: dict) -> None:
     for key in params.keys():
         if key.startswith('_'):  # 内部参数跳过（如 _issues）
             continue
+        if key in IGNORED_META_PARAMS:  # 元数据参数跳过
+            continue
         if key not in ALLOWED_SINGLE_PARAMS:
             unexpected_params.append(key)
 
@@ -81,6 +97,8 @@ def validate_vocal_params(params: dict) -> None:
 
     for key in params.keys():
         if key.startswith('_'):
+            continue
+        if key in IGNORED_META_PARAMS:
             continue
         if key not in ALLOWED_VOCAL_PARAMS:
             unexpected_params.append(key)
@@ -106,6 +124,8 @@ def validate_inst_params(params: dict) -> None:
     for key in params.keys():
         if key.startswith('_'):
             continue
+        if key in IGNORED_META_PARAMS:
+            continue
         if key not in ALLOWED_INST_PARAMS:
             unexpected_params.append(key)
 
@@ -127,6 +147,8 @@ def get_missing_params(params: dict, allowed_params: set) -> list:
     missing = []
     for key in params.keys():
         if key.startswith('_'):
+            continue
+        if key in IGNORED_META_PARAMS:
             continue
         if key not in allowed_params:
             missing.append(key)
