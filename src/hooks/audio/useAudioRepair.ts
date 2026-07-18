@@ -17,6 +17,7 @@ import { AIRepairParams, RepairMode, defaultAIRepairParams } from '../../utils/a
 import { writeLog } from './utils';
 import type { AudioCoreState, AudioCoreRefs } from './useAudioCore';
 import type { RenderResult } from './useAudioExport';
+import { useToast } from '../../components/Toast';
 
 interface UseAudioRepairOptions {
   state: AudioCoreState;
@@ -34,6 +35,7 @@ export function useAudioRepair({
   loadAudioFromUrl,
   renderAndDownload,
 }: UseAudioRepairOptions) {
+  const toast = useToast();
   const {
     audioFile,
     audioBuffer,
@@ -115,7 +117,11 @@ export function useAudioRepair({
   }, [wsControlRef]);
 
   const applySettings = useCallback(async () => {
-    if (!audioBuffer) return;
+    if (!audioBuffer) {
+      console.warn('[applySettings] audioBuffer 为空，无法开始修复');
+      toast.warning('请先上传音频文件');
+      return;
+    }
 
     setIsProcessing(true);
     setProcessingProgress(0);
@@ -184,6 +190,8 @@ export function useAudioRepair({
     if (!currentTaskId) {
       if (!audioFile) {
         writeLog(`[applySettings] 没有音频文件，无法创建任务`);
+        console.warn('[applySettings] audioFile 为空，无法创建任务');
+        toast.error('请先上传音频文件');
         setIsProcessing(false);
         return;
       }
@@ -200,6 +208,7 @@ export function useAudioRepair({
         setBackendError('上传失败: ' + msg);
         setProcessingStep('[上传失败] ' + msg);
         setIsProcessing(false);
+        toast.error(`上传失败: ${msg}`);
         return;
       }
       currentTaskId = uploadRes.task_id;
@@ -270,6 +279,7 @@ export function useAudioRepair({
         setProcessingSource('backend');
         setProcessingStep('修复失败: ' + msg);
         setBackendAvailable(false);
+        toast.error(`修复失败: ${msg}`);
         return null;
       }
     })() : Promise.resolve(null);
@@ -398,6 +408,7 @@ export function useAudioRepair({
     state,
     loadAudioFromUrl,
     renderAndDownload,
+    toast,
   ]);
 
   const resetStuckState = useCallback(() => {

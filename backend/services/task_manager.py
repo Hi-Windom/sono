@@ -18,6 +18,7 @@ from services.ai_detector import detect_ai_audio
 from services.audio_repair import ALGORITHM_VERSIONS, DEFAULT_VERSION, repair_audio
 from services.memory_guard import get_available_memory_bytes
 from services.ws_manager import ws_manager
+from services.perf_metrics import get_perf_collector, perf_timer
 
 logger = logging.getLogger(__name__)
 
@@ -185,9 +186,14 @@ def _handle_future_exception(future: Future[Any], task_id: str, task_type: str) 
     except FutureTimeoutError:
         logger.error(f"[{task_type}] 任务超时 task_id={task_id}")
         update_task(task_id, status="error", error=f"任务执行超时（{TASK_TIMEOUTS.get(task_type, 300)}秒）", step="执行超时")
+        _ws_send_final(task_id, {"task_id": task_id, "status": "error", "progress": 0, "step": "执行超时", "error": f"任务执行超时（{TASK_TIMEOUTS.get(task_type, 300)}秒）", "error_type": "timeout"})
     except Exception as e:
-        logger.error(f"[{task_type}] 任务异常 task_id={task_id}: {e}")
-        update_task(task_id, status="error", error=f"任务执行异常: {str(e)}", step="执行异常")
+        tb_str = traceback.format_exc()
+        error_msg = f"{type(e).__name__}: {e}"
+        full_error = f"{error_msg}\n{tb_str}"
+        logger.error(f"[{task_type}] 任务异常 task_id={task_id}: {full_error}")
+        update_task(task_id, status="error", error=full_error[:1000], step="执行异常")
+        _ws_send_final(task_id, {"task_id": task_id, "status": "error", "progress": 0, "step": "执行异常", "error": error_msg, "error_type": type(e).__name__, "traceback": tb_str[:2000]})
 
 
 def _run_detect(task_id: str, audio_path: str, detect_type: str, detector_version: str) -> None:
@@ -295,6 +301,8 @@ def _run_detect(task_id: str, audio_path: str, detect_type: str, detector_versio
 def _run_repair(task_id: str, audio_path: str, params: dict[str, Any], mobile_mode: bool = False) -> None:
     start_time = time.time()
     algorithm_version = params.get("algorithm_version", DEFAULT_VERSION)
+    perf_collector = get_perf_collector()
+    perf_collector.start_repair(task_id)
     
     if mobile_mode:
         version_info = ALGORITHM_VERSIONS.get(algorithm_version)
@@ -368,15 +376,27 @@ def _run_repair(task_id: str, audio_path: str, params: dict[str, Any], mobile_mo
             update_task(task_id, progress=p, step=s)
             _ws_send_progress(task_id, {"task_id": task_id, "status": "repairing", "progress": p, "step": s})
 
-        repair_result = repair_audio(
-            audio_path,
-            output_path,
-            params,
-            progress_callback,
-            mobile_mode=mobile_mode
-        )
+        with perf_timer("repair_total"):
+            repair_result = repair_audio(
+                audio_path,
+                output_path,
+                params,
+                progress_callback,
+                mobile_mode=mobile_mode
+            )
 
         elapsed = time.time() - start_time
+
+        size_samples = 0
+        try:
+            from services.audio_loader import load_audio_with_fallback
+            y, sr = load_audio_with_fallback(audio_path, sr=None, mono=False)
+            size_samples = y.shape[1] if y.ndim > 1 else len(y)
+        except Exception:
+            pass
+
+        perf_data = perf_collector.end_repair(task_id, size_samples, algorithm_version)
+        repair_result["perf_data"] = perf_data
 
         if os.path.exists(output_path):
             output_size = os.path.getsize(output_path)

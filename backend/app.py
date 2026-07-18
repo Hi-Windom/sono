@@ -2,12 +2,16 @@ import os
 import time
 import asyncio
 import logging
+import uuid
+import traceback
 from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, Response, JSONResponse
+from fastapi.exceptions import RequestValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from api.routes import router
 from config import MOBILE_MODE
 from pydantic import BaseModel
@@ -80,16 +84,21 @@ def create_app() -> FastAPI:
 
     @app.middleware("http")
     async def log_requests(request: Request, call_next):
+        request_id = str(uuid.uuid4())[:12]
+        request.state.request_id = request_id
         start = time.time()
-        logger.info(f">>> {request.method} {request.url.path} query={dict(request.query_params)} client={request.client.host if request.client else 'unknown'}")
+        client_ip = request.client.host if request.client else 'unknown'
+        logger.info(f"[{request_id}] >>> {request.method} {request.url.path} query={dict(request.query_params)} client={client_ip}")
         try:
             response = await call_next(request)
             elapsed = time.time() - start
-            logger.info(f"<<< {request.method} {request.url.path} status={response.status_code} time={elapsed:.3f}s")
+            response.headers["X-Request-ID"] = request_id
+            logger.info(f"[{request_id}] <<< {request.method} {request.url.path} status={response.status_code} time={elapsed:.3f}s")
             return response
         except Exception as e:
             elapsed = time.time() - start
-            logger.error(f"!!! {request.method} {request.url.path} error={e} time={elapsed:.3f}s")
+            tb_str = traceback.format_exc()
+            logger.error(f"[{request_id}] !!! {request.method} {request.url.path} error={type(e).__name__}: {e}\n{tb_str}")
             raise
 
     app.add_middleware(
@@ -101,6 +110,62 @@ def create_app() -> FastAPI:
     )
 
     app.include_router(router)
+
+    @app.exception_handler(StarletteHTTPException)
+    async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+        request_id = getattr(request.state, "request_id", "unknown")
+        error_detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
+        logger.error(f"[{request_id}] HTTP {exc.status_code}: {error_detail}")
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={
+                "error": {
+                    "code": f"http_{exc.status_code}",
+                    "message": error_detail,
+                    "detail": "",
+                    "request_id": request_id,
+                }
+            },
+        )
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_exception_handler(request: Request, exc: RequestValidationError):
+        request_id = getattr(request.state, "request_id", "unknown")
+        errors = []
+        for err in exc.errors():
+            loc = " -> ".join(str(x) for x in err.get("loc", []))
+            msg = err.get("msg", "validation error")
+            errors.append(f"{loc}: {msg}")
+        error_msg = "; ".join(errors) if errors else "请求参数验证失败"
+        logger.error(f"[{request_id}] Validation Error: {error_msg}")
+        return JSONResponse(
+            status_code=422,
+            content={
+                "error": {
+                    "code": "validation_error",
+                    "message": "请求参数验证失败",
+                    "detail": error_msg,
+                    "request_id": request_id,
+                }
+            },
+        )
+
+    @app.exception_handler(Exception)
+    async def general_exception_handler(request: Request, exc: Exception):
+        request_id = getattr(request.state, "request_id", "unknown")
+        tb_str = traceback.format_exc()
+        logger.error(f"[{request_id}] Unhandled Exception: {type(exc).__name__}: {exc}\n{tb_str}")
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": {
+                    "code": "internal_server_error",
+                    "message": "服务器内部错误",
+                    "detail": f"{type(exc).__name__}: {str(exc)}",
+                    "request_id": request_id,
+                }
+            },
+        )
 
     @app.get("/health")
     async def health():

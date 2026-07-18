@@ -128,11 +128,20 @@ export default defineConfig(({ mode }) => {
     },
     build: {
       sourcemap: 'hidden',
+      target: 'es2019',
+      cssCodeSplit: true,
+      minify: 'esbuild',
+      reportCompressedSize: false,
+      chunkSizeWarningLimit: 1000,
       rollupOptions: {
         output: {
           entryFileNames: `assets/[name].[hash].js`,
           chunkFileNames: `assets/[name].[hash].js`,
           assetFileNames: `assets/[name].[hash].[ext]`,
+          manualChunks: {
+            'react-vendor': ['react', 'react-dom', 'react-router-dom'],
+            'ui-vendor': ['lucide-react'],
+          },
         },
       },
     },

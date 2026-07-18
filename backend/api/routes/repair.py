@@ -2,7 +2,8 @@ import os
 import json
 import logging
 import shutil
-from fastapi import APIRouter, HTTPException
+import traceback
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
@@ -50,22 +51,35 @@ class DebugRepairRequest(BaseModel):
 
 
 @router.post("/repair")
-async def repair_audio_endpoint(request: RepairRequest):
-    can_accept, reject_reason = can_accept_task()
-    if not can_accept:
-        raise HTTPException(status_code=503, detail=reject_reason)
+async def repair_audio_endpoint(request: Request, body: RepairRequest):
+    request_id = getattr(request.state, "request_id", "unknown")
+    try:
+        logger.info(f"[{request_id}] [/repair] 收到请求 task_id={body.task_id}")
+        can_accept, reject_reason = can_accept_task()
+        if not can_accept:
+            logger.warning(f"[{request_id}] [/repair] 任务被拒绝: {reject_reason}")
+            raise HTTPException(status_code=503, detail=reject_reason)
 
-    task = get_task(request.task_id)
-    if not task:
-        raise HTTPException(status_code=404, detail="任务不存在")
+        task = get_task(body.task_id)
+        if not task:
+            logger.warning(f"[{request_id}] [/repair] 任务不存在 task_id={body.task_id}")
+            raise HTTPException(status_code=404, detail="任务不存在")
 
-    audio_path = task.get("original_path")
-    if not audio_path or not os.path.exists(audio_path):
-        raise HTTPException(status_code=400, detail="原始音频不存在")
+        audio_path = task.get("original_path")
+        if not audio_path or not os.path.exists(audio_path):
+            logger.warning(f"[{request_id}] [/repair] 原始音频不存在 task_id={body.task_id}")
+            raise HTTPException(status_code=400, detail="原始音频不存在")
 
-    submit_repair_task(request.task_id, audio_path, request.params)
+        submit_repair_task(body.task_id, audio_path, body.params)
+        logger.info(f"[{request_id}] [/repair] 任务已提交 task_id={body.task_id}")
 
-    return {"task_id": request.task_id, "status": "pending"}
+        return {"task_id": body.task_id, "status": "pending"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        tb_str = traceback.format_exc()
+        logger.error(f"[{request_id}] [/repair] 接口异常: {type(e).__name__}: {e}\n{tb_str}")
+        raise HTTPException(status_code=500, detail=f"修复请求处理失败: {str(e)}")
 
 
 @router.post("/repair-dual")
@@ -278,16 +292,20 @@ async def get_track_status(task_id: str):
 
 
 @router.get("/status/{task_id}")
-async def get_task_status(task_id: str):
+async def get_task_status(request: Request, task_id: str):
+    request_id = getattr(request.state, "request_id", "unknown")
     try:
+        logger.debug(f"[{request_id}] [/status/{task_id}] 查询任务状态")
         task = get_task(task_id)
         if not task:
+            logger.warning(f"[{request_id}] [/status/{task_id}] 任务不存在")
             raise HTTPException(status_code=404, detail="任务不存在")
         return task
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"[/status/{task_id}] 获取任务状态失败: {e}", exc_info=True)
+        tb_str = traceback.format_exc()
+        logger.error(f"[{request_id}] [/status/{task_id}] 获取任务状态失败: {type(e).__name__}: {e}\n{tb_str}")
         raise HTTPException(status_code=503, detail=f"获取任务状态失败: {str(e)[:100]}")
 
 

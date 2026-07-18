@@ -300,6 +300,8 @@ def _vocal_ai_repair_adaptive(y, sr, strength):
         _vocal_ai_repair_adaptive(y, sr, strength)
         return y[0]
 
+    from scipy.ndimage import minimum_filter1d, uniform_filter1d
+
     for ch in range(y.shape[0]):
         data = y[ch].astype(np.float64)
         S = stft(data, n_fft=N_FFT, hop_length=HOP_LENGTH)
@@ -315,32 +317,24 @@ def _vocal_ai_repair_adaptive(y, sr, strength):
         mid_cut = min(mid_cut, n_bins)
 
         min_stats_frames = 10
-        noise_floor_min = np.zeros_like(magnitude)
-        for b in range(n_bins):
-            for f in range(n_frames):
-                start_f = max(0, f - min_stats_frames + 1)
-                noise_floor_min[b, f] = np.min(magnitude[b, start_f:f+1])
+        noise_floor_min = minimum_filter1d(magnitude, size=min_stats_frames, axis=1, mode='nearest')
 
         threshold = np.zeros_like(magnitude)
-        for f in range(n_frames):
-            threshold[:low_cut, f] = noise_floor_min[:low_cut, f] * (1.0 + strength * 2.0)
-            threshold[low_cut:mid_cut, f] = noise_floor_min[low_cut:mid_cut, f] * (1.0 + strength * 2.5)
-            threshold[mid_cut:, f] = noise_floor_min[mid_cut:, f] * (1.0 + strength * 3.0)
+        if low_cut > 0:
+            threshold[:low_cut, :] = noise_floor_min[:low_cut, :] * (1.0 + strength * 2.0)
+        if mid_cut > low_cut:
+            threshold[low_cut:mid_cut, :] = noise_floor_min[low_cut:mid_cut, :] * (1.0 + strength * 2.5)
+        if mid_cut < n_bins:
+            threshold[mid_cut:, :] = noise_floor_min[mid_cut:, :] * (1.0 + strength * 3.0)
 
         gain_map = np.where(magnitude < threshold, magnitude / (threshold + 1e-10), 1.0)
         gain_map = np.maximum(gain_map, 1.0 - strength * 0.3)
 
         smoothing_frames = max(2, int(0.02 * sr / HOP_LENGTH))
-        kernel = np.ones(smoothing_frames) / smoothing_frames
-        gain_map_smooth = np.zeros_like(gain_map)
-        for b in range(n_bins):
-            gain_map_smooth[b] = np.convolve(gain_map[b], kernel, mode='same')
+        gain_map_smooth = uniform_filter1d(gain_map, size=smoothing_frames, axis=1, mode='nearest')
 
         spectral_kernel_size = max(3, n_bins // 16)
-        spectral_kernel = np.ones(spectral_kernel_size) / spectral_kernel_size
-        gain_map_spectral = np.zeros_like(gain_map_smooth)
-        for f in range(n_frames):
-            gain_map_spectral[:, f] = np.convolve(gain_map_smooth[:, f], spectral_kernel, mode='same')
+        gain_map_spectral = uniform_filter1d(gain_map_smooth, size=spectral_kernel_size, axis=0, mode='nearest')
 
         S_repaired = magnitude * gain_map_spectral * np.exp(1j * phase)
         y_out = istft(S_repaired, hop_length=HOP_LENGTH, length=len(data))

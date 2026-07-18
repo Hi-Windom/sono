@@ -10,6 +10,7 @@ import DetectPage from "@/pages/DetectPage";
 import FlowVisualizationPage from "@/pages/FlowVisualizationPage";
 import DebugRepairPage from "@/pages/DebugRepairPage";
 import { BuildInfo } from "@/components/BuildInfo";
+import { ToastProvider } from "@/components/Toast";
 import { useEffect, useState } from "react";
 import { BackendProvider } from "@/contexts/BackendContext";
 
@@ -36,20 +37,48 @@ function VConsoleInit() {
 }
 
 function GlobalErrorHandler() {
-  const [fatalError] = useState<string | null>(null);
+  const [fatalError, setFatalError] = useState<string | null>(null);
 
   useEffect(() => {
     const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
-      console.error('[GlobalErrorHandler] 未处理的 Promise 拒绝:', event.reason);
-      const msg = event.reason?.message || String(event.reason);
+      const reason = event.reason;
+      const msg = reason?.message || String(reason);
+      console.error('[GlobalErrorHandler] 未处理的 Promise 拒绝:', reason);
+
       if (msg.includes('chunk') || msg.includes('Loading') || msg.includes('import')) {
         window.location.reload();
         return;
       }
+
+      if (reason?.isNetworkError || reason?.isTimeout) {
+        console.warn('[GlobalErrorHandler] 网络错误，不显示致命错误界面');
+        return;
+      }
+
+      try {
+        fetch('/api/log', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            message: `[Frontend UnhandledRejection] ${msg}\n${reason?.stack || ''}`,
+            level: 'error',
+          }),
+        }).catch(() => {});
+      } catch {}
     };
 
     const handleError = (event: ErrorEvent) => {
       console.error('[GlobalErrorHandler] 未捕获的错误:', event.error);
+      try {
+        fetch('/api/log', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            message: `[Frontend Error] ${event.message}\n${event.error?.stack || ''}`,
+            level: 'error',
+          }),
+        }).catch(() => {});
+      } catch {}
     };
 
     window.addEventListener('unhandledrejection', handleUnhandledRejection);
@@ -125,8 +154,10 @@ const router = createBrowserRouter([
 
 export default function App() {
   return (
-    <BackendProvider>
-      <RouterProvider router={router} />
-    </BackendProvider>
+    <ToastProvider>
+      <BackendProvider>
+        <RouterProvider router={router} />
+      </BackendProvider>
+    </ToastProvider>
   );
 }

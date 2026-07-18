@@ -1,11 +1,19 @@
 import numpy as np
 from functools import lru_cache
+import time
 
 
-@lru_cache(maxsize=16)
-def _get_window(window: str, n_fft: int) -> np.ndarray:
-    from scipy.signal import get_window
-    return get_window(window, n_fft, fftbins=True)
+_WINDOW_CACHE = {}
+
+
+def _get_window(window: str, n_fft: int, dtype=np.float64) -> np.ndarray:
+    key = (window, n_fft, dtype)
+    if key not in _WINDOW_CACHE:
+        from scipy.signal import get_window
+        w = get_window(window, n_fft, fftbins=True).astype(dtype)
+        _WINDOW_CACHE[key] = w
+        _WINDOW_CACHE[(window, n_fft, np.complex128 if dtype == np.float64 else np.complex64)] = w.astype(dtype)
+    return _WINDOW_CACHE[key]
 
 
 def _dct(x, **kwargs):
@@ -21,63 +29,69 @@ def _medfilt(x, **kwargs):
 def _stride_frames(y, frame_length, hop_length):
     n_frames = 1 + (len(y) - frame_length) // hop_length
     if n_frames <= 0:
-        return np.empty((0, frame_length))
+        return np.empty((0, frame_length), dtype=y.dtype)
     strides = (y.strides[0] * hop_length, y.strides[0])
     return np.lib.stride_tricks.as_strided(y, shape=(n_frames, frame_length), strides=strides)
 
 
+def _get_dtype(y):
+    if y.dtype == np.float32:
+        return np.float32, np.complex64
+    return np.float64, np.complex128
+
+
 def stft(y, n_fft=2048, hop_length=512, window='hann'):
-    fft_window = _get_window(window, n_fft)
+    f_dtype, c_dtype = _get_dtype(y)
+    fft_window = _get_window(window, n_fft, f_dtype)
     pad_length = n_fft // 2
-    y_padded = np.pad(y, (pad_length, pad_length), mode='reflect')
+    y_padded = np.pad(y, (pad_length, pad_length), mode='reflect').astype(f_dtype, copy=False)
     frames = _stride_frames(y_padded, n_fft, hop_length)
     if frames.shape[0] == 0:
-        return np.empty((1 + n_fft // 2, 0), dtype=np.complex128)
-    windowed = frames * fft_window[np.newaxis, :]
+        return np.empty((1 + n_fft // 2, 0), dtype=c_dtype)
+    windowed = frames * fft_window
     S = np.fft.rfft(windowed, axis=1).T
     return S
 
 
 def stft_chunked(y, n_fft=2048, hop_length=512, window='hann', chunk_frames=4096):
-    fft_window = _get_window(window, n_fft)
+    f_dtype, c_dtype = _get_dtype(y)
+    fft_window = _get_window(window, n_fft, f_dtype)
     pad_length = n_fft // 2
-    y_padded = np.pad(y, (pad_length, pad_length), mode='reflect')
+    y_padded = np.pad(y, (pad_length, pad_length), mode='reflect').astype(f_dtype, copy=False)
     n_frames = 1 + (len(y_padded) - n_fft) // hop_length
     if n_frames <= 0:
-        return np.empty((1 + n_fft // 2, 0), dtype=np.complex128)
+        return np.empty((1 + n_fft // 2, 0), dtype=c_dtype)
     n_bins = 1 + n_fft // 2
-    S = np.empty((n_bins, n_frames), dtype=np.complex128)
+    S = np.empty((n_bins, n_frames), dtype=c_dtype)
     for start in range(0, n_frames, chunk_frames):
         end = min(start + chunk_frames, n_frames)
         starts = start * hop_length
         ends = starts + n_fft + (end - start - 1) * hop_length
-        chunk_data = y_padded[starts:ends]
-        chunk_frames_data = _stride_frames(
-            np.ascontiguousarray(chunk_data), n_fft, hop_length
-        )[:end - start]
-        windowed = chunk_frames_data * fft_window[np.newaxis, :]
+        chunk_data = np.ascontiguousarray(y_padded[starts:ends])
+        chunk_frames_data = _stride_frames(chunk_data, n_fft, hop_length)[:end - start]
+        windowed = chunk_frames_data * fft_window
         S[:, start:end] = np.fft.rfft(windowed, axis=1).T
     return S
 
 
 def istft(S, hop_length=512, length=None, window='hann'):
     n_fft = 2 * (S.shape[0] - 1)
-    fft_window = _get_window(window, n_fft)
+    c_dtype = S.dtype
+    f_dtype = np.float32 if c_dtype == np.complex64 else np.float64
+    fft_window = _get_window(window, n_fft, f_dtype)
     n_frames = S.shape[1]
     expected_signal_len = n_fft + hop_length * (n_frames - 1)
-    y = np.zeros(expected_signal_len)
-    window_sum = np.zeros(expected_signal_len)
+    y = np.zeros(expected_signal_len, dtype=f_dtype)
+    window_sum = np.zeros(expected_signal_len, dtype=f_dtype)
     frames = np.fft.irfft(S.T, n=n_fft, axis=1)
-    windowed = frames * fft_window[np.newaxis, :]
+    windowed = frames * fft_window
     win_sq = fft_window ** 2
     frame_starts = np.arange(n_frames) * hop_length
-    # 分块 overlap-add：块宽 = hop_length，保证块内索引无重复，可用直接赋值累加
-    # （跨块顺序 += 正确累加重叠帧），避免一次性物化 (n_frames, n_fft) 索引矩阵省内存
     block = max(1, hop_length)
     for i0 in range(0, n_fft, block):
         i1 = min(i0 + block, n_fft)
-        cols = np.arange(i0, i1)  # offset by i0 so each block writes to correct position
-        idx = frame_starts[:, None] + cols  # (n_frames, b)，块内无重复
+        cols = np.arange(i0, i1)
+        idx = frame_starts[:, None] + cols
         y[idx] += windowed[:, i0:i1]
         window_sum[idx] += win_sq[i0:i1]
     nonzero = window_sum > 1e-10
@@ -91,23 +105,25 @@ def istft(S, hop_length=512, length=None, window='hann'):
 
 def istft_chunked(S, hop_length=512, length=None, window='hann', chunk_frames=4096):
     n_fft = 2 * (S.shape[0] - 1)
-    fft_window = _get_window(window, n_fft)
+    c_dtype = S.dtype
+    f_dtype = np.float32 if c_dtype == np.complex64 else np.float64
+    fft_window = _get_window(window, n_fft, f_dtype)
     n_frames = S.shape[1]
     expected_signal_len = n_fft + hop_length * (n_frames - 1)
-    y = np.zeros(expected_signal_len)
-    window_sum = np.zeros(expected_signal_len)
+    y = np.zeros(expected_signal_len, dtype=f_dtype)
+    window_sum = np.zeros(expected_signal_len, dtype=f_dtype)
     win_sq = fft_window ** 2
     block = max(1, hop_length)
     for start in range(0, n_frames, chunk_frames):
         end = min(start + chunk_frames, n_frames)
         S_chunk = S[:, start:end]
         frames = np.fft.irfft(S_chunk.T, n=n_fft, axis=1)
-        windowed = frames * fft_window[np.newaxis, :]
+        windowed = frames * fft_window
         chunk_n_frames = end - start
         frame_starts = np.arange(start, end) * hop_length
         for i0 in range(0, n_fft, block):
             i1 = min(i0 + block, n_fft)
-            cols = np.arange(i0, i1)  # offset by i0 so each block writes to correct position
+            cols = np.arange(i0, i1)
             idx = frame_starts[:, None] + cols
             y[idx] += windowed[:, i0:i1]
             window_sum[idx] += win_sq[i0:i1]
@@ -133,8 +149,8 @@ def streaming_spectral_process(y, sr, process_fn, n_fft=2048, hop_length=512,
     else:
         global_stats = None
 
-    output = np.zeros(n_samples, dtype=np.float64)
-    window_sum = np.zeros(n_samples, dtype=np.float64)
+    output = np.zeros(n_samples, dtype=y.dtype)
+    window_sum = np.zeros(n_samples, dtype=y.dtype)
 
     fade_len = min(hop_length * 8, chunk_samples // 2)
 
@@ -142,7 +158,7 @@ def streaming_spectral_process(y, sr, process_fn, n_fft=2048, hop_length=512,
     while pos < n_samples:
         start = max(0, pos - overlap_samples)
         end = min(n_samples, pos + chunk_samples + overlap_samples)
-        chunk = y[start:end].astype(np.float64)
+        chunk = y[start:end]
 
         S = stft(chunk, n_fft=n_fft, hop_length=hop_length)
         if global_stats is not None:
@@ -157,14 +173,14 @@ def streaming_spectral_process(y, sr, process_fn, n_fft=2048, hop_length=512,
         region = chunk_out[out_start:out_end]
 
         region_len = len(region)
-        win = np.ones(region_len, dtype=np.float64)
+        win = np.ones(region_len, dtype=y.dtype)
         if pos > 0 and fade_len > 0:
             fl = min(fade_len, region_len // 2)
-            win[:fl] = np.linspace(0, 1, fl)
+            win[:fl] = np.linspace(0, 1, fl, dtype=y.dtype)
         remaining = n_samples - pos - region_len
         if remaining > 0 and fade_len > 0:
             fl = min(fade_len, region_len // 2)
-            win[-fl:] = np.linspace(1, 0, fl)
+            win[-fl:] = np.linspace(1, 0, fl, dtype=y.dtype)
 
         write_start = pos
         write_end = pos + region_len
@@ -177,7 +193,7 @@ def streaming_spectral_process(y, sr, process_fn, n_fft=2048, hop_length=512,
 
     valid = window_sum > 1e-10
     output[valid] /= window_sum[valid]
-    return output.astype(y.dtype)
+    return output
 
 
 def fft_frequencies(sr=22050, n_fft=2048):
@@ -288,16 +304,16 @@ def delta(data, width=9, order=1):
     if width < 3 or width % 2 == 0:
         width = max(3, width if width % 2 == 1 else width + 1)
     half_width = width // 2
-    kernel = np.arange(-half_width, half_width + 1, dtype=float)
+    kernel = np.arange(-half_width, half_width + 1, dtype=np.float64)
     kernel = kernel / np.sum(np.abs(kernel))
     if data.ndim == 1:
         padded = np.pad(data, half_width, mode='edge')
         result = np.convolve(padded, kernel, mode='valid')[:len(data)]
     else:
+        padded = np.pad(data, ((0, 0), (half_width, half_width)), mode='edge')
         result = np.zeros_like(data)
         for row in range(data.shape[0]):
-            padded = np.pad(data[row], half_width, mode='edge')
-            result[row] = np.convolve(padded, kernel, mode='valid')[:data.shape[1]]
+            result[row] = np.convolve(padded[row], kernel, mode='valid')[:data.shape[1]]
     if order > 1:
         return delta(result, width=width, order=order - 1)
     return result

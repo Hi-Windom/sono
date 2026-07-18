@@ -422,6 +422,13 @@
       "filePath": "/workspace/src/components/StemProcessingPanel.tsx"
     },
     {
+      "id": "src-components-Toast",
+      "label": "Toast",
+      "type": "component",
+      "layer": "frontend",
+      "filePath": "/workspace/src/components/Toast.tsx"
+    },
+    {
       "id": "src-components-repair",
       "label": "repair",
       "type": "component",

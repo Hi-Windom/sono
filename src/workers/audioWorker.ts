@@ -4,6 +4,7 @@ export interface DecodedWavResult {
   channels: number;
   bitDepth: number;
   totalFrames: number;
+  decodeTimeMs?: number;
 }
 
 export interface AudioIssue {
@@ -23,6 +24,7 @@ export interface AudioAnalysisResult {
   crackleRegions: number[];
   popRegions: number[];
   detailedIssues: AudioIssue[];
+  analysisTimeMs?: number;
 }
 
 type WorkerRequest =
@@ -90,39 +92,48 @@ function parseWavHeaderFull(buffer: ArrayBuffer): WavParseResult | null {
 
 function deinterleaveInt16(src: Int16Array, channels: number): Float32Array[] {
   const totalFrames = src.length / channels;
-  const outputs: Float32Array[] = [];
+  const outputs: Float32Array[] = new Array(channels);
   for (let ch = 0; ch < channels; ch++) {
-    const out = new Float32Array(totalFrames);
-    for (let i = 0; i < totalFrames; i++) {
-      out[i] = src[i * channels + ch] / 32768;
+    outputs[ch] = new Float32Array(totalFrames);
+  }
+  const invMax = 1 / 32768;
+  let idx = 0;
+  for (let i = 0; i < totalFrames; i++) {
+    for (let ch = 0; ch < channels; ch++) {
+      outputs[ch][i] = src[idx++] * invMax;
     }
-    outputs.push(out);
   }
   return outputs;
 }
 
 function deinterleaveInt32(src: Int32Array, channels: number): Float32Array[] {
   const totalFrames = src.length / channels;
-  const outputs: Float32Array[] = [];
+  const outputs: Float32Array[] = new Array(channels);
   for (let ch = 0; ch < channels; ch++) {
-    const out = new Float32Array(totalFrames);
-    for (let i = 0; i < totalFrames; i++) {
-      out[i] = src[i * channels + ch] / 2147483648;
+    outputs[ch] = new Float32Array(totalFrames);
+  }
+  const invMax = 1 / 2147483648;
+  let idx = 0;
+  for (let i = 0; i < totalFrames; i++) {
+    for (let ch = 0; ch < channels; ch++) {
+      outputs[ch][i] = src[idx++] * invMax;
     }
-    outputs.push(out);
   }
   return outputs;
 }
 
 function deinterleaveUint8(src: Uint8Array, channels: number): Float32Array[] {
   const totalFrames = src.length / channels;
-  const outputs: Float32Array[] = [];
+  const outputs: Float32Array[] = new Array(channels);
   for (let ch = 0; ch < channels; ch++) {
-    const out = new Float32Array(totalFrames);
-    for (let i = 0; i < totalFrames; i++) {
-      out[i] = (src[i * channels + ch] - 128) / 128;
+    outputs[ch] = new Float32Array(totalFrames);
+  }
+  const invMax = 1 / 128;
+  let idx = 0;
+  for (let i = 0; i < totalFrames; i++) {
+    for (let ch = 0; ch < channels; ch++) {
+      outputs[ch][i] = (src[idx++] - 128) * invMax;
     }
-    outputs.push(out);
   }
   return outputs;
 }
@@ -130,24 +141,28 @@ function deinterleaveUint8(src: Uint8Array, channels: number): Float32Array[] {
 function deinterleaveInt24(src: Uint8Array, channels: number): Float32Array[] {
   const bytesPerFrame = channels * 3;
   const totalFrames = Math.floor(src.length / bytesPerFrame);
-  const outputs: Float32Array[] = [];
+  const outputs: Float32Array[] = new Array(channels);
   for (let ch = 0; ch < channels; ch++) {
-    const out = new Float32Array(totalFrames);
-    for (let i = 0; i < totalFrames; i++) {
-      const byteOffset = i * bytesPerFrame + ch * 3;
+    outputs[ch] = new Float32Array(totalFrames);
+  }
+  const invMax = 1 / 8388608;
+  for (let i = 0; i < totalFrames; i++) {
+    let byteOffset = i * bytesPerFrame;
+    for (let ch = 0; ch < channels; ch++) {
       const b0 = src[byteOffset];
       const b1 = src[byteOffset + 1];
       const b2 = src[byteOffset + 2];
       let raw = b0 | (b1 << 8) | (b2 << 16);
       if (raw & 0x800000) raw |= ~0xFFFFFF;
-      out[i] = raw / 8388608;
+      outputs[ch][i] = raw * invMax;
+      byteOffset += 3;
     }
-    outputs.push(out);
   }
   return outputs;
 }
 
 function decodeWavPcm(buffer: ArrayBuffer): DecodedWavResult | null {
+  const startTime = performance.now();
   const parseResult = parseWavHeaderFull(buffer);
   if (!parseResult) return null;
 
@@ -173,7 +188,8 @@ function decodeWavPcm(buffer: ArrayBuffer): DecodedWavResult | null {
     return null;
   }
 
-  return { channelData, sampleRate, channels, bitDepth, totalFrames };
+  const decodeTimeMs = performance.now() - startTime;
+  return { channelData, sampleRate, channels, bitDepth, totalFrames, decodeTimeMs };
 }
 
 function calculateSpectralFlatness(signal: Float32Array, fftSize: number): number {
@@ -207,6 +223,7 @@ function calculateSpectralFlatness(signal: Float32Array, fftSize: number): numbe
 }
 
 function detectAudioIssues(channelData: Float32Array, sampleRate: number, channels: number, allChannelData: Float32Array[]): AudioAnalysisResult {
+  const startTime = performance.now();
   const issues: string[] = [];
   const detailedIssues: AudioIssue[] = [];
   let sumSquares = 0;
@@ -218,32 +235,34 @@ function detectAudioIssues(channelData: Float32Array, sampleRate: number, channe
   const blockSize = Math.floor(sampleRate * 0.001);
   let prevBlockRMS = 0;
   let prevSample = 0;
+  let blockSum = 0;
+  let blockIdx = 0;
 
-  for (let i = 0; i < channelData.length; i++) {
-    const sample = Math.abs(channelData[i]);
-    sumSquares += sample * sample;
-    maxSample = Math.max(maxSample, sample);
+  const len = channelData.length;
+  for (let i = 0; i < len; i++) {
+    const sample = channelData[i];
+    const absSample = Math.abs(sample);
+    sumSquares += absSample * absSample;
+    if (absSample > maxSample) maxSample = absSample;
 
-    if (sample > 0.95) {
+    if (absSample > 0.95) {
       clippingCount++;
-      if (detailedIssues.length === 0 || detailedIssues[detailedIssues.length - 1].type !== 'clip') {
-        detailedIssues.push({ type: 'clip', start: i, end: i, severity: sample - 0.95 });
+      const last = detailedIssues[detailedIssues.length - 1];
+      if (!last || last.type !== 'clip') {
+        detailedIssues.push({ type: 'clip', start: i, end: i, severity: absSample - 0.95 });
       } else {
-        detailedIssues[detailedIssues.length - 1].end = i;
-        detailedIssues[detailedIssues.length - 1].severity = Math.max(
-          detailedIssues[detailedIssues.length - 1].severity,
-          sample - 0.95,
-        );
+        last.end = i;
+        if (absSample - 0.95 > last.severity) last.severity = absSample - 0.95;
       }
     }
 
-    if (i % blockSize === 0 && i > 0) {
-      let blockRMS = 0;
-      const end = Math.min(i + blockSize, channelData.length);
-      for (let j = i; j < end; j++) {
-        blockRMS += channelData[j] * channelData[j];
-      }
-      blockRMS = Math.sqrt(blockRMS / blockSize);
+    blockSum += sample * sample;
+    blockIdx++;
+
+    if (blockIdx >= blockSize && i > 0) {
+      const blockRMS = Math.sqrt(blockSum / blockSize);
+      blockSum = 0;
+      blockIdx = 0;
 
       const diff = Math.abs(blockRMS - prevBlockRMS);
       if (diff > 0.35) {
@@ -259,14 +278,14 @@ function detectAudioIssues(channelData: Float32Array, sampleRate: number, channe
       prevBlockRMS = blockRMS;
     }
 
-    const diffFromPrev = Math.abs(channelData[i] - prevSample);
-    if (diffFromPrev > 0.4 && Math.abs(channelData[i]) > 0.05) {
+    const diffFromPrev = Math.abs(sample - prevSample);
+    if (diffFromPrev > 0.4 && absSample > 0.05) {
       detailedIssues.push({ type: 'crackle', start: i, end: i + 1, severity: diffFromPrev });
     }
-    prevSample = channelData[i];
+    prevSample = sample;
   }
 
-  const rms = Math.sqrt(sumSquares / channelData.length);
+  const rms = Math.sqrt(sumSquares / len);
   const dynamicRangeDb = 20 * Math.log10(maxSample / (rms + 0.0001));
   const fftSize = 1024;
   const spectralFlatness = calculateSpectralFlatness(channelData, fftSize);
@@ -276,7 +295,7 @@ function detectAudioIssues(channelData: Float32Array, sampleRate: number, channe
     const rightChannel = allChannelData[1];
     let leftEnergy = 0;
     let rightEnergy = 0;
-    for (let i = 0; i < channelData.length; i++) {
+    for (let i = 0; i < len; i++) {
       leftEnergy += channelData[i] * channelData[i];
       rightEnergy += rightChannel[i] * rightChannel[i];
     }
@@ -285,11 +304,12 @@ function detectAudioIssues(channelData: Float32Array, sampleRate: number, channe
 
   if (spectralFlatness > 0.6) issues.push('频谱异常');
   if (dynamicRangeDb < 6) issues.push('动态范围过小');
-  if (clippingCount > channelData.length * 0.0005) issues.push('削波失真');
+  if (clippingCount > len * 0.0005) issues.push('削波失真');
   if (crackleRegions.length > 3) issues.push('毛刺/撕裂');
   if (popRegions.length > 5) issues.push('爆音');
   if (stereoBalance < 0.4 || stereoBalance > 0.6) issues.push('立体声平衡偏移');
 
+  const analysisTimeMs = performance.now() - startTime;
   return {
     spectralFlatness,
     dynamicRange: dynamicRangeDb,
@@ -300,6 +320,7 @@ function detectAudioIssues(channelData: Float32Array, sampleRate: number, channe
     crackleRegions,
     popRegions,
     detailedIssues,
+    analysisTimeMs,
   };
 }
 
