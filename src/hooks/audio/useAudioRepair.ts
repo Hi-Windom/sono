@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useMemo } from 'react';
 import {
   uploadAudio,
   repairAudio,
@@ -528,7 +528,7 @@ export function useAudioRepair({
     setIsProcessing(false);
   }, [setShowRepairCacheModal, setIsProcessing]);
 
-  return {
+  const api = useMemo(() => ({
     applyAlgorithmVersion,
     closeWS,
     applySettings,
@@ -538,5 +538,17 @@ export function useAudioRepair({
     handleRenderCacheDownload,
     handleReRepair,
     handleCloseRepairCacheModal,
-  };
+  }), [
+    applyAlgorithmVersion,
+    closeWS,
+    applySettings,
+    resetStuckState,
+    cancelCurrentTask,
+    handleUseRepairCache,
+    handleRenderCacheDownload,
+    handleReRepair,
+    handleCloseRepairCacheModal,
+  ]);
+
+  return api;
 }

@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useMemo } from 'react';
 import {
   renderAudio,
   waitRenderWithWS,
@@ -156,7 +156,9 @@ export function useAudioExport({ state, refs }: UseAudioExportOptions) {
     durationRef,
   ]);
 
-  return {
+  const api = useMemo(() => ({
     renderAndDownload,
-  };
+  }), [renderAndDownload]);
+
+  return api;
 }

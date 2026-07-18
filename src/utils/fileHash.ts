@@ -14,28 +14,21 @@ function fnv1aHash(data: Uint8Array, extraSeed = 0): number {
   return hash >>> 0;
 }
 
-function fallbackHash(buffer: ArrayBuffer, fileSize: number, fileName: string): string {
+function fallbackHash(buffer: ArrayBuffer, fileSize: number): string {
   const data = new Uint8Array(buffer);
   const h1 = fnv1aHash(data, 0);
   const h2 = fnv1aHash(data, h1);
 
-  let nameHash = 0;
-  for (let i = 0; i < fileName.length; i++) {
-    nameHash = Math.imul(nameHash ^ fileName.charCodeAt(i), 0x01000193);
-  }
-  nameHash = nameHash >>> 0;
-
   const combined = new DataView(new ArrayBuffer(16));
   combined.setUint32(0, h1, false);
   combined.setUint32(4, h2, false);
-  combined.setUint32(8, nameHash, false);
   combined.setBigUint64(8, BigInt(fileSize), false);
 
   let hex = '';
   for (let i = 0; i < 16; i++) {
     hex += combined.getUint8(i).toString(16).padStart(2, '0');
   }
-  return hex + hex;
+  return hex;
 }
 
 export async function computeFileHash(file: File): Promise<string> {
@@ -72,7 +65,7 @@ export async function computeFileHash(file: File): Promise<string> {
     hash = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
     hashMethod = 'SHA-256';
   } else {
-    hash = fallbackHash(buffer, file.size, file.name);
+    hash = fallbackHash(buffer, file.size);
     hashMethod = 'FNV1a-fallback';
   }
 

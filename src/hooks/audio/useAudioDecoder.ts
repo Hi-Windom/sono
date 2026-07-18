@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useMemo } from 'react';
 import { parseWavHeader } from '../../utils/wavParser';
 import { computeFileHash } from '../../utils/fileHash';
 import { useRepairSessionStore } from '../../store/repairSessionStore';
@@ -427,8 +427,10 @@ export function useAudioDecoder({
     wavInfoRef,
   ]);
 
-  return {
+  const api = useMemo(() => ({
     loadAudioFile,
     loadAudioFromUrl,
-  };
+  }), [loadAudioFile, loadAudioFromUrl]);
+
+  return api;
 }

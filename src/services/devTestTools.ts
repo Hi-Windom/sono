@@ -1,5 +1,6 @@
 import { uploadAudio, uploadDualAudio, checkFileHash } from './api/upload';
-import { pollProgress, connectProgressWS, connectCacheWS } from './api/repair';
+import { pollProgress, connectProgressWS } from './api/repair';
+import { connectCacheWS } from './api/cache';
 
 if (import.meta.env.DEV) {
   (window as any).__testUpload = {

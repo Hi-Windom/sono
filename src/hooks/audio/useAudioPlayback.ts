@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useMemo } from 'react';
 import { PlayMode } from './types';
 import { writeLog } from './utils';
 import type { AudioCoreState, AudioCoreRefs } from './useAudioCore';
@@ -457,7 +457,7 @@ export function useAudioPlayback({ state, refs }: UseAudioPlaybackOptions) {
     updateTime();
   }, [activeModeRef, isPlayingRef, backendProcessedBufferRef, audioBufferRef, setPlayMode, getAudioContext, startTimeRef, streamingAudioRef, mediaSourceRef, modeNodesRef, analyserRef, sourceNodeRef, gainNodeRef, stopPlaying, setCurrentTime, pausedAtRef, animationFrameRef]);
 
-  return {
+  const api = useMemo(() => ({
     getAudioContext,
     stopAllModeNodes,
     stopPlaying,
@@ -467,5 +467,17 @@ export function useAudioPlayback({ state, refs }: UseAudioPlaybackOptions) {
     pause,
     seek,
     switchPlayMode,
-  };
+  }), [
+    getAudioContext,
+    stopAllModeNodes,
+    stopPlaying,
+    startStreamingPlayback,
+    getCurrentBuffer,
+    play,
+    pause,
+    seek,
+    switchPlayMode,
+  ]);
+
+  return api;
 }

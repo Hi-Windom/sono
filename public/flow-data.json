@@ -313,7 +313,8 @@
       "filePath": "/workspace/src/pages/TrainingUploadPage.tsx",
       "children": [
         "src-components-Header",
-        "src-services-backendApi"
+        "src-services-backendApi",
+        "src-utils-fileHash"
       ]
     },
     {
@@ -1588,6 +1589,12 @@
     {
       "source": "src-pages-TrainingUploadPage",
       "target": "src-services-backendApi",
+      "label": "使用",
+      "type": "import"
+    },
+    {
+      "source": "src-pages-TrainingUploadPage",
+      "target": "src-utils-fileHash",
       "label": "使用",
       "type": "import"
     },

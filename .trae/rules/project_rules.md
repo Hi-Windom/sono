@@ -177,3 +177,21 @@ cd /workspace && python -m pytest backend/tests/test_repair_quality.py -v
 - 分块上传的 speed 不能硬编码为 0，要根据时间和已上传字节计算
 - 每个阶段（读取、解码、分析、上传）都要有进度反馈，不能中间消失
 - 失败时必须重置 isProcessing 和显示错误，不能让进度条一直卡着
+
+### 6. React Hook 返回对象引用稳定性
+- **自定义 hook 返回对象时必须用 `useMemo` 包装**，否则每次渲染都是新引用
+- 下游 useEffect 依赖这些对象时，会每次渲染都触发清理+重建
+- 反面教材：`useAudioWorker` 返回对象每次渲染都是新的 → 下游 effect 清理函数每次都调用 `terminate()` → Worker 被杀 → 正在进行的 Promise 永远 pending → 上传卡 20%
+- 检查清单：所有 `return { ... }` 的自定义 hook 都要用 `useMemo` 稳定引用
+
+### 7. Web Worker 正确清理
+- `terminate()` Worker 时，**必须 reject 所有 pending 的 Promise**，不能只清空 map
+- 否则调用方的 `await` 会永远等待，表现为"卡住了"
+- Worker 失败/超时时，转移了所有权（transfer）的 buffer 不能再用，必须保留副本用于 fallback
+- Worker 操作必须有超时机制，默认 10 秒，超时后触发 fallback
+
+### 8. 哈希计算兼容性
+- `crypto.subtle.digest` 在 HTTP（非HTTPS）环境下可能不可用
+- 必须有 fallback 哈希算法（如 FNV-1a）
+- fallback 哈希必须只基于文件内容，不能混入文件名（否则重命名文件缓存失效）
+- 注意 DataView 写入偏移量，不同字段不能覆盖（如 nameHash 和 fileSize 不能写在同一偏移）
