@@ -460,6 +460,7 @@ export function connectProgressWS(
   let lastProgress = -1;
   let lastStep = '';
   let lastProgressTime = Date.now();
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
   const checkStuck = (progress: number, step: string) => {
     const now = Date.now();
@@ -551,7 +552,8 @@ export function connectProgressWS(
         reconnectAttempts++;
         const delay = Math.pow(2, reconnectAttempts - 1) * 1000;
         console.log(`[WS] 重连 #${reconnectAttempts} task_id=${taskId} 延迟=${delay}ms`);
-        setTimeout(connect, delay);
+        if (reconnectTimer) clearTimeout(reconnectTimer);
+        reconnectTimer = setTimeout(connect, delay);
       } else {
         console.warn(`[WS] 重连耗尽 task_id=${taskId}`);
         fallbackToPolling();
@@ -564,6 +566,10 @@ export function connectProgressWS(
   return {
     close: () => {
       closed = true;
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
       if (ws) {
         ws.close();
         ws = null;

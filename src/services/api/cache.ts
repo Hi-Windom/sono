@@ -87,6 +87,7 @@ export function connectCacheWS(
   let reconnectAttempts = 0;
   const maxReconnectAttempts = 5;
   let closed = false;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
   const connect = () => {
     if (closed) return;
@@ -135,7 +136,8 @@ export function connectCacheWS(
         reconnectAttempts++;
         const delay = Math.pow(2, reconnectAttempts - 1) * 1000;
         console.log(`[CacheWS] 重连 #${reconnectAttempts} 延迟=${delay}ms`);
-        setTimeout(connect, delay);
+        if (reconnectTimer) clearTimeout(reconnectTimer);
+        reconnectTimer = setTimeout(connect, delay);
       } else {
         console.warn(`[CacheWS] 重连耗尽`);
       }
@@ -147,6 +149,10 @@ export function connectCacheWS(
   return {
     close: () => {
       closed = true;
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
       if (ws) {
         ws.close();
         ws = null;
