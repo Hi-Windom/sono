@@ -136,8 +136,18 @@ async def upload_wasm_module(
     
     os.makedirs(MODULE_DIR, exist_ok=True)
     
-    name = module_name or os.path.splitext(file.filename)[0]
-    file_path = os.path.join(MODULE_DIR, f"{name}.wasm")
+    raw_name = module_name or os.path.splitext(file.filename)[0]
+    safe_name = os.path.basename(raw_name)
+    if not safe_name or safe_name != raw_name:
+        raise HTTPException(status_code=400, detail="Invalid module name")
+    if not safe_name.replace('_', '').replace('-', '').isalnum():
+        raise HTTPException(status_code=400, detail="Module name must contain only letters, numbers, underscores, and hyphens")
+    
+    file_path = os.path.join(MODULE_DIR, f"{safe_name}.wasm")
+    real_path = os.path.realpath(file_path)
+    real_module_dir = os.path.realpath(MODULE_DIR)
+    if not real_path.startswith(real_module_dir + os.sep):
+        raise HTTPException(status_code=400, detail="Path traversal detected")
     
     content = await file.read()
     
@@ -149,11 +159,11 @@ async def upload_wasm_module(
     registry = _get_registry()
     registry.scan_modules()
     
-    logger.info(f"WASM module uploaded: {name} ({len(content)} bytes, hash={file_hash})")
+    logger.info(f"WASM module uploaded: {safe_name} ({len(content)} bytes, hash={file_hash})")
     
     return {
         "success": True,
-        "name": name,
+        "name": safe_name,
         "size": len(content),
         "hash": file_hash,
         "path": file_path,

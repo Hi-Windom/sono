@@ -4,10 +4,14 @@ import logging
 import os
 from typing import Any
 
-from config import OUTPUT_DIR, SOURCE_FILE_CACHE_LIMIT, UPLOAD_DIR
 from database import TaskDict, delete_task, get_all_tasks_ordered
 
 logger = logging.getLogger(__name__)
+
+
+def _get_config():
+    import config
+    return config.OUTPUT_DIR, config.SOURCE_FILE_CACHE_LIMIT, config.UPLOAD_DIR
 
 def get_dir_size(path: str) -> int:
     total = 0
@@ -19,6 +23,7 @@ def get_dir_size(path: str) -> int:
     return total
 
 def evict_old_files() -> None:
+    OUTPUT_DIR, SOURCE_FILE_CACHE_LIMIT, UPLOAD_DIR = _get_config()
     upload_size = get_dir_size(UPLOAD_DIR)
     output_size = get_dir_size(OUTPUT_DIR)
     total = upload_size + output_size

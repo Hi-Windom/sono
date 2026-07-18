@@ -561,7 +561,7 @@ async def websocket_task_status(websocket: WebSocket, task_id: str):
         if task.get("error"):
             current["error"] = task["error"]
         await websocket.send_json(current)
-        if task.get("status") in ("completed", "detected", "error", "render_completed"):
+        if task.get("status") in ("completed", "detected", "error", "render_completed", "cancelled"):
             await websocket.close()
             return
 
@@ -591,7 +591,7 @@ async def websocket_task_status(websocket: WebSocket, task_id: str):
                 if current_task.get("error"):
                     heartbeat_msg["error"] = current_task["error"]
                 await websocket.send_json(heartbeat_msg)
-                if current_task["status"] in ("completed", "detected", "error", "render_completed"):
+                if current_task["status"] in ("completed", "detected", "error", "render_completed", "cancelled"):
                     await websocket.close()
                     return
     except WebSocketDisconnect:

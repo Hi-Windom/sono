@@ -189,10 +189,21 @@ def generate_task_id() -> str:
 
 def submit_detect_task(task_id: str, audio_path: str, detect_type: str = "original", detector_version: str = "v1.1"):
     logger.info(f"[submit_detect_task] task_id={task_id} type={detect_type} version={detector_version}")
+    label = "修复后" if detect_type == "repaired" else "原始"
+    update_task(
+        task_id,
+        status="pending",
+        progress=0.0,
+        step=f"任务已提交，等待{label}检测...",
+        error="",
+        detection_result=None if detect_type == "original" else None,
+        repaired_detection_result=None if detect_type == "repaired" else None,
+    )
     if not _track_task_start(task_id):
         active = get_active_task_count()
         logger.warning(f"[submit_detect_task] 拒绝任务 task_id={task_id}: 系统繁忙 ({active}/{MAX_CONCURRENT_TASKS})")
         update_task(task_id, status="error", error=f"系统繁忙（{active}/{MAX_CONCURRENT_TASKS} 任务运行中），请稍后重试", step="系统繁忙")
+        _track_task_end(task_id)
         return
     future = executor.submit(_run_detect, task_id, audio_path, detect_type, detector_version)
     future.add_done_callback(lambda f: _handle_future_exception(f, task_id, "detect"))
@@ -200,11 +211,22 @@ def submit_detect_task(task_id: str, audio_path: str, detect_type: str = "origin
 
 def submit_repair_task(task_id: str, audio_path: str, params: dict[str, Any]) -> None:
     logger.info(f"[submit_repair_task] task_id={task_id} params_keys={list(params.keys())}")
-    update_task(task_id, params=params)
+    update_task(
+        task_id,
+        params=params,
+        status="pending",
+        progress=0.0,
+        step="任务已提交，等待执行...",
+        error="",
+        repair_result=None,
+        render_filename=None,
+        render_result=None,
+    )
     if not _track_task_start(task_id):
         active = get_active_task_count()
         logger.warning(f"[submit_repair_task] 拒绝任务 task_id={task_id}: 系统繁忙 ({active}/{MAX_CONCURRENT_TASKS})")
         update_task(task_id, status="error", error=f"系统繁忙（{active}/{MAX_CONCURRENT_TASKS} 任务运行中），请稍后重试", step="系统繁忙")
+        _track_task_end(task_id)
         return
     future = executor.submit(_run_repair, task_id, audio_path, params, MOBILE_MODE)
     future.add_done_callback(lambda f: _handle_future_exception(f, task_id, "repair"))
@@ -217,6 +239,7 @@ def _handle_future_exception(future: Future[Any], task_id: str, task_type: str) 
         logger.error(f"[{task_type}] 任务超时 task_id={task_id}")
         update_task(task_id, status="error", error=f"任务执行超时（{TASK_TIMEOUTS.get(task_type, 300)}秒）", step="执行超时")
         _ws_send_final(task_id, {"task_id": task_id, "status": "error", "progress": 0, "step": "执行超时", "error": f"任务执行超时（{TASK_TIMEOUTS.get(task_type, 300)}秒）", "error_type": "timeout"})
+        _track_task_end(task_id)
     except Exception as e:
         tb_str = traceback.format_exc()
         error_msg = f"{type(e).__name__}: {e}"
@@ -224,6 +247,7 @@ def _handle_future_exception(future: Future[Any], task_id: str, task_type: str) 
         logger.error(f"[{task_type}] 任务异常 task_id={task_id}: {full_error}")
         update_task(task_id, status="error", error=full_error[:1000], step="执行异常")
         _ws_send_final(task_id, {"task_id": task_id, "status": "error", "progress": 0, "step": "执行异常", "error": error_msg, "error_type": type(e).__name__, "traceback": tb_str[:2000]})
+        _track_task_end(task_id)
 
 
 def _run_detect(task_id: str, audio_path: str, detect_type: str, detector_version: str) -> None:
@@ -500,6 +524,8 @@ def _run_repair(task_id: str, audio_path: str, params: dict[str, Any], mobile_mo
             except Exception as e:
                 logger.warning(f"[repair] perf_collector.end_repair 失败 task_id={task_id}: {e}")
         _track_task_end(task_id)
+        with _cancelled_lock:
+            _cancelled_tasks.discard(task_id)
 
 
 def get_task_status(task_id: str) -> TaskDict | None:

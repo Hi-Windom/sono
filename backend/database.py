@@ -82,7 +82,7 @@ def init_db() -> None:
 def cleanup_stale_tasks() -> int:
     conn = get_db()
     try:
-        stale_statuses = ('pending', 'processing', 'detecting', 'detected', 'analyzing')
+        stale_statuses = ('pending', 'processing', 'detecting', 'detected', 'analyzing', 'repairing', 'rendering')
         cursor = conn.execute(
             "SELECT id, status, original_filename FROM tasks WHERE status IN ({})".format(
                 ','.join('?' * len(stale_statuses))

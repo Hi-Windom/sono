@@ -6,7 +6,7 @@ from pydantic import BaseModel
 
 from config import OUTPUT_DIR
 from database import get_task, update_task
-from services.task_manager import executor
+from services.task_manager import executor, _track_task_start, _track_task_end, TaskCancelledError, _cancelled_lock
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +23,14 @@ class RenderRequest(BaseModel):
 
 def _run_render(task_id, input_path, output_path, target_sr, bit_depth, render_filename):
     from services.render import render_output
-    from services.task_manager import _ws_send_progress, _ws_send_final
+    from services.task_manager import _ws_send_progress, _ws_send_final, _cancelled_lock, TaskCancelledError
+
+    with _cancelled_lock:
+        if task_id in _cancelled_tasks:
+            logger.info(f"[render] 任务已取消，跳过执行 task_id={task_id}")
+            _cancelled_tasks.discard(task_id)
+            _track_task_end(task_id)
+            return
 
     source_bit_depth = None
     try:
@@ -34,6 +41,9 @@ def _run_render(task_id, input_path, output_path, target_sr, bit_depth, render_f
         pass
 
     def progress_callback(pct, step):
+        with _cancelled_lock:
+            if task_id in _cancelled_tasks:
+                raise TaskCancelledError(f"任务已取消: {task_id}")
         update_task(task_id, progress=pct, step=step)
         _ws_send_progress(task_id, {
             "task_id": task_id,
@@ -43,6 +53,7 @@ def _run_render(task_id, input_path, output_path, target_sr, bit_depth, render_f
         })
 
     try:
+        update_task(task_id, status="rendering", progress=0, step="开始渲染...")
         result = render_output(input_path, output_path, target_sr, bit_depth, progress_callback=progress_callback, source_bit_depth=source_bit_depth)
         update_task(task_id,
             status="render_completed",
@@ -68,6 +79,9 @@ def _run_render(task_id, input_path, output_path, target_sr, bit_depth, render_f
             )
         except Exception:
             pass
+    except TaskCancelledError:
+        logger.info(f"[render] 任务已取消 task_id={task_id}")
+        _ws_send_final(task_id, {"task_id": task_id, "status": "cancelled", "progress": 0, "step": "已取消"})
     except Exception as e:
         logger.error(f"[render] 渲染失败 task_id={task_id}: {e}")
         update_task(task_id, status="error", error=str(e), step="渲染失败")
@@ -77,13 +91,25 @@ def _run_render(task_id, input_path, output_path, target_sr, bit_depth, render_f
             "error": str(e),
             "step": "渲染失败",
         })
+        raise
+    finally:
+        _track_task_end(task_id)
+        with _cancelled_lock:
+            _cancelled_tasks.discard(task_id)
 
 
 def _run_render_dual(task_id, vocal_path, accompaniment_path, output_path, target_sr, bit_depth, render_filename, merge=False, track_type="both"):
     from services.render import render_output
-    from services.task_manager import _ws_send_progress, _ws_send_final
+    from services.task_manager import _ws_send_progress, _ws_send_final, _cancelled_lock, TaskCancelledError
     import numpy as np
     import soundfile as sf
+
+    with _cancelled_lock:
+        if task_id in _cancelled_tasks:
+            logger.info(f"[render_dual] 任务已取消，跳过执行 task_id={task_id}")
+            _cancelled_tasks.discard(task_id)
+            _track_task_end(task_id)
+            return
 
     vocal_rendered = False
     accompaniment_rendered = False
@@ -91,6 +117,9 @@ def _run_render_dual(task_id, vocal_path, accompaniment_path, output_path, targe
     accompaniment_render_filename = None
 
     def progress_callback(pct, step):
+        with _cancelled_lock:
+            if task_id in _cancelled_tasks:
+                raise TaskCancelledError(f"任务已取消: {task_id}")
         update_task(task_id, progress=pct, step=step)
         _ws_send_progress(task_id, {
             "task_id": task_id,
@@ -100,6 +129,7 @@ def _run_render_dual(task_id, vocal_path, accompaniment_path, output_path, targe
         })
 
     try:
+        update_task(task_id, status="rendering", progress=0, step="开始渲染...")
         from services.audio_loader import load_audio_with_fallback
 
         if track_type == "vocal":
@@ -223,6 +253,9 @@ def _run_render_dual(task_id, vocal_path, accompaniment_path, output_path, targe
             )
         except Exception:
             pass
+    except TaskCancelledError:
+        logger.info(f"[render_dual] 任务已取消 task_id={task_id}")
+        _ws_send_final(task_id, {"task_id": task_id, "status": "cancelled", "progress": 0, "step": "已取消"})
     except Exception as e:
         logger.error(f"[render_dual] 渲染失败 task_id={task_id}: {e}")
         update_task(task_id, status="error", error=str(e), step="渲染失败")
@@ -232,6 +265,11 @@ def _run_render_dual(task_id, vocal_path, accompaniment_path, output_path, targe
             "error": str(e),
             "step": "渲染失败",
         })
+        raise
+    finally:
+        _track_task_end(task_id)
+        with _cancelled_lock:
+            _cancelled_tasks.discard(task_id)
 
 
 @router.post("/render")
@@ -274,11 +312,21 @@ async def render_audio_endpoint(request: RenderRequest):
         render_filename = f"{request.task_id}_rendered_{algo_ver}{speed_tag}_{request.sample_rate}_{request.bit_depth}{merge_suffix}.wav"
     render_path = os.path.join(OUTPUT_DIR, render_filename)
 
-    update_task(request.task_id, status="rendering", step="渲染交付规格...", progress=0)
+    update_task(request.task_id, status="pending", step="渲染任务已提交，等待执行...", progress=0, error="")
 
+    if not _track_task_start(request.task_id):
+        from services.task_manager import get_active_task_count, MAX_CONCURRENT_TASKS
+        active = get_active_task_count()
+        logger.warning(f"[render] 拒绝任务 task_id={request.task_id}: 系统繁忙 ({active}/{MAX_CONCURRENT_TASKS})")
+        update_task(request.task_id, status="error", error=f"系统繁忙（{active}/{MAX_CONCURRENT_TASKS} 任务运行中），请稍后重试", step="系统繁忙")
+        _track_task_end(request.task_id)
+        return {"task_id": request.task_id, "status": "error", "error": f"系统繁忙（{active}/{MAX_CONCURRENT_TASKS} 任务运行中），请稍后重试"}
+
+    from services.task_manager import _handle_future_exception
     if is_dual_track:
-        executor.submit(_run_render_dual, request.task_id, vocal_output_path, accompaniment_output_path, render_path, request.sample_rate, request.bit_depth, render_filename, request.merge, request.track_type)
+        future = executor.submit(_run_render_dual, request.task_id, vocal_output_path, accompaniment_output_path, render_path, request.sample_rate, request.bit_depth, render_filename, request.merge, request.track_type)
     else:
-        executor.submit(_run_render, request.task_id, output_path, render_path, request.sample_rate, request.bit_depth, render_filename)
+        future = executor.submit(_run_render, request.task_id, output_path, render_path, request.sample_rate, request.bit_depth, render_filename)
+    future.add_done_callback(lambda f: _handle_future_exception(f, request.task_id, "render"))
 
     return {"task_id": request.task_id, "status": "rendering"}
