@@ -21,6 +21,7 @@ export interface AudioWorkerAPI {
 export function useAudioWorker(): AudioWorkerAPI {
   const workerRef = useRef<Worker | null>(null);
   const pendingRef = useRef<Map<number, PendingRequest>>(new Map());
+  const timeoutRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
   const nextIdRef = useRef(0);
   const workerAvailableRef = useRef<boolean | null>(null);
 
@@ -36,6 +37,11 @@ export function useAudioWorker(): AudioWorkerAPI {
       worker.onmessage = (e: MessageEvent) => {
         console.log(`[useAudioWorker] 收到Worker消息: type=${e.data?.type}, id=${e.data?.id}`);
         const { id } = e.data;
+        const timeoutId = timeoutRef.current.get(id);
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+          timeoutRef.current.delete(id);
+        }
         const pending = pendingRef.current.get(id);
         if (pending) {
           pendingRef.current.delete(id);
@@ -48,6 +54,8 @@ export function useAudioWorker(): AudioWorkerAPI {
       };
       worker.onerror = (err) => {
         console.warn('[useAudioWorker] Worker error:', err);
+        timeoutRef.current.forEach(timer => clearTimeout(timer));
+        timeoutRef.current.clear();
         for (const [id, pending] of pendingRef.current) {
           pending.reject(new Error('Worker error'));
           pendingRef.current.delete(id);
@@ -80,14 +88,16 @@ export function useAudioWorker(): AudioWorkerAPI {
         worker.postMessage(msg);
       }
 
-      setTimeout(() => {
+      const timeoutId = setTimeout(() => {
         const pending = pendingRef.current.get(msg.id);
         if (pending) {
           console.warn(`[useAudioWorker] Worker超时: type=${msg.type}, id=${msg.id}, timeout=${timeoutMs}ms`);
           pendingRef.current.delete(msg.id);
+          timeoutRef.current.delete(msg.id);
           reject(new Error(`Worker timeout after ${timeoutMs}ms for ${msg.type}`));
         }
       }, timeoutMs);
+      timeoutRef.current.set(msg.id, timeoutId);
     });
   }, [getWorker]);
 
@@ -180,6 +190,8 @@ export function useAudioWorker(): AudioWorkerAPI {
       workerRef.current = null;
       workerAvailableRef.current = null;
     }
+    timeoutRef.current.forEach(timer => clearTimeout(timer));
+    timeoutRef.current.clear();
     for (const [id, pending] of pendingRef.current) {
       pending.reject(new Error('Worker terminated'));
     }

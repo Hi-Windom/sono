@@ -2,6 +2,15 @@ import React, { createContext, useContext, useState, useCallback, useEffect, use
 
 type ConnectionStatus = 'connected' | 'disconnected' | 'unstable';
 
+export interface BackendErrorEntry {
+  id: number;
+  message: string;
+  timestamp: number;
+  source?: string;
+}
+
+const MAX_ERROR_QUEUE_SIZE = 20;
+
 interface FrontendDiag {
   user_agent: string;
   platform: string;
@@ -40,6 +49,9 @@ interface BackendContextType {
     process?: { cpu_percent: number; memory_mb: number; threads: number; fd_count: number | null };
     frontend?: FrontendDiag;
   } | null;
+  backendErrorQueue: BackendErrorEntry[];
+  addBackendError: (message: string, source?: string) => void;
+  clearBackendErrorQueue: () => void;
 }
 
 const BackendContext = createContext<BackendContextType | undefined>(undefined);
@@ -92,6 +104,8 @@ export function BackendProvider({ children }: { children: ReactNode }) {
   const [hasUpstreamActivity, setHasUpstreamActivity] = useState(false);
   const [hasDownstreamActivity, setHasDownstreamActivity] = useState(false);
   const [backendDiag, setBackendDiag] = useState<BackendContextType['backendDiag']>(null);
+  const [backendErrorQueue, setBackendErrorQueue] = useState<BackendErrorEntry[]>([]);
+  const errorIdCounterRef = useRef(0);
 
   const upstreamTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const downstreamTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -205,6 +219,23 @@ export function BackendProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const addBackendError = useCallback((message: string, source?: string) => {
+    const entry: BackendErrorEntry = {
+      id: ++errorIdCounterRef.current,
+      message,
+      timestamp: Date.now(),
+      source,
+    };
+    setBackendErrorQueue(prev => {
+      const next = [entry, ...prev];
+      return next.slice(0, MAX_ERROR_QUEUE_SIZE);
+    });
+  }, []);
+
+  const clearBackendErrorQueue = useCallback(() => {
+    setBackendErrorQueue([]);
+  }, []);
+
   useEffect(() => {
     const cleanup = setupNetworkInterceptor(triggerUpstream, handleResponseSuccess);
     return cleanup;
@@ -232,6 +263,9 @@ export function BackendProvider({ children }: { children: ReactNode }) {
         hasDownstreamActivity,
         runBackendDiag,
         backendDiag,
+        backendErrorQueue,
+        addBackendError,
+        clearBackendErrorQueue,
       }}
     >
       {children}

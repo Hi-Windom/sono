@@ -493,28 +493,42 @@ export default function CacheManagerPage() {
                         <div className="text-xs text-gray-500">{formatDateTime(task.created_at)}</div>
                       </div>
 
-                      {/* 展开详情：渲染缓存列表 */}
-                      {expandedTask === task.id && task.render_caches && task.render_caches.length > 0 && (
-                        <div className="px-3 pb-3">
-                          <div className="bg-emerald-500/5 border border-emerald-500/20 rounded-lg p-3">
-                            <div className="text-emerald-400 text-xs font-medium mb-2">交付渲染缓存</div>
-                            {task.render_caches.map((rc, idx) => (
-                              <div key={idx} className="flex items-center justify-between py-1.5 text-xs">
-                                <div className="flex items-center gap-2">
-                                  <span className="text-gray-300">{rc.filename}</span>
-                                  <span className="text-gray-500">{formatBytes(rc.size)}</span>
+                      {/* 展开详情：渲染缓存列表 / 错误信息 */}
+                      {expandedTask === task.id && (
+                        <>
+                          {task.error && (
+                            <div className="px-3 pb-3">
+                              <div className="bg-red-500/5 border border-red-500/20 rounded-lg p-3">
+                                <div className="text-red-400 text-xs font-medium mb-1.5">错误信息</div>
+                                <div className="text-gray-300 text-xs break-all whitespace-pre-wrap font-mono">
+                                  {task.error}
                                 </div>
-                                <button
-                                  onClick={() => handleDeleteRenderCache(rc.filename)}
-                                  className="text-gray-500 hover:text-red-400 transition"
-                                  title="删除渲染缓存"
-                                >
-                                  ×
-                                </button>
                               </div>
-                            ))}
-                          </div>
-                        </div>
+                            </div>
+                          )}
+                          {task.render_caches && task.render_caches.length > 0 && (
+                            <div className="px-3 pb-3">
+                              <div className="bg-emerald-500/5 border border-emerald-500/20 rounded-lg p-3">
+                                <div className="text-emerald-400 text-xs font-medium mb-2">交付渲染缓存</div>
+                                {task.render_caches.map((rc, idx) => (
+                                  <div key={idx} className="flex items-center justify-between py-1.5 text-xs">
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-gray-300">{rc.filename}</span>
+                                      <span className="text-gray-500">{formatBytes(rc.size)}</span>
+                                    </div>
+                                    <button
+                                      onClick={() => handleDeleteRenderCache(rc.filename)}
+                                      className="text-gray-500 hover:text-red-400 transition"
+                                      title="删除渲染缓存"
+                                    >
+                                      ×
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </>
                       )}
                     </div>
                   ))}

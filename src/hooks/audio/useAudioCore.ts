@@ -1,6 +1,7 @@
 import { useRef, useState, useCallback, useEffect } from 'react';
 import { useAudioWorker } from '../../workers/useAudioWorker';
 import { loadSettings } from '../../utils/settingsStorage';
+import { useBackend } from '../../contexts/BackendContext';
 import {
   WSProgressControl,
   ProcessingOptions,
@@ -21,6 +22,7 @@ import {
 export function useAudioCore() {
   const savedSettings = loadSettings();
   const audioWorker = useAudioWorker();
+  const { addBackendError, clearBackendErrorQueue: clearGlobalErrorQueue } = useBackend();
 
   const [audioFile, setAudioFile] = useState<File | null>(null);
   const [audioBuffer, setAudioBuffer] = useState<AudioBuffer | null>(null);
@@ -54,7 +56,7 @@ export function useAudioCore() {
   const [isTaskStuck, setIsTaskStuck] = useState(false);
   const [stuckInfo, setStuckInfo] = useState<StuckInfo | null>(null);
   const [queueStatus, setQueueStatus] = useState<QueueStatus | null>(null);
-  const [backendError, setBackendError] = useState<string | null>(null);
+  const [backendError, setBackendErrorState] = useState<string | null>(null);
   const [backendPreviewUrl, setBackendPreviewUrl] = useState<string | null>(null);
   const [renderDownloadUrl, setRenderDownloadUrl] = useState<string | null>(null);
   const [showDownloadModal, setShowDownloadModal] = useState(false);
@@ -123,6 +125,17 @@ export function useAudioCore() {
     wavInfoRef.current = info;
     setWavInfoState(info);
   }, []);
+
+  const setBackendError = useCallback((error: string | null) => {
+    setBackendErrorState(error);
+    if (error) {
+      addBackendError(error, 'audio');
+    }
+  }, [addBackendError]);
+
+  const clearBackendErrorQueue = useCallback(() => {
+    clearGlobalErrorQueue();
+  }, [clearGlobalErrorQueue]);
 
   useEffect(() => { processingOptionsRef.current = processingOptions; }, [processingOptions]);
   useEffect(() => { algorithmVersionRef.current = algorithmVersion; }, [algorithmVersion]);

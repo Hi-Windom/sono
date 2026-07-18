@@ -88,7 +88,35 @@ def _generate_waveform_peaks(output_path: str, num_peaks: int = WAVEFORM_PEAKS_C
                     peaks.append([float(np.min(mono)), float(np.max(mono))])
             return peaks if peaks else None
     except Exception as e:
-        logger.warning(f"[waveform] 生成波形峰值失败: {e}")
+        logger.warning(f"[waveform] soundfile生成波形峰值失败，尝试miniaudio: {e}")
+
+    try:
+        import miniaudio
+        sound = miniaudio.decode_file(output_path, output_format=miniaudio.SampleFormat.FLOAT32)
+        raw = np.frombuffer(sound.samples, dtype=np.float32)
+        nchannels = sound.nchannels
+        n_frames = sound.num_frames
+        if n_frames == 0:
+            return None
+        if nchannels > 1:
+            raw = raw.reshape(-1, nchannels).T
+            mono = np.mean(raw, axis=0)
+        else:
+            mono = raw
+        samples_per_peak = max(1, n_frames // num_peaks)
+        peaks = []
+        for i in range(num_peaks):
+            start = i * samples_per_peak
+            end = min(start + samples_per_peak, n_frames)
+            if start >= end:
+                break
+            block = mono[start:end]
+            if block.size == 0:
+                break
+            peaks.append([float(np.min(block)), float(np.max(block))])
+        return peaks if peaks else None
+    except Exception as e:
+        logger.warning(f"[waveform] miniaudio生成波形峰值也失败: {e}")
         return None
 
 _loop = None

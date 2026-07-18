@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useState, useRef, useEffect } from 'react';
 
 interface AudioUploaderProps {
   onFileSelect: (file: File) => void;
@@ -9,6 +9,15 @@ interface AudioUploaderProps {
 
 export function AudioUploader({ onFileSelect, onInvalidFile, isLoading = false }: AudioUploaderProps) {
   const [showInvalidHint, setShowInvalidHint] = useState(false);
+  const invalidHintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (invalidHintTimerRef.current) {
+        clearTimeout(invalidHintTimerRef.current);
+      }
+    };
+  }, []);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -16,10 +25,20 @@ export function AudioUploader({ onFileSelect, onInvalidFile, isLoading = false }
     const file = e.dataTransfer.files[0];
     if (file && file.type.startsWith('audio/')) {
       setShowInvalidHint(false);
+      if (invalidHintTimerRef.current) {
+        clearTimeout(invalidHintTimerRef.current);
+        invalidHintTimerRef.current = null;
+      }
       onFileSelect(file);
     } else if (file) {
       setShowInvalidHint(true);
-      setTimeout(() => setShowInvalidHint(false), 2000);
+      if (invalidHintTimerRef.current) {
+        clearTimeout(invalidHintTimerRef.current);
+      }
+      invalidHintTimerRef.current = setTimeout(() => {
+        setShowInvalidHint(false);
+        invalidHintTimerRef.current = null;
+      }, 2000);
       onInvalidFile?.();
     }
   }, [onFileSelect, onInvalidFile, isLoading]);

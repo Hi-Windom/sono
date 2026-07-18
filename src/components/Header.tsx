@@ -37,18 +37,18 @@ const formatUptime = (seconds?: number | null) => {
 
 const Section = ({ title, items }: { title: string; items: Array<{ label: string; name: string; ok?: boolean; warn?: boolean; detail?: string | null; dim?: boolean }> }) => (
   <div>
-    <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-2">{title}</div>
-    <div className="space-y-1">
+    <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-2">{title}</div>
+    <div className="space-y-1.5">
       {items.map(item => (
-        <div key={item.label} className={`flex items-center gap-2 ${item.dim ? 'text-gray-500' : ''}`}>
-          <span className="w-16 text-gray-600 text-[10px] font-mono shrink-0">{item.label}</span>
+        <div key={item.label} className={`flex items-center gap-2 ${item.dim ? 'text-gray-400' : 'text-gray-200'}`}>
+          <span className="w-16 text-gray-500 text-[10px] font-mono shrink-0">{item.label}</span>
           <span className="text-xs">{item.name}</span>
           {item.ok !== undefined && (
-            <span className={`ml-auto text-[10px] px-1.5 py-0.5 rounded ${item.ok ? 'bg-emerald-500/10 text-emerald-400' : item.warn ? 'bg-yellow-500/10 text-yellow-400' : 'bg-red-500/10 text-red-400'}`}>
+            <span className={`ml-auto text-[10px] px-1.5 py-0.5 rounded font-medium ${item.ok ? 'bg-emerald-500/15 text-emerald-400' : item.warn ? 'bg-yellow-500/15 text-yellow-400' : 'bg-red-500/15 text-red-400'}`}>
               {item.ok ? 'OK' : item.warn ? 'WARN' : 'FAIL'}
             </span>
           )}
-          {item.detail && <span className="text-[10px] text-gray-600 ml-2 truncate">{item.detail}</span>}
+          {item.detail && <span className="text-[11px] text-gray-400 ml-2 truncate">{item.detail}</span>}
         </div>
       ))}
     </div>
@@ -89,7 +89,7 @@ const buildCopyText = (backendDiag: NonNullable<ReturnType<typeof useBackend>['b
 
 export const Header = () => {
   const navigate = useNavigate();
-  const { connectionStatus, hasUpstreamActivity, hasDownstreamActivity, runBackendDiag, backendDiag } = useBackend();
+  const { connectionStatus, hasUpstreamActivity, hasDownstreamActivity, runBackendDiag, backendDiag, backendErrorQueue, clearBackendErrorQueue } = useBackend();
   const [showDiagModal, setShowDiagModal] = useState(false);
   const [isDiagLoading, setIsDiagLoading] = useState(false);
   const [safePadding, setSafePadding] = useState(0);
@@ -426,6 +426,40 @@ export const Header = () => {
                     ]} />
                   </>
                 )}
+
+                {/* === 后端错误队列 === */}
+                <div className="border-t border-white/5" />
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">
+                      错误日志 ({backendErrorQueue.length})
+                    </div>
+                    {backendErrorQueue.length > 0 && (
+                      <button
+                        onClick={clearBackendErrorQueue}
+                        className="text-[10px] text-gray-500 hover:text-red-400 transition-colors cursor-pointer"
+                      >
+                        清空
+                      </button>
+                    )}
+                  </div>
+                  {backendErrorQueue.length === 0 ? (
+                    <div className="text-[11px] text-gray-600 italic">暂无错误记录</div>
+                  ) : (
+                    <div className="space-y-1.5 max-h-40 overflow-y-auto">
+                      {backendErrorQueue.map((entry) => (
+                        <div key={entry.id} className="bg-red-500/5 border border-red-500/10 rounded px-2.5 py-1.5">
+                          <div className="flex items-center gap-2 text-[10px]">
+                            <span className="text-red-400 font-semibold">ERROR</span>
+                            <span className="text-gray-500">{new Date(entry.timestamp).toLocaleTimeString('zh-CN', { hour12: false })}</span>
+                            {entry.source && <span className="text-gray-500 ml-auto">[{entry.source}]</span>}
+                          </div>
+                          <div className="text-[11px] text-gray-300 mt-0.5 break-all">{entry.message}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
 
                 <div className="border-t border-white/5" />
 
