@@ -15,11 +15,11 @@ from ._common import _get_audio_info
 
 router = APIRouter(prefix="/api/v1")
 
+router.include_router(cache_router)
 router.include_router(system_router)
 router.include_router(upload_router)
 router.include_router(detect_router)
 router.include_router(repair_router)
 router.include_router(render_router)
 router.include_router(download_router)
-router.include_router(cache_router)
 router.include_router(perf_router)

@@ -14,7 +14,7 @@ import {
 import { useRepairSessionStore } from '../../store/repairSessionStore';
 import { saveSession } from '../../utils/sessionDB';
 import { AIRepairParams, RepairMode, defaultAIRepairParams } from '../../utils/advancedAudioProcessing';
-import { writeLog } from './utils';
+import { writeLog, formatBytes, formatSpeed } from './utils';
 import type { AudioCoreState, AudioCoreRefs } from './useAudioCore';
 import type { RenderResult } from './useAudioExport';
 import { useToast } from '../../components/Toast';
@@ -200,7 +200,11 @@ export function useAudioRepair({
       setProcessingProgress(0.01);
       let uploadRes;
       try {
-        uploadRes = await uploadAudio(audioFile, undefined, fileHashRef.current || undefined);
+        uploadRes = await uploadAudio(audioFile, (loaded, total, speed) => {
+          const pct = total > 0 ? loaded / total : 0;
+          setProcessingProgress(0.01 + pct * 0.09);
+          setProcessingStep(`上传中 ${formatBytes(loaded)}/${formatBytes(total)} ${formatSpeed(speed)}`);
+        }, fileHashRef.current || undefined);
       } catch (uploadErr) {
         const msg = uploadErr instanceof Error ? uploadErr.message : String(uploadErr);
         console.warn('[applySettings] 上传失败:', msg);
