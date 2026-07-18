@@ -10,6 +10,13 @@ from services.param_maps import DUAL_REPAIR_PARAM_KEYS, SINGLE_REPAIR_PARAM_KEYS
 
 TaskDict = dict[str, Any]
 
+_ALLOWED_TASK_COLUMNS = {
+    "status", "progress", "step", "original_filename", "original_path",
+    "file_hash", "file_size", "output_path", "params", "detection_result",
+    "repaired_detection_result", "repair_result", "error",
+    "render_filename", "render_result"
+}
+
 
 def get_db() -> sqlite3.Connection:
     conn = sqlite3.connect(config.DB_PATH)
@@ -136,9 +143,10 @@ def update_task(task_id: str, **kwargs: Any) -> None:
     sets: list[str] = []
     values: list[Any] = []
     for k, v in kwargs.items():
+        if k not in _ALLOWED_TASK_COLUMNS:
+            raise ValueError(f"不允许更新的字段: {k}")
         sets.append(f"{k} = ?")
         if isinstance(v, (dict, list)):
-            # 先转换 numpy 类型，再序列化
             serializable_v = _convert_to_json_serializable(v)
             values.append(json.dumps(serializable_v))
         else:

@@ -535,7 +535,7 @@ async def websocket_task_status(websocket: WebSocket, task_id: str):
         except WebSocketDisconnect:
             pass
         finally:
-            ws_manager.disconnect(task_id, websocket)
+            await ws_manager.disconnect(task_id, websocket)
         return
 
     task = get_task(task_id)
@@ -597,4 +597,4 @@ async def websocket_task_status(websocket: WebSocket, task_id: str):
     except WebSocketDisconnect:
         pass
     finally:
-        ws_manager.disconnect(task_id, websocket)
+        await ws_manager.disconnect(task_id, websocket)

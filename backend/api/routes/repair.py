@@ -241,10 +241,21 @@ async def repair_debug_endpoint(request: DebugRepairRequest):
 
 @router.get("/repair-debug/{task_id}/{filename}")
 async def download_debug_variant(task_id: str, filename: str):
+    safe_filename = os.path.basename(filename)
+    if safe_filename != filename:
+        raise HTTPException(status_code=400, detail="无效的文件名")
+    if not task_id.replace("-", "").isalnum():
+        raise HTTPException(status_code=400, detail="无效的任务ID")
     debug_dir = os.path.join(OUTPUT_DIR, f"debug_{task_id}")
-    file_path = os.path.join(debug_dir, filename)
+    file_path = os.path.join(debug_dir, safe_filename)
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="调试文件不存在")
+    if not os.path.isfile(file_path):
+        raise HTTPException(status_code=400, detail="不是文件")
+    real_path = os.path.realpath(file_path)
+    real_debug_dir = os.path.realpath(debug_dir)
+    if not real_path.startswith(real_debug_dir + os.sep):
+        raise HTTPException(status_code=400, detail="路径越界")
     return FileResponse(file_path, media_type="audio/wav")
 
 

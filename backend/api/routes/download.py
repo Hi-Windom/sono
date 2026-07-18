@@ -14,6 +14,22 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _safe_output_path(filename: str) -> str:
+    safe_filename = os.path.basename(filename)
+    if safe_filename != filename:
+        raise HTTPException(status_code=400, detail="无效的文件名")
+    file_path = os.path.join(OUTPUT_DIR, safe_filename)
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="文件不存在")
+    if not os.path.isfile(file_path):
+        raise HTTPException(status_code=400, detail="不是文件")
+    real_path = os.path.realpath(file_path)
+    real_output_dir = os.path.realpath(OUTPUT_DIR)
+    if not real_path.startswith(real_output_dir + os.sep):
+        raise HTTPException(status_code=400, detail="路径越界")
+    return file_path
+
+
 def _wav_to_mp3(wav_path: str, mp3_path: str, bitrate: int = 128):
     from services.mp3_encoder import encode_mp3
     encode_mp3(wav_path, mp3_path, bitrate)
@@ -90,11 +106,8 @@ async def download_audio(task_id: str):
 @router.get("/download-file/{filename}")
 async def download_file(filename: str, request: Request):
     logger.info(f"[DOWNLOAD] Request received: filename={filename}, client={request.client.host if request.client else 'unknown'}")
-    file_path = os.path.join(OUTPUT_DIR, filename)
+    file_path = _safe_output_path(filename)
     logger.info(f"[DOWNLOAD] File path: {file_path}, exists={os.path.exists(file_path)}")
-    if not os.path.exists(file_path):
-        logger.warning(f"[DOWNLOAD] File not found: {file_path}")
-        raise HTTPException(status_code=404, detail="文件不存在")
 
     download_name = filename
     if "_rendered_" in filename:
@@ -440,9 +453,7 @@ async def download_mp3_file(filename: str, request: Request):
     if not filename.endswith(".wav"):
         raise HTTPException(status_code=400, detail="仅支持 .wav 源文件")
 
-    wav_path = os.path.join(OUTPUT_DIR, filename)
-    if not os.path.exists(wav_path):
-        raise HTTPException(status_code=404, detail="音频文件不存在")
+    wav_path = _safe_output_path(filename)
 
     base_name = filename[:-4]
     mp3_path = os.path.join(OUTPUT_DIR, f"{base_name}.mp3")
@@ -527,9 +538,7 @@ async def download_m4a_file(filename: str, request: Request):
     if not filename.endswith(".wav"):
         raise HTTPException(status_code=400, detail="仅支持 .wav 源文件")
 
-    wav_path = os.path.join(OUTPUT_DIR, filename)
-    if not os.path.exists(wav_path):
-        raise HTTPException(status_code=404, detail="音频文件不存在")
+    wav_path = _safe_output_path(filename)
 
     base_name = filename[:-4]
     m4a_path = os.path.join(OUTPUT_DIR, f"{base_name}.m4a")

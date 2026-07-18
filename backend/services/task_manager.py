@@ -230,6 +230,13 @@ def _run_detect(task_id: str, audio_path: str, detect_type: str, detector_versio
     start_time = time.time()
     logger.info(f"[detect] 开始 task_id={task_id} type={detect_type} version={detector_version}")
 
+    with _cancelled_lock:
+        if task_id in _cancelled_tasks:
+            logger.info(f"[detect] 任务已取消，跳过执行 task_id={task_id}")
+            _cancelled_tasks.discard(task_id)
+            _track_task_end(task_id)
+            return
+
     last_progress_time = [time.time()]
     last_progress = [-1.0]
     is_stuck = [False]
@@ -332,9 +339,17 @@ def _run_repair(task_id: str, audio_path: str, params: dict[str, Any], mobile_mo
     start_time = time.time()
     algorithm_version = params.get("algorithm_version", DEFAULT_VERSION)
     perf_collector = get_perf_collector()
-    perf_collector.start_repair(task_id)
     size_samples = 0
     perf_ended = False
+    
+    with _cancelled_lock:
+        if task_id in _cancelled_tasks:
+            logger.info(f"[repair] 任务已取消，跳过执行 task_id={task_id}")
+            _cancelled_tasks.discard(task_id)
+            _track_task_end(task_id)
+            return
+    
+    perf_collector.start_repair(task_id)
     
     if mobile_mode:
         version_info = ALGORITHM_VERSIONS.get(algorithm_version)

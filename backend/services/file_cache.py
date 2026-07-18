@@ -50,6 +50,19 @@ def evict_old_files() -> None:
             released += orig_size
             logger.info(f"释放源文件: {original_path} ({orig_size} bytes)")
 
+        if os.path.isdir(OUTPUT_DIR):
+            for fname in os.listdir(OUTPUT_DIR):
+                if fname.startswith(f"{task_id}_rendered_") and fname.endswith(".wav"):
+                    fp = os.path.join(OUTPUT_DIR, fname)
+                    if os.path.isfile(fp):
+                        try:
+                            fsize = os.path.getsize(fp)
+                            os.remove(fp)
+                            released += fsize
+                            logger.info(f"释放渲染缓存: {fp} ({fsize} bytes)")
+                        except OSError as e:
+                            logger.warning(f"删除渲染缓存失败: {fp}, {e}")
+
         delete_task(task_id)
         logger.info(f"删除任务记录: {task_id}")
 

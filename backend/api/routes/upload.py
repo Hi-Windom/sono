@@ -1,6 +1,8 @@
 import os
 import json
 import logging
+import re
+import threading
 import uuid
 from datetime import datetime, timezone
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
@@ -10,6 +12,9 @@ from config import ALLOWED_EXTENSIONS, MAX_UPLOAD_SIZE, UPLOAD_DIR, BASE_DIR
 from database import create_task, find_task_by_hash
 from services.task_manager import generate_task_id
 from ._common import _get_audio_info
+
+_SESSION_ID_PATTERN = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
+_audio_files_cache_lock = threading.Lock()
 
 logger = logging.getLogger(__name__)
 
@@ -171,6 +176,8 @@ async def upload_chunk(
     chunk_index: int = Form(...),
     chunk: UploadFile = File(...),
 ):
+    if not _SESSION_ID_PATTERN.match(session_id):
+        raise HTTPException(status_code=400, detail="无效的会话ID")
     session_dir = os.path.join(UPLOAD_SESSIONS_DIR, session_id)
     session_file = os.path.join(session_dir, "session.json")
 
@@ -202,6 +209,8 @@ async def upload_chunk(
 
 @router.get("/upload-status")
 async def upload_status(session_id: str = ...):
+    if not _SESSION_ID_PATTERN.match(session_id):
+        raise HTTPException(status_code=400, detail="无效的会话ID")
     session_dir = os.path.join(UPLOAD_SESSIONS_DIR, session_id)
     session_file = os.path.join(session_dir, "session.json")
 
@@ -231,6 +240,8 @@ async def upload_status(session_id: str = ...):
 
 @router.post("/upload-finalize")
 async def upload_finalize(session_id: str = Form(...)):
+    if not _SESSION_ID_PATTERN.match(session_id):
+        raise HTTPException(status_code=400, detail="无效的会话ID")
     session_dir = os.path.join(UPLOAD_SESSIONS_DIR, session_id)
     session_file = os.path.join(session_dir, "session.json")
 
@@ -323,6 +334,21 @@ async def upload_dual_audio(
     if len(accompaniment_content) > MAX_UPLOAD_SIZE:
         raise HTTPException(status_code=413, detail=f"伴奏文件过大，最大支持 {MAX_UPLOAD_SIZE // 1024 // 1024}MB")
 
+    total_size = len(vocal_content) + len(accompaniment_content)
+    try:
+        disk_usage = os.statvfs(UPLOAD_DIR)
+        available_bytes = disk_usage.f_bavail * disk_usage.f_frsize
+        min_required = total_size * 2
+        if available_bytes < min_required:
+            available_mb = available_bytes // 1024 // 1024
+            required_mb = min_required // 1024 // 1024
+            raise HTTPException(
+                status_code=507,
+                detail=f"存储空间不足：可用 {available_mb}MB，至少需要 {required_mb}MB（文件大小的2倍）"
+            )
+    except OSError:
+        pass
+
     with open(vocal_upload_path, "wb") as f:
         f.write(vocal_content)
     with open(accompaniment_upload_path, "wb") as f:
@@ -377,8 +403,9 @@ async def list_audio_files():
     from config import OUTPUT_DIR
 
     now = time.time()
-    if _audio_files_cache["data"] is not None and now - _audio_files_cache["ts"] < 5:
-        return _audio_files_cache["data"]
+    with _audio_files_cache_lock:
+        if _audio_files_cache["data"] is not None and now - _audio_files_cache["ts"] < 5:
+            return _audio_files_cache["data"]
 
     files = []
     seen_paths = set()
@@ -414,8 +441,9 @@ async def list_audio_files():
     files.sort(key=lambda x: x["modified_at"], reverse=True)
 
     result = {"files": files, "count": len(files)}
-    _audio_files_cache["data"] = result
-    _audio_files_cache["ts"] = now
+    with _audio_files_cache_lock:
+        _audio_files_cache["data"] = result
+        _audio_files_cache["ts"] = now
     return result
 
 
@@ -492,6 +520,8 @@ async def training_upload_init(
 async def training_upload_finalize(
     session_id: str = Form(...),
 ):
+    if not _SESSION_ID_PATTERN.match(session_id):
+        raise HTTPException(status_code=400, detail="无效的会话ID")
     session_dir = os.path.join(UPLOAD_SESSIONS_DIR, session_id)
     session_file = os.path.join(session_dir, "session.json")
 

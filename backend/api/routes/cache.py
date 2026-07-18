@@ -93,7 +93,7 @@ async def websocket_cache_events(websocket: WebSocket):
     except WebSocketDisconnect:
         pass
     finally:
-        ws_manager.disconnect(CACHE_LISTENER_ID, websocket)
+        await ws_manager.disconnect(CACHE_LISTENER_ID, websocket)
 
 
 @router.get("/render-cache/{task_id}")
@@ -168,14 +168,23 @@ async def get_render_cache(task_id: str):
 
 @router.delete("/render-cache/{filename}")
 async def delete_render_cache(filename: str):
-    file_path = os.path.join(OUTPUT_DIR, filename)
+    safe_filename = os.path.basename(filename)
+    if safe_filename != filename:
+        raise HTTPException(status_code=400, detail="无效的文件名")
+    file_path = os.path.join(OUTPUT_DIR, safe_filename)
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="文件不存在")
-    if "_rendered_" not in filename:
+    if not os.path.isfile(file_path):
+        raise HTTPException(status_code=400, detail="不是文件")
+    real_path = os.path.realpath(file_path)
+    real_output_dir = os.path.realpath(OUTPUT_DIR)
+    if not real_path.startswith(real_output_dir + os.sep):
+        raise HTTPException(status_code=400, detail="路径越界")
+    if "_rendered_" not in safe_filename:
         raise HTTPException(status_code=400, detail="不是渲染缓存文件")
     released = os.path.getsize(file_path)
     os.remove(file_path)
-    return {"released_bytes": released, "filename": filename}
+    return {"released_bytes": released, "filename": safe_filename}
 
 
 @router.get("/delivery-files")
@@ -248,28 +257,42 @@ async def list_delivery_files():
 
 @router.delete("/delivery-files/{filename}")
 async def delete_delivery_file(filename: str):
-    file_path = os.path.join(OUTPUT_DIR, filename)
+    safe_filename = os.path.basename(filename)
+    if safe_filename != filename:
+        raise HTTPException(status_code=400, detail="无效的文件名")
+    file_path = os.path.join(OUTPUT_DIR, safe_filename)
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="文件不存在")
     if not os.path.isfile(file_path):
         raise HTTPException(status_code=400, detail="不是文件")
+    real_path = os.path.realpath(file_path)
+    real_output_dir = os.path.realpath(OUTPUT_DIR)
+    if not real_path.startswith(real_output_dir + os.sep):
+        raise HTTPException(status_code=400, detail="路径越界")
     try:
         os.remove(file_path)
     except PermissionError:
         raise HTTPException(status_code=403, detail="权限不足，无法删除")
-    logger.info(f"[/delivery-files] deleted: {filename}")
+    logger.info(f"[/delivery-files] deleted: {safe_filename}")
     return {"status": "ok"}
 
 
 @router.delete("/delivery-files/parent/{filename}")
 async def delete_delivery_parent(filename: str):
-    file_path = os.path.join(OUTPUT_DIR, filename)
+    safe_filename = os.path.basename(filename)
+    if safe_filename != filename:
+        raise HTTPException(status_code=400, detail="无效的文件名")
+    file_path = os.path.join(OUTPUT_DIR, safe_filename)
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="文件不存在")
+    real_path = os.path.realpath(file_path)
+    real_output_dir = os.path.realpath(OUTPUT_DIR)
+    if not real_path.startswith(real_output_dir + os.sep):
+        raise HTTPException(status_code=400, detail="路径越界")
 
     parent_task_id = None
-    if "_rendered_" in filename:
-        base = filename.replace(".wav", "")
+    if "_rendered_" in safe_filename:
+        base = safe_filename.replace(".wav", "")
         parts = base.split("_rendered_")
         if len(parts) == 2:
             parent_task_id = parts[0]
@@ -279,13 +302,16 @@ async def delete_delivery_parent(filename: str):
             os.remove(file_path)
         except PermissionError:
             raise HTTPException(status_code=403, detail="权限不足，无法删除")
-        return {"status": "ok", "deleted": [filename]}
+        return {"status": "ok", "deleted": [safe_filename]}
 
     deleted = []
     if os.path.isdir(OUTPUT_DIR):
         for fname in os.listdir(OUTPUT_DIR):
             if fname.startswith(f"{parent_task_id}_rendered_") and fname.endswith(".wav"):
                 fp = os.path.join(OUTPUT_DIR, fname)
+                fp_real = os.path.realpath(fp)
+                if not fp_real.startswith(real_output_dir + os.sep):
+                    continue
                 if os.path.isfile(fp):
                     try:
                         os.remove(fp)
