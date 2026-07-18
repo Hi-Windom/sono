@@ -357,7 +357,11 @@ export function pollProgress(
         if (terminals.has(status.status)) {
           log('poll', `COMPLETE task_id=${taskId} status=${status.status}`);
           stopQueueCheck();
-          callbacks.onComplete?.(status);
+          if (status.status === 'error' || status.status === 'timeout') {
+            callbacks.onError?.(new Error(status.error || status.step || `任务失败(status=${status.status})`));
+          } else {
+            callbacks.onComplete?.(status);
+          }
           return;
         }
       } catch (err) {

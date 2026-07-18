@@ -290,8 +290,8 @@ def repair_single_track(input_path: str, output_path: str, params: dict, progres
             sf.write(os.path.join(debug_output_dir, "99_mastering.wav"),
                      y.T if y.ndim > 1 else y, working_sr, subtype="PCM_24")
 
-    if progress:
-        progress(0.90, f"{VERSION_TAG} 导出...")
+    if progress_callback:
+        progress_callback(0.90, f"{VERSION_TAG} 导出...")
 
     output_volume_db = params.get("output_volume", 0.0)
     if output_volume_db != 0.0:

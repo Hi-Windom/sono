@@ -148,6 +148,10 @@ rm -rf "$PKG_DIR/backend/training"
 rm -f "$PKG_DIR/backend/server.log"
 rm -f "$PKG_DIR/backend/watchdog.log"
 rm -f "$PKG_DIR/backend/.venv"
+# 删除 dist 中的测试音频文件（仅用于开发/测试，不打包）
+rm -f "$PKG_DIR/backend/dist/test_"*.mp3
+rm -f "$PKG_DIR/backend/dist/test_"*.wav
+rm -f "$PKG_DIR/backend/dist/test_"*.ogg
 
 OUTPUT_FILE="$PROJECT_ROOT/release_android.tar.gz"
 tar -czf "$OUTPUT_FILE" -C "$TMP_DIR" sono-android
