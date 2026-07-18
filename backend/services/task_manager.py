@@ -55,9 +55,10 @@ def can_accept_task() -> tuple[bool, str]:
 
 def _track_task_start(task_id: str) -> bool:
     with _active_tasks_lock:
-        if len(_active_tasks) >= MAX_CONCURRENT_TASKS:
-            return False
         _active_tasks.add(task_id)
+        if len(_active_tasks) > MAX_CONCURRENT_TASKS:
+            _active_tasks.discard(task_id)
+            return False
         return True
 
 
@@ -177,6 +178,17 @@ STUCK_THRESHOLD = 30
 
 _cancelled_tasks: set[str] = set()
 _cancelled_lock = threading.Lock()
+_CANCEL_CLEANUP_DELAY = 3600
+
+
+def _schedule_cancel_cleanup(task_id: str) -> None:
+    def _cleanup():
+        time.sleep(_CANCEL_CLEANUP_DELAY)
+        with _cancelled_lock:
+            _cancelled_tasks.discard(task_id)
+        logger.debug(f"[cancel] 超时清理取消标记 task_id={task_id}")
+    t = threading.Thread(target=_cleanup, daemon=True)
+    t.start()
 
 
 def cancel_task(task_id: str) -> bool:
@@ -188,6 +200,7 @@ def cancel_task(task_id: str) -> bool:
     update_task(task_id, status="cancelled", step="已取消", progress=0)
     _ws_send_final(task_id, {"task_id": task_id, "status": "cancelled"})
     logger.info(f"[cancel] 任务已取消 task_id={task_id}")
+    _schedule_cancel_cleanup(task_id)
     return True
 
 
@@ -720,7 +733,8 @@ class DetectTask(BaseTask):
         self.detect_type = detect_type
         self.detector_version = detector_version
         self._start_time = 0.0
-        self._prev_status = "pending"
+        prev_task = get_task(task_id)
+        self._prev_status = prev_task["status"] if prev_task else "pending"
         self._stop_monitor = [False]
         self._monitor_thread: threading.Thread | None = None
         self._last_progress_time = [0.0]
@@ -1044,6 +1058,7 @@ class RenderTask(BaseTask):
 
     def on_success(self, result: dict[str, Any]) -> dict[str, Any]:
         return {
+            "output_path": self.output_path,
             "render_filename": self.render_filename,
             "render_result": result,
         }

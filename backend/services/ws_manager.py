@@ -47,16 +47,19 @@ class ProgressWSManager:
     async def send_final(self, task_id: str, data: dict[str, Any]) -> None:
         async with self._lock:
             connections = list(self._connections.get(task_id, []))
-            self._connections.pop(task_id, None)
         for ws in connections:
             try:
-                await ws.send_json(data)
-            except Exception as e:
-                logger.warning(f"[ws_manager] send_final 发送消息失败 task_id={task_id}: {e}")
-            try:
-                await ws.close()
-            except Exception as e:
-                logger.warning(f"[ws_manager] send_final 关闭连接失败 task_id={task_id}: {e}")
+                try:
+                    await ws.send_json(data)
+                except Exception as e:
+                    logger.warning(f"[ws_manager] send_final 发送消息失败 task_id={task_id}: {e}")
+            finally:
+                try:
+                    await ws.close()
+                except Exception as e:
+                    logger.warning(f"[ws_manager] send_final 关闭连接失败 task_id={task_id}: {e}")
+        async with self._lock:
+            self._connections.pop(task_id, None)
 
     async def broadcast(self, data: dict[str, Any]) -> None:
         async with self._lock:

@@ -505,21 +505,37 @@ async def websocket_task_status(websocket: WebSocket, task_id: str):
     if task_id.startswith("qt-"):
         qt_task = _quality_test_cache.get(task_id)
         if not qt_task:
-            await websocket.send_json({"error": "测试任务不存在"})
-            await websocket.close()
+            try:
+                await websocket.send_json({"error": "测试任务不存在"})
+            except Exception:
+                pass
+            try:
+                await websocket.close()
+            except Exception:
+                pass
             return
         from services.ws_manager import ws_manager
         await ws_manager.connect(task_id, websocket)
         try:
-            await websocket.send_json({
-                "task_id": task_id,
-                "status": qt_task.get("status", "running"),
-                "progress": 0 if qt_task.get("status") == "running" else 100,
-                "step": "quality_test",
-            })
+            try:
+                await websocket.send_json({
+                    "task_id": task_id,
+                    "status": qt_task.get("status", "running"),
+                    "progress": 0 if qt_task.get("status") == "running" else 100,
+                    "step": "quality_test",
+                })
+            except Exception as e:
+                logger.warning(f"[ws] 发送初始状态失败 task_id={task_id}: {e}")
+                return
             if qt_task.get("status") == "completed":
-                await websocket.send_json({"task_id": task_id, "status": "completed", "progress": 100, "step": "done", **qt_task})
-                await websocket.close()
+                try:
+                    await websocket.send_json({"task_id": task_id, "status": "completed", "progress": 100, "step": "done", **qt_task})
+                except Exception as e:
+                    logger.warning(f"[ws] 发送完成状态失败 task_id={task_id}: {e}")
+                try:
+                    await websocket.close()
+                except Exception:
+                    pass
                 return
             import asyncio
             while True:
@@ -528,20 +544,41 @@ async def websocket_task_status(websocket: WebSocket, task_id: str):
                 except asyncio.TimeoutError:
                     current = _quality_test_cache.get(task_id, {})
                     if current.get("status") == "completed":
-                        await websocket.send_json({"task_id": task_id, "status": "completed", "progress": 100, "step": "done", **current})
-                        await websocket.close()
+                        try:
+                            await websocket.send_json({"task_id": task_id, "status": "completed", "progress": 100, "step": "done", **current})
+                        except Exception as e:
+                            logger.warning(f"[ws] 发送完成状态失败 task_id={task_id}: {e}")
+                        try:
+                            await websocket.close()
+                        except Exception:
+                            pass
                         return
-                    await websocket.send_json({"task_id": task_id, "status": "running", "progress": 50, "step": "quality_test", "heartbeat": True})
+                    try:
+                        await websocket.send_json({"task_id": task_id, "status": "running", "progress": 50, "step": "quality_test", "heartbeat": True})
+                    except Exception as e:
+                        logger.warning(f"[ws] 发送心跳失败 task_id={task_id}: {e}")
+                        return
         except WebSocketDisconnect:
             pass
+        except Exception as e:
+            logger.warning(f"[ws] 连接异常 task_id={task_id}: {e}")
         finally:
-            await ws_manager.disconnect(task_id, websocket)
+            try:
+                await ws_manager.disconnect(task_id, websocket)
+            except Exception:
+                pass
         return
 
     task = get_task(task_id)
     if not task:
-        await websocket.send_json({"error": "任务不存在"})
-        await websocket.close()
+        try:
+            await websocket.send_json({"error": "任务不存在"})
+        except Exception:
+            pass
+        try:
+            await websocket.close()
+        except Exception:
+            pass
         return
     from services.ws_manager import ws_manager
     await ws_manager.connect(task_id, websocket)
@@ -560,9 +597,16 @@ async def websocket_task_status(websocket: WebSocket, task_id: str):
             current["repair_result"] = task["repair_result"]
         if task.get("error"):
             current["error"] = task["error"]
-        await websocket.send_json(current)
+        try:
+            await websocket.send_json(current)
+        except Exception as e:
+            logger.warning(f"[ws] 发送初始状态失败 task_id={task_id}: {e}")
+            return
         if task.get("status") in ("completed", "detected", "error", "render_completed", "cancelled"):
-            await websocket.close()
+            try:
+                await websocket.close()
+            except Exception:
+                pass
             return
 
         import asyncio
@@ -572,8 +616,14 @@ async def websocket_task_status(websocket: WebSocket, task_id: str):
             except asyncio.TimeoutError:
                 current_task = get_task(task_id)
                 if not current_task:
-                    await websocket.send_json({"error": "任务不存在"})
-                    await websocket.close()
+                    try:
+                        await websocket.send_json({"error": "任务不存在"})
+                    except Exception:
+                        pass
+                    try:
+                        await websocket.close()
+                    except Exception:
+                        pass
                     return
                 heartbeat_msg = {
                     "task_id": task_id,
@@ -590,11 +640,23 @@ async def websocket_task_status(websocket: WebSocket, task_id: str):
                     heartbeat_msg["repair_result"] = current_task["repair_result"]
                 if current_task.get("error"):
                     heartbeat_msg["error"] = current_task["error"]
-                await websocket.send_json(heartbeat_msg)
+                try:
+                    await websocket.send_json(heartbeat_msg)
+                except Exception as e:
+                    logger.warning(f"[ws] 发送心跳失败 task_id={task_id}: {e}")
+                    return
                 if current_task["status"] in ("completed", "detected", "error", "render_completed", "cancelled"):
-                    await websocket.close()
+                    try:
+                        await websocket.close()
+                    except Exception:
+                        pass
                     return
     except WebSocketDisconnect:
         pass
+    except Exception as e:
+        logger.warning(f"[ws] 连接异常 task_id={task_id}: {e}")
     finally:
-        await ws_manager.disconnect(task_id, websocket)
+        try:
+            await ws_manager.disconnect(task_id, websocket)
+        except Exception:
+            pass

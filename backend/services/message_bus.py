@@ -4,6 +4,7 @@ import asyncio
 import logging
 import queue
 import threading
+from concurrent.futures import Future
 from typing import Any
 
 from services.ws_manager import ws_manager
@@ -11,13 +12,14 @@ from services.ws_manager import ws_manager
 logger = logging.getLogger(__name__)
 
 _SENTINEL = object()
+DEFAULT_MAXSIZE = 10000
 
 
 class MessageBus:
     _instance: MessageBus | None = None
     _lock: threading.Lock = threading.Lock()
 
-    def __new__(cls, maxsize: int = 0) -> MessageBus:
+    def __new__(cls, maxsize: int = DEFAULT_MAXSIZE) -> MessageBus:
         if cls._instance is None:
             with cls._lock:
                 if cls._instance is None:
@@ -26,7 +28,7 @@ class MessageBus:
                     cls._instance = instance
         return cls._instance
 
-    def __init__(self, maxsize: int = 0) -> None:
+    def __init__(self, maxsize: int = DEFAULT_MAXSIZE) -> None:
         if self._initialized:
             return
         self._initialized = True
@@ -35,6 +37,7 @@ class MessageBus:
         self._thread: threading.Thread | None = None
         self._running: bool = False
         self._maxsize: int = maxsize
+        self._stop_event: threading.Event = threading.Event()
 
     def set_loop(self, loop: asyncio.AbstractEventLoop) -> None:
         self._loop = loop
@@ -48,6 +51,7 @@ class MessageBus:
             logger.warning("[MessageBus] 投递线程仍在运行，先等待其退出")
             self.stop()
         self._running = True
+        self._stop_event.clear()
         self._thread = threading.Thread(target=self._worker, name="MessageBus-Worker", daemon=True)
         self._thread.start()
         logger.debug("[MessageBus] 投递线程已启动")
@@ -56,6 +60,7 @@ class MessageBus:
         if not self._running:
             return
         self._running = False
+        self._stop_event.set()
         try:
             self._queue.put_nowait(_SENTINEL)
         except queue.Full:
@@ -74,15 +79,20 @@ class MessageBus:
         try:
             self._queue.put_nowait((channel, data))
         except queue.Full:
-            logger.warning(f"[MessageBus] 队列已满，丢弃消息 channel={channel}, maxsize={self._maxsize}")
+            try:
+                self._queue.get_nowait()
+                self._queue.put_nowait((channel, data))
+                logger.warning(f"[MessageBus] 队列已满，丢弃最老消息并加入新消息 channel={channel}, maxsize={self._maxsize}")
+            except (queue.Empty, queue.Full):
+                logger.warning(f"[MessageBus] 队列操作失败，丢弃消息 channel={channel}, maxsize={self._maxsize}")
 
     def _worker(self) -> None:
-        while self._running:
+        while not self._stop_event.is_set():
             try:
                 item = self._queue.get(timeout=1.0)
             except queue.Empty:
                 continue
-            if item is _SENTINEL:
+            if item is _SENTINEL or self._stop_event.is_set():
                 break
             channel, data = item
             try:
@@ -98,26 +108,41 @@ class MessageBus:
             logger.warning(f"[MessageBus] 事件循环已关闭，无法投递消息 channel={channel}")
             return
 
+        def _on_future_done(fut: Future, ch: str, tid: str) -> None:
+            try:
+                exc = fut.exception()
+                if exc is not None:
+                    logger.warning(
+                        f"[MessageBus] 协程执行异常 channel={ch}, task_id={tid}: {exc}"
+                    )
+            except Exception as e:
+                logger.warning(
+                    f"[MessageBus] 获取协程异常失败 channel={ch}, task_id={tid}: {e}"
+                )
+
         try:
             if channel == "ws_progress":
                 task_id = data.get("task_id", "")
-                asyncio.run_coroutine_threadsafe(
+                fut = asyncio.run_coroutine_threadsafe(
                     ws_manager.send_progress(task_id, data),
                     self._loop,
                 )
+                fut.add_done_callback(lambda f, ch=channel, tid=task_id: _on_future_done(f, ch, tid))
             elif channel == "ws_final":
                 task_id = data.get("task_id", "")
-                asyncio.run_coroutine_threadsafe(
+                fut = asyncio.run_coroutine_threadsafe(
                     ws_manager.send_final(task_id, data),
                     self._loop,
                 )
+                fut.add_done_callback(lambda f, ch=channel, tid=task_id: _on_future_done(f, ch, tid))
             elif channel == "render_cache_update":
                 task_id = data.get("task_id", "")
                 files = data.get("files", [])
-                asyncio.run_coroutine_threadsafe(
+                fut = asyncio.run_coroutine_threadsafe(
                     ws_manager.broadcast_render_cache_update(task_id, files),
                     self._loop,
                 )
+                fut.add_done_callback(lambda f, ch=channel, tid=task_id: _on_future_done(f, ch, tid))
             else:
                 logger.warning(f"[MessageBus] 未知 channel: {channel}")
         except Exception as e:

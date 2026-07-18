@@ -15,12 +15,12 @@
 
 | ID | 问题 | 位置 | 影响 | 状态 |
 |----|------|------|------|------|
-| TL-001 | `TaskExecutor.cancel` 未调用 `_track_task_end`，导致 `_active_tasks` 集合泄漏 | `task_executor.py:87-105` | 任务取消后不释放槽位，最终系统拒绝所有新任务 | ⏳ 待修复 |
-| TL-002 | `cleanup_stale_tasks` 错误地将 `detected` 状态视为停滞状态（detected 是检测任务终态） | `database.py:85` | 服务器重启后检测完成的任务被标记为 failed | ⏳ 待修复 |
-| TL-003 | `RenderTask.on_success` 未保存 `output_path` 到数据库 | `task_manager.py:1045-1049` | 渲染完成后数据库中 output_path 为空，下载接口可能失败 | ⏳ 待修复 |
-| TL-004 | 服务器重启清理用 `failed` 状态，与系统其他地方的 `error` 状态不一致 | `database.py:102` | 前端判断终态时可能漏掉 failed，导致一直显示进行中 | ⏳ 待修复 |
-| TL-005 | `DetectTask.completed_status` 依赖 `_prev_status`，但 `_prev_status` 在 `execute()` 中才初始化 | `task_manager.py:723, 748-749` | 极端时序下 completed_status 可能返回错误值 | ⏳ 待修复 |
-| TL-006 | 取消未开始执行的任务时，`_cancelled_tasks` 条目存在临时泄漏风险 | `task_executor.py:87-105` | 取消后任务还没执行的窗口内，_cancelled_tasks 中残留 | ⏳ 待修复 |
+| TL-001 | `TaskExecutor.cancel` 未调用 `_track_task_end`，导致 `_active_tasks` 集合泄漏 | `task_executor.py:87-105` | 任务取消后不释放槽位，最终系统拒绝所有新任务 | ✅ 已修复 |
+| TL-002 | `cleanup_stale_tasks` 错误地将 `detected` 状态视为停滞状态（detected 是检测任务终态） | `database.py:85` | 服务器重启后检测完成的任务被标记为 failed | ✅ 已修复 |
+| TL-003 | `RenderTask.on_success` 未保存 `output_path` 到数据库 | `task_manager.py:1045-1049` | 渲染完成后数据库中 output_path 为空，下载接口可能失败 | ✅ 已修复 |
+| TL-004 | 服务器重启清理用 `failed` 状态，与系统其他地方的 `error` 状态不一致 | `database.py:102` | 前端判断终态时可能漏掉 failed，导致一直显示进行中 | ✅ 已修复 |
+| TL-005 | `DetectTask.completed_status` 依赖 `_prev_status`，但 `_prev_status` 在 `execute()` 中才初始化 | `task_manager.py:723, 748-749` | 极端时序下 completed_status 可能返回错误值 | ✅ 已修复 |
+| TL-006 | 取消未开始执行的任务时，`_cancelled_tasks` 条目存在临时泄漏风险 | `task_executor.py:87-105` | 取消后任务还没执行的窗口内，_cancelled_tasks 中残留 | ✅ 已修复 |
 
 ### 🟡 中严重程度（6 个）
 
@@ -51,11 +51,11 @@
 
 | ID | 问题 | 位置 | 影响 | 状态 |
 |----|------|------|------|------|
-| FC-001 | `safe_write` 写入失败时临时文件泄漏（`.tmp` 文件不清理） | `file_gateway.py:57-66` | 磁盘空间泄漏，临时文件堆积 | ⏳ 待修复 |
-| FC-002 | 锁 LRU 淘汰导致并发安全失效（被持有的锁被淘汰后新请求创建新锁，失去互斥） | `file_gateway.py:38-48` | 同一文件可被多线程同时写入，数据损坏 | ⏳ 待修复 |
-| FC-003 | `/decoded-wav/{file_hash}` 路径遍历漏洞（`file_hash` 未校验，可 `../` 逃逸） | `download.py:684-686` | 安全漏洞，可下载任意文件 | ⏳ 待修复 |
-| FC-004 | TTL 清理失败的文件在 LRU 阶段不再被重试（删除失败仍从列表移除） | `cache_manager.py:169-182` | 无法删除的文件永远占用空间 | ⏳ 待修复 |
-| FC-005 | `file_cache.py` 直接修改 `CacheManager._layers` 私有属性，非线程安全 | `file_cache.py:45-67` | 破坏封装，并发下数据竞争 | ⏳ 待修复 |
+| FC-001 | `safe_write` 写入失败时临时文件泄漏（`.tmp` 文件不清理） | `file_gateway.py:57-66` | 磁盘空间泄漏，临时文件堆积 | ✅ 已修复 |
+| FC-002 | 锁 LRU 淘汰导致并发安全失效（被持有的锁被淘汰后新请求创建新锁，失去互斥） | `file_gateway.py:38-48` | 同一文件可被多线程同时写入，数据损坏 | ✅ 已修复 |
+| FC-003 | `/decoded-wav/{file_hash}` 路径遍历漏洞（`file_hash` 未校验，可 `../` 逃逸） | `download.py:684-686` | 安全漏洞，可下载任意文件 | ✅ 已修复 |
+| FC-004 | TTL 清理失败的文件在 LRU 阶段不再被重试（删除失败仍从列表移除） | `cache_manager.py:169-182` | 无法删除的文件永远占用空间 | ✅ 已修复 |
+| FC-005 | `file_cache.py` 直接修改 `CacheManager._layers` 私有属性，非线程安全 | `file_cache.py:45-67` | 破坏封装，并发下数据竞争 | ✅ 已修复 |
 
 ### 🟡 中严重程度（6 个）
 
@@ -86,11 +86,11 @@
 
 | ID | 问题 | 位置 | 影响 | 状态 |
 |----|------|------|------|------|
-| WR-001 | MessageBus `stop()` 队列满时无法放入 SENTINEL，工作线程无法可靠停止 | `message_bus.py:59-62` | shutdown 可能挂起 | ⏳ 待修复 |
-| WR-002 | `_dispatch` 中 `run_coroutine_threadsafe` 的 Future 未检查，协程异常静默丢失 | `message_bus.py:101-124` | WS 消息投递失败无感知 | ⏳ 待修复 |
-| WR-003 | WebSocket 路由中 `send_json` 异常未被捕获，导致未处理异常和连接泄漏 | `system.py:535-600` | 异常连接资源泄漏 | ⏳ 待修复 |
-| WR-004 | `/metrics/reset` 端点无认证，可任意重置所有监控数据 | `metrics.py:52-58` | 监控数据可被恶意篡改 | ⏳ 待修复 |
-| WR-005 | `send_final` 中直接 pop task_id 但 `ws.close()` 失败会导致连接资源泄漏 | `ws_manager.py:47-59` | 连接句柄泄漏 | ⏳ 待修复 |
+| WR-001 | MessageBus `stop()` 队列满时无法放入 SENTINEL，工作线程无法可靠停止 | `message_bus.py:59-62` | shutdown 可能挂起 | ✅ 已修复 |
+| WR-002 | `_dispatch` 中 `run_coroutine_threadsafe` 的 Future 未检查，协程异常静默丢失 | `message_bus.py:101-124` | WS 消息投递失败无感知 | ✅ 已修复 |
+| WR-003 | WebSocket 路由中 `send_json` 异常未被捕获，导致未处理异常和连接泄漏 | `system.py:535-600` | 异常连接资源泄漏 | ✅ 已修复 |
+| WR-004 | `/metrics/reset` 端点无认证，可任意重置所有监控数据 | `metrics.py:52-58` | 监控数据可被恶意篡改 | ✅ 已修复 |
+| WR-005 | `send_final` 中直接 pop task_id 但 `ws.close()` 失败会导致连接资源泄漏 | `ws_manager.py:47-59` | 连接句柄泄漏 | ✅ 已修复 |
 
 ### 🟡 中严重程度（5 个）
 
@@ -123,10 +123,10 @@
 |----|------|------|------|------|
 | CC-001 | `TaskExecutor.cancel()` 导致 `_active_tasks` 集合泄漏，并发槽位耗尽 | `task_executor.py:87-105` | 同 TL-001，取消后不释放槽位 | ⏳ 待修复 |
 | CC-002 | `SafeFileGateway` 锁缓存 LRU 淘汰导致互斥失效 | `file_gateway.py:38-48` | 同 FC-002，数据损坏风险 | ⏳ 待修复 |
-| CC-003 | `_cancelled_tasks` 集合无限增长 | `task_manager.py:178-191` | 未执行的取消任务永不清理，内存泄漏 | ⏳ 待修复 |
-| CC-004 | SQLite 多线程写入无 WAL 模式，高并发下 database is locked | `database.py:21-24` | 高并发写入大量失败 | ⏳ 待修复 |
-| CC-005 | `can_accept_task` 存在 TOCTOU 竞态条件 | `task_manager.py:45-53` | 检查与操作不一致，可能超量接受任务 | ⏳ 待修复 |
-| CC-006 | `MessageBus` 默认无界队列，消费慢时 OOM | `message_bus.py:33` | 消息积压导致内存耗尽 | ⏳ 待修复 |
+| CC-003 | `_cancelled_tasks` 集合无限增长 | `task_manager.py:178-191` | 未执行的取消任务永不清理，内存泄漏 | ✅ 已修复 |
+| CC-004 | SQLite 多线程写入无 WAL 模式，高并发下 database is locked | `database.py:21-24` | 高并发写入大量失败 | ✅ 已修复 |
+| CC-005 | `can_accept_task` 存在 TOCTOU 竞态条件 | `task_manager.py:45-53` | 检查与操作不一致，可能超量接受任务 | ✅ 已修复 |
+| CC-006 | `MessageBus` 默认无界队列，消费慢时 OOM | `message_bus.py:33` | 消息积压导致内存耗尽 | ✅ 已修复 |
 
 ### 🟡 中严重程度（6 个）
 

@@ -416,7 +416,13 @@ class TestMetricsApiEndpoints:
         assert "total_messages_sent" in data
 
     def test_metrics_reset_endpoint(self, api_client):
-        res = api_client.post("/api/v1/metrics/reset")
-        assert res.status_code == 200
-        data = res.json()
-        assert data["status"] == "ok"
+        import config as _config
+        original = _config.ADMIN_TOKEN
+        try:
+            _config.ADMIN_TOKEN = "test-admin-token-123"
+            res = api_client.post("/api/v1/metrics/reset", headers={"X-Admin-Token": "test-admin-token-123"})
+            assert res.status_code == 200
+            data = res.json()
+            assert data["status"] == "ok"
+        finally:
+            _config.ADMIN_TOKEN = original

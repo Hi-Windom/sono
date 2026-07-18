@@ -42,7 +42,16 @@ class SafeFileGateway:
                 self._locks.move_to_end(basename)
                 return self._locks[basename]
             if len(self._locks) >= self._MAX_LOCKS:
-                    self._locks.popitem(last=False)
+                keys_to_evict = []
+                for key in self._locks:
+                    lock = self._locks[key]
+                    if lock.acquire(blocking=False):
+                        lock.release()
+                        keys_to_evict.append(key)
+                        if len(keys_to_evict) >= len(self._locks) - self._MAX_LOCKS + 1:
+                            break
+                for key in keys_to_evict:
+                    del self._locks[key]
             lock = threading.Lock()
             self._locks[basename] = lock
             return lock
@@ -59,11 +68,18 @@ class SafeFileGateway:
         lock = self.get_lock(filename)
         with lock:
             temp_path = full_path + ".tmp"
-            with open(temp_path, mode) as f:
-                f.write(data)
-                f.flush()
-                os.fsync(f.fileno())
-            os.replace(temp_path, full_path)
+            try:
+                with open(temp_path, mode) as f:
+                    f.write(data)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(temp_path, full_path)
+            finally:
+                if os.path.exists(temp_path):
+                    try:
+                        os.unlink(temp_path)
+                    except OSError:
+                        pass
 
     def safe_rename(self, temp_filename: str, final_filename: str) -> None:
         temp_path = self.resolve(temp_filename)

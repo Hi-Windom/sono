@@ -42,29 +42,26 @@ def evict_old_files() -> None:
 
     limit_mb = SOURCE_FILE_CACHE_LIMIT / (1024 * 1024)
 
-    upload_layer = cache_mgr._layers["upload_cache"]
-    output_layer = cache_mgr._layers["repair_output"]
-
-    old_upload_max = upload_layer.max_size_mb
-    old_output_max = output_layer.max_size_mb
+    old_upload_max = cache_mgr.get_layer_max_size("upload_cache")
+    old_output_max = cache_mgr.get_layer_max_size("repair_output")
 
     try:
         if upload_size > 0 and output_size > 0:
             ratio = upload_size / total
-            upload_layer.max_size_mb = limit_mb * ratio * 0.9
-            output_layer.max_size_mb = limit_mb * (1 - ratio) * 0.9
+            cache_mgr.set_layer_max_size("upload_cache", limit_mb * ratio * 0.9)
+            cache_mgr.set_layer_max_size("repair_output", limit_mb * (1 - ratio) * 0.9)
         elif upload_size > 0:
-            upload_layer.max_size_mb = limit_mb * 0.9
-            output_layer.max_size_mb = 0
+            cache_mgr.set_layer_max_size("upload_cache", limit_mb * 0.9)
+            cache_mgr.set_layer_max_size("repair_output", 0)
         else:
-            upload_layer.max_size_mb = 0
-            output_layer.max_size_mb = limit_mb * 0.9
+            cache_mgr.set_layer_max_size("upload_cache", 0)
+            cache_mgr.set_layer_max_size("repair_output", limit_mb * 0.9)
 
         cache_mgr.evict_layer("upload_cache")
         cache_mgr.evict_layer("repair_output")
     finally:
-        upload_layer.max_size_mb = old_upload_max
-        output_layer.max_size_mb = old_output_max
+        cache_mgr.set_layer_max_size("upload_cache", old_upload_max)
+        cache_mgr.set_layer_max_size("repair_output", old_output_max)
 
     tasks: list[TaskDict] = get_all_tasks_ordered()
     for task in tasks:

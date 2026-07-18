@@ -12,6 +12,7 @@ from services.task_manager import (
     TaskCancelledError,
     _cancelled_lock,
     _cancelled_tasks,
+    _schedule_cancel_cleanup,
     _track_task_end,
     _track_task_start,
     _ws_send_final,
@@ -90,6 +91,7 @@ class TaskExecutor:
                 return False
             _cancelled_tasks.add(task_id)
 
+        _track_task_end(task_id)
         update_task(task_id, status="cancelled", step="已取消", progress=0)
         _ws_send_final(task_id, {"task_id": task_id, "status": "cancelled"})
 
@@ -100,6 +102,8 @@ class TaskExecutor:
         tracer.record_state_change(task_id, "", "cancelled", step="已取消")
         tracer.record_task_end(task_id, "cancelled")
         metrics.record_task_cancellation(task_type)
+
+        _schedule_cancel_cleanup(task_id)
 
         logger.info(f"[TaskExecutor] 任务已取消 task_id={task_id}")
         return True

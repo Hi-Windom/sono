@@ -1,6 +1,7 @@
 import logging
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Header, HTTPException
 
+import config
 from services.observability import get_task_tracer, get_system_metrics
 
 logger = logging.getLogger(__name__)
@@ -50,7 +51,13 @@ async def metrics_websocket():
 
 
 @router.post("/metrics/reset")
-async def metrics_reset():
+async def metrics_reset(x_admin_token: str = Header(None)):
+    admin_token = config.ADMIN_TOKEN
+    if admin_token:
+        if x_admin_token != admin_token:
+            raise HTTPException(status_code=401, detail="未授权的操作")
+    else:
+        raise HTTPException(status_code=403, detail="重置接口未启用（未配置 ADMIN_TOKEN）")
     metrics = get_system_metrics()
     tracer = get_task_tracer()
     metrics.reset()

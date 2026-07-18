@@ -19,8 +19,10 @@ _ALLOWED_TASK_COLUMNS = {
 
 
 def get_db() -> sqlite3.Connection:
-    conn = sqlite3.connect(config.DB_PATH)
+    conn = sqlite3.connect(config.DB_PATH, timeout=30.0)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=30000")
     return conn
 
 def init_db() -> None:
@@ -82,7 +84,7 @@ def init_db() -> None:
 def cleanup_stale_tasks() -> int:
     conn = get_db()
     try:
-        stale_statuses = ('pending', 'processing', 'detecting', 'detected', 'analyzing', 'repairing', 'rendering')
+        stale_statuses = ('pending', 'processing', 'detecting', 'analyzing', 'repairing', 'rendering')
         cursor = conn.execute(
             "SELECT id, status, original_filename FROM tasks WHERE status IN ({})".format(
                 ','.join('?' * len(stale_statuses))
@@ -99,7 +101,7 @@ def cleanup_stale_tasks() -> int:
                 f"status={row['status']} filename={row['original_filename']}"
             )
         conn.execute(
-            "UPDATE tasks SET status = 'failed', error = '服务器重启，任务中断', progress = 0, "
+            "UPDATE tasks SET status = 'error', error = '服务器重启，任务中断', progress = 0, "
             "step = '任务已中断', updated_at = CURRENT_TIMESTAMP WHERE status IN ({})".format(
                 ','.join('?' * len(stale_statuses))
             ),
@@ -487,8 +489,10 @@ def _parse_json_fields(result: TaskDict) -> None:
 TRAINING_DB_PATH = os.path.join(os.path.dirname(config.DB_PATH), "training.db")
 
 def get_training_db() -> sqlite3.Connection:
-    conn = sqlite3.connect(TRAINING_DB_PATH)
+    conn = sqlite3.connect(TRAINING_DB_PATH, timeout=30.0)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=30000")
     return conn
 
 def init_training_db() -> None:

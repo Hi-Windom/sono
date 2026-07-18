@@ -114,6 +114,34 @@ class CacheManager:
             os.makedirs(layer.base_dir, exist_ok=True)
             logger.info(f"注册缓存层: {layer.name} -> {layer.base_dir}")
 
+    def set_layer_max_size(self, layer_name: str, max_size_mb: float) -> None:
+        with self._lock:
+            layer = self._layers.get(layer_name)
+            if layer is None:
+                raise ValueError(f"缓存层不存在: {layer_name}")
+            layer.max_size_mb = max_size_mb
+
+    def set_layer_ttl(self, layer_name: str, ttl_seconds: float) -> None:
+        with self._lock:
+            layer = self._layers.get(layer_name)
+            if layer is None:
+                raise ValueError(f"缓存层不存在: {layer_name}")
+            layer.ttl_seconds = ttl_seconds
+
+    def get_layer_max_size(self, layer_name: str) -> float:
+        with self._lock:
+            layer = self._layers.get(layer_name)
+        if layer is None:
+            raise ValueError(f"缓存层不存在: {layer_name}")
+        return layer.max_size_mb
+
+    def get_layer_ttl(self, layer_name: str) -> float:
+        with self._lock:
+            layer = self._layers.get(layer_name)
+        if layer is None:
+            raise ValueError(f"缓存层不存在: {layer_name}")
+        return layer.ttl_seconds
+
     def _get_layer(self, layer_name: str) -> CacheLayer:
         with self._lock:
             layer = self._layers.get(layer_name)
@@ -170,6 +198,7 @@ class CacheManager:
             now = time.time()
             expired = [f for f in files if now - f[2] > ttl]
             expired.sort(key=lambda x: x[2])
+            failed_deletes = set()
             for fp, size, mtime in expired:
                 try:
                     os.remove(fp)
@@ -179,7 +208,9 @@ class CacheManager:
                     logger.debug(f"TTL 过期删除: {fp}")
                 except OSError as e:
                     logger.warning(f"删除文件失败 {fp}: {e}")
-            files = [f for f in files if f[0] not in {e[0] for e in expired}]
+                    failed_deletes.add(fp)
+            successfully_removed = {e[0] for e in expired} - failed_deletes
+            files = [f for f in files if f[0] not in successfully_removed]
 
         if max_size_bytes > 0 and total_size > max_size_bytes:
             files.sort(key=lambda x: x[2])

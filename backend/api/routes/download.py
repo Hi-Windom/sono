@@ -681,9 +681,24 @@ async def preview_audio(task_id: str, type: str = 'repaired'):
     )
 
 
+def _safe_decoded_path(file_hash: str) -> str:
+    import re
+    if not file_hash or not re.match(r'^[a-fA-F0-9]+$', file_hash):
+        raise HTTPException(status_code=400, detail="无效的文件哈希")
+    decoded_filename = f"{file_hash}.wav"
+    basename = os.path.basename(decoded_filename)
+    if basename != decoded_filename or basename in (".", ".."):
+        raise HTTPException(status_code=400, detail="无效的文件名")
+    decoded_path = os.path.realpath(os.path.join(DECODED_DIR, basename))
+    real_decoded_dir = os.path.realpath(DECODED_DIR)
+    if not decoded_path.startswith(real_decoded_dir + os.sep):
+        raise HTTPException(status_code=400, detail="无效的文件路径")
+    return decoded_path
+
+
 @router.get("/decoded-wav/{file_hash}")
 async def get_decoded_wav(file_hash: str, request: Request):
-    decoded_path = os.path.join(DECODED_DIR, f"{file_hash}.wav")
+    decoded_path = _safe_decoded_path(file_hash)
     if not os.path.exists(decoded_path):
         raise HTTPException(status_code=404, detail="解码缓存不存在")
 
@@ -743,7 +758,7 @@ async def get_decoded_wav(file_hash: str, request: Request):
 
 @router.head("/decoded-wav/{file_hash}")
 async def head_decoded_wav(file_hash: str):
-    decoded_path = os.path.join(DECODED_DIR, f"{file_hash}.wav")
+    decoded_path = _safe_decoded_path(file_hash)
     if not os.path.exists(decoded_path):
         raise HTTPException(status_code=404, detail="解码缓存不存在")
     file_size = os.path.getsize(decoded_path)
@@ -758,7 +773,7 @@ async def head_decoded_wav(file_hash: str):
 
 @router.post("/decoded-wav/{file_hash}")
 async def create_decoded_wav(file_hash: str):
-    decoded_path = os.path.join(DECODED_DIR, f"{file_hash}.wav")
+    decoded_path = _safe_decoded_path(file_hash)
     if os.path.exists(decoded_path):
         return {"status": "ok", "message": "缓存已存在"}
 

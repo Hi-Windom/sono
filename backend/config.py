@@ -22,6 +22,8 @@ SOURCE_FILE_CACHE_LIMIT = int(os.getenv("SOURCE_FILE_CACHE_LIMIT", str(1024 * 10
 
 MOBILE_MODE = os.getenv("MOBILE_MODE", "").lower() in ("1", "true", "yes")
 
+ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
+
 
 def _init_deploy_time():
     now = datetime.now(timezone.utc).isoformat()
