@@ -149,9 +149,8 @@ export function useAudioDecoder({
     }
     pendingObjectURLRef.current = URL.createObjectURL(file);
 
-    setIsProcessing(false);
-    setProcessingStep('');
-    setProcessingProgress(0);
+    setProcessingStep('读取文件并计算校验...');
+    setProcessingProgress(0.05);
 
     const [arrayBuf, hash] = await Promise.all([
       file.arrayBuffer(),
@@ -161,6 +160,7 @@ export function useAudioDecoder({
     fileHashRef.current = hash;
     setFileHash(hash);
     writeLog(`[loadAudioFile] fileHash=${hash.slice(0, 16)}`);
+    setProcessingProgress(0.15);
 
     let cachedAnalysis: AudioAnalysis | null = null;
     let cachedWavInfo: WavInfo | null = null;
@@ -179,6 +179,9 @@ export function useAudioDecoder({
       }
     } catch { /* 缓存读取失败，继续正常流程 */ }
 
+    setProcessingStep('解码音频...');
+    setProcessingProgress(0.2);
+
     const context = getAudioContext();
     let buffer: AudioBuffer;
     const workerDecoded = await audioWorker.decodeWav(context, arrayBuf.slice(0));
@@ -186,6 +189,7 @@ export function useAudioDecoder({
     if (workerDecoded) {
       buffer = workerDecoded;
       writeLog(`[loadAudioFile] WAV PCM Worker解码完成`);
+      setProcessingProgress(0.55);
     } else {
       const decodedWavUrl = `/api/v1/decoded-wav/${hash}`;
       let usedDecodedCache = false;
@@ -193,12 +197,19 @@ export function useAudioDecoder({
         const headRes = await fetch(decodedWavUrl, { method: 'HEAD' });
         if (headRes.ok && headRes.headers.get('Content-Length')) {
           writeLog(`[loadAudioFile] 发现后端解码WAV缓存，下载快速解码`);
-          const wavBuf = await downloadWithProgress(decodedWavUrl);
+          setProcessingStep('下载解码缓存...');
+          const wavBuf = await downloadWithProgress(decodedWavUrl, (loaded, total, speed) => {
+            if (seq !== loadAudioSeqRef.current) return;
+            const pct = total > 0 ? loaded / total : 0;
+            setProcessingProgress(0.2 + pct * 0.3);
+            setProcessingStep(`下载解码缓存 ${formatBytes(loaded)}/${formatBytes(total)} ${formatSpeed(speed)}`);
+          });
           const cachedBuf = await audioWorker.decodeWav(context, wavBuf);
           if (cachedBuf) {
             buffer = cachedBuf;
             usedDecodedCache = true;
             writeLog(`[loadAudioFile] 后端解码WAV缓存Worker解码完成`);
+            setProcessingProgress(0.55);
           }
         }
       } catch { /* 解码缓存不可用，继续正常流程 */ }
@@ -207,9 +218,11 @@ export function useAudioDecoder({
         try {
           buffer = await context.decodeAudioData(arrayBuf);
           writeLog(`[loadAudioFile] 浏览器解码完成`);
+          setProcessingProgress(0.55);
         } catch (decodeErr) {
           console.warn('[loadAudioFile] 浏览器解码失败:', decodeErr);
           setIsDecodingAudio(false);
+          setIsProcessing(false);
           if (arrayBuf.byteLength === 0) {
             setBackendError('解码缓冲区异常，请重新上传文件');
           } else if (decodeErr instanceof DOMException && decodeErr.name === 'EncodingError') {
@@ -250,6 +263,8 @@ export function useAudioDecoder({
       play();
     }
 
+    setProcessingStep('分析音频特征...');
+    setProcessingProgress(0.6);
     let analysis = cachedAnalysis;
     if (!analysis) {
       const channelData: Float32Array[] = [];
@@ -259,6 +274,7 @@ export function useAudioDecoder({
       analysis = await audioWorker.analyzeAudio(channelData, buffer.sampleRate, buffer.numberOfChannels);
     }
     setAudioAnalysis(analysis);
+    setProcessingProgress(0.85);
 
     if (!cachedAnalysis) {
       fetch('/api/v1/analysis-cache', {
@@ -285,11 +301,10 @@ export function useAudioDecoder({
       try {
         writeLog(`[loadAudioFile] 后台上传开始...`);
         setProcessingStep('上传中...');
-        setIsProcessing(true);
         const uploadRes = await uploadAudio(file, (loaded, total, speed) => {
           if (seq !== loadAudioSeqRef.current) return;
           const pct = total > 0 ? loaded / total : 0;
-          setProcessingProgress(0.9 + pct * 0.1);
+          setProcessingProgress(0.85 + pct * 0.15);
           setProcessingStep(`上传中 ${formatBytes(loaded)}/${formatBytes(total)} ${formatSpeed(speed)}`);
         }, hash);
         if (seq !== loadAudioSeqRef.current) return;
@@ -356,6 +371,10 @@ export function useAudioDecoder({
       } catch (err) {
         console.warn('[loadAudioFile] 上传失败:', err);
         setBackendAvailable(false);
+        setIsProcessing(false);
+        const msg = err instanceof Error ? err.message : String(err);
+        setProcessingStep(`上传失败: ${msg}`);
+        setBackendError(`上传失败: ${msg}`);
       }
     })();
   }, [

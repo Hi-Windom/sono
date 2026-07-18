@@ -98,6 +98,7 @@ async function uploadFileChunked(
 
   const uploadedChunks = new Set<number>();
   let successfulChunks = 0;
+  let uploadedBytes = 0;
 
   try {
     const checkResp = await fetch(`${API_BASE}/upload-status?session_id=${sessionId}`);
@@ -105,8 +106,15 @@ async function uploadFileChunked(
       const checkData = await checkResp.json();
       (checkData.uploaded_chunks || []).forEach((i: number) => uploadedChunks.add(i));
       successfulChunks = uploadedChunks.size;
+      uploadedBytes = successfulChunks * CHUNK_SIZE;
+      if (onProgress && file.size > 0) {
+        const clamped = Math.min(uploadedBytes, file.size);
+        onProgress(clamped, file.size, 0);
+      }
     }
   } catch { /* ignore */ }
+
+  const startTime = Date.now();
 
   for (let i = 0; i < totalChunks; i++) {
     if (uploadedChunks.has(i)) continue;
@@ -115,25 +123,32 @@ async function uploadFileChunked(
     const end = Math.min(start + CHUNK_SIZE, file.size);
     const chunk = file.slice(start, end);
 
-    const chunkFormData = new FormData();
-    chunkFormData.append('session_id', sessionId);
-    chunkFormData.append('chunk_index', String(i));
-    chunkFormData.append('chunk', chunk);
-
     let retrySuccess = false;
     for (let retry = 0; retry < 3; retry++) {
       try {
-        await new Promise(r => setTimeout(r, 1000 * retry));
-        const resp = await fetch(`${API_BASE}/upload-chunk`, { method: 'POST', body: chunkFormData });
-        if (resp.ok) {
-          const data = await resp.json();
-          if (data.success) {
-            uploadedChunks.add(i);
-            successfulChunks++;
-            retrySuccess = true;
-            if (onProgress) onProgress(file.size * (successfulChunks / totalChunks), file.size, 0);
-            break;
+        if (retry > 0) {
+          await new Promise(r => setTimeout(r, 500 * retry));
+        }
+        const result = await uploadChunkWithProgress(
+          `${API_BASE}/upload-chunk`,
+          sessionId,
+          i,
+          chunk,
+          (chunkLoaded, chunkTotal) => {
+            if (!onProgress) return;
+            const totalLoaded = uploadedBytes + chunkLoaded;
+            const elapsed = (Date.now() - startTime) / 1000;
+            const speed = elapsed > 0 ? totalLoaded / elapsed : 0;
+            const clamped = Math.min(totalLoaded, file.size);
+            onProgress(clamped, file.size, speed);
           }
+        );
+        if (result) {
+          uploadedChunks.add(i);
+          successfulChunks++;
+          uploadedBytes = Math.min(successfulChunks * CHUNK_SIZE, file.size);
+          retrySuccess = true;
+          break;
         }
       } catch { /* retry */ }
     }
@@ -161,6 +176,48 @@ async function uploadFileChunked(
     size: file.size,
     message: '上传完成',
   };
+}
+
+function uploadChunkWithProgress(
+  url: string,
+  sessionId: string,
+  chunkIndex: number,
+  chunk: Blob,
+  onProgress?: (loaded: number, total: number) => void
+): Promise<boolean> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', url);
+    xhr.timeout = 120000;
+
+    const formData = new FormData();
+    formData.append('session_id', sessionId);
+    formData.append('chunk_index', String(chunkIndex));
+    formData.append('chunk', chunk);
+
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && onProgress) {
+        onProgress(e.loaded, e.total);
+      }
+    };
+
+    xhr.onload = () => {
+      try {
+        const data = JSON.parse(xhr.responseText);
+        if (xhr.status >= 200 && xhr.status < 300 && data.success) {
+          resolve(true);
+        } else {
+          reject(new Error(data.error || '分片上传失败'));
+        }
+      } catch {
+        reject(new Error('分片上传响应解析失败'));
+      }
+    };
+
+    xhr.onerror = () => reject(new Error('分片上传网络错误'));
+    xhr.ontimeout = () => reject(new Error('分片上传超时(120s)'));
+    xhr.send(formData);
+  });
 }
 
 async function uploadFileCore(
@@ -208,19 +265,35 @@ export async function uploadDualAudio(
   accompanimentFileHash?: string
 ): Promise<DualUploadResponse> {
   const totalSize = vocalFile.size + accompanimentFile.size;
+  let vocalLoaded = 0;
+  let accLoaded = 0;
+  const startTime = Date.now();
 
   const vocalResult = await uploadFileCore(
     vocalFile,
     `${API_BASE}/upload`,
     vocalFileHash ? { file_hash: vocalFileHash } : undefined,
-    onProgress ? (_, total, speed) => onProgress(_, total, speed, 'vocal') : undefined
+    onProgress ? (loaded, total, speed) => {
+      vocalLoaded = loaded;
+      const totalLoaded = vocalLoaded + accLoaded;
+      const elapsed = (Date.now() - startTime) / 1000;
+      const avgSpeed = elapsed > 0 ? totalLoaded / elapsed : 0;
+      onProgress(totalLoaded, totalSize, avgSpeed, 'vocal');
+    } : undefined
   );
+  vocalLoaded = vocalFile.size;
 
   const accResult = await uploadFileCore(
     accompanimentFile,
     `${API_BASE}/upload`,
     accompanimentFileHash ? { file_hash: accompanimentFileHash } : undefined,
-    onProgress ? (_, total, speed) => onProgress(_, total, speed, 'accompaniment') : undefined
+    onProgress ? (loaded, total, speed) => {
+      accLoaded = loaded;
+      const totalLoaded = vocalLoaded + accLoaded;
+      const elapsed = (Date.now() - startTime) / 1000;
+      const avgSpeed = elapsed > 0 ? totalLoaded / elapsed : 0;
+      onProgress(totalLoaded, totalSize, avgSpeed, 'accompaniment');
+    } : undefined
   );
 
   log('upload-dual', `Dual upload complete: vocal=${vocalResult.task_id}, acc=${accResult.task_id}`);
