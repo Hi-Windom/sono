@@ -326,7 +326,9 @@ function detectAudioIssues(channelData: Float32Array, sampleRate: number, channe
 
 self.onmessage = (e: MessageEvent<WorkerRequest>) => {
   const msg = e.data;
+  console.log(`[audioWorker] 收到消息: type=${msg.type}, id=${msg.id}`);
 
+  try {
   if (msg.type === 'decode-wav') {
     const result = decodeWavPcm(msg.buffer);
     const transfer: ArrayBuffer[] = [];
@@ -335,6 +337,7 @@ self.onmessage = (e: MessageEvent<WorkerRequest>) => {
         transfer.push(ch.buffer);
       }
     }
+    console.log(`[audioWorker] decode-wav完成: result=${result ? 'success' : 'null'}`);
     const response: WorkerResponse = { type: 'decode-wav', id: msg.id, result };
     (self as unknown as { postMessage: (message: unknown, transfer: Transferable[]) => void }).postMessage(response, transfer);
   } else if (msg.type === 'analyze-audio') {
@@ -353,5 +356,13 @@ self.onmessage = (e: MessageEvent<WorkerRequest>) => {
     }
     const response: WorkerResponse = { type: 'decode-and-analyze', id: msg.id, decode, analysis };
     (self as unknown as { postMessage: (message: unknown, transfer: Transferable[]) => void }).postMessage(response, transfer);
+  }
+  } catch (err) {
+    console.error('[audioWorker] 处理消息出错:', err);
+    (self as unknown as { postMessage: (message: unknown) => void }).postMessage({
+      type: 'error',
+      id: msg.id,
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 };

@@ -152,10 +152,14 @@ export function useAudioDecoder({
     setProcessingStep('读取文件并计算校验...');
     setProcessingProgress(0.05);
 
-    const [arrayBuf, hash] = await Promise.all([
-      file.arrayBuffer(),
-      computeFileHash(file),
-    ]);
+    console.time('[loadAudioFile] readFile+hash');
+    const arrayBufPromise = file.arrayBuffer().then(buf => {
+      console.log(`[loadAudioFile] arrayBuffer完成，大小: ${buf.byteLength}`);
+      return buf;
+    });
+    const hashPromise = computeFileHash(file);
+    const [arrayBuf, hash] = await Promise.all([arrayBufPromise, hashPromise]);
+    console.timeEnd('[loadAudioFile] readFile+hash');
     if (seq !== loadAudioSeqRef.current) return;
     fileHashRef.current = hash;
     setFileHash(hash);
@@ -182,9 +186,16 @@ export function useAudioDecoder({
     setProcessingStep('解码音频...');
     setProcessingProgress(0.2);
 
+    console.log('[loadAudioFile] 开始解码音频...');
     const context = getAudioContext();
+    console.log('[loadAudioFile] AudioContext已获取');
     let buffer: AudioBuffer;
+    
+    console.time('[loadAudioFile] workerDecodeWav');
     const workerDecoded = await audioWorker.decodeWav(context, arrayBuf.slice(0));
+    console.timeEnd('[loadAudioFile] workerDecodeWav');
+    console.log(`[loadAudioFile] Worker解码结果: ${workerDecoded ? '成功(WAV)' : '失败(非WAV)'}`);
+    
     const isNonWavFile = !workerDecoded;
     if (workerDecoded) {
       buffer = workerDecoded;

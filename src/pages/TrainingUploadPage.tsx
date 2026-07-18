@@ -2,6 +2,7 @@ import React, { useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Header } from '../components/Header';
 import { uploadTrainingAudio } from '../services/backendApi';
+import { computeFileHash } from '../utils/fileHash';
 
 interface UploadingFile {
   name: string;
@@ -10,14 +11,6 @@ interface UploadingFile {
   status: 'checking' | 'uploading' | 'success' | 'error' | 'cached';
   error?: string;
   size: number;
-}
-
-// 计算文件 SHA256 哈希
-async function calculateFileHash(file: File): Promise<string> {
-  const buffer = await file.arrayBuffer();
-  const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
 // 格式化文件大小
@@ -71,7 +64,7 @@ export default function TrainingUploadPage() {
           return updated;
         });
         
-        const fileHash = await calculateFileHash(file);
+        const fileHash = await computeFileHash(file);
         
         // 上传（带哈希检测和进度回调）
         setUploadingFiles(prev => {

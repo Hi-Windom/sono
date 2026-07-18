@@ -1,4 +1,4 @@
-import { useRef, useCallback } from 'react';
+import { useRef, useCallback, useMemo } from 'react';
 import type { DecodedWavResult, AudioAnalysisResult } from './audioWorker';
 import { decodeWavPcm } from '../utils/wavParser';
 import { detectAudioIssues } from '../utils/advancedAudioProcessing';
@@ -28,11 +28,13 @@ export function useAudioWorker(): AudioWorkerAPI {
     if (workerRef.current) return workerRef.current;
 
     try {
+      console.log('[useAudioWorker] 正在创建Worker...');
       const worker = new Worker(
         new URL('./audioWorker.ts', import.meta.url),
         { type: 'module' },
       );
       worker.onmessage = (e: MessageEvent) => {
+        console.log(`[useAudioWorker] 收到Worker消息: type=${e.data?.type}, id=${e.data?.id}`);
         const { id } = e.data;
         const pending = pendingRef.current.get(id);
         if (pending) {
@@ -49,6 +51,7 @@ export function useAudioWorker(): AudioWorkerAPI {
       };
       workerRef.current = worker;
       workerAvailableRef.current = true;
+      console.log('[useAudioWorker] Worker创建成功');
       return worker;
     } catch (err) {
       console.warn('[useAudioWorker] Worker creation failed, using main thread fallback:', err);
@@ -57,19 +60,30 @@ export function useAudioWorker(): AudioWorkerAPI {
     }
   }, []);
 
-  const sendToWorker = useCallback(<T>(msg: { type: string; id: number; [key: string]: unknown }, transfer?: Transferable[]): Promise<T> => {
+  const sendToWorker = useCallback(<T>(msg: { type: string; id: number; [key: string]: unknown }, transfer?: Transferable[], timeoutMs = 10000): Promise<T> => {
     return new Promise((resolve, reject) => {
       const worker = getWorker();
       if (!worker) {
+        console.warn('[useAudioWorker] Worker not available, rejecting');
         reject(new Error('Worker not available'));
         return;
       }
+      console.log(`[useAudioWorker] 发送消息到Worker: type=${msg.type}, id=${msg.id}, transfer=${transfer ? transfer.length : 0}`);
       pendingRef.current.set(msg.id, { resolve, reject });
       if (transfer && transfer.length > 0) {
         worker.postMessage(msg, transfer);
       } else {
         worker.postMessage(msg);
       }
+
+      setTimeout(() => {
+        const pending = pendingRef.current.get(msg.id);
+        if (pending) {
+          console.warn(`[useAudioWorker] Worker超时: type=${msg.type}, id=${msg.id}, timeout=${timeoutMs}ms`);
+          pendingRef.current.delete(msg.id);
+          reject(new Error(`Worker timeout after ${timeoutMs}ms for ${msg.type}`));
+        }
+      }, timeoutMs);
     });
   }, [getWorker]);
 
@@ -81,9 +95,10 @@ export function useAudioWorker(): AudioWorkerAPI {
 
     const id = nextIdRef.current++;
     try {
+      const bufferCopy = buffer.slice(0);
       const response = await sendToWorker<{ type: string; id: number; result: DecodedWavResult | null }>(
-        { type: 'decode-wav', id, buffer },
-        [buffer],
+        { type: 'decode-wav', id, buffer: bufferCopy },
+        [bufferCopy],
       );
       if (!response.result) return null;
       const { channelData, sampleRate, channels, totalFrames } = response.result;
@@ -92,7 +107,8 @@ export function useAudioWorker(): AudioWorkerAPI {
         audioBuffer.copyToChannel(channelData[ch], ch);
       }
       return audioBuffer;
-    } catch {
+    } catch (err) {
+      console.warn('[useAudioWorker] decodeWav worker failed, falling back:', err);
       return decodeWavPcm(audioContext, buffer);
     }
   }, [getWorker, sendToWorker]);
@@ -130,11 +146,12 @@ export function useAudioWorker(): AudioWorkerAPI {
 
     const id = nextIdRef.current++;
     try {
+      const bufferCopy = buffer.slice(0);
       const response = await sendToWorker<{
         type: string; id: number;
         decode: DecodedWavResult | null;
         analysis: AudioAnalysisResult | null;
-      }>({ type: 'decode-and-analyze', id, buffer }, [buffer]);
+      }>({ type: 'decode-and-analyze', id, buffer: bufferCopy }, [bufferCopy]);
 
       if (!response.decode) return { audioBuffer: null, analysis: null };
 
@@ -144,7 +161,8 @@ export function useAudioWorker(): AudioWorkerAPI {
         audioBuffer.copyToChannel(channelData[ch], ch);
       }
       return { audioBuffer, analysis: response.analysis };
-    } catch {
+    } catch (err) {
+      console.warn('[useAudioWorker] decodeAndAnalyze worker failed, falling back:', err);
       const audioBuffer = decodeWavPcm(audioContext, buffer);
       if (!audioBuffer) return { audioBuffer: null, analysis: null };
       const analysis = detectAudioIssues(audioBuffer);
@@ -158,8 +176,18 @@ export function useAudioWorker(): AudioWorkerAPI {
       workerRef.current = null;
       workerAvailableRef.current = null;
     }
+    for (const [id, pending] of pendingRef.current) {
+      pending.reject(new Error('Worker terminated'));
+    }
     pendingRef.current.clear();
   }, []);
 
-  return { decodeWav, analyzeAudio, decodeAndAnalyze, terminate };
+  const api = useMemo<AudioWorkerAPI>(() => ({
+    decodeWav,
+    analyzeAudio,
+    decodeAndAnalyze,
+    terminate,
+  }), [decodeWav, analyzeAudio, decodeAndAnalyze, terminate]);
+
+  return api;
 }
