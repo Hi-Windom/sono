@@ -83,11 +83,15 @@ export function useAudioPlayback({ state, refs }: UseAudioPlaybackOptions) {
     }
     if (streamingAudioRef.current) {
       streamingAudioRef.current.pause();
+      streamingAudioRef.current.onended = null;
+      streamingAudioRef.current.onerror = null;
       streamingAudioRef.current.src = '';
+      try { streamingAudioRef.current.load(); } catch {}
       streamingAudioRef.current = null;
     }
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = null;
     }
     isPlayingRef.current = false;
     setIsPlaying(false);

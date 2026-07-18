@@ -34,7 +34,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
   }
 
   static getDerivedStateFromError(error: Error): State {
-    return { hasError: true, error, errorInfo: null, showDetails: false };
+    return { hasError: true, error, errorInfo: null, showDetails: false, copyStatus: 'idle' };
   }
 
   componentDidCatch(error: Error, info: React.ErrorInfo) {
@@ -56,13 +56,13 @@ export class ErrorBoundary extends React.Component<Props, State> {
   }
 
   handleReset = () => {
-    this.setState({ hasError: false, error: null, errorInfo: null, showDetails: false });
+    this.setState({ hasError: false, error: null, errorInfo: null, showDetails: false, copyStatus: 'idle' });
     window.location.reload();
   };
 
   handleClearAndReset = () => {
     clearAllPersistedState();
-    this.setState({ hasError: false, error: null, errorInfo: null, showDetails: false });
+    this.setState({ hasError: false, error: null, errorInfo: null, showDetails: false, copyStatus: 'idle' });
     window.location.reload();
   };
 
