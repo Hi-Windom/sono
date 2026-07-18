@@ -106,20 +106,6 @@ async def log_message(request: LogRequest):
     return {"status": "ok"}
 
 
-@router.post("", include_in_schema=False)
-async def log_message_root(request: LogRequest):
-    level = request.level.lower()
-    if level == "error":
-        logger.error(request.message)
-    elif level == "warning":
-        logger.warning(request.message)
-    elif level == "debug":
-        logger.debug(request.message)
-    else:
-        logger.info(request.message)
-    return {"status": "ok"}
-
-
 @router.get("/algorithm-versions")
 async def list_algorithm_versions():
     return {"versions": get_available_versions(mobile_mode=MOBILE_MODE)}
