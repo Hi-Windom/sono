@@ -54,9 +54,10 @@ def create_app() -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        # 在主线程事件循环中缓存 loop，供后台修复线程通过
-        # run_coroutine_threadsafe 投递 WebSocket 进度协程。
-        # 否则后台线程拿到的是「未运行」的 loop，进度消息会静默丢失。
+        from database import cleanup_stale_tasks
+        stale_count = cleanup_stale_tasks()
+        if stale_count > 0:
+            logger.info(f"[startup] 已清理 {stale_count} 个停滞任务")
         from services.task_manager import set_event_loop
         set_event_loop(asyncio.get_running_loop())
         yield

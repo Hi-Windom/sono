@@ -217,3 +217,146 @@ class TestHookReferenceStability:
             f"{rel_path} 返回对象时应该使用 useMemo 稳定引用"
             "（否则下游 useEffect 会频繁触发清理重建）"
         )
+
+
+# ============================================================================
+# 回归测试 5: 服务器启动时清理停滞任务
+# Bug: 服务器重启后，数据库中 pending/processing 状态的任务永远停留在"进行中"
+# 导致缓存管理页面显示大量"进行中"任务但实际不会执行
+# ============================================================================
+
+class TestStaleTaskCleanup:
+    """防止服务器重启后任务状态永久停滞"""
+
+    def test_cleanup_stale_tasks_marks_pending_as_failed(self):
+        """cleanup_stale_tasks 应该将 pending 任务标记为 failed"""
+        import tempfile
+        import os
+        from database import init_db, cleanup_stale_tasks, create_task, get_task
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "test.db")
+            import config
+            old_db = config.DB_PATH
+            config.DB_PATH = db_path
+            try:
+                init_db()
+
+                create_task("test_stale_1", "test.wav", "/tmp/test.wav", {}, "hash1", 1000)
+
+                from database import get_db
+                conn = get_db()
+                conn.execute("UPDATE tasks SET status = 'pending' WHERE id = 'test_stale_1'")
+                conn.commit()
+                conn.close()
+
+                count = cleanup_stale_tasks()
+                assert count == 1, f"应该清理 1 个任务，实际清理了 {count} 个"
+
+                task = get_task("test_stale_1")
+                assert task is not None
+                assert task["status"] == "failed", f"状态应该是 failed，实际是 {task['status']}"
+                assert "服务器重启" in task.get("error", ""), "错误信息应该包含服务器重启"
+            finally:
+                config.DB_PATH = old_db
+
+    def test_cleanup_stale_tasks_ignores_completed(self):
+        """cleanup_stale_tasks 不应该动 completed 任务"""
+        import tempfile
+        import os
+        from database import init_db, cleanup_stale_tasks, create_task, get_task, update_task
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "test.db")
+            import config
+            old_db = config.DB_PATH
+            config.DB_PATH = db_path
+            try:
+                init_db()
+
+                create_task("test_completed_1", "test.wav", "/tmp/test.wav", {}, "hash1", 1000)
+                update_task("test_completed_1", status="completed", output_path="/tmp/out.wav")
+
+                count = cleanup_stale_tasks()
+                assert count == 0, f"completed 任务不应该被清理，实际清理了 {count} 个"
+
+                task = get_task("test_completed_1")
+                assert task is not None
+                assert task["status"] == "completed"
+            finally:
+                config.DB_PATH = old_db
+
+    def test_cleanup_stale_tasks_handles_multiple_statuses(self):
+        """cleanup_stale_tasks 应该处理所有非终态（pending/processing/detecting等）"""
+        import tempfile
+        import os
+        from database import init_db, cleanup_stale_tasks, create_task, get_db
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "test.db")
+            import config
+            old_db = config.DB_PATH
+            config.DB_PATH = db_path
+            try:
+                init_db()
+
+                stale_statuses = ['pending', 'processing', 'detecting', 'detected', 'analyzing']
+                for i, status in enumerate(stale_statuses):
+                    create_task(f"test_{status}_{i}", f"test_{i}.wav", f"/tmp/test_{i}.wav", {}, f"hash{i}", 1000)
+                    conn = get_db()
+                    conn.execute(f"UPDATE tasks SET status = '{status}' WHERE id = 'test_{status}_{i}'")
+                    conn.commit()
+                    conn.close()
+
+                count = cleanup_stale_tasks()
+                assert count == len(stale_statuses), f"应该清理 {len(stale_statuses)} 个任务，实际清理了 {count} 个"
+            finally:
+                config.DB_PATH = old_db
+
+
+# ============================================================================
+# 回归测试 6: cancel_task 必须发送 WebSocket 最终消息并清理活跃计数
+# Bug: cancel_task 只更新数据库状态，不发 WS 消息，前端一直等待
+# Bug: cancel_task 不清理 _active_tasks，活跃任务计数泄漏
+# ============================================================================
+
+class TestCancelTaskBehavior:
+    """防止取消任务时资源泄漏和前端无响应"""
+
+    def test_cancel_task_sends_ws_message(self):
+        """cancel_task 应该调用 _ws_send_final 发送最终状态"""
+        from services import task_manager
+
+        sent_messages = []
+        def fake_ws_send(task_id, msg):
+            sent_messages.append((task_id, msg))
+
+        original_send = task_manager._ws_send_final
+        task_manager._ws_send_final = fake_ws_send
+        try:
+            from database import create_task
+            import tempfile
+            import os
+            from database import init_db
+
+            with tempfile.TemporaryDirectory() as tmpdir:
+                db_path = os.path.join(tmpdir, "test.db")
+                import config
+                old_db = config.DB_PATH
+                config.DB_PATH = db_path
+                try:
+                    init_db()
+                    create_task("cancel_test_1", "test.wav", "/tmp/test.wav", {}, "hash_cancel", 1000)
+
+                    from services.task_manager import cancel_task
+                    result = cancel_task("cancel_test_1")
+
+                    assert result is True, "cancel_task 应该返回 True"
+                    assert len(sent_messages) >= 1, "cancel_task 应该发送至少一条 WS 消息"
+                    task_id, msg = sent_messages[0]
+                    assert task_id == "cancel_test_1"
+                    assert msg.get("status") == "cancelled", f"消息状态应该是 cancelled，实际是 {msg.get('status')}"
+                finally:
+                    config.DB_PATH = old_db
+        finally:
+            task_manager._ws_send_final = original_send

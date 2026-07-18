@@ -34,7 +34,8 @@ class ProgressWSManager:
         for ws in self._connections[task_id]:
             try:
                 await ws.send_json(data)
-            except Exception:
+            except Exception as e:
+                logger.warning(f"[ws_manager] send_progress 发送失败 task_id={task_id}: {e}")
                 disconnected.append(ws)
         for ws in disconnected:
             self.disconnect(task_id, ws)
@@ -45,12 +46,12 @@ class ProgressWSManager:
         for ws in self._connections[task_id]:
             try:
                 await ws.send_json(data)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"[ws_manager] send_final 发送消息失败 task_id={task_id}: {e}")
             try:
                 await ws.close()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"[ws_manager] send_final 关闭连接失败 task_id={task_id}: {e}")
         self._connections.pop(task_id, None)
 
     async def broadcast(self, data: dict[str, Any]) -> None:
@@ -59,7 +60,8 @@ class ProgressWSManager:
             for ws in connections:
                 try:
                     await ws.send_json(data)
-                except Exception:
+                except Exception as e:
+                    logger.warning(f"[ws_manager] broadcast 发送失败 task_id={task_id}: {e}")
                     disconnected.append((task_id, ws))
         for task_id, ws in disconnected:
             self.disconnect(task_id, ws)

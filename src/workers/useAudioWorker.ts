@@ -39,7 +39,11 @@ export function useAudioWorker(): AudioWorkerAPI {
         const pending = pendingRef.current.get(id);
         if (pending) {
           pendingRef.current.delete(id);
-          pending.resolve(e.data);
+          if (e.data?.type === 'error') {
+            pending.reject(new Error(e.data.error || 'Worker error'));
+          } else {
+            pending.resolve(e.data);
+          }
         }
       };
       worker.onerror = (err) => {

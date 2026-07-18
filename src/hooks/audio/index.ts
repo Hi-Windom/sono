@@ -299,7 +299,7 @@ export function useAudioProcessor() {
         refs.versionInitializedRef.current = true;
       }
     }
-  }, [state.availableAlgorithms, state.algorithmVersion, state, refs]);
+  }, [state.availableAlgorithms, state.algorithmVersion, refs]);
 
   const backendAvailableRef = refs.backendAvailableRef;
   const healthFailCountRef = refs.healthFailCountRef;
@@ -487,12 +487,11 @@ export function useAudioProcessor() {
           return;
         }
 
-        state.setAudioFile(restoredFile);
         refs.fileHashRef.current = session.fileHash;
 
         const context = playback.getAudioContext();
         const wavHeaderInfo = parseWavHeader(arrayBuf.slice(0, 44 + 4096));
-        setWavInfo(wavHeaderInfo);
+        let finalWavInfo = wavHeaderInfo;
         if (!wavHeaderInfo && session.fileHash) {
           try {
             const infoRes = await fetch(`/api/v1/audio-info/${session.fileHash}`);
@@ -500,13 +499,12 @@ export function useAudioProcessor() {
             if (infoRes.ok) {
               const ai = await infoRes.json();
               if (seq !== refs.restoreSeqRef.current) return;
-              const infoFromApi: WavInfo = {
+              finalWavInfo = {
                 sampleRate: ai.sample_rate,
                 channels: ai.channels,
                 duration: ai.duration,
                 bitDepth: ai.sample_width * 8,
               };
-              setWavInfo(infoFromApi);
             }
           } catch {}
         }
@@ -515,11 +513,13 @@ export function useAudioProcessor() {
         const buffer = workerBuffer || await context.decodeAudioData(arrayBuf);
         if (seq !== refs.restoreSeqRef.current) return;
 
+        state.setAudioFile(restoredFile);
         state.setAudioBuffer(buffer);
         state.setDuration(buffer.duration);
         refs.durationRef.current = buffer.duration;
         state.setCurrentTime(0);
         refs.pausedAtRef.current = 0;
+        setWavInfo(finalWavInfo);
 
         if (workerAnalysis) state.setAudioAnalysis(workerAnalysis);
 
@@ -579,7 +579,7 @@ export function useAudioProcessor() {
         refs.sessionRestoredRef.current = true;
       }
     })();
-  }, [state.backendAvailable, playback, audioWorker, state, refs, setTaskId, setWavInfo]);
+  }, [state.backendAvailable, playback, audioWorker, refs, setTaskId, setWavInfo]);
 
   useEffect(() => {
     return () => {

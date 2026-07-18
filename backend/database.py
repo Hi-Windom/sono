@@ -72,6 +72,38 @@ def init_db() -> None:
     conn.commit()
     conn.close()
 
+def cleanup_stale_tasks() -> int:
+    conn = get_db()
+    try:
+        stale_statuses = ('pending', 'processing', 'detecting', 'detected', 'analyzing')
+        cursor = conn.execute(
+            "SELECT id, status, original_filename FROM tasks WHERE status IN ({})".format(
+                ','.join('?' * len(stale_statuses))
+            ),
+            stale_statuses,
+        )
+        stale_tasks = cursor.fetchall()
+        if not stale_tasks:
+            return 0
+        for row in stale_tasks:
+            logger = __import__('logging').getLogger(__name__)
+            logger.info(
+                f"[cleanup_stale_tasks] 标记停滞任务为失败: id={row['id']} "
+                f"status={row['status']} filename={row['original_filename']}"
+            )
+        conn.execute(
+            "UPDATE tasks SET status = 'failed', error = '服务器重启，任务中断', progress = 0, "
+            "step = '任务已中断', updated_at = CURRENT_TIMESTAMP WHERE status IN ({})".format(
+                ','.join('?' * len(stale_statuses))
+            ),
+            stale_statuses,
+        )
+        conn.commit()
+        return len(stale_tasks)
+    finally:
+        conn.close()
+
+
 def create_task(task_id: str, filename: str, filepath: str, params: dict[str, Any], file_hash: str = "", file_size: int = 0) -> None:
     conn = get_db()
     conn.execute(

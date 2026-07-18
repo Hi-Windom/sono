@@ -144,7 +144,9 @@ def cancel_task(task_id: str) -> bool:
         if task_id in _cancelled_tasks:
             return False
         _cancelled_tasks.add(task_id)
+    _track_task_end(task_id)
     update_task(task_id, status="cancelled", step="已取消", progress=0)
+    _ws_send_final(task_id, {"task_id": task_id, "status": "cancelled"})
     logger.info(f"[cancel] 任务已取消 task_id={task_id}")
     return True
 
@@ -303,6 +305,8 @@ def _run_repair(task_id: str, audio_path: str, params: dict[str, Any], mobile_mo
     algorithm_version = params.get("algorithm_version", DEFAULT_VERSION)
     perf_collector = get_perf_collector()
     perf_collector.start_repair(task_id)
+    size_samples = 0
+    perf_ended = False
     
     if mobile_mode:
         version_info = ALGORITHM_VERSIONS.get(algorithm_version)
@@ -353,6 +357,13 @@ def _run_repair(task_id: str, audio_path: str, params: dict[str, Any], mobile_mo
         file_size = os.path.getsize(audio_path)
         logger.info(f"[repair] 音频文件 task_id={task_id} size={file_size/1024/1024:.2f}MB")
 
+        try:
+            from services.audio_loader import load_audio_with_fallback
+            y, sr = load_audio_with_fallback(audio_path, sr=None, mono=False)
+            size_samples = y.shape[1] if y.ndim > 1 else len(y)
+        except Exception:
+            pass
+
         active_params = {k: v for k, v in params.items() if isinstance(v, (int, float)) and v > 0}
         logger.info(f"[repair] 参数 task_id={task_id} active_params={active_params}")
 
@@ -387,17 +398,6 @@ def _run_repair(task_id: str, audio_path: str, params: dict[str, Any], mobile_mo
 
         elapsed = time.time() - start_time
 
-        size_samples = 0
-        try:
-            from services.audio_loader import load_audio_with_fallback
-            y, sr = load_audio_with_fallback(audio_path, sr=None, mono=False)
-            size_samples = y.shape[1] if y.ndim > 1 else len(y)
-        except Exception:
-            pass
-
-        perf_data = perf_collector.end_repair(task_id, size_samples, algorithm_version)
-        repair_result["perf_data"] = perf_data
-
         if os.path.exists(output_path):
             output_size = os.path.getsize(output_path)
             logger.info(f"[repair] 输出文件 task_id={task_id} size={output_size/1024/1024:.2f}MB")
@@ -423,6 +423,10 @@ def _run_repair(task_id: str, audio_path: str, params: dict[str, Any], mobile_mo
             accompaniment_task_id = params.get("accompaniment_task_id")
             if accompaniment_task_id:
                 update_task(accompaniment_task_id, output_path=repair_result["accompaniment_output_path"], status="completed", progress=1)
+
+        perf_data = perf_collector.end_repair(task_id, size_samples, algorithm_version)
+        perf_ended = True
+        repair_result["perf_data"] = perf_data
         _ws_send_final(task_id, {"task_id": task_id, "status": "completed", "progress": 1, "step": f"修复完成 ({elapsed:.1f}s)", "repair_result": repair_result})
 
         logger.info(f"[repair] 完成 task_id={task_id} elapsed={elapsed:.1f}s issues={repair_result.get('issues_found', [])}")
@@ -446,6 +450,11 @@ def _run_repair(task_id: str, audio_path: str, params: dict[str, Any], mobile_mo
         raise
     finally:
         stop_monitor[0] = True
+        if not perf_ended:
+            try:
+                perf_collector.end_repair(task_id, size_samples, algorithm_version)
+            except Exception:
+                pass
         _track_task_end(task_id)
 
 

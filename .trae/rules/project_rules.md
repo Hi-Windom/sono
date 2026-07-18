@@ -158,6 +158,10 @@ cd /workspace && python -m pytest backend/tests/test_regression.py -v
    - HTTP 轮询模式下 error 状态正确回调
    - 打包产物不含测试/开发文件
    - 自定义 hook 返回对象引用稳定性
+   - 服务器启动时清理停滞任务（pending/processing 等非终态）
+   - cancel_task 发送 WebSocket 最终消息 + 清理活跃任务计数
+   - WebSocket 发送异常必须打 warning 日志，禁止 bare except + pass
+   - perf_collector.end_repair 必须在 finally 中调用，防止性能数据泄漏
 6. 涉及 Android 的修改，提交前必须跑 `bash scripts/build_android_release.sh` 确保打包成功
 
 ## 🚨 问题排查铁律（血的教训）
@@ -167,11 +171,15 @@ cd /workspace && python -m pytest backend/tests/test_regression.py -v
 - **必须**先看真实日志（后端日志、浏览器控制台、Network面板），定位问题根因
 - **禁止**用"应该是"、"可能是"、"大概率"这种推测性表述来定位问题
 - 反面教材：WebSocket 不断重连 → 猜是 ws_manager 的问题 → 改了没用 → 实际是路由注册顺序错误
+- **永远不要质疑用户反馈**，用户说有问题就是有问题，不要说"修改没生效"这种话，直接假设自己代码有 bug 去查
 
 ### 2. 验证要真实，禁止自欺欺人
 - 修复后**必须**在真实环境中验证（前端实际操作、后端日志确认），不能只看代码
 - **禁止**只跑了个后端 Python 脚本测试就说"修复成功"，前端的问题必须在浏览器中验证
 - 验证通过的标准：用户视角下问题现象消失，且日志无异常
+- **严禁乐观测试**：不能只测 happy path，必须测边界情况、错误路径、并发场景
+- **严禁凑数测试**：测试必须能真正暴露问题，不能写一堆"假阳性"测试来充数
+- 自动化测试目标：每条核心链路至少暴露 1 个真实问题，没暴露说明测试没写到位
 
 ### 3. 由点带面，系统排查
 - 修一个 bug 时，必须检查同类问题在其他地方是否也存在
@@ -210,3 +218,15 @@ cd /workspace && python -m pytest backend/tests/test_regression.py -v
 - 必须有 fallback 哈希算法（如 FNV-1a）
 - fallback 哈希必须只基于文件内容，不能混入文件名（否则重命名文件缓存失效）
 - 注意 DataView 写入偏移量，不同字段不能覆盖（如 nameHash 和 fileSize 不能写在同一偏移）
+
+### 9. 会话恢复与竞态条件
+- **会话恢复时，不能提前设置 `audioFile` 等 UI 状态**，必须等解码完成后再批量设置所有状态
+- 否则会触发 useEffect 重入，导致第一次异步解码结果因 seq 不匹配被丢弃，最终 UI 显示文件已加载但 audioBuffer 为空
+- useEffect 依赖要最小化，不要依赖整个 `state` 对象，只依赖真正需要的字段
+- 每个异步操作后都要检查 seq / restoreSeqRef，防止过期的异步结果覆盖新状态
+
+### 10. 服务器重启任务状态清理
+- 服务器启动时必须清理所有非终态任务（pending/processing/detecting/detected/analyzing）
+- 将这些任务标记为 failed，错误信息标注"服务器重启，任务中断"
+- 否则缓存管理页面会显示大量"进行中"任务但实际不会执行
+- 清理逻辑必须在 lifespan startup 阶段执行，在任务管理器初始化之前
