@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Header } from '../components/Header';
+import { useToast } from '../components/Toast';
 import { AIRepairParams, defaultAIRepairParams } from '../utils/advancedAudioProcessing';
 import {
   getSavedProfiles,
@@ -69,6 +70,7 @@ function backendKeyToParamKey(backendKey: string): keyof AIRepairParams | null {
 
 export default function ProfileManagerPage() {
   const navigate = useNavigate();
+  const toast = useToast();
   const [profiles, setProfiles] = useState<ProfileConfig[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState('');
@@ -179,9 +181,9 @@ export default function ProfileManagerPage() {
         }));
         saveSettings({ savedProfiles: [...existing, ...newProfiles] });
         refresh();
-        alert(`已导入 ${list.length} 个配置`);
+        toast.success(`已导入 ${list.length} 个配置`);
       } catch {
-        alert('导入失败：JSON 格式不正确');
+        toast.error('导入失败：JSON 格式不正确');
       }
     };
     reader.readAsText(file);

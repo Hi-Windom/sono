@@ -214,10 +214,12 @@ export function AIRepairPanel({
               <span className="text-gray-400">峰值电平: </span>
               <span className="text-white">{(analysis.peakLevel * 100).toFixed(0)}%</span>
             </div>
-            <div>
-              <span className="text-gray-400">立体声: </span>
-              <span className="text-white">{analysis.stereoBalance.toFixed(2)}</span>
-            </div>
+            {(channels === undefined || channels > 1) && (
+              <div>
+                <span className="text-gray-400">立体声: </span>
+                <span className="text-white">{analysis.stereoBalance.toFixed(2)}</span>
+              </div>
+            )}
           </div>
           {analysis.issues.length > 0 && (
             <div className="mt-2">

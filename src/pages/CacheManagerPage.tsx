@@ -455,10 +455,15 @@ export default function CacheManagerPage() {
                             <span className="text-white text-sm font-medium truncate">{task.filename}</span>
                             <span className={`text-xs px-2 py-0.5 rounded flex-shrink-0 ${
                               task.status === 'completed' ? 'bg-emerald-500/20 text-emerald-400' :
-                              task.status === 'error' || task.status === 'timeout' ? 'bg-red-500/20 text-red-400' :
+                              task.status === 'error' || task.status === 'timeout' || task.status === 'failed' ? 'bg-red-500/20 text-red-400' :
+                              task.status === 'cancelled' ? 'bg-gray-500/20 text-gray-400' :
                               'bg-yellow-500/20 text-yellow-400'
                             }`}>
-                              {task.status === 'completed' ? '完成' : task.status === 'error' ? '错误' : task.status === 'timeout' ? '超时' : '进行中'}
+                              {task.status === 'completed' ? '完成' :
+                               task.status === 'error' || task.status === 'failed' ? '失败' :
+                               task.status === 'timeout' ? '超时' :
+                               task.status === 'cancelled' ? '已取消' :
+                               '进行中'}
                             </span>
                             {task.render_caches && task.render_caches.length > 0 && (
                               <span className="text-xs text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded">

@@ -741,6 +741,15 @@ export default function RepairPage() {
                 </div>
               </div>
               <span className="text-gray-400 text-xs flex-shrink-0 w-10 text-right">{Math.round(processingProgress * 100)}%</span>
+              {!isTaskStuck && (
+                <button
+                  onClick={cancelCurrentTask}
+                  className="text-gray-500 hover:text-red-400 text-xs px-2 py-1 rounded hover:bg-red-500/10 transition flex-shrink-0"
+                  title="取消任务"
+                >
+                  取消
+                </button>
+              )}
             </div>
             {isTaskStuck && stuckInfo && (
               <div className="mt-1.5 text-xs text-yellow-400">
@@ -988,7 +997,7 @@ export default function RepairPage() {
                       <p className="text-red-400 text-sm font-medium">后端处理出错</p>
                       <p className="text-gray-400 text-xs mt-1">{backendError}</p>
                     </div>
-                    <button onClick={clearBackendError} className="text-gray-500 hover:text-white text-lg">×</button>
+                    <button onClick={clearBackendError} className="text-gray-500 hover:text-white text-xl w-8 h-8 flex items-center justify-center rounded-lg hover:bg-white/5 transition" aria-label="关闭">×</button>
                   </div>
                 </div>
               )}

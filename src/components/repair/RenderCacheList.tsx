@@ -95,7 +95,7 @@ export function RenderCacheList({
                 <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-emerald-400 rounded-full" title="当前版本有渲染缓存" />
               )}
               <div className="font-medium">{est.sampleRate / 1000}k/{est.bitDepth}bit</div>
-              <div>{isMobile ? est.sizeMB.toFixed(0) : est.sizeMiB.toFixed(0)}{isMobile ? 'MB' : 'MiB'}</div>
+              <div>{isMobile ? (est.sizeMB < 1 ? est.sizeMB.toFixed(1) : est.sizeMB.toFixed(0)) : (est.sizeMiB < 1 ? est.sizeMiB.toFixed(1) : est.sizeMiB.toFixed(0))}{isMobile ? 'MB' : 'MiB'}</div>
               {isCached && <div className="text-[8px] text-emerald-400">可秒下</div>}
             </div>
           );

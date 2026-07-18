@@ -1,5 +1,6 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { parseFilenameFromDisposition } from '../services/backendApi';
+import { useToast } from './Toast';
 
 export interface DownloadFileInfo {
   filename: string;
@@ -77,6 +78,7 @@ export function DownloadModal({
   dualTrackVocalTaskId,
   dualTrackAccompanimentTaskId,
 }: DownloadModalProps) {
+  const toast = useToast();
   const [copySuccess, setCopySuccess] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [dlProgress, setDlProgress] = useState(0);
@@ -354,7 +356,7 @@ export function DownloadModal({
         a.click();
         document.body.removeChild(a);
       } catch (fallbackErr) {
-        alert('下载失败，请尝试复制链接使用下载器下载');
+        toast.error('下载失败，请尝试复制链接使用下载器下载');
       }
     } finally {
       setDownloading(false);
@@ -392,7 +394,7 @@ export function DownloadModal({
             </div>
             <div>
               <h2 className="text-white font-bold text-lg">导出音频</h2>
-              <p className="text-gray-500 text-xs">选择下载方式，支持断点续传和多线程</p>
+              <p className="text-gray-500 text-xs">选择导出格式，支持外部下载工具加速</p>
             </div>
           </div>
           <button

@@ -71,7 +71,7 @@ const buildCopyText = (backendDiag: NonNullable<ReturnType<typeof useBackend>['b
     lines.push('', '--- 系统 ---', backendDiag.system.os, backendDiag.system.arch, `主机: ${backendDiag.system.hostname}`);
   }
   if (backendDiag.runtime) {
-    lines.push('', '--- 运行时 ---', `PID: ${backendDiag.runtime.pid}  模式: ${backendDiag.runtime.mobile_mode ? '移动端' : '桌面端'}`, `算法版本: ${(backendDiag.runtime.algorithm_versions || []).join(', ')}`, `运行时间: ${formatUptime(backendDiag.runtime.uptime_seconds)}`);
+    lines.push('', '--- 运行时 ---', `PID: ${backendDiag.runtime.pid}  模式: ${backendDiag.runtime.mobile_mode ? '移动端' : '桌面端'}`, `算法版本: ${(backendDiag.runtime.algorithm_versions || []).map((v: any) => v.name || v).join(', ')}`, `运行时间: ${formatUptime(backendDiag.runtime.uptime_seconds)}`);
   }
   if (backendDiag.process) {
     lines.push('', '--- 进程资源 ---', `CPU: ${backendDiag.process.cpu_percent}%  内存: ${backendDiag.process.memory_mb}MB  线程: ${backendDiag.process.threads}`);
@@ -381,7 +381,7 @@ export const Header = () => {
                     <Section title="运行时" items={[
                       { label: 'PID', name: '进程ID', ok: true, detail: String(backendDiag.runtime.pid), dim: true },
                       { label: 'MODE', name: '运行模式', ok: true, detail: backendDiag.runtime.mobile_mode ? '📱 移动端' : '🖥️ 桌面端', dim: true },
-                      { label: 'VER', name: '算法版本', ok: true, detail: (backendDiag.runtime.algorithm_versions || []).join(', '), dim: true },
+                      { label: 'VER', name: '算法版本', ok: true, detail: (backendDiag.runtime.algorithm_versions || []).map((v: any) => v.name || v).join(', '), dim: true },
                       { label: 'UP', name: '运行时长', ok: true, detail: formatUptime(backendDiag.runtime.uptime_seconds), dim: true },
                     ]} />
                   </>

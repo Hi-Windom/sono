@@ -11,6 +11,7 @@ interface State {
   error: Error | null;
   errorInfo: React.ErrorInfo | null;
   showDetails: boolean;
+  copyStatus: 'idle' | 'success' | 'error';
 }
 
 function clearAllPersistedState() {
@@ -29,7 +30,7 @@ function clearAllPersistedState() {
 export class ErrorBoundary extends React.Component<Props, State> {
   constructor(props: Props) {
     super(props);
-    this.state = { hasError: false, error: null, errorInfo: null, showDetails: false };
+    this.state = { hasError: false, error: null, errorInfo: null, showDetails: false, copyStatus: 'idle' };
   }
 
   static getDerivedStateFromError(error: Error): State {
@@ -72,9 +73,13 @@ export class ErrorBoundary extends React.Component<Props, State> {
   copyError = async () => {
     const { error, errorInfo } = this.state;
     const errorText = `Error: ${error?.message || 'Unknown error'}\n\nStack:\n${error?.stack || 'N/A'}\n\nComponent Stack:\n${errorInfo?.componentStack || 'N/A'}`;
+    const setCopyStatus = (status: 'success' | 'error') => {
+      this.setState({ copyStatus: status });
+      setTimeout(() => this.setState({ copyStatus: 'idle' }), 2000);
+    };
     try {
       await navigator.clipboard.writeText(errorText);
-      alert('错误信息已复制到剪贴板');
+      setCopyStatus('success');
     } catch {
       const textarea = document.createElement('textarea');
       textarea.value = errorText;
@@ -82,9 +87,9 @@ export class ErrorBoundary extends React.Component<Props, State> {
       textarea.select();
       try {
         document.execCommand('copy');
-        alert('错误信息已复制到剪贴板');
+        setCopyStatus('success');
       } catch {
-        alert('复制失败，请手动复制');
+        setCopyStatus('error');
       }
       document.body.removeChild(textarea);
     }
@@ -136,12 +141,20 @@ export class ErrorBoundary extends React.Component<Props, State> {
                 {this.state.showDetails ? '隐藏详情' : '查看错误详情'}
               </button>
               {this.state.showDetails && (
-                <button
-                  onClick={this.copyError}
-                  className="w-full px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg text-sm transition"
-                >
-                  📋 复制错误信息
-                </button>
+                <>
+                  <button
+                    onClick={this.copyError}
+                    className="w-full px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg text-sm transition"
+                  >
+                    📋 复制错误信息
+                  </button>
+                  {this.state.copyStatus === 'success' && (
+                    <p className="text-green-400 text-xs text-center">✓ 已复制到剪贴板</p>
+                  )}
+                  {this.state.copyStatus === 'error' && (
+                    <p className="text-red-400 text-xs text-center">✗ 复制失败，请手动复制</p>
+                  )}
+                </>
               )}
               <button
                 onClick={this.handleClearAndReset}
