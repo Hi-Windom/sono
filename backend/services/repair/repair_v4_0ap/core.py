@@ -47,6 +47,7 @@ from services.repair.repair_v4_0a.core import (
     _apply_mastering,
     _make_sub_progress,
     _SINGLE_KEY_MAP,
+    _adaptive_declip,
 )
 from services.repair.repair_v4_0a.analyzer import analyze_signal, profile_summary
 from services.repair.repair_v4_0a.adaptive import build_strategy
@@ -144,7 +145,7 @@ def process_track_adaptive_premium(y: np.ndarray, sr: int, intent: dict,
 
     # 逐原语上报进度（pass1 占 0.05~0.70）
     _pass1_steps = [
-        ("declip", "去削波", lambda: _v32a_declip(y, strategy.declip)),
+        ("declip", "去削波", lambda: _adaptive_declip(y, strategy.declip, strategy.declip_threshold)),
         ("depop", "去爆音", lambda: _depop(y, sr, strategy.depop)),
         ("de_ess", "去齿音", lambda: _v32a_de_ess(y, sr, strategy.de_ess)),
         ("noise_reduction", "降噪", lambda: _v32a_spectral_denoise(y, sr, strategy.noise_reduction)),
@@ -180,7 +181,7 @@ def process_track_adaptive_premium(y: np.ndarray, sr: int, intent: dict,
         if residual.has_clipping(threshold=0.003) and strategy.declip > 0:
             if progress:
                 progress(0.78, "二遍清除残留削波...")
-            y = _v32a_declip(y, strategy.declip * 0.5)
+            y = _adaptive_declip(y, strategy.declip * 0.5, strategy.declip_threshold)
             verify_notes.append("二遍清除残留削波")
             if debug_output_dir:
                 save_idx += 1
@@ -289,8 +290,14 @@ def repair_single_track(input_path: str, output_path: str, params: dict, progres
             sf.write(os.path.join(debug_output_dir, "99_mastering.wav"),
                      y.T if y.ndim > 1 else y, working_sr, subtype="PCM_24")
 
-    if progress_callback:
-        progress_callback(0.90, f"{VERSION_TAG} 导出...")
+    if progress:
+        progress(0.90, f"{VERSION_TAG} 导出...")
+
+    output_volume_db = params.get("output_volume", 0.0)
+    if output_volume_db != 0.0:
+        volume_gain = 10 ** (output_volume_db / 20.0)
+        y = (y * volume_gain).astype(y.dtype)
+
     y = soft_peak_limit(y, threshold=0.9)
     bit_depth = int(params.get("bit_depth", 24))
     subtype_map = {16: "PCM_16", 24: "PCM_24", 32: "PCM_32"}

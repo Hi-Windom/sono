@@ -71,6 +71,28 @@ _SINGLE_KEY_MAP = {
 }
 
 
+def _adaptive_declip(y: np.ndarray, amount: float, threshold: float = 0.90) -> np.ndarray:
+    """自适应去削波：支持可变阈值，amount 控制修复强度。
+
+    相比 v3.2a simple_declip（固定阈值 0.90），这里阈值可自适应下调，
+    保护干净段的同时精准修复削波。amount∈(0,1] 控制 tanh 软拐点的强度。
+    """
+    if amount <= 0:
+        return y
+    threshold = max(0.80, min(0.99, float(threshold)))
+    mask = np.abs(y) > threshold
+    if not np.any(mask):
+        return y
+    y64 = y.astype(np.float64, copy=False)
+    masked_vals = y64[mask]
+    abs_masked = np.abs(masked_vals)
+    over = abs_masked - threshold
+    headroom = 1.0 - threshold
+    strength = max(0.1, min(1.0, float(amount)))
+    y64[mask] = np.sign(masked_vals) * (threshold + headroom * np.tanh(over / headroom) * strength)
+    return y64.astype(y.dtype)
+
+
 def _resample_to_working(y: np.ndarray, sr: int, working_sr: int) -> tuple[np.ndarray, int]:
     if sr == working_sr:
         return y, sr
@@ -156,27 +178,12 @@ def process_track_adaptive(y: np.ndarray, sr: int, intent: dict, *, premium: boo
         sf.write(os.path.join(debug_output_dir, f"{save_idx:02d}_original.wav"),
                  y.T if y.ndim > 1 else y, sr, subtype="PCM_24")
 
-    if strategy.declip > 0:
-        # 自适应阈值通过临时包装实现：v3.2a simple_declip 阈值固定 0.90，
-        # 这里在调用前对超阈值样本预衰减以等效下移阈值（保护干净段）。
-        if strategy.declip_threshold < 0.90:
-            thr = strategy.declip_threshold
-            over = np.abs(y) > thr
-            if np.any(over):
-                # 等效：把 [thr,1] 段软压到 [thr, thr+0.05]，使 simple_declip 在 0.90 处只处理真正满幅
-                y = y.astype(np.float64, copy=False)
-                mag = np.abs(y)
-                scale = np.where(over, thr + 0.05 * np.tanh((mag - thr) / 0.05) / max(1e-6, np.tanh((1.0 - thr) / 0.05)), mag)
-                y = y / np.maximum(mag, 1e-9) * scale
-                if y.dtype != np.float64:
-                    y = y.astype(np.float64)
-
     # 进度基线：分析后到末尾分配 0.05~0.98
     for idx, (key, label) in enumerate(active):
         if progress:
             progress(0.05 + 0.93 * (idx / n_active), f"{label}...")
         if key == "declip":
-            y = _v32a_declip(y, strategy.declip)
+            y = _adaptive_declip(y, strategy.declip, strategy.declip_threshold)
         elif key == "depop":
             y = _v32a_depop(y, sr, strategy.depop)
         elif key == "de_ess":
@@ -283,8 +290,13 @@ def repair_single_track(input_path: str, output_path: str, params: dict, progres
             sf.write(os.path.join(debug_output_dir, "99_mastering.wav"),
                      y.T if y.ndim > 1 else y, working_sr, subtype="PCM_24")
 
-    if progress_callback:
-        progress_callback(0.90, f"{VERSION_TAG} 导出...")
+    if progress:
+        progress(0.90, f"{VERSION_TAG} 导出...")
+
+    output_volume_db = params.get("output_volume", 0.0)
+    if output_volume_db != 0.0:
+        volume_gain = 10 ** (output_volume_db / 20.0)
+        y = (y * volume_gain).astype(y.dtype)
 
     y = soft_peak_limit(y, threshold=0.9)
     bit_depth = int(params.get("bit_depth", 24))

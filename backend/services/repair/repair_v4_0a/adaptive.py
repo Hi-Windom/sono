@@ -58,21 +58,22 @@ def build_strategy(intent: dict, profile: SignalProfile, *, premium: bool = Fals
     # —— 自适应 declip ——
     # v3.2a 固定阈值 0.90：v4.0 按实际削波密度调制，且阈值随峰值下移
     declip_intent = float(intent.get("declip", 0) or 0)
-    if profile.has_clipping() and declip_intent > 0:
-        # 削波越严重，有效强度越高
-        boost = 1.0 + min(2.0, profile.clip_density * 20.0)
-        s.declip = _clamp(declip_intent * boost)
-        # 峰值未达满幅时阈值下移到实际峰值附近，避免误伤
-        if profile.peak_abs < 0.999:
-            s.declip_threshold = max(0.80, min(0.95, profile.peak_abs * 0.97))
+    if declip_intent > 0:
+        if profile.has_clipping():
+            # 削波越严重，有效强度越高
+            boost = 1.0 + min(2.0, profile.clip_density * 20.0)
+            s.declip = _clamp(declip_intent * boost)
+            # 峰值未达满幅时阈值下移到实际峰值附近，避免误伤
+            if profile.peak_abs < 0.999:
+                s.declip_threshold = max(0.80, min(0.95, profile.peak_abs * 0.97))
+            else:
+                s.declip_threshold = 0.90
+            notes.append(f"自适应去削波(阈值{s.declip_threshold:.2f}，加强)")
         else:
-            s.declip_threshold = 0.90
-        notes.append(f"自适应去削波(阈值{s.declip_threshold:.2f})")
-    else:
-        # 无削波 → 即使 intent>0 也跳过，保护干净音频
-        s.declip = 0.0
-        if declip_intent > 0:
-            notes.append("无削波，跳过去削波")
+            # 无明显削波时保留轻量软化（防止潜在削波 + 轻微峰值控制）
+            s.declip = _clamp(declip_intent * 0.3)
+            s.declip_threshold = 0.93
+            notes.append("无明显削波，轻量峰值软化")
 
     # —— 自适应 depop ——
     # 瞬态密度高 → 更可能含爆音；否则弱化
@@ -82,33 +83,32 @@ def build_strategy(intent: dict, profile: SignalProfile, *, premium: bool = Fals
         s.depop = _clamp(depop_intent * factor)
 
     # —— 自适应 de_ess ——
-    # 仅在齿音能量确实偏高时生效；否则跳过，避免齿音被误削
+    # 齿音高时加强，齿音正常时保留基础强度（避免完全跳过导致用户感知不到效果）
     de_ess_intent = float(intent.get("de_ess", 0) or 0)
-    if profile.has_sibilance() and de_ess_intent > 0:
-        s.de_ess = _clamp(de_ess_intent * (1.0 + profile.sibilance_energy))
+    if de_ess_intent > 0:
+        if profile.has_sibilance():
+            s.de_ess = _clamp(de_ess_intent * (1.0 + profile.sibilance_energy))
+            notes.append(f"自适应去齿音(齿音{sibilance_pct(profile):.0f}%，加强)")
+        else:
+            s.de_ess = _clamp(de_ess_intent * 0.35)
+            notes.append("齿音正常，轻量去齿音")
         s.sibilance_gate = profile.sibilance_energy
-        notes.append(f"自适应去齿音(齿音{sibilance_pct(profile):.0f}%)")
-    else:
-        s.de_ess = 0.0
-        if de_ess_intent > 0:
-            notes.append("齿音正常，跳过去齿音")
 
     # —— 自适应降噪 ——
-    # 门限=测量本底噪声；SNR 低才降噪，避免降噪剂吞噬高频空气感
+    # 门限=测量本底噪声；SNR 低时加强，SNR 高时保留轻量降噪（避免完全跳过）
     nr_intent = float(intent.get("noise_reduction", 0) or intent.get("ai_repair", 0) or 0)
-    if profile.is_noisy() and nr_intent > 0:
-        s.noise_reduction = _clamp(nr_intent)
+    if nr_intent > 0:
         s.noise_gate_db = profile.noise_floor_db
+        if profile.is_noisy():
+            s.noise_reduction = _clamp(nr_intent)
+            notes.append(f"自适应降噪(门限{s.noise_gate_db:.0f}dB，标准)")
+        else:
+            s.noise_reduction = _clamp(nr_intent * 0.25)
+            notes.append("信噪比良好，轻量降噪")
         # ai_repair 自适应（谱减）强度受 SNR 调制
         ai_intent = float(intent.get("ai_repair_adaptive_lite", 0) or intent.get("ai_repair_adaptive", 0) or 0)
         if ai_intent > 0:
-            s.ai_repair_adaptive = _clamp(ai_intent * (1.0 + max(0.0, (30.0 - profile.snr_db) / 30.0)))
-        notes.append(f"自适应降噪(门限{s.noise_gate_db:.0f}dB)")
-    else:
-        s.noise_reduction = 0.0
-        s.ai_repair_adaptive = 0.0
-        if nr_intent > 0:
-            notes.append("信噪比良好，跳过降噪")
+            s.ai_repair_adaptive = _clamp(ai_intent * (0.5 + max(0.0, (30.0 - profile.snr_db) / 30.0)))
 
     # —— exciter / compressor / transient / resonance ——
     # 这些是"增强类"操作，保留 intent，但 transient/resonance 受 profile 微调
@@ -120,18 +120,22 @@ def build_strategy(intent: dict, profile: SignalProfile, *, premium: bool = Fals
         # 瞬态密度高时加强瞬态修复
         s.transient = _clamp(trans_intent * (0.7 + profile.transient_density * 2.0))
     res_intent = float(intent.get("resonance", 0) or 0)
-    # 频谱越不平（谐波多）越需要共振抑制
-    if res_intent > 0 and profile.spectral_flatness < 0.5:
-        s.resonance = _clamp(res_intent * (1.0 - profile.spectral_flatness))
-    else:
-        s.resonance = 0.0
+    # 频谱越不平（谐波多）越需要共振抑制；频谱平坦时保留基础强度
+    if res_intent > 0:
+        if profile.spectral_flatness < 0.5:
+            s.resonance = _clamp(res_intent * (1.0 - profile.spectral_flatness))
+        else:
+            s.resonance = _clamp(res_intent * 0.4)
 
     # —— bass / air / dynamic ——
     s.bass_enhance = _clamp(float(intent.get("bass_enhance", 0) or 0))
-    # air_texture 仅在 HF 能量不足时增强
+    # air_texture：HF 不足时加强，HF 充足时保留基础强度（完全保留用户意图）
     air_intent = float(intent.get("air_texture", 0) or 0)
     if air_intent > 0:
-        s.air_texture = _clamp(air_intent * (0.5 + max(0.0, 0.05 - profile.hf_energy) * 10.0))
+        if profile.hf_energy < 0.05:
+            s.air_texture = _clamp(air_intent * (1.0 + (0.05 - profile.hf_energy) * 10.0))
+        else:
+            s.air_texture = _clamp(air_intent)
     s.dynamic = _clamp(float(intent.get("dynamic", 0) or 0))
 
     # —— 自适应响度 ——
