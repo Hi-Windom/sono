@@ -1,17 +1,17 @@
 """
-WAMR WebAssembly Runtime 核心实现
+WebAssembly Runtime 核心实现
 
-支持两种运行模式：
-1. WAMR 模式（推荐，高性能）：通过 WAMR Python bindings 运行
-2. 纯 Python 模式（fallback）：当 WAMR 不可用时，使用 wasmtime 或纯解释器
+支持三种运行时后端，自动检测并降级：
+1. WAMR (Bytecode Alliance) — 推荐用于嵌入式/移动设备
+2. wasmtime (Bytecode Alliance) — 桌面/服务器高性能
+3. disabled — 无 WASM 运行时，使用纯 Python fallback
 
-注意：WAMR 需要安装 wamr-python 包或编译 Python bindings。
-如果环境不支持 WAMR，会自动降级到备用方案。
+所有后端提供统一的 WasmModule 接口。
 """
 
 import os
 import logging
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional
 from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
@@ -30,16 +30,16 @@ class WasmModuleInfo:
     size: int
     hash: str = ""
     exports: List[str] = field(default_factory=list)
-    memory_pages: int = 16
+    memory_pages: int = 0
 
 
 class WasmModule:
     """
-    封装单个 WASM 模块
-    
-    提供统一的调用接口，底层可以是 WAMR、wasmtime 或其他运行时。
+    封装单个 WASM 模块，提供统一调用接口。
+
+    底层可以是 WAMR、wasmtime 或其他运行时。
     """
-    
+
     def __init__(
         self,
         name: str,
@@ -51,320 +51,250 @@ class WasmModule:
         self._module_data = module_data
         self._runtime = runtime
         self._info = info or WasmModuleInfo(name=name, path="", size=len(module_data))
+        self._backend: str = runtime.backend
+        self._store = None
         self._instance = None
-        self._exports: Dict[str, Any] = {}
+        self._exports: Dict[str, Callable] = {}
         self._memory = None
-        
+        self._mem_read: Optional[Callable] = None
+        self._mem_write: Optional[Callable] = None
+
     @property
     def info(self) -> WasmModuleInfo:
         return self._info
-    
+
     def call(self, func_name: str, *args: Any) -> Any:
-        """
-        调用 WASM 模块中的导出函数
-        
-        Args:
-            func_name: 导出函数名
-            *args: 函数参数
-            
-        Returns:
-            函数返回值
-            
-        Raises:
-            WasmRuntimeError: 函数不存在或调用失败
-        """
         if not self._instance:
             raise WasmRuntimeError(f"Module '{self.name}' not instantiated")
-        
+
         if func_name not in self._exports:
             raise WasmRuntimeError(
                 f"Function '{func_name}' not found in module '{self.name}'. "
-                f"Available exports: {list(self._exports.keys())}"
+                f"Available: {list(self._exports.keys())}"
             )
-        
+
         try:
-            func = self._exports[func_name]
-            return func(*args)
+            return self._exports[func_name](*args)
         except Exception as e:
             raise WasmRuntimeError(
-                f"Failed to call '{func_name}' in module '{self.name}': {e}"
+                f"Failed to call '{func_name}' in '{self.name}': {e}"
             ) from e
-    
+
     def read_memory(self, offset: int, length: int) -> bytes:
-        """读取 WASM 线性内存"""
-        if not self._memory:
-            raise WasmRuntimeError(f"No memory available in module '{self.name}'")
-        return bytes(self._memory[offset:offset + length])
-    
+        if not self._mem_read:
+            raise WasmRuntimeError(f"No memory in module '{self.name}'")
+        return self._mem_read(offset, length)
+
     def write_memory(self, offset: int, data: bytes) -> None:
-        """写入 WASM 线性内存"""
-        if not self._memory:
-            raise WasmRuntimeError(f"No memory available in module '{self.name}'")
-        self._memory[offset:offset + len(data)] = data
-    
+        if not self._mem_write:
+            raise WasmRuntimeError(f"No memory in module '{self.name}'")
+        self._mem_write(offset, data)
+
     def alloc(self, size: int) -> int:
-        """
-        在 WASM 堆上分配内存
-        
-        模块需要导出 malloc 函数。
-        """
         if "malloc" in self._exports:
-            return self.call("malloc", size)
-        raise WasmRuntimeError(
-            f"Module '{self.name}' does not export 'malloc'"
-        )
-    
+            return int(self.call("malloc", size))
+        raise WasmRuntimeError(f"Module '{self.name}' does not export 'malloc'")
+
     def free(self, ptr: int) -> None:
-        """释放 WASM 堆内存"""
         if "free" in self._exports:
             self.call("free", ptr)
-        else:
-            raise WasmRuntimeError(
-                f"Module '{self.name}' does not export 'free'"
-            )
 
 
 class WasmRuntime:
     """
-    WebAssembly 运行时管理器
-    
-    自动检测可用的 WASM 运行时后端并初始化。
-    优先级：WAMR > wasmtime > 纯 Python 解释器
+    WebAssembly 运行时管理器。
+
+    自动检测可用后端并初始化，优先级：WAMR > wasmtime > disabled
+    单例模式，全局共享。
     """
-    
+
     _instance: Optional["WasmRuntime"] = None
-    _initialized = False
-    
+
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         self._config = config or {}
         self._modules: Dict[str, WasmModule] = {}
         self._backend: str = "none"
         self._backend_version: str = ""
-        self._native_runtime = None
-        
+        self._engine = None
         self._detect_backend()
-    
+
     @classmethod
     def instance(cls) -> "WasmRuntime":
-        """单例模式获取全局运行时实例"""
         if cls._instance is None:
             cls._instance = cls()
         return cls._instance
-    
+
     def _detect_backend(self) -> None:
-        """检测可用的 WASM 运行时后端"""
-        backends_to_try = [
+        backends = [
             ("wamr", self._init_wamr),
             ("wasmtime", self._init_wasmtime),
         ]
-        
-        for name, init_fn in backends_to_try:
+        for name, init_fn in backends:
             try:
                 init_fn()
                 self._backend = name
-                logger.info(f"WASM runtime backend: {name} (v{self._backend_version})")
+                logger.info(f"WASM runtime: {name} v{self._backend_version}")
                 return
             except ImportError:
                 continue
             except Exception as e:
-                logger.warning(f"Failed to init {name} backend: {e}")
+                logger.warning(f"Failed to init {name}: {e}")
                 continue
-        
+
         self._backend = "disabled"
-        logger.warning(
-            "No WASM runtime backend available. WASM modules will be disabled. "
-            "Install wamr-python or wasmtime to enable WASM support."
-        )
-    
+        logger.warning("No WASM runtime available (install wamr or wasmtime)")
+
     def _init_wamr(self) -> None:
-        """初始化 WAMR 后端"""
-        try:
-            from wamr import WasmRuntime as WamrRuntime  # type: ignore
-            self._native_runtime = WamrRuntime()
-            self._backend_version = "2.4.4"
-        except ImportError:
-            raise
-        except Exception as e:
-            raise RuntimeError(f"WAMR init failed: {e}") from e
-    
+        from wamr import WasmRuntime as WamrRuntime  # type: ignore
+        self._engine = WamrRuntime()
+        self._backend_version = "2.4.4"
+
     def _init_wasmtime(self) -> None:
-        """初始化 wasmtime 后端"""
+        import wasmtime  # type: ignore
+        self._engine = wasmtime.Engine()
         try:
-            import wasmtime  # type: ignore
-            self._native_runtime = wasmtime.Engine()
             self._backend_version = wasmtime.__version__
-        except ImportError:
-            raise
-        except Exception as e:
-            raise RuntimeError(f"wasmtime init failed: {e}") from e
-    
+        except AttributeError:
+            self._backend_version = "unknown"
+
     @property
     def backend(self) -> str:
-        """当前使用的运行时后端"""
         return self._backend
-    
+
     @property
     def available(self) -> bool:
-        """WASM 运行时是否可用"""
-        return self._backend != "disabled" and self._backend != "none"
-    
+        return self._backend not in ("disabled", "none")
+
     def load_module(
         self,
         name: str,
         wasm_path: str,
         imports: Optional[Dict[str, Callable]] = None,
     ) -> WasmModule:
-        """
-        从文件加载 WASM 模块
-        
-        Args:
-            name: 模块名称（唯一标识）
-            wasm_path: .wasm 文件路径
-            imports: 要注入的宿主函数
-            
-        Returns:
-            WasmModule 实例
-            
-        Raises:
-            WasmRuntimeError: 加载失败
-        """
         if not self.available:
-            raise WasmRuntimeError("No WASM runtime backend available")
-        
-        if name in self._modules:
-            logger.warning(f"Module '{name}' already loaded, reloading")
-        
+            raise WasmRuntimeError("No WASM runtime available")
+
         if not os.path.exists(wasm_path):
             raise WasmRuntimeError(f"WASM file not found: {wasm_path}")
-        
+
         with open(wasm_path, "rb") as f:
             wasm_data = f.read()
-        
-        module = self._create_module(name, wasm_data, imports)
-        self._modules[name] = module
-        
-        logger.info(
-            f"Loaded WASM module '{name}' "
-            f"({len(wasm_data)} bytes, backend={self._backend})"
-        )
-        return module
-    
+
+        return self.load_module_from_bytes(name, wasm_data, imports)
+
     def load_module_from_bytes(
         self,
         name: str,
         wasm_data: bytes,
         imports: Optional[Dict[str, Callable]] = None,
     ) -> WasmModule:
-        """从内存中加载 WASM 模块"""
         if not self.available:
-            raise WasmRuntimeError("No WASM runtime backend available")
-        
-        module = self._create_module(name, wasm_data, imports)
+            raise WasmRuntimeError("No WASM runtime available")
+
+        if name in self._modules:
+            logger.warning(f"Module '{name}' already loaded, reloading")
+
+        module = self._create_module(name, wasm_data, imports or {})
         self._modules[name] = module
-        
+
         logger.info(
-            f"Loaded WASM module '{name}' from memory "
-            f"({len(wasm_data)} bytes, backend={self._backend})"
+            f"Loaded WASM module '{name}' "
+            f"({len(wasm_data)} bytes, {self._backend})"
         )
         return module
-    
+
     def _create_module(
         self,
         name: str,
         wasm_data: bytes,
-        imports: Optional[Dict[str, Callable]] = None,
+        imports: Dict[str, Callable],
     ) -> WasmModule:
-        """根据后端创建模块实例"""
         module = WasmModule(name, wasm_data, self)
-        
+        module._info.size = len(wasm_data)
+
         if self._backend == "wamr":
-            self._create_module_wamr(module, wasm_data, imports or {})
+            self._create_wamr(module, wasm_data, imports)
         elif self._backend == "wasmtime":
-            self._create_module_wasmtime(module, wasm_data, imports or {})
+            self._create_wasmtime(module, wasm_data, imports)
         else:
             raise WasmRuntimeError(f"Unsupported backend: {self._backend}")
-        
+
         return module
-    
-    def _create_module_wamr(
-        self,
-        module: WasmModule,
-        wasm_data: bytes,
-        imports: Dict[str, Callable],
+
+    def _create_wamr(
+        self, module: WasmModule, wasm_data: bytes, imports: Dict[str, Callable]
     ) -> None:
-        """使用 WAMR 后端创建模块"""
         from wamr import WasmModule as WamrModule, WasmInstance  # type: ignore
-        
-        wamr_module = WamrModule(wasm_data)
-        
-        import_obj = {}
-        for name, func in imports.items():
-            import_obj[name] = func
-        
-        instance = WasmInstance(wamr_module, import_obj)
+
+        wamr_mod = WamrModule(wasm_data)
+        import_obj = dict(imports)
+        instance = WasmInstance(wamr_mod, import_obj)
         module._instance = instance
-        
+
         for export_name in instance.exports:
             module._exports[export_name] = instance.exports[export_name]
-        
+
         module._info.exports = list(module._exports.keys())
-        
+
         if hasattr(instance, 'memory'):
-            module._memory = instance.memory
-    
-    def _create_module_wasmtime(
-        self,
-        module: WasmModule,
-        wasm_data: bytes,
-        imports: Dict[str, Callable],
+            mem = instance.memory
+            module._memory = mem
+            module._mem_read = lambda off, sz: bytes(mem[off:off + sz])
+            module._mem_write = lambda off, data: mem.__setitem__(
+                slice(off, off + len(data)), data
+            )
+
+    def _create_wasmtime(
+        self, module: WasmModule, wasm_data: bytes, imports: Dict[str, Callable]
     ) -> None:
-        """使用 wasmtime 后端创建模块"""
         import wasmtime  # type: ignore
-        
-        engine = self._native_runtime
-        store = wasmtime.Store(engine)
-        wasm_module = wasmtime.Module(engine, wasm_data)
-        
-        import_list = []
+
+        store = wasmtime.Store(self._engine)
+        wasm_mod = wasmtime.Module(self._engine, wasm_data)
+
+        import_funcs = []
         for name, func in imports.items():
-            import_list.append(wasmtime.Func(store, func))
-        
-        instance = wasmtime.Instance(store, wasm_module, import_list)
-        
-        module._instance = (store, instance)
-        module._exports = {}
-        
-        for export in instance.exports(store):
-            if isinstance(export, wasmtime.Func):
-                module._exports[export.name] = lambda *a, e=export, s=store: e(s, *a)
-            elif isinstance(export, wasmtime.Memory):
-                module._memory = export.data_ptr(store)
-        
+            import_funcs.append(wasmtime.Func(store, func))
+
+        instance = wasmtime.Instance(store, wasm_mod, import_funcs)
+        module._store = store
+        module._instance = instance
+
+        exports = instance.exports(store)
+
+        for exp_type in wasm_mod.exports:
+            name = exp_type.name
+            try:
+                value = exports[name]
+            except Exception:
+                continue
+
+            if isinstance(value, wasmtime.Func):
+                fn = value
+                module._exports[name] = lambda *a, _fn=fn, _s=store: _fn(_s, *a)
+            elif isinstance(value, wasmtime.Memory):
+                module._memory = value
+                mem = value
+                module._mem_read = lambda off, sz, _m=mem, _s=store: _m.read(_s, off, off + sz)
+                module._mem_write = lambda off, data, _m=mem, _s=store: _m.write(_s, data, off)
+                module._info.memory_pages = mem.size(store)
+
         module._info.exports = list(module._exports.keys())
-    
+
     def get_module(self, name: str) -> Optional[WasmModule]:
-        """获取已加载的模块"""
         return self._modules.get(name)
-    
+
     def unload_module(self, name: str) -> None:
-        """卸载模块"""
         if name in self._modules:
             del self._modules[name]
             logger.info(f"Unloaded WASM module '{name}'")
-    
+
     def list_modules(self) -> List[str]:
-        """列出所有已加载的模块"""
         return list(self._modules.keys())
-    
+
     def shutdown(self) -> None:
-        """关闭运行时，释放所有资源"""
         for name in list(self._modules.keys()):
             self.unload_module(name)
-        
-        if self._native_runtime:
-            if hasattr(self._native_runtime, 'shutdown'):
-                self._native_runtime.shutdown()
-            self._native_runtime = None
-        
+        self._engine = None
         self._backend = "none"
-        logger.info("WASM runtime shutdown complete")
+        logger.info("WASM runtime shutdown")

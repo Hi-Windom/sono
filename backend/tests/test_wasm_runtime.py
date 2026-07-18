@@ -82,7 +82,7 @@ class TestWasmModuleInfo:
         )
         assert info.name == "test_module"
         assert info.size == 1024
-        assert info.memory_pages == 16
+        assert info.memory_pages == 0
         assert isinstance(info.exports, list)
     
     def test_module_info_with_exports(self):
@@ -271,3 +271,179 @@ class TestDspAccelerator:
         
         assert result.shape == audio.shape
         assert result.dtype == audio.dtype
+
+
+wasm_available = False
+try:
+    import wasmtime
+    wasm_available = True
+except ImportError:
+    pass
+
+
+@pytest.mark.skipif(not wasm_available, reason="wasmtime not available")
+class TestWasmtimeRealRuntime:
+    """使用真实 wasmtime 运行时的集成测试"""
+
+    def test_runtime_backend_detection(self):
+        """测试 wasmtime 后端正确检测"""
+        WasmRuntime._instance = None
+        rt = WasmRuntime()
+        assert rt.backend == "wasmtime"
+        assert rt.available is True
+
+    def test_load_dsp_core_module(self):
+        """测试加载 dsp_core.wasm 模块"""
+        import os
+        WasmRuntime._instance = None
+        rt = WasmRuntime()
+        
+        module_path = os.path.join(
+            os.path.dirname(__file__),
+            "..", "services", "wasm_runtime", "modules", "dsp_core.wasm"
+        )
+        module_path = os.path.abspath(module_path)
+        
+        if not os.path.exists(module_path):
+            pytest.skip("dsp_core.wasm not built")
+        
+        mod = rt.load_module("test_dsp", module_path)
+        assert mod.name == "test_dsp"
+        assert "apply_gain" in mod.info.exports
+        assert "compute_rms" in mod.info.exports
+        assert "malloc" in mod.info.exports
+        assert mod.info.memory_pages > 0
+
+    def test_wasm_apply_gain_correctness(self):
+        """测试 WASM apply_gain 结果正确性"""
+        dsp = DspAccelerator()
+        if not dsp.available:
+            pytest.skip("WASM accelerator not available")
+        
+        audio = np.array([0.1, 0.2, 0.3, -0.4, 0.5], dtype=np.float32)
+        result = dsp.apply_gain(audio, 6.0)
+        expected = audio * (10.0 ** (6.0 / 20.0))
+        
+        np.testing.assert_allclose(result, expected, rtol=1e-4)
+
+    def test_wasm_compute_rms_correctness(self):
+        """测试 WASM compute_rms 结果正确性"""
+        dsp = DspAccelerator()
+        if not dsp.available:
+            pytest.skip("WASM accelerator not available")
+        
+        audio = np.array([0.5, 0.3, 0.8, -0.2], dtype=np.float32)
+        rms = dsp.compute_rms(audio)
+        expected = float(np.sqrt(np.mean(audio ** 2)))
+        
+        assert abs(rms - expected) < 1e-5
+
+    def test_wasm_compute_peak_correctness(self):
+        """测试 WASM compute_peak 结果正确性"""
+        dsp = DspAccelerator()
+        if not dsp.available:
+            pytest.skip("WASM accelerator not available")
+        
+        audio = np.array([0.1, -0.8, 0.3, 0.5], dtype=np.float32)
+        peak = dsp.compute_peak(audio)
+        
+        assert abs(peak - 0.8) < 1e-5
+
+    def test_wasm_normalize_correctness(self):
+        """测试 WASM normalize 结果正确性"""
+        dsp = DspAccelerator()
+        if not dsp.available:
+            pytest.skip("WASM accelerator not available")
+        
+        audio = np.array([0.1, 0.2, 0.5, 0.3], dtype=np.float32)
+        result = dsp.normalize(audio, 0.9)
+        peak = np.max(np.abs(result))
+        
+        assert abs(peak - 0.9) < 1e-4
+
+    def test_wasm_remove_dc(self):
+        """测试 WASM remove_dc 功能"""
+        dsp = DspAccelerator()
+        if not dsp.available:
+            pytest.skip("WASM accelerator not available")
+        
+        audio = np.ones(1000, dtype=np.float32) * 0.5
+        result = dsp.remove_dc(audio)
+        
+        assert abs(np.mean(result)) < 1e-5
+
+    def test_wasm_fade_in_out(self):
+        """测试 WASM fade_in / fade_out"""
+        dsp = DspAccelerator()
+        if not dsp.available:
+            pytest.skip("WASM accelerator not available")
+        
+        audio = np.ones(100, dtype=np.float32)
+        
+        faded_in = dsp.fade_in(audio, 50)
+        assert faded_in[0] == 0.0
+        assert abs(faded_in[49] - 0.98) < 0.05
+        assert faded_in[-1] == 1.0
+        
+        faded_out = dsp.fade_out(audio, 50)
+        assert faded_out[0] == 1.0
+        assert faded_out[-1] == 0.0
+
+    def test_wasm_stereo_audio(self):
+        """测试 WASM 处理立体声（2D 数组）"""
+        dsp = DspAccelerator()
+        if not dsp.available:
+            pytest.skip("WASM accelerator not available")
+        
+        audio = np.random.randn(2, 1000).astype(np.float32) * 0.5
+        result = dsp.apply_gain(audio, 3.0)
+        
+        assert result.shape == audio.shape
+        assert result.dtype == audio.dtype
+
+    def test_wasm_dtype_preserved(self):
+        """测试 WASM 处理后 dtype 保持一致"""
+        dsp = DspAccelerator()
+        if not dsp.available:
+            pytest.skip("WASM accelerator not available")
+        
+        for dtype in [np.float32, np.float64]:
+            audio = np.array([0.1, 0.2, 0.3], dtype=dtype)
+            result = dsp.apply_gain(audio, 3.0)
+            assert result.dtype == dtype
+
+    def test_wasm_empty_array_rms(self):
+        """测试 WASM 空数组 RMS 返回 0"""
+        dsp = DspAccelerator()
+        if not dsp.available:
+            pytest.skip("WASM accelerator not available")
+        
+        audio = np.array([], dtype=np.float32)
+        rms = dsp.compute_rms(audio)
+        assert rms == 0.0
+
+    def test_wasm_low_pass_filter(self):
+        """测试 WASM 低通滤波器基本功能"""
+        dsp = DspAccelerator()
+        if not dsp.available:
+            pytest.skip("WASM accelerator not available")
+        
+        sr = 44100.0
+        n = 10000
+        t = np.arange(n) / sr
+        sig = (np.sin(2 * np.pi * 440 * t) + 0.5 * np.sin(2 * np.pi * 8000 * t)).astype(np.float32)
+        
+        filtered = dsp.low_pass_filter(sig, sr, 1000.0)
+        assert filtered.shape == sig.shape
+        assert filtered.dtype == sig.dtype
+        assert dsp.compute_rms(filtered) < dsp.compute_rms(sig)
+
+    def test_dsp_accelerator_backend_property(self):
+        """测试 DspAccelerator backend 属性"""
+        dsp = DspAccelerator()
+        backend = dsp.backend
+        assert isinstance(backend, str)
+        if dsp.available:
+            assert "wasm" in backend
+        else:
+            assert "fallback" in backend
