@@ -143,7 +143,22 @@ deploy/      # 运行时部署脚本（被打包进Android发布包，在用户�
 ```bash
 # 运行音频修复质量测试
 cd /workspace && python -m pytest backend/tests/test_repair_quality.py -v
+
+# 运行回归测试（必须每次修改相关代码后跑，防止历史bug复发）
+cd /workspace && python -m pytest backend/tests/test_regression.py -v
 ```
+
+### 防回归测试铁律
+1. **每修一个 bug 必须补对应的回归测试**，禁止修完就完事
+2. 测试文件：`backend/tests/test_regression.py`
+3. 测试命名规范：`Test<Bug类别>` + 明确的测试用例，注释写明对应的历史 bug 是什么
+4. **每次修改相关代码后必须跑回归测试**，不能只测新增功能
+5. 回归测试覆盖范围（持续补充）：
+   - 修复算法 progress/progress_callback 变量名一致性
+   - HTTP 轮询模式下 error 状态正确回调
+   - 打包产物不含测试/开发文件
+   - 自定义 hook 返回对象引用稳定性
+6. 涉及 Android 的修改，提交前必须跑 `bash scripts/build_android_release.sh` 确保打包成功
 
 ## 🚨 问题排查铁律（血的教训）
 
