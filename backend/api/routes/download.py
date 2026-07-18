@@ -9,34 +9,22 @@ from urllib.parse import quote
 from config import OUTPUT_DIR, DECODED_DIR
 from database import get_task, find_task_by_hash, update_task
 from services.task_manager import executor
+from services.file_gateway import output_gateway, SecurityError
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-_mp3_encode_locks: dict[str, threading.Lock] = {}
-_mp3_encode_locks_guard = threading.Lock()
-
-def _get_mp3_encode_lock(task_id: str) -> threading.Lock:
-    with _mp3_encode_locks_guard:
-        if task_id not in _mp3_encode_locks:
-            _mp3_encode_locks[task_id] = threading.Lock()
-        return _mp3_encode_locks[task_id]
-
 
 def _safe_output_path(filename: str) -> str:
-    safe_filename = os.path.basename(filename)
-    if safe_filename != filename:
+    try:
+        file_path = output_gateway.resolve(filename)
+    except SecurityError:
         raise HTTPException(status_code=400, detail="无效的文件名")
-    file_path = os.path.join(OUTPUT_DIR, safe_filename)
-    if not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail="文件不存在")
     if not os.path.isfile(file_path):
+        if not os.path.exists(file_path):
+            raise HTTPException(status_code=404, detail="文件不存在")
         raise HTTPException(status_code=400, detail="不是文件")
-    real_path = os.path.realpath(file_path)
-    real_output_dir = os.path.realpath(OUTPUT_DIR)
-    if not real_path.startswith(real_output_dir + os.sep):
-        raise HTTPException(status_code=400, detail="路径越界")
     return file_path
 
 
@@ -235,7 +223,8 @@ async def download_file(filename: str, request: Request):
 
 @router.get("/download-mp3/{task_id}")
 async def download_mp3(task_id: str, request: Request):
-    wav_path = os.path.join(OUTPUT_DIR, f"{task_id}_repaired.wav")
+    wav_filename = f"{task_id}_repaired.wav"
+    wav_path = output_gateway.resolve(wav_filename)
     temp_wav = None
 
     if not os.path.exists(wav_path):
@@ -255,10 +244,11 @@ async def download_mp3(task_id: str, request: Request):
                 else:
                     vocal_task_id = params.get("vocal_task_id")
                     acc_task_id = params.get("accompaniment_task_id")
-                    vocal_wav = os.path.join(OUTPUT_DIR, f"{vocal_task_id}_repaired.wav") if vocal_task_id else None
-                    acc_wav = os.path.join(OUTPUT_DIR, f"{acc_task_id}_repaired.wav") if acc_task_id else None
+                    vocal_wav = output_gateway.resolve(f"{vocal_task_id}_repaired.wav") if vocal_task_id else None
+                    acc_wav = output_gateway.resolve(f"{acc_task_id}_repaired.wav") if acc_task_id else None
                     if vocal_wav and os.path.exists(vocal_wav) and acc_wav and os.path.exists(acc_wav):
-                        temp_wav = os.path.join(OUTPUT_DIR, f"{task_id}_temp_merged.wav")
+                        temp_wav_filename = f"{task_id}_temp_merged.wav"
+                        temp_wav = output_gateway.resolve(temp_wav_filename)
                         _merge_wavs(vocal_wav, acc_wav, temp_wav)
                         wav_path = temp_wav
                     elif vocal_wav and os.path.exists(vocal_wav):
@@ -269,9 +259,10 @@ async def download_mp3(task_id: str, request: Request):
     if not os.path.exists(wav_path):
         raise HTTPException(status_code=404, detail="音频文件不存在")
 
-    mp3_path = os.path.join(OUTPUT_DIR, f"{task_id}_repaired.mp3")
+    mp3_filename = f"{task_id}_repaired.mp3"
+    mp3_path = output_gateway.resolve(mp3_filename)
     if not os.path.exists(mp3_path):
-        lock = _get_mp3_encode_lock(task_id)
+        lock = output_gateway.get_lock(mp3_filename)
         with lock:
             if not os.path.exists(mp3_path):
                 temp_mp3 = mp3_path + ".tmp"
@@ -383,7 +374,8 @@ async def download_m4a(task_id: str, request: Request):
     if not m4a_available():
         raise HTTPException(status_code=501, detail="ffmpeg 未安装，M4A/ALAC 编码不可用")
 
-    wav_path = os.path.join(OUTPUT_DIR, f"{task_id}_repaired.wav")
+    wav_filename = f"{task_id}_repaired.wav"
+    wav_path = output_gateway.resolve(wav_filename)
     temp_wav = None
 
     if not os.path.exists(wav_path):
@@ -403,10 +395,11 @@ async def download_m4a(task_id: str, request: Request):
                 else:
                     vocal_task_id = params.get("vocal_task_id")
                     acc_task_id = params.get("accompaniment_task_id")
-                    vocal_wav = os.path.join(OUTPUT_DIR, f"{vocal_task_id}_repaired.wav") if vocal_task_id else None
-                    acc_wav = os.path.join(OUTPUT_DIR, f"{acc_task_id}_repaired.wav") if acc_task_id else None
+                    vocal_wav = output_gateway.resolve(f"{vocal_task_id}_repaired.wav") if vocal_task_id else None
+                    acc_wav = output_gateway.resolve(f"{acc_task_id}_repaired.wav") if acc_task_id else None
                     if vocal_wav and os.path.exists(vocal_wav) and acc_wav and os.path.exists(acc_wav):
-                        temp_wav = os.path.join(OUTPUT_DIR, f"{task_id}_temp_merged.wav")
+                        temp_wav_filename = f"{task_id}_temp_merged.wav"
+                        temp_wav = output_gateway.resolve(temp_wav_filename)
                         _merge_wavs(vocal_wav, acc_wav, temp_wav)
                         wav_path = temp_wav
                     elif vocal_wav and os.path.exists(vocal_wav):
@@ -417,7 +410,8 @@ async def download_m4a(task_id: str, request: Request):
     if not os.path.exists(wav_path):
         raise HTTPException(status_code=404, detail="音频文件不存在")
 
-    m4a_path = os.path.join(OUTPUT_DIR, f"{task_id}_repaired.m4a")
+    m4a_filename = f"{task_id}_repaired.m4a"
+    m4a_path = output_gateway.resolve(m4a_filename)
     if not os.path.exists(m4a_path):
         try:
             encode_m4a(wav_path, m4a_path)
@@ -503,7 +497,8 @@ async def download_mp3_file(filename: str, request: Request):
     wav_path = _safe_output_path(filename)
 
     base_name = filename[:-4]
-    mp3_path = os.path.join(OUTPUT_DIR, f"{base_name}.mp3")
+    mp3_filename = f"{base_name}.mp3"
+    mp3_path = output_gateway.resolve(mp3_filename)
     if not os.path.exists(mp3_path):
         try:
             _wav_to_mp3(wav_path, mp3_path)
@@ -588,7 +583,8 @@ async def download_m4a_file(filename: str, request: Request):
     wav_path = _safe_output_path(filename)
 
     base_name = filename[:-4]
-    m4a_path = os.path.join(OUTPUT_DIR, f"{base_name}.m4a")
+    m4a_filename = f"{base_name}.m4a"
+    m4a_path = output_gateway.resolve(m4a_filename)
     if not os.path.exists(m4a_path):
         try:
             encode_m4a(wav_path, m4a_path)

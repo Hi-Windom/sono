@@ -7,6 +7,7 @@ from pydantic import BaseModel
 from config import OUTPUT_DIR
 from database import get_task, update_task
 from services.task_manager import executor, _track_task_start, _track_task_end, TaskCancelledError, _cancelled_lock
+from services.file_gateway import output_gateway
 
 logger = logging.getLogger(__name__)
 
@@ -194,7 +195,7 @@ def _run_render_dual(task_id, vocal_path, accompaniment_path, output_path, targe
 
             progress_callback(0.6, "渲染人声独立轨...")
             vocal_render_filename = f"{base_name}_vocal.wav"
-            vocal_render_path = os.path.join(os.path.dirname(output_path), vocal_render_filename)
+            vocal_render_path = output_gateway.resolve(vocal_render_filename)
             vocal_source_bit_depth = None
             try:
                 _, _, src_bd = load_audio_with_fallback(vocal_path, sr=None, mono=False, return_bit_depth=True)
@@ -210,7 +211,7 @@ def _run_render_dual(task_id, vocal_path, accompaniment_path, output_path, targe
 
             progress_callback(0.8, "渲染伴奏独立轨...")
             accompaniment_render_filename = f"{base_name}_accompaniment.wav"
-            accompaniment_render_path = os.path.join(os.path.dirname(output_path), accompaniment_render_filename)
+            accompaniment_render_path = output_gateway.resolve(accompaniment_render_filename)
             accompaniment_source_bit_depth = None
             try:
                 _, _, src_bd = load_audio_with_fallback(accompaniment_path, sr=None, mono=False, return_bit_depth=True)
@@ -310,7 +311,7 @@ async def render_audio_endpoint(request: RenderRequest):
     else:
         merge_suffix = "_merged" if request.merge else ""
         render_filename = f"{request.task_id}_rendered_{algo_ver}{speed_tag}_{request.sample_rate}_{request.bit_depth}{merge_suffix}.wav"
-    render_path = os.path.join(OUTPUT_DIR, render_filename)
+    render_path = output_gateway.resolve(render_filename)
 
     from services.task_manager import RenderTask
     from services.task_executor import get_task_executor

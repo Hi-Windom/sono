@@ -20,6 +20,7 @@ from services.memory_guard import get_available_memory_bytes
 from services.ws_manager import ws_manager
 from services.perf_metrics import get_perf_collector, perf_timer
 from services.task_base import BaseTask
+from services.message_bus import publish_ws_progress, publish_ws_final, get_message_bus
 
 logger = logging.getLogger(__name__)
 
@@ -154,20 +155,14 @@ def _get_loop():
     return _loop
 
 def _ws_send_progress(task_id: str, data: dict[str, Any]) -> None:
-    loop = _get_loop()
-    if loop is None:
-        return
     try:
-        asyncio.run_coroutine_threadsafe(ws_manager.send_progress(task_id, data), loop)
+        publish_ws_progress(task_id, data)
     except Exception as e:
         logger.warning(f"[_ws_send_progress] 发送进度消息失败: {e}")
 
 def _ws_send_final(task_id: str, data: dict[str, Any]) -> None:
-    loop = _get_loop()
-    if loop is None:
-        return
     try:
-        asyncio.run_coroutine_threadsafe(ws_manager.send_final(task_id, data), loop)
+        publish_ws_final(task_id, data)
     except Exception as e:
         logger.warning(f"[_ws_send_final] 发送最终消息失败: {e}")
 

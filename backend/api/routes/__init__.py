@@ -9,6 +9,7 @@ from .download import router as download_router
 from .cache import router as cache_router
 from .perf import router as perf_router
 from .wasm import router as wasm_router
+from .metrics import router as metrics_router
 
 from .download import _wav_to_mp3
 from .cache import get_render_cache, lookup_repair_cache
@@ -25,3 +26,4 @@ router.include_router(render_router)
 router.include_router(download_router)
 router.include_router(perf_router)
 router.include_router(wasm_router)
+router.include_router(metrics_router)

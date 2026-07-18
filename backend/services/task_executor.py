@@ -7,6 +7,7 @@ from typing import Any, Callable
 from config import MAX_CONCURRENT_TASKS
 from database import update_task
 from services.task_base import BaseTask
+from services.observability import get_task_tracer, get_system_metrics
 from services.task_manager import (
     TaskCancelledError,
     _cancelled_lock,
@@ -40,7 +41,14 @@ class TaskExecutor:
 
     def submit(self, task: BaseTask) -> None:
         task_id = task.task_id
+        task_type = task.task_type
         logger.info(f"[TaskExecutor] submit task_id={task_id} type={task.task_type}")
+
+        tracer = get_task_tracer()
+        metrics = get_system_metrics()
+        tracer.create_trace(task_id, task_type)
+        tracer.record_state_change(task_id, "", "pending", step=task.initial_step)
+        metrics.record_task_start(task_type)
 
         update_fields = {
             "status": "pending",
@@ -67,6 +75,9 @@ class TaskExecutor:
                     "error": error_msg,
                 },
             )
+            tracer.record_state_change(task_id, "pending", "error", step="系统繁忙", note="系统繁忙被拒绝")
+            tracer.record_task_end(task_id, "error", error=error_msg)
+            metrics.record_task_failure(task_type)
             _track_task_end(task_id)
             return
 
@@ -81,6 +92,15 @@ class TaskExecutor:
 
         update_task(task_id, status="cancelled", step="已取消", progress=0)
         _ws_send_final(task_id, {"task_id": task_id, "status": "cancelled"})
+
+        tracer = get_task_tracer()
+        metrics = get_system_metrics()
+        trace = tracer.get_trace(task_id)
+        task_type = trace.task_type if trace else "unknown"
+        tracer.record_state_change(task_id, "", "cancelled", step="已取消")
+        tracer.record_task_end(task_id, "cancelled")
+        metrics.record_task_cancellation(task_type)
+
         logger.info(f"[TaskExecutor] 任务已取消 task_id={task_id}")
         return True
 
@@ -91,6 +111,9 @@ class TaskExecutor:
         completed_status = task.completed_status
         logger.info(f"[TaskExecutor] 开始执行 task_id={task_id} type={task_type}")
 
+        tracer = get_task_tracer()
+        metrics = get_system_metrics()
+
         try:
             with _cancelled_lock:
                 if task_id in _cancelled_tasks:
@@ -98,6 +121,7 @@ class TaskExecutor:
                     return
 
             update_task(task_id, status=processing_status, progress=0, step=task.start_step)
+            tracer.record_state_change(task_id, "pending", processing_status, step=task.start_step)
             _ws_send_progress(
                 task_id,
                 {
@@ -135,6 +159,10 @@ class TaskExecutor:
             update_fields.update(extra_fields)
 
             update_task(task_id, **update_fields)
+            tracer.record_state_change(task_id, processing_status, completed_status, step=task.done_step)
+            duration = tracer.record_task_end(task_id, completed_status)
+            if duration is not None:
+                metrics.record_task_completion(task_type, duration)
 
             final_data: dict[str, Any] = {
                 "task_id": task_id,
@@ -151,6 +179,9 @@ class TaskExecutor:
             task.on_cancel()
             logger.info(f"[TaskExecutor] 已取消 task_id={task_id}")
             update_task(task_id, status="cancelled", step=task.cancel_step, progress=0)
+            tracer.record_state_change(task_id, processing_status, "cancelled", step=task.cancel_step)
+            tracer.record_task_end(task_id, "cancelled")
+            metrics.record_task_cancellation(task_type)
             _ws_send_final(
                 task_id,
                 {
@@ -170,6 +201,9 @@ class TaskExecutor:
             error_text = extra_error_fields.pop("error", full_error[:500])
             step_text = extra_error_fields.pop("step", task.error_step)
             update_task(task_id, status="error", error=error_text, step=step_text, **extra_error_fields)
+            tracer.record_state_change(task_id, processing_status, "error", step=step_text, note=error_msg)
+            tracer.record_task_end(task_id, "error", error=error_msg)
+            metrics.record_task_failure(task_type)
             _ws_send_final(
                 task_id,
                 {

@@ -59,8 +59,16 @@ def create_app() -> FastAPI:
         if stale_count > 0:
             logger.info(f"[startup] 已清理 {stale_count} 个停滞任务")
         from services.task_manager import set_event_loop
-        set_event_loop(asyncio.get_running_loop())
+        loop = asyncio.get_running_loop()
+        set_event_loop(loop)
+        from services.message_bus import get_message_bus
+        message_bus = get_message_bus()
+        message_bus.set_loop(loop)
+        message_bus.start()
+        logger.info("[startup] MessageBus 已启动")
         yield
+        message_bus.stop()
+        logger.info("[shutdown] MessageBus 已停止")
 
     app = FastAPI(
         title="Next-Gen AI Audio Repair API",
