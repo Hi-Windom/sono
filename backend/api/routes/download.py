@@ -6,10 +6,10 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse, Response
 from urllib.parse import quote
 
-from config import OUTPUT_DIR, DECODED_DIR
+from config import OUTPUT_DIR, DECODED_DIR, UPLOAD_DIR
 from database import get_task, find_task_by_hash, update_task
 from services.task_manager import executor
-from services.file_gateway import output_gateway, SecurityError
+from services.file_gateway import output_gateway, upload_gateway, SecurityError
 
 logger = logging.getLogger(__name__)
 
@@ -664,19 +664,29 @@ async def preview_audio(task_id: str, type: str = 'repaired'):
 
     if type == 'original':
         original_path = task.get("original_path", "")
-        if not original_path or not os.path.exists(original_path):
+        if not original_path:
+            raise HTTPException(status_code=404, detail="原始音频不存在")
+        if ".." in original_path or "\x00" in original_path:
+            raise HTTPException(status_code=400, detail="无效的文件路径")
+        real_original_path = os.path.realpath(original_path)
+        if not os.path.isfile(real_original_path):
             raise HTTPException(status_code=404, detail="原始音频不存在")
         return FileResponse(
-            original_path,
+            real_original_path,
             media_type="audio/wav",
         )
 
     output_path = task.get("output_path")
-    if not output_path or not os.path.exists(output_path):
+    if not output_path:
+        raise HTTPException(status_code=404, detail="修复后的音频不存在")
+    if ".." in output_path or "\x00" in output_path:
+        raise HTTPException(status_code=400, detail="无效的文件路径")
+    real_output_path = os.path.realpath(output_path)
+    if not os.path.isfile(real_output_path):
         raise HTTPException(status_code=404, detail="修复后的音频不存在")
 
     return FileResponse(
-        output_path,
+        real_output_path,
         media_type="audio/wav",
     )
 

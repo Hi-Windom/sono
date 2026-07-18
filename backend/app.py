@@ -42,10 +42,6 @@ with open(LOG_FILE, 'a', encoding='utf-8') as _f:
 
 logger = logging.getLogger(__name__)
 
-class LogRequest(BaseModel):
-    message: str
-    level: str = "info"
-
 
 def create_app() -> FastAPI:
     from database import init_db, init_training_db
@@ -69,6 +65,9 @@ def create_app() -> FastAPI:
         yield
         message_bus.stop()
         logger.info("[shutdown] MessageBus 已停止")
+        from services.task_manager import shutdown_executor
+        shutdown_executor(wait=False, cancel_futures=True)
+        logger.info("[shutdown] 线程池已关闭")
 
     app = FastAPI(
         title="Next-Gen AI Audio Repair API",
@@ -77,19 +76,11 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # 添加 /api/log 路由（不带 v1 前缀）
+    from api.routes.system import LogRequest, log_message as _v1_log_message
+
     @app.post("/api/log")
-    async def log_message(request: LogRequest):
-        level = request.level.lower()
-        if level == "error":
-            logger.error(request.message)
-        elif level == "warning":
-            logger.warning(request.message)
-        elif level == "debug":
-            logger.debug(request.message)
-        else:
-            logger.info(request.message)
-        return {"status": "ok"}
+    async def log_message_compat(request: LogRequest):
+        return await _v1_log_message(request)
 
     @app.middleware("http")
     async def log_requests(request: Request, call_next):

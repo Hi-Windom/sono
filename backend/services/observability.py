@@ -96,6 +96,7 @@ class TaskTracer:
         self._history: deque[TaskTrace] = deque(maxlen=MAX_TASK_TRACE_HISTORY)
         self._lock = threading.Lock()
         self._slow_task_threshold = SLOW_TASK_THRESHOLD
+        self._trace_timeout = 3600  # 1小时超时，防止极端异常泄漏
         self._initialized = True
 
     def set_slow_task_threshold(self, threshold: float) -> None:
@@ -136,7 +137,12 @@ class TaskTracer:
         with self._lock:
             trace = self._traces.get(task_id)
             if trace is None:
-                trace = self.create_trace(task_id, task_type)
+                trace = TaskTrace(
+                    task_id=task_id,
+                    task_type=task_type,
+                    created_at=time.time(),
+                )
+                self._traces[task_id] = trace
         trace.start_time = time.time()
 
     def record_task_end(
@@ -178,7 +184,24 @@ class TaskTracer:
 
     def get_active_traces(self) -> list[TaskTrace]:
         with self._lock:
+            self._cleanup_expired_traces_locked()
             return list(self._traces.values())
+
+    def _cleanup_expired_traces_locked(self) -> None:
+        """清理超时的活跃 trace（必须在持有 _lock 的情况下调用）。"""
+        now = time.time()
+        expired_ids = [
+            tid for tid, trace in self._traces.items()
+            if now - trace.created_at > self._trace_timeout
+        ]
+        for tid in expired_ids:
+            trace = self._traces.pop(tid, None)
+            if trace is not None:
+                trace.end_time = now
+                trace.final_status = "expired"
+                trace.error = "任务 trace 超时自动清理"
+                self._history.append(trace)
+                logger.warning(f"[TaskTracer] 清理超时 trace: task_id={tid} age={now - trace.created_at:.0f}s")
 
     def clear_history(self) -> None:
         with self._lock:
@@ -271,22 +294,26 @@ class SystemMetrics:
         with self._lock:
             self._total_tasks += 1
             self._active_tasks += 1
-        self._task_stats[task_type].record_start()
+            stats = self._task_stats[task_type]
+        stats.record_start()
 
     def record_task_completion(self, task_type: str, duration: float) -> None:
         with self._lock:
             self._active_tasks = max(0, self._active_tasks - 1)
-        self._task_stats[task_type].record_completion(duration)
+            stats = self._task_stats[task_type]
+        stats.record_completion(duration)
 
     def record_task_failure(self, task_type: str) -> None:
         with self._lock:
             self._active_tasks = max(0, self._active_tasks - 1)
-        self._task_stats[task_type].record_failure()
+            stats = self._task_stats[task_type]
+        stats.record_failure()
 
     def record_task_cancellation(self, task_type: str) -> None:
         with self._lock:
             self._active_tasks = max(0, self._active_tasks - 1)
-        self._task_stats[task_type].record_cancellation()
+            stats = self._task_stats[task_type]
+        stats.record_cancellation()
 
     def record_ws_connect(self) -> None:
         with self._lock:
@@ -302,8 +329,8 @@ class SystemMetrics:
 
     def get_task_stats(self) -> dict[str, Any]:
         with self._lock:
-            active = self._active_tasks
             total = self._total_tasks
+            active = self._active_tasks
 
         task_types: dict[str, Any] = {}
         all_completed = 0

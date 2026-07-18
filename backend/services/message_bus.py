@@ -4,6 +4,7 @@ import asyncio
 import logging
 import queue
 import threading
+import time
 from concurrent.futures import Future
 from typing import Any
 
@@ -13,6 +14,17 @@ logger = logging.getLogger(__name__)
 
 _SENTINEL = object()
 DEFAULT_MAXSIZE = 10000
+_PUBLISH_RETRY_TIMEOUT = 2.0
+_IMPORTANT_CHANNELS = {"ws_final"}
+
+
+def _wrap_envelope(channel: str, data: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "type": channel,
+        "channel": channel,
+        "timestamp": time.time(),
+        "data": data,
+    }
 
 
 class MessageBus:
@@ -36,8 +48,10 @@ class MessageBus:
         self._loop: asyncio.AbstractEventLoop | None = None
         self._thread: threading.Thread | None = None
         self._running: bool = False
+        self._stopped: bool = False
         self._maxsize: int = maxsize
         self._stop_event: threading.Event = threading.Event()
+        self._dropped_count: int = 0
 
     def set_loop(self, loop: asyncio.AbstractEventLoop) -> None:
         self._loop = loop
@@ -51,6 +65,7 @@ class MessageBus:
             logger.warning("[MessageBus] 投递线程仍在运行，先等待其退出")
             self.stop()
         self._running = True
+        self._stopped = False
         self._stop_event.clear()
         self._thread = threading.Thread(target=self._worker, name="MessageBus-Worker", daemon=True)
         self._thread.start()
@@ -60,6 +75,7 @@ class MessageBus:
         if not self._running:
             return
         self._running = False
+        self._stopped = True
         self._stop_event.set()
         try:
             self._queue.put_nowait(_SENTINEL)
@@ -72,19 +88,47 @@ class MessageBus:
             self._thread = None
         logger.debug("[MessageBus] 投递线程已停止")
 
-    def publish(self, channel: str, data: dict[str, Any]) -> None:
+    def publish(self, channel: str, data: dict[str, Any]) -> bool:
         if not self._running:
-            logger.warning(f"[MessageBus] 消息总线未启动，丢弃消息 channel={channel}")
-            return
+            if self._stopped:
+                logger.warning(f"[MessageBus] 消息总线已停止，拒绝消息 channel={channel}")
+            else:
+                logger.warning(f"[MessageBus] 消息总线未启动，拒绝消息 channel={channel}")
+            return False
+        if self._loop is not None and self._loop.is_closed():
+            logger.warning(f"[MessageBus] 事件循环已关闭，拒绝消息 channel={channel}")
+            return False
+        envelope = _wrap_envelope(channel, data)
+        is_important = channel in _IMPORTANT_CHANNELS
         try:
-            self._queue.put_nowait((channel, data))
+            if is_important:
+                self._queue.put((channel, envelope), timeout=_PUBLISH_RETRY_TIMEOUT)
+            else:
+                self._queue.put_nowait((channel, envelope))
+            return True
         except queue.Full:
-            try:
-                self._queue.get_nowait()
-                self._queue.put_nowait((channel, data))
-                logger.warning(f"[MessageBus] 队列已满，丢弃最老消息并加入新消息 channel={channel}, maxsize={self._maxsize}")
-            except (queue.Empty, queue.Full):
-                logger.warning(f"[MessageBus] 队列操作失败，丢弃消息 channel={channel}, maxsize={self._maxsize}")
+            if is_important:
+                logger.error(
+                    f"[MessageBus] 重要消息入队超时（{_PUBLISH_RETRY_TIMEOUT}s），丢弃 channel={channel}, "
+                    f"maxsize={self._maxsize}, dropped_total={self._dropped_count}"
+                )
+            else:
+                try:
+                    self._queue.get_nowait()
+                    self._queue.put_nowait((channel, envelope))
+                    self._dropped_count += 1
+                    logger.warning(
+                        f"[MessageBus] 队列已满，丢弃最老消息并加入新消息 channel={channel}, "
+                        f"maxsize={self._maxsize}, dropped_total={self._dropped_count}"
+                    )
+                    return True
+                except (queue.Empty, queue.Full):
+                    self._dropped_count += 1
+                    logger.warning(
+                        f"[MessageBus] 队列操作失败，丢弃消息 channel={channel}, "
+                        f"maxsize={self._maxsize}, dropped_total={self._dropped_count}"
+                    )
+            return False
 
     def _worker(self) -> None:
         while not self._stop_event.is_set():
@@ -100,13 +144,15 @@ class MessageBus:
             except Exception as e:
                 logger.warning(f"[MessageBus] 分发消息失败 channel={channel}: {e}")
 
-    def _dispatch(self, channel: str, data: dict[str, Any]) -> None:
+    def _dispatch(self, channel: str, envelope: dict[str, Any]) -> None:
         if self._loop is None:
             logger.warning(f"[MessageBus] 事件循环未设置，无法投递消息 channel={channel}")
             return
         if self._loop.is_closed():
             logger.warning(f"[MessageBus] 事件循环已关闭，无法投递消息 channel={channel}")
             return
+
+        data = envelope.get("data", envelope)
 
         def _on_future_done(fut: Future, ch: str, tid: str) -> None:
             try:

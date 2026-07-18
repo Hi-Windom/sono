@@ -124,6 +124,7 @@ def _generate_waveform_peaks(output_path: str, num_peaks: int = WAVEFORM_PEAKS_C
 
 _loop = None
 _loop_warned = False
+_loop_lock = threading.Lock()
 
 def set_event_loop(loop: asyncio.AbstractEventLoop) -> None:
     """由应用启动（lifespan）在主线程事件循环中调用，缓存正在运行的 loop。
@@ -133,8 +134,9 @@ def set_event_loop(loop: asyncio.AbstractEventLoop) -> None:
     （表现为 WebSocket 进度静默丢失，前端只能退回 HTTP 轮询）。
     """
     global _loop, _loop_warned
-    _loop = loop
-    _loop_warned = False
+    with _loop_lock:
+        _loop = loop
+        _loop_warned = False
 
 def _get_loop():
     """获取正在运行的事件循环。
@@ -143,17 +145,18 @@ def _get_loop():
     调用方需要处理 None 的情况（打日志、退回轮询等）。
     """
     global _loop_warned
-    if _loop is None:
-        if not _loop_warned:
-            logger.warning("[_get_loop] 事件循环未设置（set_event_loop 未调用），WebSocket 消息将无法发送，前端需退回 HTTP 轮询")
-            _loop_warned = True
-        return None
-    if _loop.is_closed():
-        if not _loop_warned:
-            logger.warning("[_get_loop] 事件循环已关闭，WebSocket 消息将无法发送")
-            _loop_warned = True
-        return None
-    return _loop
+    with _loop_lock:
+        if _loop is None:
+            if not _loop_warned:
+                logger.warning("[_get_loop] 事件循环未设置（set_event_loop 未调用），WebSocket 消息将无法发送，前端需退回 HTTP 轮询")
+                _loop_warned = True
+            return None
+        if _loop.is_closed():
+            if not _loop_warned:
+                logger.warning("[_get_loop] 事件循环已关闭，WebSocket 消息将无法发送")
+                _loop_warned = True
+            return None
+        return _loop
 
 def _ws_send_progress(task_id: str, data: dict[str, Any]) -> None:
     try:
@@ -168,6 +171,16 @@ def _ws_send_final(task_id: str, data: dict[str, Any]) -> None:
         logger.warning(f"[_ws_send_final] 发送最终消息失败: {e}")
 
 executor = ThreadPoolExecutor(max_workers=MAX_WORKERS)
+
+
+def shutdown_executor(wait: bool = True, cancel_futures: bool = True) -> None:
+    """优雅关闭全局线程池。"""
+    try:
+        executor.shutdown(wait=wait, cancel_futures=cancel_futures)
+        logger.info("[executor] 全局线程池已关闭")
+    except Exception as e:
+        logger.warning(f"[executor] 关闭线程池时出错: {e}")
+
 
 TASK_TIMEOUTS = {
     "detect": 300,
@@ -192,16 +205,8 @@ def _schedule_cancel_cleanup(task_id: str) -> None:
 
 
 def cancel_task(task_id: str) -> bool:
-    with _cancelled_lock:
-        if task_id in _cancelled_tasks:
-            return False
-        _cancelled_tasks.add(task_id)
-    _track_task_end(task_id)
-    update_task(task_id, status="cancelled", step="已取消", progress=0)
-    _ws_send_final(task_id, {"task_id": task_id, "status": "cancelled"})
-    logger.info(f"[cancel] 任务已取消 task_id={task_id}")
-    _schedule_cancel_cleanup(task_id)
-    return True
+    from services.task_executor import get_task_executor
+    return get_task_executor().cancel(task_id)
 
 
 class TaskCancelledError(Exception):
@@ -259,12 +264,11 @@ def _run_detect(task_id: str, audio_path: str, detect_type: str, detector_versio
     last_progress_time = [time.time()]
     last_progress = [-1.0]
     is_stuck = [False]
-    stop_monitor = [False]
+    stop_monitor = threading.Event()
 
     def monitor_stuck():
-        while not stop_monitor[0]:
-            time.sleep(2)
-            if stop_monitor[0]:
+        while not stop_monitor.is_set():
+            if stop_monitor.wait(2):
                 break
             elapsed = time.time() - last_progress_time[0]
             if elapsed > STUCK_THRESHOLD and not is_stuck[0]:
@@ -348,7 +352,7 @@ def _run_detect(task_id: str, audio_path: str, detect_type: str, detector_versio
         _ws_send_final(task_id, {"task_id": task_id, "status": "error", "progress": 0, "step": f"检测失败 ({elapsed:.1f}s)", "error": f"{type(e).__name__}: {e}"})
         raise
     finally:
-        stop_monitor[0] = True
+        stop_monitor.set()
         _track_task_end(task_id)
         with _cancelled_lock:
             _cancelled_tasks.discard(task_id)
@@ -384,12 +388,11 @@ def _run_repair(task_id: str, audio_path: str, params: dict[str, Any], mobile_mo
     last_progress_time = [time.time()]
     last_progress = [-1.0]
     is_stuck = [False]
-    stop_monitor = [False]
+    stop_monitor = threading.Event()
 
     def monitor_stuck():
-        while not stop_monitor[0]:
-            time.sleep(2)
-            if stop_monitor[0]:
+        while not stop_monitor.is_set():
+            if stop_monitor.wait(2):
                 break
             elapsed = time.time() - last_progress_time[0]
             if elapsed > STUCK_THRESHOLD and not is_stuck[0]:
@@ -512,7 +515,7 @@ def _run_repair(task_id: str, audio_path: str, params: dict[str, Any], mobile_mo
         _ws_send_final(task_id, {"task_id": task_id, "status": "error", "progress": 0, "step": f"修复失败 ({elapsed:.1f}s)", "error": f"{type(e).__name__}: {e}"})
         raise
     finally:
-        stop_monitor[0] = True
+        stop_monitor.set()
         if not perf_ended:
             try:
                 perf_collector.end_repair(task_id, size_samples, algorithm_version)
@@ -527,12 +530,6 @@ def get_task_status(task_id: str) -> TaskDict | None:
     return get_task(task_id)
 
 
-def shutdown_executor():
-    logger.info("关闭任务执行器...")
-    executor.shutdown(wait=True)
-    logger.info("任务执行器已关闭")
-
-
 class RepairTask(BaseTask):
     def __init__(self, task_id: str, audio_path: str, params: dict[str, Any], mobile_mode: bool = False) -> None:
         super().__init__(task_id)
@@ -543,7 +540,7 @@ class RepairTask(BaseTask):
         self._start_time = 0.0
         self._size_samples = 0
         self._perf_ended = False
-        self._stop_monitor = [False]
+        self._stop_monitor = threading.Event()
         self._monitor_thread: threading.Thread | None = None
         self._last_progress_time = [0.0]
         self._last_progress = [-1.0]
@@ -697,9 +694,8 @@ class RepairTask(BaseTask):
 
     def _start_stuck_monitor(self) -> None:
         def monitor_stuck():
-            while not self._stop_monitor[0]:
-                time.sleep(2)
-                if self._stop_monitor[0]:
+            while not self._stop_monitor.is_set():
+                if self._stop_monitor.wait(2):
                     break
                 elapsed = time.time() - self._last_progress_time[0]
                 if elapsed > STUCK_THRESHOLD and not self._is_stuck[0]:
@@ -718,7 +714,9 @@ class RepairTask(BaseTask):
         self._monitor_thread.start()
 
     def cleanup(self) -> None:
-        self._stop_monitor[0] = True
+        self._stop_monitor.set()
+        if self._monitor_thread is not None:
+            self._monitor_thread.join(timeout=3.0)
         if not self._perf_ended:
             try:
                 self._perf_collector.end_repair(self.task_id, self._size_samples, self.algorithm_version)
@@ -735,7 +733,7 @@ class DetectTask(BaseTask):
         self._start_time = 0.0
         prev_task = get_task(task_id)
         self._prev_status = prev_task["status"] if prev_task else "pending"
-        self._stop_monitor = [False]
+        self._stop_monitor = threading.Event()
         self._monitor_thread: threading.Thread | None = None
         self._last_progress_time = [0.0]
         self._last_progress = [-1.0]
@@ -838,11 +836,18 @@ class DetectTask(BaseTask):
         else:
             return {"detection_result": result}
 
+    def on_error(self, error: Exception) -> dict[str, Any] | None:
+        if isinstance(error, MemoryError):
+            return {
+                "error": str(error)[:500],
+                "step": f"内存不足 ({time.time() - self._start_time:.1f}s)",
+            }
+        return None
+
     def _start_stuck_monitor(self) -> None:
         def monitor_stuck():
-            while not self._stop_monitor[0]:
-                time.sleep(2)
-                if self._stop_monitor[0]:
+            while not self._stop_monitor.is_set():
+                if self._stop_monitor.wait(2):
                     break
                 elapsed = time.time() - self._last_progress_time[0]
                 if elapsed > STUCK_THRESHOLD and not self._is_stuck[0]:
@@ -861,10 +866,14 @@ class DetectTask(BaseTask):
         self._monitor_thread.start()
 
     def cleanup(self) -> None:
-        self._stop_monitor[0] = True
+        self._stop_monitor.set()
+        if self._monitor_thread is not None:
+            self._monitor_thread.join(timeout=3.0)
 
 
 class RenderTask(BaseTask):
+    VALID_TRACK_TYPES = ("vocal", "accompaniment", "both")
+
     def __init__(
         self,
         task_id: str,
@@ -879,6 +888,8 @@ class RenderTask(BaseTask):
         track_type: str = "both",
     ) -> None:
         super().__init__(task_id)
+        if track_type not in self.VALID_TRACK_TYPES:
+            raise ValueError(f"无效的 track_type: {track_type}，有效值为: {self.VALID_TRACK_TYPES}")
         self.input_path = input_path
         self.output_path = output_path
         self.target_sr = target_sr
@@ -893,6 +904,12 @@ class RenderTask(BaseTask):
         self._accompaniment_rendered = False
         self._vocal_render_filename: str | None = None
         self._accompaniment_render_filename: str | None = None
+        self._start_time = 0.0
+        self._stop_monitor = threading.Event()
+        self._monitor_thread: threading.Thread | None = None
+        self._last_progress_time = [0.0]
+        self._last_progress = [-1.0]
+        self._is_stuck = [False]
 
     @property
     def task_type(self) -> str:
@@ -927,10 +944,21 @@ class RenderTask(BaseTask):
         return "渲染失败"
 
     def execute(self, progress_callback) -> dict[str, Any]:
+        self._start_time = time.time()
+        self._last_progress_time[0] = time.time()
+        self._start_stuck_monitor()
+
+        def wrapped_progress(p: float, s: str) -> None:
+            self._last_progress_time[0] = time.time()
+            self._last_progress[0] = p
+            if self._is_stuck[0]:
+                self._is_stuck[0] = False
+            progress_callback(p, s)
+
         if self._is_dual:
-            return self._execute_dual(progress_callback)
+            return self._execute_dual(wrapped_progress)
         else:
-            return self._execute_single(progress_callback)
+            return self._execute_single(wrapped_progress)
 
     def _execute_single(self, progress_callback) -> dict[str, Any]:
         from services.render import render_output
@@ -1063,7 +1091,31 @@ class RenderTask(BaseTask):
             "render_result": result,
         }
 
+    def _start_stuck_monitor(self) -> None:
+        def monitor_stuck():
+            while not self._stop_monitor.is_set():
+                if self._stop_monitor.wait(2):
+                    break
+                elapsed = time.time() - self._last_progress_time[0]
+                if elapsed > STUCK_THRESHOLD and not self._is_stuck[0]:
+                    self._is_stuck[0] = True
+                    logger.warning(f"[RenderTask] 任务疑似卡住 task_id={self.task_id} elapsed={elapsed:.1f}s")
+                    _ws_send_progress(self.task_id, {
+                        "task_id": self.task_id,
+                        "status": "rendering",
+                        "progress": self._last_progress[0],
+                        "step": "任务疑似卡住，请重试",
+                        "stuck": True,
+                        "stuck_duration": elapsed,
+                    })
+
+        self._monitor_thread = threading.Thread(target=monitor_stuck, daemon=True)
+        self._monitor_thread.start()
+
     def cleanup(self) -> None:
+        self._stop_monitor.set()
+        if self._monitor_thread is not None:
+            self._monitor_thread.join(timeout=3.0)
         from services.ws_manager import ws_manager
         files = [{"filename": self.render_filename, "sample_rate": self.target_sr, "bit_depth": self.bit_depth, "track_type": "both"}]
         if self._vocal_rendered and self._vocal_render_filename:
@@ -1071,10 +1123,11 @@ class RenderTask(BaseTask):
         if self._accompaniment_rendered and self._accompaniment_render_filename:
             files.append({"filename": self._accompaniment_render_filename, "sample_rate": self.target_sr, "bit_depth": self.bit_depth, "track_type": "accompaniment"})
         try:
-            loop = asyncio.get_event_loop()
-            asyncio.run_coroutine_threadsafe(
-                ws_manager.broadcast_render_cache_update(self.task_id, files),
-                loop
-            )
+            loop = _get_loop()
+            if loop is not None:
+                asyncio.run_coroutine_threadsafe(
+                    ws_manager.broadcast_render_cache_update(self.task_id, files),
+                    loop
+                )
         except Exception:
             pass

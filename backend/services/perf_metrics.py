@@ -41,6 +41,7 @@ class PerfMetricsCollector:
         self.download_history = deque(maxlen=100)
         self.current_repair_steps = {}
         self._thread_local = threading.local()
+        self._data_lock = threading.Lock()
 
     @classmethod
     def get_instance(cls):
@@ -56,11 +57,12 @@ class PerfMetricsCollector:
         return self._thread_local.steps
 
     def record_step(self, step_name: str, duration_ms: float, metadata: Optional[dict] = None):
-        self.step_history[step_name].append({
-            'duration_ms': duration_ms,
-            'timestamp': time.time(),
-            'metadata': metadata or {}
-        })
+        with self._data_lock:
+            self.step_history[step_name].append({
+                'duration_ms': duration_ms,
+                'timestamp': time.time(),
+                'metadata': metadata or {}
+            })
         steps = self._get_thread_steps()
         steps[step_name] = duration_ms
         logger.debug(f"[perf] {step_name}: {duration_ms:.2f}ms")
@@ -90,7 +92,8 @@ class PerfMetricsCollector:
             'timestamp': time.time()
         }
 
-        self.repair_history.append(result)
+        with self._data_lock:
+            self.repair_history.append(result)
         logger.info(f"[perf] repair completed: task_id={task_id} total={total_time_ms:.1f}ms xRTF={xrtf:.2f}x")
         return result
 
@@ -113,23 +116,26 @@ class PerfMetricsCollector:
             'timestamp': time.time()
         }
 
-        self.detect_history.append(result)
+        with self._data_lock:
+            self.detect_history.append(result)
         logger.info(f"[perf] detect completed: task_id={task_id} total={total_time_ms:.1f}ms")
         return result
 
     def record_upload(self, file_size: int, duration_ms: float):
-        self.upload_history.append({
-            'file_size': file_size,
-            'duration_ms': duration_ms,
-            'timestamp': time.time()
-        })
+        with self._data_lock:
+            self.upload_history.append({
+                'file_size': file_size,
+                'duration_ms': duration_ms,
+                'timestamp': time.time()
+            })
 
     def record_download(self, file_size: int, duration_ms: float):
-        self.download_history.append({
-            'file_size': file_size,
-            'duration_ms': duration_ms,
-            'timestamp': time.time()
-        })
+        with self._data_lock:
+            self.download_history.append({
+                'file_size': file_size,
+                'duration_ms': duration_ms,
+                'timestamp': time.time()
+            })
 
     def get_summary(self) -> dict:
         def calc_stats(history, key='total_time_ms'):
@@ -158,8 +164,17 @@ class PerfMetricsCollector:
                 'max': round(max(values), 2),
             }
 
+        with self._data_lock:
+            repair_history = list(self.repair_history)
+            detect_history = list(self.detect_history)
+            upload_history = list(self.upload_history)
+            download_history = list(self.download_history)
+            step_history_snapshot = {}
+            for step, hist in self.step_history.items():
+                step_history_snapshot[step] = list(hist)
+
         by_version = defaultdict(list)
-        for h in self.repair_history:
+        for h in repair_history:
             ver = h.get('algorithm_version', 'unknown')
             by_version[ver].append(h)
 
@@ -170,7 +185,7 @@ class PerfMetricsCollector:
             version_stats[ver] = stats
 
         step_stats = {}
-        for step, hist in self.step_history.items():
+        for step, hist in step_history_snapshot.items():
             durations = [h['duration_ms'] for h in hist]
             if durations:
                 durations.sort()
@@ -186,22 +201,22 @@ class PerfMetricsCollector:
 
         return {
             'repair': {
-                'overall': calc_stats(self.repair_history),
-                'xrtf': calc_xrtf_stats(self.repair_history),
+                'overall': calc_stats(repair_history),
+                'xrtf': calc_xrtf_stats(repair_history),
                 'by_version': version_stats,
-                'recent_count': len(self.repair_history),
+                'recent_count': len(repair_history),
             },
             'detect': {
-                'overall': calc_stats(self.detect_history),
-                'recent_count': len(self.detect_history),
+                'overall': calc_stats(detect_history),
+                'recent_count': len(detect_history),
             },
             'upload': {
-                'overall': calc_stats([{'total_time_ms': h['duration_ms']} for h in self.upload_history]),
-                'recent_count': len(self.upload_history),
+                'overall': calc_stats([{'total_time_ms': h['duration_ms']} for h in upload_history]),
+                'recent_count': len(upload_history),
             },
             'download': {
-                'overall': calc_stats([{'total_time_ms': h['duration_ms']} for h in self.download_history]),
-                'recent_count': len(self.download_history),
+                'overall': calc_stats([{'total_time_ms': h['duration_ms']} for h in download_history]),
+                'recent_count': len(download_history),
             },
             'steps': step_stats,
             'generated_at': time.time(),

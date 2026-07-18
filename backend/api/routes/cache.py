@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
+import config
 from config import UPLOAD_DIR, OUTPUT_DIR
 from database import (
     get_db,
@@ -78,7 +79,15 @@ def _is_valid_audio_file(filepath: str) -> tuple[bool, str]:
 
 
 @router.websocket("/ws/cache-events")
-async def websocket_cache_events(websocket: WebSocket):
+async def websocket_cache_events(websocket: WebSocket, token: str = None):
+    admin_token = config.ADMIN_TOKEN
+    if admin_token:
+        if token != admin_token:
+            await websocket.close(code=1008, reason="unauthorized")
+            return
+    else:
+        await websocket.close(code=1008, reason="cache-events endpoint disabled")
+        return
     await websocket.accept()
     from services.ws_manager import ws_manager
     CACHE_LISTENER_ID = "__cache_events__"
@@ -87,7 +96,8 @@ async def websocket_cache_events(websocket: WebSocket):
         import asyncio
         while True:
             try:
-                await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
+                msg = await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
+                ws_manager.record_activity(websocket)
             except asyncio.TimeoutError:
                 await websocket.send_json({"type": "heartbeat", "status": "alive"})
     except WebSocketDisconnect:

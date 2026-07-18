@@ -37,6 +37,11 @@ class _LayerStats:
         with self._lock:
             self.misses += 1
 
+    def reset(self):
+        with self._lock:
+            self.hits = 0
+            self.misses = 0
+
     def get_snapshot(self) -> dict:
         with self._lock:
             hits = self.hits
@@ -67,6 +72,7 @@ class CacheManager:
             return
         self._layers: dict[str, CacheLayer] = {}
         self._stats: dict[str, _LayerStats] = {}
+        self._layer_locks: dict[str, Lock] = {}
         self._lock = Lock()
         self._initialized = True
         self._register_standard_layers()
@@ -111,6 +117,8 @@ class CacheManager:
             self._layers[layer.name] = layer
             if layer.name not in self._stats:
                 self._stats[layer.name] = _LayerStats()
+            if layer.name not in self._layer_locks:
+                self._layer_locks[layer.name] = Lock()
             os.makedirs(layer.base_dir, exist_ok=True)
             logger.info(f"注册缓存层: {layer.name} -> {layer.base_dir}")
 
@@ -163,94 +171,96 @@ class CacheManager:
             for fname in filenames:
                 fp = os.path.join(dirpath, fname)
                 try:
-                    if not os.path.isfile(fp):
-                        continue
                     if not self._is_path_safe(fp, base_dir):
                         logger.warning(f"跳过不安全路径: {fp}")
                         continue
                     stat = os.stat(fp)
+                    import stat as stat_module
+                    if not stat_module.S_ISREG(stat.st_mode):
+                        continue
                     files.append((fp, stat.st_size, stat.st_mtime))
                 except OSError as e:
                     logger.warning(f"扫描文件失败 {fp}: {e}")
         return files
 
     def evict_layer(self, layer_name: str) -> dict:
-        layer = self._get_layer(layer_name)
-        base_dir = layer.base_dir
-        ttl = layer.ttl_seconds
-        max_size_bytes = int(layer.max_size_mb * 1024 * 1024) if layer.max_size_mb > 0 else 0
+        with self._lock:
+            layer_lock = self._layer_locks.get(layer_name)
+            if layer_lock is None:
+                raise ValueError(f"缓存层不存在: {layer_name}")
 
-        if not os.path.isdir(base_dir):
-            return {
+        with layer_lock:
+            layer = self._get_layer(layer_name)
+            base_dir = layer.base_dir
+            ttl = layer.ttl_seconds
+            max_size_bytes = int(layer.max_size_mb * 1024 * 1024) if layer.max_size_mb > 0 else 0
+
+            if not os.path.isdir(base_dir):
+                return {
+                    "layer": layer_name,
+                    "files_removed": 0,
+                    "bytes_removed": 0,
+                    "files_remaining": 0,
+                    "bytes_remaining": 0,
+                }
+
+            files = self._scan_files(base_dir)
+            total_size = sum(f[1] for f in files)
+            removed_count = 0
+            removed_bytes = 0
+
+            if ttl > 0:
+                now = time.time()
+                expired = [f for f in files if now - f[2] > ttl]
+                expired.sort(key=lambda x: x[2])
+                failed_deletes = set()
+                for fp, size, mtime in expired:
+                    try:
+                        os.remove(fp)
+                        removed_count += 1
+                        removed_bytes += size
+                        total_size -= size
+                        logger.debug(f"TTL 过期删除: {fp}")
+                    except OSError as e:
+                        logger.warning(f"删除文件失败 {fp}: {e}")
+                        failed_deletes.add(fp)
+                successfully_removed = {e[0] for e in expired} - failed_deletes
+                files = [f for f in files if f[0] not in successfully_removed]
+
+            if max_size_bytes > 0 and total_size > max_size_bytes:
+                files.sort(key=lambda x: x[2])
+                remaining_after_lru = []
+                for fp, size, mtime in files:
+                    if total_size <= max_size_bytes:
+                        remaining_after_lru.append((fp, size, mtime))
+                        continue
+                    try:
+                        os.remove(fp)
+                        removed_count += 1
+                        removed_bytes += size
+                        total_size -= size
+                        logger.debug(f"LRU 淘汰: {fp}")
+                    except OSError as e:
+                        logger.warning(f"删除文件失败 {fp}: {e}")
+                        remaining_after_lru.append((fp, size, mtime))
+                files = remaining_after_lru
+
+            remaining_files = len(files)
+            remaining_size = total_size
+
+            result = {
                 "layer": layer_name,
-                "files_removed": 0,
-                "bytes_removed": 0,
-                "files_remaining": 0,
-                "bytes_remaining": 0,
+                "files_removed": removed_count,
+                "bytes_removed": removed_bytes,
+                "files_remaining": remaining_files,
+                "bytes_remaining": remaining_size,
             }
-
-        files = self._scan_files(base_dir)
-        total_size = sum(f[1] for f in files)
-        removed_count = 0
-        removed_bytes = 0
-
-        if ttl > 0:
-            now = time.time()
-            expired = [f for f in files if now - f[2] > ttl]
-            expired.sort(key=lambda x: x[2])
-            failed_deletes = set()
-            for fp, size, mtime in expired:
-                try:
-                    os.remove(fp)
-                    removed_count += 1
-                    removed_bytes += size
-                    total_size -= size
-                    logger.debug(f"TTL 过期删除: {fp}")
-                except OSError as e:
-                    logger.warning(f"删除文件失败 {fp}: {e}")
-                    failed_deletes.add(fp)
-            successfully_removed = {e[0] for e in expired} - failed_deletes
-            files = [f for f in files if f[0] not in successfully_removed]
-
-        if max_size_bytes > 0 and total_size > max_size_bytes:
-            files.sort(key=lambda x: x[2])
-            for fp, size, mtime in files:
-                if total_size <= max_size_bytes:
-                    break
-                try:
-                    os.remove(fp)
-                    removed_count += 1
-                    removed_bytes += size
-                    total_size -= size
-                    logger.debug(f"LRU 淘汰: {fp}")
-                except OSError as e:
-                    logger.warning(f"删除文件失败 {fp}: {e}")
-
-        remaining_files = 0
-        remaining_size = 0
-        try:
-            for dirpath, _, filenames in os.walk(base_dir):
-                for fname in filenames:
-                    fp = os.path.join(dirpath, fname)
-                    if os.path.isfile(fp):
-                        remaining_files += 1
-                        remaining_size += os.path.getsize(fp)
-        except OSError:
-            pass
-
-        result = {
-            "layer": layer_name,
-            "files_removed": removed_count,
-            "bytes_removed": removed_bytes,
-            "files_remaining": remaining_files,
-            "bytes_remaining": remaining_size,
-        }
-        logger.info(
-            f"缓存清理完成 [{layer_name}]: "
-            f"删除 {removed_count} 文件 ({removed_bytes} bytes), "
-            f"剩余 {remaining_files} 文件 ({remaining_size} bytes)"
-        )
-        return result
+            logger.info(
+                f"缓存清理完成 [{layer_name}]: "
+                f"删除 {removed_count} 文件 ({removed_bytes} bytes), "
+                f"剩余 {remaining_files} 文件 ({remaining_size} bytes)"
+            )
+            return result
 
     def evict_all(self) -> dict[str, dict]:
         results = {}
@@ -313,7 +323,7 @@ class CacheManager:
         with self._lock:
             if layer_name:
                 if layer_name in self._stats:
-                    self._stats[layer_name] = _LayerStats()
+                    self._stats[layer_name].reset()
             else:
                 for name in list(self._stats.keys()):
-                    self._stats[name] = _LayerStats()
+                    self._stats[name].reset()

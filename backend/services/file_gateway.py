@@ -25,7 +25,7 @@ class SafeFileGateway:
         return self._base_dir
 
     def resolve(self, filename: str) -> str:
-        if not filename or "\\" in filename or "/" in filename:
+        if not filename or "\\" in filename or "/" in filename or "\x00" in filename:
             raise SecurityError(f"Invalid filename: {filename!r}")
         basename = os.path.basename(filename)
         if not basename or basename != filename or basename in (".", ".."):
@@ -84,8 +84,16 @@ class SafeFileGateway:
     def safe_rename(self, temp_filename: str, final_filename: str) -> None:
         temp_path = self.resolve(temp_filename)
         final_path = self.resolve(final_filename)
+        if temp_path == final_path:
+            return
         temp_lock = self.get_lock(temp_filename)
         final_lock = self.get_lock(final_filename)
+        if temp_lock is final_lock:
+            with temp_lock:
+                if not os.path.isfile(temp_path):
+                    raise FileNotFoundError(f"File not found: {temp_filename}")
+                os.replace(temp_path, final_path)
+            return
         first_lock, second_lock = (temp_lock, final_lock) if id(temp_lock) < id(final_lock) else (final_lock, temp_lock)
         with first_lock:
             with second_lock:
@@ -116,6 +124,8 @@ class SafeFileGateway:
             return []
         result = []
         for fname in os.listdir(self._base_dir):
+            if fname.endswith(".tmp"):
+                continue
             full_path = os.path.join(self._base_dir, fname)
             if os.path.isfile(full_path):
                 result.append(fname)
@@ -125,11 +135,15 @@ class SafeFileGateway:
         total = 0
         if not os.path.isdir(self._base_dir):
             return 0
-        for dirpath, _, filenames in os.walk(self._base_dir):
+        for dirpath, _, filenames in os.walk(self._base_dir, followlinks=False):
             for f in filenames:
                 fp = os.path.join(dirpath, f)
-                if os.path.exists(fp):
-                    total += os.path.getsize(fp)
+                try:
+                    st = os.lstat(fp)
+                    if not os.path.islink(fp):
+                        total += st.st_size
+                except OSError:
+                    continue
         return total
 
 

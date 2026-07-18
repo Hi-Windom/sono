@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+from contextlib import closing
 from typing import Any
 
 import config
@@ -26,60 +27,58 @@ def get_db() -> sqlite3.Connection:
     return conn
 
 def init_db() -> None:
-    conn = get_db()
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS tasks (
-            id TEXT PRIMARY KEY,
-            status TEXT NOT NULL DEFAULT 'pending',
-            progress REAL NOT NULL DEFAULT 0,
-            step TEXT NOT NULL DEFAULT '',
-            original_filename TEXT NOT NULL DEFAULT '',
-            original_path TEXT NOT NULL DEFAULT '',
-            file_hash TEXT NOT NULL DEFAULT '',
-            file_size INTEGER NOT NULL DEFAULT 0,
-            output_path TEXT NOT NULL DEFAULT '',
-            params TEXT NOT NULL DEFAULT '{}',
-            detection_result TEXT,
-            repaired_detection_result TEXT,
-            repair_result TEXT,
-            error TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    try:
-        conn.execute("ALTER TABLE tasks ADD COLUMN file_hash TEXT NOT NULL DEFAULT ''")
-    except Exception:
-        pass
-    try:
-        conn.execute("ALTER TABLE tasks ADD COLUMN file_size INTEGER NOT NULL DEFAULT 0")
-    except Exception:
-        pass
-    # 分析缓存表
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS analysis_cache (
-            quick_hash TEXT PRIMARY KEY,
-            file_name TEXT NOT NULL DEFAULT '',
-            file_size INTEGER NOT NULL DEFAULT 0,
-            wav_info TEXT NOT NULL DEFAULT '',
-            analysis TEXT NOT NULL DEFAULT '',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    try:
-        conn.execute("ALTER TABLE analysis_cache ADD COLUMN waveform_peaks TEXT")
-    except Exception:
-        pass
-    try:
-        conn.execute("ALTER TABLE tasks ADD COLUMN render_filename TEXT")
-    except Exception:
-        pass
-    try:
-        conn.execute("ALTER TABLE tasks ADD COLUMN render_result TEXT")
-    except Exception:
-        pass
-    conn.commit()
-    conn.close()
+    with closing(get_db()) as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS tasks (
+                id TEXT PRIMARY KEY,
+                status TEXT NOT NULL DEFAULT 'pending',
+                progress REAL NOT NULL DEFAULT 0,
+                step TEXT NOT NULL DEFAULT '',
+                original_filename TEXT NOT NULL DEFAULT '',
+                original_path TEXT NOT NULL DEFAULT '',
+                file_hash TEXT NOT NULL DEFAULT '',
+                file_size INTEGER NOT NULL DEFAULT 0,
+                output_path TEXT NOT NULL DEFAULT '',
+                params TEXT NOT NULL DEFAULT '{}',
+                detection_result TEXT,
+                repaired_detection_result TEXT,
+                repair_result TEXT,
+                error TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        try:
+            conn.execute("ALTER TABLE tasks ADD COLUMN file_hash TEXT NOT NULL DEFAULT ''")
+        except Exception:
+            pass
+        try:
+            conn.execute("ALTER TABLE tasks ADD COLUMN file_size INTEGER NOT NULL DEFAULT 0")
+        except Exception:
+            pass
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS analysis_cache (
+                quick_hash TEXT PRIMARY KEY,
+                file_name TEXT NOT NULL DEFAULT '',
+                file_size INTEGER NOT NULL DEFAULT 0,
+                wav_info TEXT NOT NULL DEFAULT '',
+                analysis TEXT NOT NULL DEFAULT '',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        try:
+            conn.execute("ALTER TABLE analysis_cache ADD COLUMN waveform_peaks TEXT")
+        except Exception:
+            pass
+        try:
+            conn.execute("ALTER TABLE tasks ADD COLUMN render_filename TEXT")
+        except Exception:
+            pass
+        try:
+            conn.execute("ALTER TABLE tasks ADD COLUMN render_result TEXT")
+        except Exception:
+            pass
+        conn.commit()
 
 def cleanup_stale_tasks() -> int:
     conn = get_db()
@@ -114,13 +113,12 @@ def cleanup_stale_tasks() -> int:
 
 
 def create_task(task_id: str, filename: str, filepath: str, params: dict[str, Any], file_hash: str = "", file_size: int = 0) -> None:
-    conn = get_db()
-    conn.execute(
-        "INSERT INTO tasks (id, original_filename, original_path, params, file_hash, file_size) VALUES (?, ?, ?, ?, ?, ?)",
-        (task_id, filename, filepath, json.dumps(params), file_hash, file_size)
-    )
-    conn.commit()
-    conn.close()
+    with closing(get_db()) as conn:
+        conn.execute(
+            "INSERT INTO tasks (id, original_filename, original_path, params, file_hash, file_size) VALUES (?, ?, ?, ?, ?, ?)",
+            (task_id, filename, filepath, json.dumps(params), file_hash, file_size)
+        )
+        conn.commit()
 
 def _convert_to_json_serializable(obj: Any) -> Any:
     """将 numpy 类型和其他不可序列化类型转换为 JSON 可序列化类型"""
@@ -141,28 +139,26 @@ def _convert_to_json_serializable(obj: Any) -> Any:
 
 
 def update_task(task_id: str, **kwargs: Any) -> None:
-    conn = get_db()
-    sets: list[str] = []
-    values: list[Any] = []
-    for k, v in kwargs.items():
-        if k not in _ALLOWED_TASK_COLUMNS:
-            raise ValueError(f"不允许更新的字段: {k}")
-        sets.append(f"{k} = ?")
-        if isinstance(v, (dict, list)):
-            serializable_v = _convert_to_json_serializable(v)
-            values.append(json.dumps(serializable_v))
-        else:
-            values.append(v)
-    sets.append("updated_at = CURRENT_TIMESTAMP")
-    values.append(task_id)
-    conn.execute(f"UPDATE tasks SET {', '.join(sets)} WHERE id = ?", values)
-    conn.commit()
-    conn.close()
+    with closing(get_db()) as conn:
+        sets: list[str] = []
+        values: list[Any] = []
+        for k, v in kwargs.items():
+            if k not in _ALLOWED_TASK_COLUMNS:
+                raise ValueError(f"不允许更新的字段: {k}")
+            sets.append(f"{k} = ?")
+            if isinstance(v, (dict, list)):
+                serializable_v = _convert_to_json_serializable(v)
+                values.append(json.dumps(serializable_v))
+            else:
+                values.append(v)
+        sets.append("updated_at = CURRENT_TIMESTAMP")
+        values.append(task_id)
+        conn.execute(f"UPDATE tasks SET {', '.join(sets)} WHERE id = ?", values)
+        conn.commit()
 
 def get_task(task_id: str) -> TaskDict | None:
-    conn = get_db()
-    row = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
-    conn.close()
+    with closing(get_db()) as conn:
+        row = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
     if row is None:
         return None
     result: TaskDict = dict(row)
@@ -173,12 +169,11 @@ def get_task(task_id: str) -> TaskDict | None:
     return result
 
 def find_task_by_hash(file_hash: str) -> TaskDict | None:
-    conn = get_db()
-    row = conn.execute(
-        "SELECT * FROM tasks WHERE file_hash = ? ORDER BY created_at DESC LIMIT 1",
-        (file_hash,)
-    ).fetchone()
-    conn.close()
+    with closing(get_db()) as conn:
+        row = conn.execute(
+            "SELECT * FROM tasks WHERE file_hash = ? ORDER BY created_at DESC LIMIT 1",
+            (file_hash,)
+        ).fetchone()
     if row is None:
         return None
     result: TaskDict = dict(row)
@@ -194,12 +189,11 @@ def find_repair_cache(file_hash: str, params: dict) -> TaskDict | None:
     import logging
     logger = logging.getLogger(__name__)
     
-    conn = get_db()
-    rows = conn.execute(
-        "SELECT * FROM tasks WHERE file_hash = ? ORDER BY updated_at DESC",
-        (file_hash,),
-    ).fetchall()
-    conn.close()
+    with closing(get_db()) as conn:
+        rows = conn.execute(
+            "SELECT * FROM tasks WHERE file_hash = ? ORDER BY updated_at DESC",
+            (file_hash,),
+        ).fetchall()
     logger.info(f"[cache-lookup] hash={file_hash} found {len(rows)} total tasks")
     
     params_json = json.dumps(params, sort_keys=True, ensure_ascii=False)
@@ -266,11 +260,10 @@ def find_dual_repair_cache(vocal_file_hash: str, accompaniment_file_hash: str, p
     import logging
     logger = logging.getLogger(__name__)
 
-    conn = get_db()
-    rows = conn.execute(
-        "SELECT * FROM tasks WHERE json_extract(params, '$.processing_mode') = 'dual' ORDER BY updated_at DESC"
-    ).fetchall()
-    conn.close()
+    with closing(get_db()) as conn:
+        rows = conn.execute(
+            "SELECT * FROM tasks WHERE json_extract(params, '$.processing_mode') = 'dual' ORDER BY updated_at DESC"
+        ).fetchall()
     logger.info(f"[cache-lookup-dual] vocal_hash={vocal_file_hash} acc_hash={accompaniment_file_hash} found {len(rows)} dual tasks")
 
     params_json = json.dumps(params, sort_keys=True, ensure_ascii=False)
@@ -349,39 +342,34 @@ def find_dual_repair_cache(vocal_file_hash: str, accompaniment_file_hash: str, p
     return None
 
 def get_all_tasks_ordered() -> list[TaskDict]:
-    conn = get_db()
-    rows = conn.execute("SELECT id, original_path, output_path, file_size, created_at FROM tasks ORDER BY created_at ASC").fetchall()
-    conn.close()
+    with closing(get_db()) as conn:
+        rows = conn.execute("SELECT id, original_path, output_path, file_size, created_at FROM tasks ORDER BY created_at ASC").fetchall()
     return [dict(r) for r in rows]
 
 def delete_task(task_id: str) -> None:
-    conn = get_db()
-    conn.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
-    conn.commit()
-    conn.close()
+    with closing(get_db()) as conn:
+        conn.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
+        conn.commit()
 
 
 def get_queue_status() -> dict[str, Any]:
     """获取任务队列状态"""
-    conn = get_db()
-    
-    status_counts = conn.execute(
-        "SELECT status, COUNT(*) as count FROM tasks GROUP BY status"
-    ).fetchall()
-    
-    running_tasks = conn.execute(
-        """SELECT id, status, step, progress, 
-                  (julianday('now') - julianday(updated_at)) * 24 * 60 * 60 as elapsed_seconds
-           FROM tasks 
-           WHERE status IN ('detecting', 'repairing') 
-           ORDER BY updated_at DESC"""
-    ).fetchall()
-    
-    pending_tasks = conn.execute(
-        "SELECT id, status, original_filename FROM tasks WHERE status = 'pending' ORDER BY created_at"
-    ).fetchall()
-    
-    conn.close()
+    with closing(get_db()) as conn:
+        status_counts = conn.execute(
+            "SELECT status, COUNT(*) as count FROM tasks GROUP BY status"
+        ).fetchall()
+        
+        running_tasks = conn.execute(
+            """SELECT id, status, step, progress, 
+                      (julianday('now') - julianday(updated_at)) * 24 * 60 * 60 as elapsed_seconds
+               FROM tasks 
+               WHERE status IN ('detecting', 'repairing', 'rendering') 
+               ORDER BY updated_at DESC"""
+        ).fetchall()
+        
+        pending_tasks = conn.execute(
+            "SELECT id, status, original_filename FROM tasks WHERE status = 'pending' ORDER BY created_at"
+        ).fetchall()
     
     return {
         'status_counts': {row['status']: row['count'] for row in status_counts},
@@ -405,55 +393,49 @@ def get_queue_status() -> dict[str, Any]:
 
 def mark_stuck_tasks(timeout_seconds: int = 300) -> None:
     """标记卡住的任务（超过timeout_seconds没有更新）"""
-    conn = get_db()
-    conn.execute(
-        """UPDATE tasks 
-           SET status = 'timeout', 
-               step = '任务执行超时，请重试',
-               error = 'Task execution timeout'
-           WHERE status IN ('detecting', 'repairing') 
-           AND (julianday('now') - julianday(updated_at)) * 24 * 60 * 60 > ?""",
-        (timeout_seconds,)
-    )
-    conn.commit()
-    conn.close()
+    with closing(get_db()) as conn:
+        conn.execute(
+            """UPDATE tasks 
+               SET status = 'timeout', 
+                   step = '任务执行超时，请重试',
+                   error = 'Task execution timeout'
+               WHERE status IN ('detecting', 'repairing', 'rendering') 
+               AND (julianday('now') - julianday(updated_at)) * 24 * 60 * 60 > ?""",
+            (timeout_seconds,)
+        )
+        conn.commit()
 
 
 def get_analysis_cache(quick_hash: str) -> dict[str, Any] | None:
-    conn = get_db()
-    row = conn.execute("SELECT * FROM analysis_cache WHERE quick_hash = ?", (quick_hash,)).fetchone()
-    conn.close()
+    with closing(get_db()) as conn:
+        row = conn.execute("SELECT * FROM analysis_cache WHERE quick_hash = ?", (quick_hash,)).fetchone()
     if row is None:
         return None
     return dict(row)
 
 def save_analysis_cache(quick_hash: str, file_name: str, file_size: int, wav_info: str, analysis: str, waveform_peaks: str = "") -> None:
-    conn = get_db()
-    conn.execute(
-        "INSERT OR REPLACE INTO analysis_cache (quick_hash, file_name, file_size, wav_info, analysis, waveform_peaks) VALUES (?, ?, ?, ?, ?, ?)",
-        (quick_hash, file_name, file_size, wav_info, analysis, waveform_peaks),
-    )
-    conn.commit()
-    conn.close()
+    with closing(get_db()) as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO analysis_cache (quick_hash, file_name, file_size, wav_info, analysis, waveform_peaks) VALUES (?, ?, ?, ?, ?, ?)",
+            (quick_hash, file_name, file_size, wav_info, analysis, waveform_peaks),
+        )
+        conn.commit()
 
 def get_all_analysis_cache() -> list[dict[str, Any]]:
-    conn = get_db()
-    rows = conn.execute("SELECT * FROM analysis_cache ORDER BY created_at DESC").fetchall()
-    conn.close()
+    with closing(get_db()) as conn:
+        rows = conn.execute("SELECT * FROM analysis_cache ORDER BY created_at DESC").fetchall()
     return [dict(r) for r in rows]
 
 def delete_analysis_cache(quick_hash: str) -> None:
-    conn = get_db()
-    conn.execute("DELETE FROM analysis_cache WHERE quick_hash = ?", (quick_hash,))
-    conn.commit()
-    conn.close()
+    with closing(get_db()) as conn:
+        conn.execute("DELETE FROM analysis_cache WHERE quick_hash = ?", (quick_hash,))
+        conn.commit()
 
 def clear_all_analysis_cache() -> int:
-    conn = get_db()
-    count = conn.execute("SELECT COUNT(*) FROM analysis_cache").fetchone()[0]
-    conn.execute("DELETE FROM analysis_cache")
-    conn.commit()
-    conn.close()
+    with closing(get_db()) as conn:
+        count = conn.execute("SELECT COUNT(*) FROM analysis_cache").fetchone()[0]
+        conn.execute("DELETE FROM analysis_cache")
+        conn.commit()
     return count
 
 
@@ -496,36 +478,33 @@ def get_training_db() -> sqlite3.Connection:
     return conn
 
 def init_training_db() -> None:
-    conn = get_training_db()
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS training_files (
-            id TEXT PRIMARY KEY,
-            filename TEXT NOT NULL,
-            filepath TEXT NOT NULL,
-            file_hash TEXT NOT NULL UNIQUE,
-            file_size INTEGER NOT NULL DEFAULT 0,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    conn.commit()
-    conn.close()
+    with closing(get_training_db()) as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS training_files (
+                id TEXT PRIMARY KEY,
+                filename TEXT NOT NULL,
+                filepath TEXT NOT NULL,
+                file_hash TEXT NOT NULL UNIQUE,
+                file_size INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        conn.commit()
 
 def create_training_record(file_id: str, filename: str, filepath: str, file_hash: str, file_size: int = 0) -> None:
-    conn = get_training_db()
-    conn.execute(
-        "INSERT OR REPLACE INTO training_files (id, filename, filepath, file_hash, file_size) VALUES (?, ?, ?, ?, ?)",
-        (file_id, filename, filepath, file_hash, file_size)
-    )
-    conn.commit()
-    conn.close()
+    with closing(get_training_db()) as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO training_files (id, filename, filepath, file_hash, file_size) VALUES (?, ?, ?, ?, ?)",
+            (file_id, filename, filepath, file_hash, file_size)
+        )
+        conn.commit()
 
 def find_training_by_hash(file_hash: str) -> TaskDict | None:
-    conn = get_training_db()
-    row = conn.execute(
-        "SELECT * FROM training_files WHERE file_hash = ? LIMIT 1",
-        (file_hash,)
-    ).fetchone()
-    conn.close()
+    with closing(get_training_db()) as conn:
+        row = conn.execute(
+            "SELECT * FROM training_files WHERE file_hash = ? LIMIT 1",
+            (file_hash,)
+        ).fetchone()
     if row is None:
         return None
     result: TaskDict = dict(row)

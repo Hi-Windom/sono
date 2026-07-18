@@ -52,3 +52,4 @@ android-app/
 playwright-report/
 test-results/
 playwright/.cache/
+*.wasm

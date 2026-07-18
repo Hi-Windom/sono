@@ -3,14 +3,16 @@ import asyncio
 import logging
 import time
 from datetime import datetime, timezone
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, Header
 from pydantic import BaseModel
 
+import config
 from config import MOBILE_MODE, DEPLOY_TIME_FILE
 from services.task_manager import get_active_task_count, get_active_tasks, can_accept_task, executor
 from services.audio_repair import get_available_versions
 from services.ai_detector import get_detector_versions
 from services.memory_guard import get_available_memory_bytes, estimate_repair_memory_bytes, should_use_float32, get_total_memory_bytes
+from services.ws_manager import ws_manager
 from database import get_queue_status, get_task
 
 logger = logging.getLogger(__name__)
@@ -149,7 +151,14 @@ async def system_load():
 
 
 @router.get("/diag")
-async def diagnostics():
+async def diagnostics(x_admin_token: str = Header(None)):
+    admin_token = config.ADMIN_TOKEN
+    if admin_token:
+        if x_admin_token != admin_token:
+            raise HTTPException(status_code=401, detail="未授权的操作")
+    else:
+        raise HTTPException(status_code=403, detail="诊断接口未启用（未配置 ADMIN_TOKEN）")
+
     import sys
     import platform
     import shutil
@@ -501,6 +510,7 @@ async def get_quality_test_result(task_id: str):
 @router.websocket("/ws/{task_id}")
 async def websocket_task_status(websocket: WebSocket, task_id: str):
     await websocket.accept()
+    await ws_manager.start_heartbeat_monitor()
 
     if task_id.startswith("qt-"):
         qt_task = _quality_test_cache.get(task_id)
@@ -514,16 +524,17 @@ async def websocket_task_status(websocket: WebSocket, task_id: str):
             except Exception:
                 pass
             return
-        from services.ws_manager import ws_manager
         await ws_manager.connect(task_id, websocket)
         try:
+            cached = ws_manager.get_cached_progress(task_id)
+            initial_msg = cached if cached else {
+                "task_id": task_id,
+                "status": qt_task.get("status", "running"),
+                "progress": 0 if qt_task.get("status") == "running" else 100,
+                "step": "quality_test",
+            }
             try:
-                await websocket.send_json({
-                    "task_id": task_id,
-                    "status": qt_task.get("status", "running"),
-                    "progress": 0 if qt_task.get("status") == "running" else 100,
-                    "step": "quality_test",
-                })
+                await websocket.send_json(initial_msg)
             except Exception as e:
                 logger.warning(f"[ws] 发送初始状态失败 task_id={task_id}: {e}")
                 return
@@ -540,7 +551,8 @@ async def websocket_task_status(websocket: WebSocket, task_id: str):
             import asyncio
             while True:
                 try:
-                    await asyncio.wait_for(websocket.receive_text(), timeout=10.0)
+                    msg = await asyncio.wait_for(websocket.receive_text(), timeout=10.0)
+                    ws_manager.record_activity(websocket)
                 except asyncio.TimeoutError:
                     current = _quality_test_cache.get(task_id, {})
                     if current.get("status") == "completed":
@@ -580,23 +592,26 @@ async def websocket_task_status(websocket: WebSocket, task_id: str):
         except Exception:
             pass
         return
-    from services.ws_manager import ws_manager
     await ws_manager.connect(task_id, websocket)
     try:
-        current = {
-            "task_id": task_id,
-            "status": task["status"],
-            "progress": task["progress"],
-            "step": task["step"],
-        }
-        if task.get("detection_result"):
-            current["detection_result"] = task["detection_result"]
-        if task.get("repaired_detection_result"):
-            current["repaired_detection_result"] = task["repaired_detection_result"]
-        if task.get("repair_result"):
-            current["repair_result"] = task["repair_result"]
-        if task.get("error"):
-            current["error"] = task["error"]
+        cached = ws_manager.get_cached_progress(task_id)
+        if cached:
+            current = cached
+        else:
+            current = {
+                "task_id": task_id,
+                "status": task["status"],
+                "progress": task["progress"],
+                "step": task["step"],
+            }
+            if task.get("detection_result"):
+                current["detection_result"] = task["detection_result"]
+            if task.get("repaired_detection_result"):
+                current["repaired_detection_result"] = task["repaired_detection_result"]
+            if task.get("repair_result"):
+                current["repair_result"] = task["repair_result"]
+            if task.get("error"):
+                current["error"] = task["error"]
         try:
             await websocket.send_json(current)
         except Exception as e:
@@ -612,7 +627,8 @@ async def websocket_task_status(websocket: WebSocket, task_id: str):
         import asyncio
         while True:
             try:
-                await asyncio.wait_for(websocket.receive_text(), timeout=10.0)
+                msg = await asyncio.wait_for(websocket.receive_text(), timeout=10.0)
+                ws_manager.record_activity(websocket)
             except asyncio.TimeoutError:
                 current_task = get_task(task_id)
                 if not current_task:

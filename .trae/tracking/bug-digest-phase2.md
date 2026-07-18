@@ -26,20 +26,20 @@
 
 | ID | 问题 | 位置 | 影响 | 状态 |
 |----|------|------|------|------|
-| TL-007 | `TaskExecutor.cancel` 中 `tracer.record_state_change` 的 `from_status` 是空字符串 | `task_executor.py:100` | 可观测性数据不准确 | ⏳ 待修复 |
-| TL-008 | `RenderTask` 缺少 stuck monitor 线程（与 RepairTask/DetectTask 不一致） | `task_manager.py:853-1065` | 渲染任务卡住时用户无感知 | ⏳ 待修复 |
-| TL-009 | 两套取消机制并存且行为不一致（`cancel_task` vs `TaskExecutor.cancel`） | `task_manager.py:182-191` | 取消行为可能因调用路径不同而有差异 | ⏳ 待修复 |
-| TL-010 | `SystemMetrics._active_tasks` 与 `task_manager._active_tasks` 两套计数可能不一致 | `observability.py:270-289` | 监控数据不准确 | ⏳ 待修复 |
-| TL-011 | `get_queue_status` 和 `mark_stuck_tasks` 未包含 `rendering` 状态 | `database.py:370-376, 404-417` | 渲染任务的卡住检测不生效 | ⏳ 待修复 |
-| TL-012 | `RenderTask.cleanup` 中使用 `asyncio.get_event_loop()` 而非 `_get_loop()` | `task_manager.py:1059` | 非主线程调用可能抛 RuntimeError，广播失败 | ⏳ 待修复 |
+| TL-007 | `TaskExecutor.cancel` 中 `tracer.record_state_change` 的 `from_status` 是空字符串 | `task_executor.py:100` | 可观测性数据不准确 | ✅ 已修复 |
+| TL-008 | `RenderTask` 缺少 stuck monitor 线程（与 RepairTask/DetectTask 不一致） | `task_manager.py:853-1065` | 渲染任务卡住时用户无感知 | ✅ 已修复 |
+| TL-009 | 两套取消机制并存且行为不一致（`cancel_task` vs `TaskExecutor.cancel`） | `task_manager.py:182-191` | 取消行为可能因调用路径不同而有差异 | ✅ 已修复 |
+| TL-010 | `SystemMetrics._active_tasks` 与 `task_manager._active_tasks` 两套计数可能不一致 | `observability.py:270-289` | 监控数据不准确 | ✅ 已修复 |
+| TL-011 | `get_queue_status` 和 `mark_stuck_tasks` 未包含 `rendering` 状态 | `database.py:370-376, 404-417` | 渲染任务的卡住检测不生效 | ✅ 已修复 |
+| TL-012 | `RenderTask.cleanup` 中使用 `asyncio.get_event_loop()` 而非 `_get_loop()` | `task_manager.py:1059` | 非主线程调用可能抛 RuntimeError，广播失败 | ✅ 已修复 |
 
 ### 🟢 低严重程度（3 个）
 
 | ID | 问题 | 位置 | 影响 | 状态 |
 |----|------|------|------|------|
-| TL-013 | `RenderTask._execute_dual` 未校验 `track_type` 参数有效性 | `task_manager.py:942-1035` | 传入无效 track_type 可能走到意外分支 | ⏳ 待修复 |
-| TL-014 | `DetectTask` 缺少 `on_error` 实现（与 RepairTask 不一致） | `task_manager.py:677-683` | 错误处理不一致 | ⏳ 待修复 |
-| TL-015 | stuck monitor 线程只设 stop 标志不 join，可能有短暂残留 | `task_manager.py:707-713, 849-850` | 理论上的资源释放延迟 | ⏳ 待修复 |
+| TL-013 | `RenderTask._execute_dual` 未校验 `track_type` 参数有效性 | `task_manager.py:942-1035` | 传入无效 track_type 可能走到意外分支 | ✅ 已修复 |
+| TL-014 | `DetectTask` 缺少 `on_error` 实现（与 RepairTask 不一致） | `task_manager.py:677-683` | 错误处理不一致 | ✅ 已修复 |
+| TL-015 | stuck monitor 线程只设 stop 标志不 join，可能有短暂残留 | `task_manager.py:707-713, 849-850` | 理论上的资源释放延迟 | ✅ 已修复 |
 
 ---
 
@@ -61,20 +61,20 @@
 
 | ID | 问题 | 位置 | 影响 | 状态 |
 |----|------|------|------|------|
-| FC-006 | `safe_rename` 同名文件导致死锁（同一把 Lock acquire 两次） | `file_gateway.py:68-78` | 线程挂死 | ⏳ 待修复 |
-| FC-007 | `get_dir_size` 统计符号链接目标文件大小（容量统计失真） | `file_gateway.py:108-117` | 缓存大小统计不准确 | ⏳ 待修复 |
-| FC-008 | `reset_stats` 与 `record_hit/miss` 竞态导致统计丢失 | `cache_manager.py:269-288` | 命中率统计不准确 | ⏳ 待修复 |
-| FC-009 | `preview` 接口直接使用 `original_path` 无二次校验 | `download.py:665-672` | 理论上的路径遍历风险 | ⏳ 待修复 |
-| FC-010 | `evict_layer` 清理后剩余统计使用二次扫描，结果可能不一致 | `cache_manager.py:198-208` | 清理后统计数据可能不准确 | ⏳ 待修复 |
-| FC-011 | `ConfigProvider` 抽象类与 `config.py` 实际配置项不对齐（缺 HOST/PORT 等） | `config_provider.py` | 接口不完整，后续迁移可能遗漏 | ⏳ 待修复 |
+| FC-006 | `safe_rename` 同名文件导致死锁（同一把 Lock acquire 两次） | `file_gateway.py:68-78` | 线程挂死 | ✅ 已修复 |
+| FC-007 | `get_dir_size` 统计符号链接目标文件大小（容量统计失真） | `file_gateway.py:108-117` | 缓存大小统计不准确 | ✅ 已修复 |
+| FC-008 | `reset_stats` 与 `record_hit/miss` 竞态导致统计丢失 | `cache_manager.py:269-288` | 命中率统计不准确 | ✅ 已修复 |
+| FC-009 | `preview` 接口直接使用 `original_path` 无二次校验 | `download.py:665-672` | 理论上的路径遍历风险 | ✅ 已修复 |
+| FC-010 | `evict_layer` 清理后剩余统计使用二次扫描，结果可能不一致 | `cache_manager.py:198-208` | 清理后统计数据可能不准确 | ✅ 已修复 |
+| FC-011 | `ConfigProvider` 抽象类与 `config.py` 实际配置项不对齐（缺 HOST/PORT 等） | `config_provider.py` | 接口不完整，后续迁移可能遗漏 | ✅ 已修复 |
 
 ### 🟢 低严重程度（3 个）
 
 | ID | 问题 | 位置 | 影响 | 状态 |
 |----|------|------|------|------|
-| FC-012 | `resolve` 未显式拒绝 NUL 字节注入（抛 `ValueError` 而非 `SecurityError`） | `file_gateway.py:27-36` | 异常类型不一致，调用方可能漏处理 | ⏳ 待修复 |
-| FC-013 | `list_files` 不跳过 `.tmp` 临时文件（残留临时文件可见） | `file_gateway.py:98-106` | 可能误将临时文件当正式文件 | ⏳ 待修复 |
-| FC-014 | `_scan_files` 中 `isfile` 与 `stat` 存在 TOCTOU 窗口 | `cache_manager.py:138-144` | 极端时序下可能出错 | ⏳ 待修复 |
+| FC-012 | `resolve` 未显式拒绝 NUL 字节注入（抛 `ValueError` 而非 `SecurityError`） | `file_gateway.py:27-36` | 异常类型不一致，调用方可能漏处理 | ✅ 已修复 |
+| FC-013 | `list_files` 不跳过 `.tmp` 临时文件（残留临时文件可见） | `file_gateway.py:98-106` | 可能误将临时文件当正式文件 | ✅ 已修复 |
+| FC-014 | `_scan_files` 中 `isfile` 与 `stat` 存在 TOCTOU 窗口 | `cache_manager.py:138-144` | 极端时序下可能出错 | ✅ 已修复 |
 
 ---
 
@@ -96,20 +96,20 @@
 
 | ID | 问题 | 位置 | 影响 | 状态 |
 |----|------|------|------|------|
-| WR-006 | MessageBus 队列满时直接丢弃消息，无重试机制 | `message_bus.py:74-77` | 重要消息（如任务完成通知）可能丢失 | ⏳ 待修复 |
-| WR-007 | WebSocket 无真正的心跳超时断开机制，半开连接会泄漏 | `ws_manager.py`, `system.py` | 半开连接占用资源 | ⏳ 待修复 |
-| WR-008 | 前端 WebSocket 重连后会丢失中间进度消息 | `system.py`, `ws_manager.py` | 重连后进度可能卡住 | ⏳ 待修复 |
-| WR-009 | 各 channel 消息格式不一致，缺少统一的消息信封 | `message_bus.py`, `ws_manager.py` | 消息处理混乱 | ⏳ 待修复 |
-| WR-010 | `/diag` 端点泄漏大量系统敏感信息（无认证） | `system.py:151-285` | 系统信息暴露 | ⏳ 待修复 |
+| WR-006 | MessageBus 队列满时直接丢弃消息，无重试机制 | `message_bus.py:74-77` | 重要消息（如任务完成通知）可能丢失 | ✅ 已修复 |
+| WR-007 | WebSocket 无真正的心跳超时断开机制，半开连接会泄漏 | `ws_manager.py`, `system.py` | 半开连接占用资源 | ✅ 已修复 |
+| WR-008 | 前端 WebSocket 重连后会丢失中间进度消息 | `system.py`, `ws_manager.py` | 重连后进度可能卡住 | ✅ 已修复 |
+| WR-009 | 各 channel 消息格式不一致，缺少统一的消息信封 | `message_bus.py`, `ws_manager.py` | 消息处理混乱 | ✅ 已修复 |
+| WR-010 | `/diag` 端点泄漏大量系统敏感信息（无认证） | `system.py:151-285` | 系统信息暴露 | ✅ 已修复 |
 
 ### 🟢 低严重程度（4 个）
 
 | ID | 问题 | 位置 | 影响 | 状态 |
 |----|------|------|------|------|
-| WR-011 | `/ws/cache-events` 端点无认证，可任意连接监听缓存事件 | `cache.py:80-96` | 缓存事件信息泄漏 | ⏳ 待修复 |
-| WR-012 | MessageBus 事件循环关闭后，publish 仍可入队，消息最终被静默丢弃 | `message_bus.py:70-77` | 无用消息堆积 | ⏳ 待修复 |
-| WR-013 | `render_cache_update` 广播给所有连接，而非按 task_id 过滤 | `ws_manager.py:74-80` | 不必要的消息广播 | ⏳ 待修复 |
-| WR-014 | `/api/log` 和 `/api/v1/log` 重复路由定义 | `app.py:81-92`, `system.py:95-106` | 冗余代码，维护成本高 | ⏳ 待修复 |
+| WR-011 | `/ws/cache-events` 端点无认证，可任意连接监听缓存事件 | `cache.py:80-96` | 缓存事件信息泄漏 | ✅ 已修复 |
+| WR-012 | MessageBus 事件循环关闭后，publish 仍可入队，消息最终被静默丢弃 | `message_bus.py:70-77` | 无用消息堆积 | ✅ 已修复 |
+| WR-013 | `render_cache_update` 广播给所有连接，而非按 task_id 过滤 | `ws_manager.py:74-80` | 不必要的消息广播 | ✅ 已修复 |
+| WR-014 | `/api/log` 和 `/api/v1/log` 重复路由定义 | `app.py:81-92`, `system.py:95-106` | 冗余代码，维护成本高 | ✅ 已修复 |
 
 ---
 
@@ -132,21 +132,21 @@
 
 | ID | 问题 | 位置 | 影响 | 状态 |
 |----|------|------|------|------|
-| CC-007 | 全局 `ThreadPoolExecutor` 无优雅关闭机制 | `task_manager.py:169` | 进程退出时任务被强制终止 | ⏳ 待修复 |
-| CC-008 | `CacheManager.evict_layer` 无层级锁，并发清理不一致 | `cache_manager.py:149-222` | 统计不准确，重复删除尝试 | ⏳ 待修复 |
-| CC-009 | `SystemMetrics._task_stats` defaultdict 并发访问不安全 | `observability.py:261` | 理论上存在竞态条件 | ⏳ 待修复 |
-| CC-010 | `PerfMetricsCollector.step_history` 并发访问不安全 | `perf_metrics.py:58-66` | 理论上存在竞态条件 | ⏳ 待修复 |
-| CC-011 | `_loop / _loop_warned` 全局变量无同步，可见性问题 | `task_manager.py:124-155` | 多线程下读到不一致状态 | ⏳ 待修复 |
+| CC-007 | 全局 `ThreadPoolExecutor` 无优雅关闭机制 | `task_manager.py:169` | 进程退出时任务被强制终止 | ✅ 已修复 |
+| CC-008 | `CacheManager.evict_layer` 无层级锁，并发清理不一致 | `cache_manager.py:149-222` | 统计不准确，重复删除尝试 | ✅ 已修复 |
+| CC-009 | `SystemMetrics._task_stats` defaultdict 并发访问不安全 | `observability.py:261` | 理论上存在竞态条件 | ✅ 已修复 |
+| CC-010 | `PerfMetricsCollector.step_history` 并发访问不安全 | `perf_metrics.py:58-66` | 理论上存在竞态条件 | ✅ 已修复 |
+| CC-011 | `_loop / _loop_warned` 全局变量无同步，可见性问题 | `task_manager.py:124-155` | 多线程下读到不一致状态 | ✅ 已修复 |
 | CC-012 | `RenderTask.cleanup()` 在工作线程调用 `get_event_loop()` 可能失败 | `task_manager.py:1051-1064` | 同 TL-012，广播可能失败 | ⏳ 待修复 |
 
 ### 🟢 低严重程度（4 个）
 
 | ID | 问题 | 位置 | 影响 | 状态 |
 |----|------|------|------|------|
-| CC-013 | 监控线程用 `list[bool]` 而非 `threading.Event` | `task_manager.py:249-270` | 可见性无严格保证 | ⏳ 待修复 |
+| CC-013 | 监控线程用 `list[bool]` 而非 `threading.Event` | `task_manager.py:249-270` | 可见性无严格保证 | ✅ 已修复 |
 | CC-014 | `file_cache.py` 直接修改 `CacheManager._layers` 绕过锁 | `file_cache.py:45-67` | 同 FC-005，破坏封装 | ⏳ 待修复 |
-| CC-015 | `TaskTracer._traces` 字典极端异常路径下泄漏 | `observability.py:95-112` | 异常路径内存泄漏 | ⏳ 待修复 |
-| CC-016 | SQLite 连接未用 context manager，异常路径可能泄漏 | `database.py` 多处 | 异常时连接泄漏 | ⏳ 待修复 |
+| CC-015 | `TaskTracer._traces` 字典极端异常路径下泄漏 | `observability.py:95-112` | 异常路径内存泄漏 | ✅ 已修复 |
+| CC-016 | SQLite 连接未用 context manager，异常路径可能泄漏 | `database.py` 多处 | 异常时连接泄漏 | ✅ 已修复 |
 
 ---
 

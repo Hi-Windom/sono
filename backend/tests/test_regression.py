@@ -1481,14 +1481,18 @@ class TestMessageBusBoundedQueue:
             assert bus._queue.qsize() == 3, "队列大小应该保持不变"
 
             first = bus._queue.get_nowait()
-            assert first[1]["id"] == 2, \
-                f"最老的消息（id=1）应该被丢弃，队首应该是 id=2，实际是 {first[1]['id']}"
+            envelope = first[1]
+            data = envelope.get("data", envelope)
+            assert data["id"] == 2, \
+                f"最老的消息（id=1）应该被丢弃，队首应该是 id=2，实际是 {data['id']}"
 
             second = bus._queue.get_nowait()
-            assert second[1]["id"] == 3
+            second_data = second[1].get("data", second[1])
+            assert second_data["id"] == 3
 
             third = bus._queue.get_nowait()
-            assert third[1]["id"] == 4
+            third_data = third[1].get("data", third[1])
+            assert third_data["id"] == 4
 
         finally:
             MessageBus._instance = None
@@ -1888,3 +1892,2251 @@ class TestFileCacheUsesPublicAPI:
             t.join()
 
         assert len(errors) == 0, f"并发访问出错: {errors}"
+
+
+# ============================================================================
+# 回归测试 20: WR-006 MessageBus 队列满时重要消息应有重试机制
+# Bug: 队列满时直接丢弃消息，重要消息（如任务完成通知）可能丢失
+# 修复: 重要 channel（ws_final）使用阻塞 put 带超时，而非直接丢弃
+# ============================================================================
+
+class TestMessageBusImportantMessageRetry:
+    """防止重要消息在队列满时被静默丢失"""
+
+    def test_important_channel_uses_blocking_put(self):
+        """ws_final 等重要消息应该使用阻塞 put 带超时重试"""
+        import threading
+        from services.message_bus import MessageBus, _IMPORTANT_CHANNELS
+
+        MessageBus._instance = None
+        MessageBus._lock = threading.Lock()
+
+        try:
+            assert "ws_final" in _IMPORTANT_CHANNELS, "ws_final 应该是重要 channel"
+
+            bus = MessageBus(maxsize=2)
+            bus._running = True
+            bus._stopped = False
+
+            bus.publish("ws_progress", {"id": 1})
+            bus.publish("ws_progress", {"id": 2})
+
+            assert bus._queue.full()
+
+            import time
+            start = time.time()
+            result = bus.publish("ws_final", {"id": 999})
+            elapsed = time.time() - start
+
+            assert result is False, "队列满时重要消息入队超时应该返回 False"
+            assert elapsed >= 1.0, f"重要消息应该阻塞等待至少 1 秒以上，实际 {elapsed:.2f}s"
+
+        finally:
+            MessageBus._instance = None
+            MessageBus._lock = threading.Lock()
+
+    def test_normal_channel_drops_oldest_when_full(self):
+        """非重要消息队列满时应该丢弃最老的消息"""
+        import threading
+        from services.message_bus import MessageBus
+
+        MessageBus._instance = None
+        MessageBus._lock = threading.Lock()
+
+        try:
+            bus = MessageBus(maxsize=3)
+            bus._running = True
+            bus._stopped = False
+
+            bus.publish("ws_progress", {"id": 1})
+            bus.publish("ws_progress", {"id": 2})
+            bus.publish("ws_progress", {"id": 3})
+
+            assert bus._queue.full()
+
+            result = bus.publish("ws_progress", {"id": 4})
+            assert result is True, "非重要消息应该能入队（丢弃老消息）"
+
+            assert bus._queue.qsize() == 3
+
+            first = bus._queue.get_nowait()
+            envelope = first[1]
+            data = envelope.get("data", envelope)
+            assert data["id"] == 2, f"最老的消息应该被丢弃，实际队首是 id=2"
+
+        finally:
+            MessageBus._instance = None
+            MessageBus._lock = threading.Lock()
+
+    def test_publish_returns_bool(self):
+        """publish 应该返回布尔值表示是否成功入队"""
+        import threading
+        from services.message_bus import MessageBus
+
+        MessageBus._instance = None
+        MessageBus._lock = threading.Lock()
+
+        try:
+            bus = MessageBus(maxsize=10)
+            bus._running = True
+            bus._stopped = False
+
+            result = bus.publish("ws_progress", {"test": True})
+            assert isinstance(result, bool), "publish 应该返回布尔值"
+            assert result is True
+
+        finally:
+            MessageBus._instance = None
+            MessageBus._lock = threading.Lock()
+
+
+# ============================================================================
+# 回归测试 21: WR-007 WebSocket 心跳超时断开机制
+# Bug: WebSocket 无真正的心跳超时断开机制，半开连接会泄漏
+# 修复: ws_manager 增加心跳监控，超时未活动的连接主动断开
+# ============================================================================
+
+class TestWebSocketHeartbeatTimeout:
+    """防止半开 WebSocket 连接泄漏"""
+
+    def test_ws_manager_has_heartbeat_monitor(self):
+        """ProgressWSManager 应该有心跳监控相关方法"""
+        from services.ws_manager import ProgressWSManager
+
+        mgr = ProgressWSManager()
+        assert hasattr(mgr, "start_heartbeat_monitor"), "应该有 start_heartbeat_monitor 方法"
+        assert hasattr(mgr, "record_activity"), "应该有 record_activity 方法"
+        assert hasattr(mgr, "_check_timeout_connections"), "应该有 _check_timeout_connections 方法"
+        assert hasattr(mgr, "_last_seen"), "应该有 _last_seen 字典记录最后活动时间"
+
+    def test_record_activity_updates_last_seen(self):
+        """record_activity 应该更新连接的最后活动时间"""
+        import asyncio
+        from unittest.mock import MagicMock
+        from services.ws_manager import ProgressWSManager
+
+        async def run_test():
+            mgr = ProgressWSManager()
+            ws = MagicMock()
+            ws_id = id(ws)
+
+            assert ws_id not in mgr._last_seen
+
+            mgr.record_activity(ws)
+            assert ws_id in mgr._last_seen
+            first_time = mgr._last_seen[ws_id]
+
+            import time
+            time.sleep(0.01)
+            mgr.record_activity(ws)
+            assert mgr._last_seen[ws_id] > first_time
+
+        asyncio.get_event_loop().run_until_complete(run_test())
+
+    def test_connect_sets_initial_last_seen(self):
+        """connect 时应该初始化 last_seen"""
+        import asyncio
+        from unittest.mock import MagicMock
+        from services.ws_manager import ProgressWSManager
+
+        async def run_test():
+            mgr = ProgressWSManager()
+            ws = MagicMock()
+            task_id = "test-task"
+
+            await mgr.connect(task_id, ws)
+            assert id(ws) in mgr._last_seen
+
+        asyncio.get_event_loop().run_until_complete(run_test())
+
+    def test_disconnect_cleans_last_seen(self):
+        """disconnect 时应该清理 last_seen 记录"""
+        import asyncio
+        from unittest.mock import MagicMock
+        from services.ws_manager import ProgressWSManager
+
+        async def run_test():
+            mgr = ProgressWSManager()
+            ws = MagicMock()
+            task_id = "test-task"
+
+            await mgr.connect(task_id, ws)
+            ws_id = id(ws)
+            assert ws_id in mgr._last_seen
+
+            await mgr.disconnect(task_id, ws)
+            assert ws_id not in mgr._last_seen
+
+        asyncio.get_event_loop().run_until_complete(run_test())
+
+
+# ============================================================================
+# 回归测试 22: WR-008 WebSocket 重连后补发最新进度
+# Bug: 前端 WebSocket 重连后会丢失中间进度消息
+# 修复: ws_manager 缓存最新进度，重连时立即补发
+# ============================================================================
+
+class TestWebSocketProgressCache:
+    """防止 WebSocket 重连后进度丢失"""
+
+    def test_send_progress_saves_to_cache(self):
+        """send_progress 应该保存最新进度到缓存"""
+        import asyncio
+        from unittest.mock import MagicMock, AsyncMock
+        from services.ws_manager import ProgressWSManager
+
+        async def run_test():
+            mgr = ProgressWSManager()
+            task_id = "test-cache-1"
+
+            data = {"task_id": task_id, "status": "running", "progress": 50, "step": "test"}
+            await mgr.send_progress(task_id, data)
+
+            cached = mgr.get_cached_progress(task_id)
+            assert cached is not None, "进度应该被缓存"
+            assert cached["progress"] == 50
+            assert cached["status"] == "running"
+
+        asyncio.get_event_loop().run_until_complete(run_test())
+
+    def test_send_final_saves_to_cache(self):
+        """send_final 也应该保存最终状态到缓存"""
+        import asyncio
+        from unittest.mock import MagicMock, AsyncMock
+        from services.ws_manager import ProgressWSManager
+
+        async def run_test():
+            mgr = ProgressWSManager()
+            task_id = "test-cache-final"
+            ws = MagicMock()
+            ws.send_json = AsyncMock()
+            ws.close = AsyncMock()
+
+            await mgr.connect(task_id, ws)
+
+            final_data = {"task_id": task_id, "status": "completed", "progress": 100}
+            await mgr.send_final(task_id, final_data)
+
+            cached = mgr.get_cached_progress(task_id)
+            assert cached is not None
+            assert cached["status"] == "completed"
+            assert cached["progress"] == 100
+
+        asyncio.get_event_loop().run_until_complete(run_test())
+
+    def test_get_cached_progress_returns_copy(self):
+        """get_cached_progress 应该返回副本，防止外部修改缓存"""
+        from services.ws_manager import ProgressWSManager
+
+        mgr = ProgressWSManager()
+        task_id = "test-copy"
+        mgr._progress_cache[task_id] = {"progress": 50}
+        mgr._progress_cache_time[task_id] = __import__("time").time()
+
+        cached = mgr.get_cached_progress(task_id)
+        cached["progress"] = 999
+
+        assert mgr._progress_cache[task_id]["progress"] == 50, \
+            "修改返回值不应该影响内部缓存"
+
+    def test_progress_cache_has_ttl(self):
+        """进度缓存应该有 TTL 过期机制"""
+        import time
+        from services.ws_manager import ProgressWSManager, PROGRESS_HISTORY_TTL
+
+        mgr = ProgressWSManager()
+        task_id = "test-ttl"
+        mgr._progress_cache[task_id] = {"progress": 50}
+        mgr._progress_cache_time[task_id] = time.time() - PROGRESS_HISTORY_TTL - 10
+
+        cached = mgr.get_cached_progress(task_id)
+        assert cached is None, "过期的缓存应该返回 None"
+
+
+# ============================================================================
+# 回归测试 23: WR-009 统一消息信封格式
+# Bug: 各 channel 消息格式不一致，缺少统一的消息信封
+# 修复: MessageBus publish 时统一包装信封（type, channel, timestamp, data）
+# ============================================================================
+
+class TestMessageBusMessageEnvelope:
+    """防止消息格式不统一导致处理混乱"""
+
+    def test_publish_wraps_in_envelope(self):
+        """publish 的消息应该被包装在统一信封中"""
+        import threading
+        from services.message_bus import MessageBus
+
+        MessageBus._instance = None
+        MessageBus._lock = threading.Lock()
+
+        try:
+            bus = MessageBus(maxsize=10)
+            bus._running = True
+            bus._stopped = False
+
+            bus.publish("ws_progress", {"task_id": "test-env", "progress": 50})
+
+            item = bus._queue.get_nowait()
+            channel, envelope = item
+
+            assert "type" in envelope, "信封应该有 type 字段"
+            assert "channel" in envelope, "信封应该有 channel 字段"
+            assert "timestamp" in envelope, "信封应该有 timestamp 字段"
+            assert "data" in envelope, "信封应该有 data 字段"
+
+            assert envelope["type"] == "ws_progress"
+            assert envelope["channel"] == "ws_progress"
+            assert isinstance(envelope["timestamp"], float)
+            assert envelope["data"]["task_id"] == "test-env"
+            assert envelope["data"]["progress"] == 50
+
+        finally:
+            MessageBus._instance = None
+            MessageBus._lock = threading.Lock()
+
+    def test_dispatch_extracts_data_from_envelope(self):
+        """_dispatch 应该从信封中提取 data 传递给下游"""
+        import threading
+        import asyncio
+        import time
+        from unittest.mock import MagicMock, patch, AsyncMock
+        from services.message_bus import MessageBus
+
+        MessageBus._instance = None
+        MessageBus._lock = threading.Lock()
+
+        try:
+            bus = MessageBus()
+            loop = asyncio.new_event_loop()
+            bus.set_loop(loop)
+
+            called_with = [None]
+
+            async def fake_send_progress(task_id, data):
+                called_with[0] = (task_id, data)
+
+            mock_ws = MagicMock()
+            mock_ws.send_progress = fake_send_progress
+
+            loop_thread = None
+
+            def run_loop():
+                asyncio.set_event_loop(loop)
+                loop.run_forever()
+
+            loop_thread = threading.Thread(target=run_loop, daemon=True)
+            loop_thread.start()
+            time.sleep(0.1)
+
+            try:
+                with patch("services.message_bus.ws_manager", mock_ws):
+                    envelope = {
+                        "type": "ws_progress",
+                        "channel": "ws_progress",
+                        "timestamp": 12345.0,
+                        "data": {"task_id": "env-test", "progress": 75}
+                    }
+
+                    bus._dispatch("ws_progress", envelope)
+
+                time.sleep(0.3)
+
+                assert called_with[0] is not None, "send_progress 应该被调用"
+                task_id, data = called_with[0]
+                assert task_id == "env-test"
+                assert data["progress"] == 75
+                assert "timestamp" not in data or data.get("task_id") == "env-test", \
+                    "传递给下游的应该是 data 部分，不是完整信封"
+
+            finally:
+                loop.call_soon_threadsafe(loop.stop)
+                loop_thread.join(timeout=2.0)
+
+        finally:
+            loop.close()
+            MessageBus._instance = None
+            MessageBus._lock = threading.Lock()
+
+
+# ============================================================================
+# 回归测试 24: WR-010 /diag 端点需要认证
+# Bug: /diag 端点泄漏大量系统敏感信息（无认证）
+# 修复: 需要 ADMIN_TOKEN 认证，未配置时默认禁用
+# ============================================================================
+
+class TestDiagEndpointAuth:
+    """防止诊断接口未授权访问泄漏系统信息"""
+
+    def test_diag_without_admin_token_disabled(self):
+        """未配置 ADMIN_TOKEN 时，diag 接口应该返回 403"""
+        from fastapi.testclient import TestClient
+        from app import create_app
+
+        import config
+        old_token = config.ADMIN_TOKEN
+        try:
+            config.ADMIN_TOKEN = ""
+
+            app = create_app()
+            client = TestClient(app)
+
+            response = client.get("/api/v1/diag")
+            assert response.status_code == 403, f"未配置 token 时应该返回 403，实际返回 {response.status_code}"
+        finally:
+            config.ADMIN_TOKEN = old_token
+
+    def test_diag_with_wrong_token(self):
+        """配置了 ADMIN_TOKEN 但请求带错误 token 时应该返回 401"""
+        from fastapi.testclient import TestClient
+        from app import create_app
+
+        import config
+        old_token = config.ADMIN_TOKEN
+        try:
+            config.ADMIN_TOKEN = "secret-diag-123"
+
+            app = create_app()
+            client = TestClient(app)
+
+            response = client.get("/api/v1/diag", headers={"X-Admin-Token": "wrong-token"})
+            assert response.status_code == 401, f"错误 token 应该返回 401，实际返回 {response.status_code}"
+
+            response = client.get("/api/v1/diag")
+            assert response.status_code == 401, f"缺少 token 应该返回 401，实际返回 {response.status_code}"
+        finally:
+            config.ADMIN_TOKEN = old_token
+
+    def test_diag_with_correct_token(self):
+        """配置了 ADMIN_TOKEN 且请求带正确 token 时应该成功"""
+        from fastapi.testclient import TestClient
+        from app import create_app
+
+        import config
+        old_token = config.ADMIN_TOKEN
+        try:
+            config.ADMIN_TOKEN = "secret-diag-123"
+
+            app = create_app()
+            client = TestClient(app)
+
+            response = client.get("/api/v1/diag", headers={"X-Admin-Token": "secret-diag-123"})
+            assert response.status_code == 200, f"正确 token 应该返回 200，实际返回 {response.status_code}"
+            data = response.json()
+            assert "backend" in data
+        finally:
+            config.ADMIN_TOKEN = old_token
+
+
+# ============================================================================
+# 回归测试 25: WR-011 /ws/cache-events 端点需要认证
+# Bug: /ws/cache-events 端点无认证，可任意连接监听缓存事件
+# 修复: 需要 token 查询参数认证，未配置时默认禁用
+# ============================================================================
+
+class TestCacheEventsWSAuth:
+    """防止缓存事件 WebSocket 未授权访问"""
+
+    def test_cache_events_without_token_rejected(self):
+        """未配置 token 时，cache-events WS 应该被拒绝"""
+        from fastapi.testclient import TestClient
+        from app import create_app
+
+        import config
+        old_token = config.ADMIN_TOKEN
+        try:
+            config.ADMIN_TOKEN = ""
+
+            app = create_app()
+            client = TestClient(app)
+
+            with pytest.raises(Exception):
+                with client.websocket_connect("/api/v1/ws/cache-events") as ws:
+                    pass
+
+        finally:
+            config.ADMIN_TOKEN = old_token
+
+    def test_cache_events_with_wrong_token_rejected(self):
+        """配置了 token 但传错时应该被拒绝"""
+        from fastapi.testclient import TestClient
+        from app import create_app
+
+        import config
+        old_token = config.ADMIN_TOKEN
+        try:
+            config.ADMIN_TOKEN = "cache-secret-456"
+
+            app = create_app()
+            client = TestClient(app)
+
+            with pytest.raises(Exception):
+                with client.websocket_connect("/api/v1/ws/cache-events?token=wrong") as ws:
+                    pass
+
+        finally:
+            config.ADMIN_TOKEN = old_token
+
+    def test_cache_events_with_correct_token_accepted(self):
+        """配置了 token 且传对时应该能连接"""
+        from fastapi.testclient import TestClient
+        from app import create_app
+
+        import config
+        old_token = config.ADMIN_TOKEN
+        try:
+            config.ADMIN_TOKEN = "cache-secret-456"
+
+            app = create_app()
+            client = TestClient(app)
+
+            with client.websocket_connect("/api/v1/ws/cache-events?token=cache-secret-456") as ws:
+                data = ws.receive_json()
+                assert data is not None
+
+        finally:
+            config.ADMIN_TOKEN = old_token
+
+
+# ============================================================================
+# 回归测试 26: WR-012 MessageBus 停止后 publish 应该被拒绝
+# Bug: MessageBus 事件循环关闭后，publish 仍可入队，消息最终被静默丢弃
+# 修复: stop 后 publish 直接拒绝返回 False，不浪费队列空间
+# ============================================================================
+
+class TestMessageBusRejectAfterStop:
+    """防止 MessageBus 停止后消息静默丢失"""
+
+    def test_publish_after_stop_returns_false(self):
+        """stop() 之后再 publish 应该返回 False 并拒绝入队"""
+        import threading
+        from services.message_bus import MessageBus
+
+        MessageBus._instance = None
+        MessageBus._lock = threading.Lock()
+
+        try:
+            bus = MessageBus(maxsize=10)
+            bus._running = True
+            bus._stopped = False
+
+            result = bus.publish("ws_progress", {"test": "before-stop"})
+            assert result is True
+
+            bus._running = False
+            bus._stopped = True
+
+            qsize_before = bus._queue.qsize()
+
+            result = bus.publish("ws_progress", {"test": "after-stop"})
+            assert result is False, "停止后 publish 应该返回 False"
+
+            assert bus._queue.qsize() == qsize_before, \
+                "停止后不应该再有消息入队"
+
+        finally:
+            MessageBus._instance = None
+            MessageBus._lock = threading.Lock()
+
+    def test_publish_when_loop_closed_returns_false(self):
+        """事件循环关闭后 publish 应该返回 False"""
+        import threading
+        import asyncio
+        from services.message_bus import MessageBus
+
+        MessageBus._instance = None
+        MessageBus._lock = threading.Lock()
+
+        try:
+            bus = MessageBus(maxsize=10)
+            bus._running = True
+            bus._stopped = False
+
+            loop = asyncio.new_event_loop()
+            bus.set_loop(loop)
+            loop.close()
+
+            qsize_before = bus._queue.qsize()
+
+            result = bus.publish("ws_progress", {"test": "loop-closed"})
+            assert result is False
+
+            assert bus._queue.qsize() == qsize_before
+
+        finally:
+            MessageBus._instance = None
+            MessageBus._lock = threading.Lock()
+
+    def test_stop_sets_stopped_flag(self):
+        """stop() 应该设置 _stopped=True，之后 publish 被拒绝"""
+        import threading
+        from services.message_bus import MessageBus
+
+        MessageBus._instance = None
+        MessageBus._lock = threading.Lock()
+
+        try:
+            bus = MessageBus(maxsize=10)
+
+            assert bus._running is False, "初始状态 _running 应为 False"
+
+            bus._running = True
+            bus._stopped = False
+            assert bus._stopped is False, "运行中 _stopped 应为 False"
+
+            result = bus.publish("ws_progress", {"test": "running"})
+            assert result is True, "运行中 publish 应该成功"
+
+            bus._running = False
+            bus._stopped = True
+            assert bus._stopped is True, "stop 后 _stopped 应为 True"
+
+            result = bus.publish("ws_progress", {"test": "after-stop"})
+            assert result is False, "stop 后 publish 应该返回 False"
+
+        finally:
+            MessageBus._instance = None
+            MessageBus._lock = threading.Lock()
+
+
+# ============================================================================
+# 回归测试 27: WR-013 render_cache_update 按 task_id 过滤
+# Bug: render_cache_update 广播给所有连接，而非按 task_id 过滤
+# 修复: 只发送给对应 task_id 的连接，不全局广播
+# ============================================================================
+
+class TestRenderCacheUpdateScoped:
+    """防止渲染缓存更新消息不必要的全局广播"""
+
+    def test_broadcast_render_cache_only_sends_to_task_id(self):
+        """broadcast_render_cache_update 应该只发给对应 task_id 的连接"""
+        import asyncio
+        from unittest.mock import MagicMock, AsyncMock, call
+        from services.ws_manager import ProgressWSManager
+
+        async def run_test():
+            mgr = ProgressWSManager()
+
+            ws1 = MagicMock()
+            ws1.send_json = AsyncMock()
+            ws2 = MagicMock()
+            ws2.send_json = AsyncMock()
+            ws3 = MagicMock()
+            ws3.send_json = AsyncMock()
+
+            await mgr.connect("task-a", ws1)
+            await mgr.connect("task-a", ws2)
+            await mgr.connect("task-b", ws3)
+
+            await mgr.broadcast_render_cache_update("task-a", [{"name": "test.wav"}])
+
+            assert ws1.send_json.await_count == 1, "task-a 的连接应该收到 1 条消息"
+            assert ws2.send_json.await_count == 1, "task-a 的所有连接都应该收到消息"
+            assert ws3.send_json.await_count == 0, "task-b 的连接不应该收到消息"
+
+        asyncio.get_event_loop().run_until_complete(run_test())
+
+    def test_broadcast_method_still_exists(self):
+        """broadcast 全局广播方法应该仍然存在（用于其他用途）"""
+        from services.ws_manager import ProgressWSManager
+
+        mgr = ProgressWSManager()
+        assert hasattr(mgr, "broadcast"), "全局 broadcast 方法应该仍然存在"
+        assert callable(mgr.broadcast)
+
+    def test_render_cache_update_uses_task_id_lookup(self):
+        """broadcast_render_cache_update 内部应该使用 task_id 查找连接"""
+        import asyncio
+        from unittest.mock import MagicMock, AsyncMock, patch
+        from services.ws_manager import ProgressWSManager
+
+        async def run_test():
+            mgr = ProgressWSManager()
+
+            ws = MagicMock()
+            ws.send_json = AsyncMock()
+
+            await mgr.connect("task-x", ws)
+
+            with patch.object(mgr, "broadcast") as mock_broadcast:
+                await mgr.broadcast_render_cache_update("task-x", [])
+                assert not mock_broadcast.called, \
+                    "不应该调用全局 broadcast"
+
+        asyncio.get_event_loop().run_until_complete(run_test())
+
+
+# ============================================================================
+# 回归测试 28: WR-014 /api/log 和 /api/v1/log 不重复定义
+# Bug: /api/log 和 /api/v1/log 重复路由定义，代码冗余
+# 修复: 消除重复代码，/api/log 复用 /api/v1/log 的实现
+# ============================================================================
+
+class TestLogRouteNoDuplicate:
+    """防止日志路由重复定义导致维护成本高"""
+
+    def test_app_log_route_reuses_v1_impl(self):
+        """app.py 中的 /api/log 应该复用 system 路由的实现"""
+        app_path = os.path.join(os.path.dirname(__file__), "..", "app.py")
+        with open(app_path) as f:
+            content = f.read()
+
+        assert "from api.routes.system import LogRequest" in content or \
+               "from api.routes.system import" in content, \
+            "app.py 应该从 system 模块导入 LogRequest 或处理函数"
+
+        assert "_v1_log_message" in content or "log_message" in content, \
+            "app.py 应该复用 v1 日志处理函数"
+
+    def test_log_request_only_defined_once(self):
+        """LogRequest 模型应该只定义一次"""
+        system_path = os.path.join(os.path.dirname(__file__), "..", "api", "routes", "system.py")
+        with open(system_path) as f:
+            system_content = f.read()
+
+        app_path = os.path.join(os.path.dirname(__file__), "..", "app.py")
+        with open(app_path) as f:
+            app_content = f.read()
+
+        system_count = system_content.count("class LogRequest")
+        app_count = app_content.count("class LogRequest")
+
+        assert system_count >= 1, "system.py 应该定义 LogRequest"
+        assert app_count == 0, f"app.py 不应该再定义 LogRequest（应该导入复用）"
+
+    def test_both_log_endpoints_work(self):
+        """/api/log 和 /api/v1/log 两个端点都应该能正常工作"""
+        from fastapi.testclient import TestClient
+        from app import create_app
+
+        app = create_app()
+        client = TestClient(app)
+
+        response1 = client.post("/api/v1/log", json={"message": "test v1", "level": "info"})
+        assert response1.status_code == 200
+        assert response1.json()["status"] == "ok"
+
+        response2 = client.post("/api/log", json={"message": "test compat", "level": "info"})
+        assert response2.status_code == 200
+        assert response2.json()["status"] == "ok"
+
+
+# ============================================================================
+# 回归测试 20: TaskExecutor.cancel 中 state_change from_status 不能为空
+# Bug: TL-007 - cancel 时 tracer.record_state_change 的 from_status 是空字符串
+# 修复: 从 trace 的最后一个状态变更中获取 from_status
+# ============================================================================
+
+class TestCancelStateChangeFromStatus:
+    """防止取消任务时 from_status 为空"""
+
+    def test_cancel_has_valid_from_status(self):
+        """取消任务时，状态变更的 from_status 应该是有效的状态名"""
+        import tempfile
+        import os
+        import time
+        from database import init_db, create_task
+        from services.task_executor import get_task_executor
+        from services.task_manager import RepairTask
+        from services.observability import get_task_tracer
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            import config
+            old_upload = config.UPLOAD_DIR
+            old_output = config.OUTPUT_DIR
+            old_db = config.DB_PATH
+            try:
+                config.UPLOAD_DIR = tmpdir
+                config.OUTPUT_DIR = tmpdir
+                config.DB_PATH = os.path.join(tmpdir, "test.db")
+                init_db()
+
+                import soundfile as sf
+                import numpy as np
+                sr = 44100
+                t = np.arange(int(sr * 1.0)) / sr
+                y = 0.3 * np.sin(2 * np.pi * 440 * t)
+                audio_path = os.path.join(tmpdir, "test.wav")
+                sf.write(audio_path, y, sr)
+
+                task_id = "reg_tl007_from_status"
+                create_task(task_id, "test.wav", audio_path, {"algorithm_version": "v2.4"}, file_hash="hash_tl007")
+
+                from services.task_manager import _active_tasks, _active_tasks_lock
+                with _active_tasks_lock:
+                    _active_tasks.clear()
+
+                task = RepairTask(task_id, audio_path, {"algorithm_version": "v2.4"}, mobile_mode=False)
+                executor = get_task_executor()
+                executor.submit(task)
+
+                time.sleep(0.1)
+                executor.cancel(task_id)
+
+                time.sleep(0.5)
+
+                tracer = get_task_tracer()
+                history = tracer.get_task_history(task_type="repair")
+                task_trace = None
+                for tr in history:
+                    if tr.task_id == task_id:
+                        task_trace = tr
+                        break
+
+                assert task_trace is not None, "应该能在历史中找到任务 trace"
+
+                cancel_changes = [sc for sc in task_trace.state_changes if sc.to_status == "cancelled"]
+                assert len(cancel_changes) > 0, "应该有 cancelled 状态变更"
+
+                from_status = cancel_changes[0].from_status
+                assert from_status != "", (
+                    "TL-007: 取消时 state_change 的 from_status 是空字符串，"
+                    "无法知道任务是从什么状态转为 cancelled 的。"
+                )
+                assert from_status in ("pending", "repairing", "processing"), (
+                    f"from_status 应该是有效的状态名，而不是 '{from_status}'"
+                )
+            finally:
+                config.UPLOAD_DIR = old_upload
+                config.OUTPUT_DIR = old_output
+                config.DB_PATH = old_db
+
+
+# ============================================================================
+# 回归测试 21: RenderTask 应该有 stuck monitor 机制
+# Bug: TL-008 - RenderTask 缺少 stuck monitor 线程
+# 修复: 给 RenderTask 添加与 RepairTask/DetectTask 一致的 stuck monitor
+# ============================================================================
+
+class TestRenderTaskStuckMonitor:
+    """防止 RenderTask 缺少卡住检测机制"""
+
+    def test_render_task_has_stuck_monitor_attributes(self):
+        """RenderTask 应该有 stuck monitor 相关的属性和方法"""
+        from services.task_manager import RenderTask
+
+        task = RenderTask(
+            task_id="reg_tl008_stuck",
+            input_path="/tmp/fake.wav",
+            output_path="/tmp/out.wav",
+            target_sr=44100,
+            bit_depth=16,
+            render_filename="out.wav",
+        )
+
+        assert hasattr(task, "_stop_monitor"), "RenderTask 应该有 _stop_monitor 属性"
+        assert hasattr(task, "_monitor_thread"), "RenderTask 应该有 _monitor_thread 属性"
+        assert hasattr(task, "_start_stuck_monitor"), "RenderTask 应该有 _start_stuck_monitor 方法"
+        assert callable(task._start_stuck_monitor), "_start_stuck_monitor 应该是可调用的"
+
+
+# ============================================================================
+# 回归测试 22: 两套取消机制行为应该一致
+# Bug: TL-009 - cancel_task 和 TaskExecutor.cancel 行为不一致
+# 修复: cancel_task 委托给 TaskExecutor.cancel，统一行为
+# ============================================================================
+
+class TestUnifiedCancelMechanism:
+    """防止两套取消机制行为不一致"""
+
+    def test_cancel_task_delegates_to_executor(self):
+        """cancel_task 应该委托给 TaskExecutor.cancel，行为一致"""
+        import inspect
+        from services.task_manager import cancel_task
+
+        source = inspect.getsource(cancel_task)
+        assert "get_task_executor" in source or "TaskExecutor" in source, (
+            "TL-009: cancel_task 应该委托给 TaskExecutor，"
+            "两套取消机制应该统一行为，避免不一致"
+        )
+
+    def test_both_cancel_paths_update_tracer(self):
+        """两种取消路径都应该更新 tracer 和 metrics"""
+        import tempfile
+        import os
+        import time
+        from database import init_db, create_task
+        from services.task_executor import get_task_executor
+        from services.task_manager import RepairTask, cancel_task
+        from services.observability import get_task_tracer, get_system_metrics
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            import config
+            old_upload = config.UPLOAD_DIR
+            old_output = config.OUTPUT_DIR
+            old_db = config.DB_PATH
+            try:
+                config.UPLOAD_DIR = tmpdir
+                config.OUTPUT_DIR = tmpdir
+                config.DB_PATH = os.path.join(tmpdir, "test.db")
+                init_db()
+
+                import soundfile as sf
+                import numpy as np
+                sr = 44100
+                t_arr = np.arange(int(sr * 1.0)) / sr
+                y = 0.3 * np.sin(2 * np.pi * 440 * t_arr)
+                audio_path = os.path.join(tmpdir, "test.wav")
+                sf.write(audio_path, y, sr)
+
+                metrics = get_system_metrics()
+
+                task_id_1 = "reg_tl009_cancel_1"
+                create_task(task_id_1, "test.wav", audio_path, {"algorithm_version": "v2.4"}, file_hash="hash_tl009a")
+
+                from services.task_manager import _active_tasks, _active_tasks_lock
+                with _active_tasks_lock:
+                    _active_tasks.clear()
+
+                task1 = RepairTask(task_id_1, audio_path, {"algorithm_version": "v2.4"}, mobile_mode=False)
+                executor = get_task_executor()
+                executor.submit(task1)
+                time.sleep(0.1)
+                executor.cancel(task_id_1)
+                time.sleep(0.3)
+
+                task_id_2 = "reg_tl009_cancel_2"
+                create_task(task_id_2, "test.wav", audio_path, {"algorithm_version": "v2.4"}, file_hash="hash_tl009b")
+
+                task2 = RepairTask(task_id_2, audio_path, {"algorithm_version": "v2.4"}, mobile_mode=False)
+                executor.submit(task2)
+                time.sleep(0.1)
+                cancel_task(task_id_2)
+                time.sleep(0.3)
+
+                tracer = get_task_tracer()
+                history = tracer.get_task_history(task_type="repair")
+                task_1_trace = None
+                task_2_trace = None
+                for tr in history:
+                    if tr.task_id == task_id_1:
+                        task_1_trace = tr
+                    elif tr.task_id == task_id_2:
+                        task_2_trace = tr
+
+                assert task_1_trace is not None, "TaskExecutor.cancel 路径应该有 trace 记录"
+                assert task_2_trace is not None, "cancel_task 路径应该有 trace 记录"
+
+                stats = metrics.get_task_stats()
+                assert stats["cancelled_tasks"] >= 2, "两种取消路径都应该计入 cancelled 统计"
+            finally:
+                config.UPLOAD_DIR = old_upload
+                config.OUTPUT_DIR = old_output
+                config.DB_PATH = old_db
+
+
+# ============================================================================
+# 回归测试 23: 两套活跃任务计数应该一致
+# Bug: TL-010 - SystemMetrics._active_tasks 与 task_manager._active_tasks 可能不一致
+# 修复: SystemMetrics.get_task_stats 从 task_manager 获取活跃任务数作为权威来源
+# ============================================================================
+
+class TestActiveTaskCountersConsistent:
+    """防止两套活跃任务计数不一致"""
+
+    def test_two_counters_are_consistent_after_submit_and_cancel(self):
+        """提交并取消任务后，两套计数应该一致"""
+        import tempfile
+        import os
+        import time
+        from database import init_db, create_task
+        from services.task_executor import get_task_executor
+        from services.task_manager import RepairTask, get_active_task_count
+        from services.observability import get_system_metrics
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            import config
+            old_upload = config.UPLOAD_DIR
+            old_output = config.OUTPUT_DIR
+            old_db = config.DB_PATH
+            try:
+                config.UPLOAD_DIR = tmpdir
+                config.OUTPUT_DIR = tmpdir
+                config.DB_PATH = os.path.join(tmpdir, "test.db")
+                init_db()
+
+                import soundfile as sf
+                import numpy as np
+                sr = 44100
+                t_arr = np.arange(int(sr * 1.0)) / sr
+                y = 0.3 * np.sin(2 * np.pi * 440 * t_arr)
+                audio_path = os.path.join(tmpdir, "test.wav")
+                sf.write(audio_path, y, sr)
+
+                task_id = "reg_tl010_dual_counter"
+                create_task(task_id, "test.wav", audio_path, {"algorithm_version": "v2.4"}, file_hash="hash_tl010")
+
+                from services.task_manager import _active_tasks, _active_tasks_lock
+                with _active_tasks_lock:
+                    _active_tasks.clear()
+
+                metrics = get_system_metrics()
+
+                task = RepairTask(task_id, audio_path, {"algorithm_version": "v2.4"}, mobile_mode=False)
+                executor = get_task_executor()
+                executor.submit(task)
+
+                time.sleep(0.1)
+                executor.cancel(task_id)
+                time.sleep(0.5)
+
+                count_set = get_active_task_count()
+                count_metrics = metrics.get_task_stats()["active_tasks"]
+
+                assert count_set == count_metrics, (
+                    f"TL-010: 两套活跃任务计数不一致。"
+                    f"task_manager 集合计数={count_set}, "
+                    f"SystemMetrics 计数={count_metrics}。"
+                )
+            finally:
+                config.UPLOAD_DIR = old_upload
+                config.OUTPUT_DIR = old_output
+                config.DB_PATH = old_db
+
+
+# ============================================================================
+# 回归测试 24: get_queue_status 和 mark_stuck_tasks 应包含 rendering 状态
+# Bug: TL-011 - 渲染任务的卡住检测不生效
+# 修复: 在检查列表中添加 'rendering' 状态
+# ============================================================================
+
+class TestRenderingInStatusChecks:
+    """防止 rendering 状态任务被遗漏"""
+
+    def test_rendering_in_queue_status(self):
+        """get_queue_status 的 running 列表应包含 rendering 状态的任务"""
+        import tempfile
+        import os
+        from database import init_db, create_task, update_task, get_queue_status
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "test.db")
+            import config
+            old_db = config.DB_PATH
+            try:
+                config.DB_PATH = db_path
+                init_db()
+
+                task_id = "reg_tl011_rendering_queue"
+                create_task(task_id, "test.wav", "/tmp/test.wav", {}, file_hash="hash_tl011")
+                update_task(task_id, status="rendering", progress=0.5, step="渲染中...")
+
+                queue_status = get_queue_status()
+                running_ids = [t["id"] for t in queue_status["running"]]
+
+                assert task_id in running_ids, (
+                    "TL-011: get_queue_status 的 running 列表未包含 'rendering' 状态的任务。"
+                    "渲染任务在运行队列中不可见。"
+                )
+            finally:
+                config.DB_PATH = old_db
+
+    def test_rendering_in_mark_stuck_tasks(self):
+        """mark_stuck_tasks 应覆盖 rendering 状态"""
+        import tempfile
+        import os
+        from database import init_db, create_task, update_task, get_task, get_db, mark_stuck_tasks
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "test.db")
+            import config
+            old_db = config.DB_PATH
+            try:
+                config.DB_PATH = db_path
+                init_db()
+
+                task_id = "reg_tl011_rendering_stuck"
+                create_task(task_id, "test.wav", "/tmp/test.wav", {}, file_hash="hash_tl011b")
+                update_task(task_id, status="rendering", progress=0.5, step="渲染中...")
+
+                conn = get_db()
+                conn.execute(
+                    "UPDATE tasks SET updated_at = datetime('now', '-10 minutes') WHERE id = ?",
+                    (task_id,),
+                )
+                conn.commit()
+                conn.close()
+
+                mark_stuck_tasks(timeout_seconds=60)
+
+                task = get_task(task_id)
+                assert task["status"] == "timeout", (
+                    "TL-011: mark_stuck_tasks 未覆盖 'rendering' 状态，"
+                    "渲染任务永远不会被标记为超时。"
+                )
+            finally:
+                config.DB_PATH = old_db
+
+
+# ============================================================================
+# 回归测试 25: RenderTask.cleanup 应使用 _get_loop() 而非 get_event_loop()
+# Bug: TL-012 - 后台线程调用 get_event_loop() 可能失败
+# 修复: 使用 _get_loop() 获取主线程事件循环
+# ============================================================================
+
+class TestRenderTaskCleanupEventLoop:
+    """防止 RenderTask.cleanup 用错事件循环获取方式"""
+
+    def test_cleanup_uses_get_loop_helper(self):
+        """RenderTask.cleanup 应该使用 _get_loop() 而非 asyncio.get_event_loop()"""
+        import inspect
+        from services.task_manager import RenderTask
+
+        cleanup_source = inspect.getsource(RenderTask.cleanup)
+
+        uses_get_event_loop = "asyncio.get_event_loop()" in cleanup_source
+        uses_get_loop_helper = "_get_loop(" in cleanup_source
+
+        assert not uses_get_event_loop or uses_get_loop_helper, (
+            "TL-012: RenderTask.cleanup 使用 asyncio.get_event_loop() 获取事件循环。"
+            "在后台线程中调用会创建新的未运行事件循环，导致 WebSocket 广播失败。"
+            "应该使用 task_manager._get_loop() 来获取主线程的运行中事件循环。"
+        )
+
+
+# ============================================================================
+# 回归测试 26: RenderTask 应校验 track_type 参数有效性
+# Bug: TL-013 - 无效 track_type 静默走意外分支
+# 修复: 在 __init__ 中校验 track_type，无效值抛异常
+# ============================================================================
+
+class TestRenderTaskTrackTypeValidation:
+    """防止无效 track_type 导致意外行为"""
+
+    def test_invalid_track_type_raises_error(self):
+        """传入无效 track_type 应该抛出 ValueError"""
+        from services.task_manager import RenderTask
+
+        with pytest.raises(ValueError):
+            RenderTask(
+                task_id="reg_tl013_invalid",
+                input_path="/tmp/in.wav",
+                output_path="/tmp/out.wav",
+                target_sr=44100,
+                bit_depth=16,
+                render_filename="out.wav",
+                vocal_path="/tmp/vocal.wav",
+                accompaniment_path="/tmp/acc.wav",
+                track_type="invalid_type",
+            )
+
+    def test_valid_track_types_accepted(self):
+        """有效的 track_type（vocal/accompaniment/both）应该正常通过"""
+        from services.task_manager import RenderTask
+
+        for valid_type in ("vocal", "accompaniment", "both"):
+            task = RenderTask(
+                task_id=f"reg_tl013_valid_{valid_type}",
+                input_path="/tmp/in.wav",
+                output_path="/tmp/out.wav",
+                target_sr=44100,
+                bit_depth=16,
+                render_filename="out.wav",
+                vocal_path="/tmp/vocal.wav",
+                accompaniment_path="/tmp/acc.wav",
+                track_type=valid_type,
+            )
+            assert task.track_type == valid_type
+
+
+# ============================================================================
+# 回归测试 27: DetectTask 应该有 on_error 实现
+# Bug: TL-014 - DetectTask 缺少 on_error，与 RepairTask 不一致
+# 修复: 给 DetectTask 添加 on_error 方法，处理 MemoryError
+# ============================================================================
+
+class TestDetectTaskOnError:
+    """防止 DetectTask 缺少错误处理不一致"""
+
+    def test_detect_task_has_on_error(self):
+        """DetectTask 应该有 on_error 方法"""
+        from services.task_manager import DetectTask, RepairTask
+
+        repair_has_on_error = "on_error" in RepairTask.__dict__
+        detect_has_on_error = "on_error" in DetectTask.__dict__
+
+        assert detect_has_on_error == repair_has_on_error, (
+            "TL-014: DetectTask 缺少 on_error 实现，与 RepairTask 不一致。"
+            "RepairTask 有特殊的 MemoryError 处理，DetectTask 应该保持一致。"
+        )
+
+    def test_detect_task_on_error_handles_memory_error(self):
+        """DetectTask.on_error 应该正确处理 MemoryError"""
+        from services.task_manager import DetectTask
+        import time
+
+        task = DetectTask(
+            task_id="reg_tl014_memerr",
+            audio_path="/tmp/test.wav",
+            detect_type="original",
+            detector_version="v1.1",
+        )
+        task._start_time = time.time()
+
+        result = task.on_error(MemoryError("out of memory"))
+
+        assert result is not None, "MemoryError 应该返回自定义错误信息"
+        assert "error" in result, "返回值应该包含 error 字段"
+        assert result["error"] == "out of memory", "error 字段应该是原始错误信息"
+        assert "step" in result, "返回值应该包含 step 字段"
+        assert "内存不足" in result["step"], "step 字段应该包含内存不足"
+
+
+# ============================================================================
+# 回归测试 28: stuck monitor 线程 cleanup 时应该 join
+# Bug: TL-015 - 只设 stop 标志不 join，可能有短暂残留
+# 修复: 在 cleanup 中 join monitor 线程
+# ============================================================================
+
+class TestStuckMonitorThreadJoin:
+    """防止 stuck monitor 线程短暂泄漏"""
+
+    def test_repair_task_cleanup_joins_monitor(self):
+        """RepairTask.cleanup 应该 join monitor 线程"""
+        import inspect
+        from services.task_manager import RepairTask
+
+        cleanup_source = inspect.getsource(RepairTask.cleanup)
+        joins_thread = "join(" in cleanup_source
+        sets_stop = "_stop_monitor" in cleanup_source
+
+        assert sets_stop and joins_thread, (
+            "TL-015: RepairTask.cleanup 只设置了 _stop_monitor 标志但没有 join 线程。"
+            "虽然是 daemon 线程不会阻止进程退出，但任务结束后 monitor 线程可能"
+            "还存活最多 2 秒（sleep 间隔），造成短暂的线程泄漏。"
+        )
+
+    def test_detect_task_cleanup_joins_monitor(self):
+        """DetectTask.cleanup 应该 join monitor 线程"""
+        import inspect
+        from services.task_manager import DetectTask
+
+        cleanup_source = inspect.getsource(DetectTask.cleanup)
+        joins_thread = "join(" in cleanup_source
+        sets_stop = "_stop_monitor" in cleanup_source
+
+        assert sets_stop and joins_thread, (
+            "TL-015: DetectTask.cleanup 只设置了 _stop_monitor 标志但没有 join 线程。"
+            "虽然是 daemon 线程不会阻止进程退出，但任务结束后 monitor 线程可能"
+            "还存活最多 2 秒（sleep 间隔），造成短暂的线程泄漏。"
+        )
+
+    def test_render_task_cleanup_joins_monitor(self):
+        """RenderTask.cleanup 应该 join monitor 线程"""
+        import inspect
+        from services.task_manager import RenderTask
+
+        cleanup_source = inspect.getsource(RenderTask.cleanup)
+        joins_thread = "join(" in cleanup_source
+        sets_stop = "_stop_monitor" in cleanup_source
+
+        assert sets_stop and joins_thread, (
+            "TL-015: RenderTask.cleanup 只设置了 _stop_monitor 标志但没有 join 线程。"
+        )
+
+
+# ============================================================================
+# 回归测试 19: safe_rename 同名文件不死锁
+# Bug: temp_filename 和 final_filename 相同时，同一把 Lock acquire 两次导致死锁
+# 修复: 检测到同名时直接返回，同一把锁时只 acquire 一次
+# ============================================================================
+
+class TestSafeRenameSameFileNoDeadlock:
+    """防止 safe_rename 同名文件导致死锁"""
+
+    def test_same_filename_no_deadlock(self):
+        """同名文件 rename 应该立即返回，不挂死"""
+        import tempfile
+        import threading
+        import time
+        from services.file_gateway import SafeFileGateway
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            gw = SafeFileGateway(tmpdir)
+            gw.safe_write("test.txt", b"hello")
+
+            result = {"timeout": True}
+
+            def rename_worker():
+                try:
+                    gw.safe_rename("test.txt", "test.txt")
+                    result["timeout"] = False
+                except Exception:
+                    result["timeout"] = False
+
+            t = threading.Thread(target=rename_worker)
+            t.start()
+            t.join(timeout=2.0)
+
+            assert not t.is_alive(), "FC-006: safe_rename 同名文件导致死锁，线程挂死"
+            assert not result["timeout"], "FC-006: safe_rename 同名文件应该成功返回"
+            assert gw.exists("test.txt"), "同名文件 rename 后文件应该仍然存在"
+
+    def test_same_lock_different_filenames(self):
+        """不同文件名但同一把锁（basename 相同）时也应该正常工作"""
+        import tempfile
+        from services.file_gateway import SafeFileGateway
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            gw = SafeFileGateway(tmpdir)
+            gw.safe_write("a.txt", b"data")
+
+            gw.safe_rename("a.txt", "a.txt")
+            assert gw.exists("a.txt")
+
+
+# ============================================================================
+# 回归测试 20: get_dir_size 不跟随符号链接
+# Bug: os.path.getsize 会跟随符号链接，导致容量统计失真
+# 修复: 使用 os.lstat，不统计符号链接目标
+# ============================================================================
+
+class TestGetDirSizeNoFollowSymlinks:
+    """防止 get_dir_size 统计符号链接目标文件大小"""
+
+    def test_symlink_not_counted(self):
+        """符号链接不应该被统计大小"""
+        import tempfile
+        from services.file_gateway import SafeFileGateway
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            gw = SafeFileGateway(tmpdir)
+            gw.safe_write("real.txt", b"1234567890")
+
+            real_path = gw.resolve("real.txt")
+            link_path = os.path.join(tmpdir, "link.txt")
+            try:
+                os.symlink(real_path, link_path)
+            except (OSError, AttributeError):
+                pytest.skip("symlink not supported")
+
+            size = gw.get_dir_size()
+            assert size == 10, f"FC-007: get_dir_size 应该只统计真实文件，不跟随符号链接。实际大小: {size}"
+
+    def test_walk_does_not_follow_links(self):
+        """os.walk 不应该跟随目录符号链接"""
+        import tempfile
+        from services.file_gateway import SafeFileGateway
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            gw = SafeFileGateway(tmpdir)
+
+            subdir = os.path.join(tmpdir, "subdir")
+            os.makedirs(subdir)
+            with open(os.path.join(subdir, "file.txt"), "w") as f:
+                f.write("12345")
+
+            link_dir = os.path.join(tmpdir, "linkdir")
+            try:
+                os.symlink(subdir, link_dir)
+            except (OSError, AttributeError):
+                pytest.skip("symlink not supported")
+
+            size = gw.get_dir_size()
+            assert size == 5, f"FC-007: 目录符号链接不应该被递归遍历。实际大小: {size}"
+
+
+# ============================================================================
+# 回归测试 21: reset_stats 与 record_hit/miss 无竞态
+# Bug: reset_stats 替换 _LayerStats 对象，与 record_hit/miss 竞争导致统计丢失
+# 修复: 使用 reset() 方法重置计数，不替换对象
+# ============================================================================
+
+class TestResetStatsNoRaceCondition:
+    """防止 reset_stats 与 record_hit/miss 竞态导致统计丢失"""
+
+    def test_reset_does_not_replace_object(self):
+        """reset_stats 应该调用 reset() 方法，而不是替换对象"""
+        import threading
+        from services.cache_manager import CacheManager
+
+        CacheManager._instance = None
+        mgr = CacheManager()
+        mgr._layers.clear()
+        mgr._stats.clear()
+
+        from services.cache_manager import CacheLayer
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            layer = CacheLayer(name="test", base_dir=tmpdir)
+            mgr.register_layer(layer)
+
+            stats_before = mgr._stats["test"]
+            mgr.record_hit("test")
+            mgr.record_miss("test")
+
+            mgr.reset_stats("test")
+
+            stats_after = mgr._stats["test"]
+            assert stats_before is stats_after, "FC-008: reset_stats 不应该替换 _LayerStats 对象"
+
+            snap = stats_after.get_snapshot()
+            assert snap["hits"] == 0, "重置后 hits 应该为 0"
+            assert snap["misses"] == 0, "重置后 misses 应该为 0"
+
+    def test_concurrent_reset_and_record(self):
+        """并发 reset 和 record_hit 不应崩溃，也不应导致对象引用错误"""
+        import threading
+        import tempfile
+        from services.cache_manager import CacheManager, CacheLayer
+
+        CacheManager._instance = None
+        mgr = CacheManager()
+        mgr._layers.clear()
+        mgr._stats.clear()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            layer = CacheLayer(name="test", base_dir=tmpdir)
+            mgr.register_layer(layer)
+
+            errors = []
+
+            def hitter():
+                try:
+                    for _ in range(100):
+                        mgr.record_hit("test")
+                        mgr.record_miss("test")
+                except Exception as e:
+                    errors.append(str(e))
+
+            def resetter():
+                try:
+                    for _ in range(50):
+                        mgr.reset_stats("test")
+                except Exception as e:
+                    errors.append(str(e))
+
+            threads = []
+            for _ in range(3):
+                threads.append(threading.Thread(target=hitter))
+            for _ in range(2):
+                threads.append(threading.Thread(target=resetter))
+
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+
+            assert len(errors) == 0, f"FC-008: 并发 reset/record 出错: {errors}"
+
+
+# ============================================================================
+# 回归测试 22: preview 接口对路径进行二次校验
+# Bug: preview 直接使用 task 中的 original_path/output_path，无安全校验
+# 修复: 对路径进行 realpath 校验，确保在对应目录内
+# ============================================================================
+
+class TestPreviewPathValidation:
+    """防止 preview 接口路径遍历"""
+
+    def test_preview_original_path_dot_dot_rejected(self):
+        """original_path 包含 .. 应该被拒绝"""
+        from fastapi.testclient import TestClient
+        from app import create_app
+        import tempfile
+        import os
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            import config
+            old_upload = config.UPLOAD_DIR
+            old_output = config.OUTPUT_DIR
+            old_db = config.DB_PATH
+            try:
+                config.UPLOAD_DIR = os.path.join(tmpdir, "uploads")
+                config.OUTPUT_DIR = os.path.join(tmpdir, "outputs")
+                config.DB_PATH = os.path.join(tmpdir, "test.db")
+                os.makedirs(config.UPLOAD_DIR)
+                os.makedirs(config.OUTPUT_DIR)
+
+                from database import init_db, create_task, update_task
+                init_db()
+
+                malicious_path = "/tmp/../etc/passwd"
+                create_task("bad-task-1", "test.wav", malicious_path, {}, "hash1", 1000)
+
+                app = create_app()
+                client = TestClient(app)
+
+                response = client.get("/api/v1/preview/bad-task-1?type=original")
+                assert response.status_code == 400, \
+                    f"FC-009: preview original 应该拒绝包含 .. 的路径。状态码: {response.status_code}"
+
+            finally:
+                config.UPLOAD_DIR = old_upload
+                config.OUTPUT_DIR = old_output
+                config.DB_PATH = old_db
+
+    def test_preview_output_path_dot_dot_rejected(self):
+        """output_path 包含 .. 应该被拒绝"""
+        from fastapi.testclient import TestClient
+        from app import create_app
+        import tempfile
+        import os
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            import config
+            old_upload = config.UPLOAD_DIR
+            old_output = config.OUTPUT_DIR
+            old_db = config.DB_PATH
+            try:
+                config.UPLOAD_DIR = os.path.join(tmpdir, "uploads")
+                config.OUTPUT_DIR = os.path.join(tmpdir, "outputs")
+                config.DB_PATH = os.path.join(tmpdir, "test.db")
+                os.makedirs(config.UPLOAD_DIR)
+                os.makedirs(config.OUTPUT_DIR)
+
+                from database import init_db, create_task, update_task
+                init_db()
+
+                malicious_path = "/tmp/../etc/shadow"
+                create_task("bad-task-2", "test.wav", "/tmp/test.wav", {}, "hash2", 1000)
+                update_task("bad-task-2", status="completed", output_path=malicious_path)
+
+                app = create_app()
+                client = TestClient(app)
+
+                response = client.get("/api/v1/preview/bad-task-2?type=repaired")
+                assert response.status_code == 400, \
+                    f"FC-009: preview output 应该拒绝包含 .. 的路径。状态码: {response.status_code}"
+
+            finally:
+                config.UPLOAD_DIR = old_upload
+                config.OUTPUT_DIR = old_output
+                config.DB_PATH = old_db
+
+    def test_preview_nul_byte_rejected(self):
+        """路径包含 NUL 字节应该被拒绝"""
+        from fastapi.testclient import TestClient
+        from app import create_app
+        import tempfile
+        import os
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            import config
+            old_upload = config.UPLOAD_DIR
+            old_output = config.OUTPUT_DIR
+            old_db = config.DB_PATH
+            try:
+                config.UPLOAD_DIR = os.path.join(tmpdir, "uploads")
+                config.OUTPUT_DIR = os.path.join(tmpdir, "outputs")
+                config.DB_PATH = os.path.join(tmpdir, "test.db")
+                os.makedirs(config.UPLOAD_DIR)
+                os.makedirs(config.OUTPUT_DIR)
+
+                from database import init_db, create_task, update_task
+                init_db()
+
+                bad_path = "/tmp/bad\x00file.wav"
+                create_task("bad-task-3", "test.wav", "/tmp/test.wav", {}, "hash3", 1000)
+                update_task("bad-task-3", status="completed", output_path=bad_path)
+
+                app = create_app()
+                client = TestClient(app)
+
+                response = client.get("/api/v1/preview/bad-task-3?type=repaired")
+                assert response.status_code == 400, \
+                    f"FC-009: preview 应该拒绝包含 NUL 字节的路径。状态码: {response.status_code}"
+
+            finally:
+                config.UPLOAD_DIR = old_upload
+                config.OUTPUT_DIR = old_output
+                config.DB_PATH = old_db
+
+
+# ============================================================================
+# 回归测试 23: evict_layer 剩余统计与内存中数据一致
+# Bug: evict_layer 清理后二次扫描磁盘，与内存中 total_size 可能不一致
+# 修复: 使用内存中的 files 列表和 total_size 计算剩余
+# ============================================================================
+
+class TestEvictLayerConsistentStats:
+    """防止 evict_layer 剩余统计不一致"""
+
+    def test_remaining_stats_consistent_with_memory(self):
+        """evict_layer 返回的 remaining 应该与实际删除量一致"""
+        import tempfile
+        import time
+        from services.cache_manager import CacheManager, CacheLayer
+
+        CacheManager._instance = None
+        mgr = CacheManager()
+        mgr._layers.clear()
+        mgr._stats.clear()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            layer = CacheLayer(name="test", base_dir=tmpdir, max_size_mb=0.001)
+            mgr.register_layer(layer)
+
+            for i in range(10):
+                fp = os.path.join(tmpdir, f"file_{i}.txt")
+                with open(fp, "wb") as f:
+                    f.write(b"x" * 500)
+                time.sleep(0.01)
+
+            result = mgr.evict_layer("test")
+
+            removed = result["files_removed"]
+            remaining = result["files_remaining"]
+            assert removed + remaining == 10, \
+                f"FC-010: 删除数 + 剩余数 应等于总数。removed={removed}, remaining={remaining}"
+
+            removed_bytes = result["bytes_removed"]
+            remaining_bytes = result["bytes_remaining"]
+            assert removed_bytes + remaining_bytes == 10 * 500, \
+                f"FC-010: 删除字节数 + 剩余字节数 应等于总字节数"
+
+
+# ============================================================================
+# 回归测试 24: ConfigProvider 与 config.py 配置项对齐
+# Bug: ConfigProvider 抽象类缺少 HOST/PORT/MAX_UPLOAD_SIZE 等配置项
+# 修复: 补齐所有 config.py 中的重要配置项
+# ============================================================================
+
+class TestConfigProviderAlignment:
+    """防止 ConfigProvider 与 config.py 配置项不对齐"""
+
+    def test_env_provider_has_all_config_methods(self):
+        """EnvConfigProvider 应该提供所有重要配置项的 getter"""
+        from services.config_provider import EnvConfigProvider
+        provider = EnvConfigProvider()
+
+        assert hasattr(provider, "get_host"), "缺少 get_host"
+        assert hasattr(provider, "get_port"), "缺少 get_port"
+        assert hasattr(provider, "get_output_dir"), "缺少 get_output_dir"
+        assert hasattr(provider, "get_upload_dir"), "缺少 get_upload_dir"
+        assert hasattr(provider, "get_decoded_dir"), "缺少 get_decoded_dir"
+        assert hasattr(provider, "get_db_path"), "缺少 get_db_path"
+        assert hasattr(provider, "get_max_upload_size"), "缺少 get_max_upload_size"
+        assert hasattr(provider, "get_allowed_extensions"), "缺少 get_allowed_extensions"
+        assert hasattr(provider, "get_max_workers"), "缺少 get_max_workers"
+        assert hasattr(provider, "get_max_concurrent_tasks"), "缺少 get_max_concurrent_tasks"
+        assert hasattr(provider, "get_source_file_cache_limit_mb"), "缺少 get_source_file_cache_limit_mb"
+        assert hasattr(provider, "get_mobile_mode"), "缺少 get_mobile_mode"
+        assert hasattr(provider, "get_admin_token"), "缺少 get_admin_token"
+        assert hasattr(provider, "get_default_algorithm_version"), "缺少 get_default_algorithm_version"
+        assert hasattr(provider, "get_stuck_threshold_seconds"), "缺少 get_stuck_threshold_seconds"
+
+    def test_env_provider_values_match_config(self):
+        """EnvConfigProvider 返回值应该与 config.py 中一致"""
+        import config
+        from services.config_provider import EnvConfigProvider
+        provider = EnvConfigProvider()
+
+        assert provider.get_host() == config.HOST
+        assert provider.get_port() == config.PORT
+        assert provider.get_output_dir() == config.OUTPUT_DIR
+        assert provider.get_upload_dir() == config.UPLOAD_DIR
+        assert provider.get_decoded_dir() == config.DECODED_DIR
+        assert provider.get_db_path() == config.DB_PATH
+        assert provider.get_max_upload_size() == config.MAX_UPLOAD_SIZE
+        assert provider.get_allowed_extensions() == config.ALLOWED_EXTENSIONS
+        assert provider.get_max_workers() == config.MAX_WORKERS
+        assert provider.get_max_concurrent_tasks() == config.MAX_CONCURRENT_TASKS
+        assert provider.get_mobile_mode() == config.MOBILE_MODE
+        assert provider.get_admin_token() == config.ADMIN_TOKEN
+
+    def test_dict_provider_has_all_methods(self):
+        """DictConfigProvider 也应该实现所有方法"""
+        from services.config_provider import DictConfigProvider
+        provider = DictConfigProvider({
+            "host": "127.0.0.1",
+            "port": 9000,
+            "output_dir": "/tmp/out",
+            "upload_dir": "/tmp/up",
+            "decoded_dir": "/tmp/dec",
+            "db_path": "/tmp/test.db",
+            "max_upload_size": 1024,
+            "allowed_extensions": {".wav"},
+            "max_workers": 2,
+            "max_concurrent_tasks": 1,
+            "source_file_cache_limit_mb": 100.0,
+            "mobile_mode": True,
+            "admin_token": "secret",
+            "default_algorithm_version": "v2.4a",
+            "stuck_threshold_seconds": 60,
+        })
+
+        assert provider.get_host() == "127.0.0.1"
+        assert provider.get_port() == 9000
+        assert provider.get_admin_token() == "secret"
+        assert provider.get_max_workers() == 2
+
+
+# ============================================================================
+# 回归测试 25: resolve 显式拒绝 NUL 字节注入
+# Bug: NUL 字节注入可能导致底层 C 库截断路径，抛 ValueError 而非 SecurityError
+# 修复: 显式检查 "\\x00" 并抛 SecurityError
+# ============================================================================
+
+class TestResolveNulByteRejection:
+    """防止 resolve 未显式拒绝 NUL 字节注入"""
+
+    def test_nul_byte_raises_security_error(self):
+        """包含 NUL 字节的文件名应该抛 SecurityError 而非 ValueError"""
+        import tempfile
+        from services.file_gateway import SafeFileGateway, SecurityError
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            gw = SafeFileGateway(tmpdir)
+
+            with pytest.raises(SecurityError):
+                gw.resolve("test\x00.txt")
+
+            with pytest.raises(SecurityError):
+                gw.resolve("\x00../etc/passwd")
+
+    def test_nul_byte_security_not_value_error(self):
+        """NUL 字节异常类型应该是 SecurityError（继承 ValueError）"""
+        import tempfile
+        from services.file_gateway import SafeFileGateway, SecurityError
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            gw = SafeFileGateway(tmpdir)
+
+            try:
+                gw.resolve("bad\x00file.txt")
+                assert False, "应该抛出异常"
+            except SecurityError:
+                pass
+            except ValueError:
+                pytest.fail("FC-012: NUL 字节应该抛 SecurityError 而非普通 ValueError")
+
+
+# ============================================================================
+# 回归测试 26: list_files 跳过 .tmp 临时文件
+# Bug: list_files 会列出残留的 .tmp 临时文件，可能被误当作正式文件
+# 修复: list_files 跳过 .tmp 结尾的文件
+# ============================================================================
+
+class TestListFilesSkipsTmp:
+    """防止 list_files 列出 .tmp 临时文件"""
+
+    def test_tmp_files_not_listed(self):
+        """.tmp 文件不应该出现在 list_files 结果中"""
+        import tempfile
+        from services.file_gateway import SafeFileGateway
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            gw = SafeFileGateway(tmpdir)
+            gw.safe_write("real.txt", b"data")
+
+            tmp_file = os.path.join(tmpdir, "temp.tmp")
+            with open(tmp_file, "w") as f:
+                f.write("temp")
+
+            files = gw.list_files()
+            assert "real.txt" in files, "正常文件应该被列出"
+            assert "temp.tmp" not in files, "FC-013: .tmp 文件不应该出现在 list_files 中"
+
+    def test_only_tmp_extension_skipped(self):
+        """只有 .tmp 结尾的文件被跳过，其他后缀正常"""
+        import tempfile
+        from services.file_gateway import SafeFileGateway
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            gw = SafeFileGateway(tmpdir)
+            gw.safe_write("a.txt", b"a")
+            gw.safe_write("b.mp3", b"b")
+
+            tmp_path = os.path.join(tmpdir, "c.tmp")
+            with open(tmp_path, "w") as f:
+                f.write("c")
+
+            tmp2_path = os.path.join(tmpdir, "d.txt.tmp")
+            with open(tmp2_path, "w") as f:
+                f.write("d")
+
+            files = gw.list_files()
+            assert "a.txt" in files
+            assert "b.mp3" in files
+            assert "c.tmp" not in files
+            assert "d.txt.tmp" not in files
+
+
+# ============================================================================
+# 回归测试 27: _scan_files 无 TOCTOU 竞态
+# Bug: 先 isfile 再 stat，中间文件可能被删除导致异常（TOCTOU）
+# 修复: 直接 stat，通过 stat 结果判断是否是普通文件
+# ============================================================================
+
+class TestScanFilesNoTOCTOU:
+    """防止 _scan_files 中 isfile 与 stat 存在 TOCTOU 窗口"""
+
+    def test_scan_handles_missing_files_gracefully(self):
+        """扫描过程中文件消失不应导致崩溃"""
+        import tempfile
+        import threading
+        import time
+        from services.cache_manager import CacheManager, CacheLayer
+
+        CacheManager._instance = None
+        mgr = CacheManager()
+        mgr._layers.clear()
+        mgr._stats.clear()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            layer = CacheLayer(name="test", base_dir=tmpdir)
+            mgr.register_layer(layer)
+
+            for i in range(20):
+                fp = os.path.join(tmpdir, f"file_{i}.txt")
+                with open(fp, "w") as f:
+                    f.write(f"data_{i}")
+
+            errors = []
+
+            def deleter():
+                try:
+                    for i in range(10):
+                        fp = os.path.join(tmpdir, f"file_{i}.txt")
+                        try:
+                            os.remove(fp)
+                        except OSError:
+                            pass
+                        time.sleep(0.001)
+                except Exception as e:
+                    errors.append(str(e))
+
+            scan_result = {"files": None}
+
+            def scanner():
+                try:
+                    scan_result["files"] = mgr._scan_files(tmpdir)
+                except Exception as e:
+                    errors.append(str(e))
+
+            t1 = threading.Thread(target=deleter)
+            t2 = threading.Thread(target=scanner)
+
+            t1.start()
+            t2.start()
+            t1.join()
+            t2.join()
+
+            assert len(errors) == 0, f"FC-014: 扫描过程中文件删除不应导致异常: {errors}"
+            assert scan_result["files"] is not None, "扫描应该完成并返回结果"
+
+    def test_scan_uses_single_stat_call(self):
+        """_scan_files 应该只做一次 stat 调用（通过 stat 结果判断文件类型）"""
+        import inspect
+        from services.cache_manager import CacheManager
+
+        source = inspect.getsource(CacheManager._scan_files)
+        assert "os.path.isfile" not in source or "S_ISREG" in source, \
+            "FC-014: _scan_files 不应该先 isfile 再 stat（TOCTOU），应该直接 stat 后用 S_ISREG 判断"
+
+
+# ============================================================================
+# 回归测试 28: 全局 ThreadPoolExecutor 无优雅关闭机制
+# Bug: 全局线程池在进程退出时没有优雅关闭，可能导致任务中断或资源泄漏
+# 修复: 注册 atexit 钩子，在进程退出时调用 executor.shutdown()
+# ============================================================================
+
+class TestThreadPoolExecutorGracefulShutdown:
+    """防止全局 ThreadPoolExecutor 进程退出时无优雅关闭"""
+
+    def test_executor_has_shutdown_hook(self):
+        """全局 executor 应该有 atexit 关闭钩子"""
+        import atexit
+        import inspect
+        from services import task_manager
+
+        assert hasattr(task_manager, 'shutdown_executor'), (
+            "CC-007: task_manager 应该有 shutdown_executor 函数，用于优雅关闭全局线程池"
+        )
+        assert callable(task_manager.shutdown_executor), (
+            "CC-007: shutdown_executor 应该是可调用的"
+        )
+
+    def test_executor_shutdown_function_works(self):
+        """shutdown_executor 函数应该能正常执行不抛异常"""
+        from services.task_manager import shutdown_executor
+
+        try:
+            shutdown_executor(wait=False, cancel_futures=True)
+        except Exception as e:
+            pytest.fail(f"CC-007: shutdown_executor 执行失败: {e}")
+
+
+# ============================================================================
+# 回归测试 29: CacheManager.evict_layer 无层级锁
+# Bug: 同一缓存层的并发清理可能导致状态不一致
+# 修复: 添加层级锁，确保同一层的清理操作互斥
+# ============================================================================
+
+class TestCacheManagerLayerLocks:
+    """防止 evict_layer 并发操作同一缓存层导致状态不一致"""
+
+    def test_cache_manager_has_layer_locks(self):
+        """CacheManager 应该有层级锁机制"""
+        import inspect
+        from services.cache_manager import CacheManager
+
+        init_source = inspect.getsource(CacheManager.__init__)
+        assert '_layer_locks' in init_source, (
+            "CC-008: CacheManager.__init__ 中应该有 _layer_locks 字典用于层级锁"
+        )
+
+        evict_source = inspect.getsource(CacheManager.evict_layer)
+        assert 'layer_lock' in evict_source or '_layer_locks' in evict_source, (
+            "CC-008: evict_layer 应该使用层级锁保护同一层的并发清理"
+        )
+
+    def test_concurrent_evict_same_layer(self):
+        """同一层的并发清理不应该导致异常"""
+        import tempfile
+        import threading
+        import time
+        from services.cache_manager import CacheManager, CacheLayer
+
+        CacheManager._instance = None
+        mgr = CacheManager()
+        mgr._layers.clear()
+        mgr._stats.clear()
+        mgr._layer_locks.clear()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            layer = CacheLayer(name="test_layer_lock", base_dir=tmpdir)
+            mgr.register_layer(layer)
+
+            for i in range(20):
+                fp = os.path.join(tmpdir, f"file_{i}.txt")
+                with open(fp, "w") as f:
+                    f.write(f"data_{i}")
+
+            errors = []
+
+            def evictor():
+                try:
+                    for _ in range(5):
+                        mgr.evict_layer("test_layer_lock")
+                        time.sleep(0.001)
+                except Exception as e:
+                    errors.append(str(e))
+
+            threads = [threading.Thread(target=evictor) for _ in range(4)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+
+            assert len(errors) == 0, f"CC-008: 并发 evict 同一层不应导致异常: {errors}"
+
+
+# ============================================================================
+# 回归测试 30: SystemMetrics._task_stats defaultdict 并发访问不安全
+# Bug: defaultdict 的自动创建 key 不是原子操作，多线程下可能出问题
+# 修复: 在锁内获取 stats 对象，确保 defaultdict 的 key 创建是线程安全的
+# ============================================================================
+
+class TestSystemMetricsTaskStatsThreadSafety:
+    """防止 _task_stats defaultdict 并发访问导致竞态"""
+
+    def test_record_task_start_concurrent(self):
+        """多线程并发调用 record_task_start 不应导致异常"""
+        import threading
+        from services.observability import SystemMetrics
+
+        metrics = SystemMetrics()
+        metrics._task_stats.clear()
+        metrics._total_tasks = 0
+        metrics._active_tasks = 0
+
+        errors = []
+
+        def worker(task_type):
+            try:
+                for _ in range(100):
+                    metrics.record_task_start(task_type)
+            except Exception as e:
+                errors.append(str(e))
+
+        threads = [threading.Thread(target=worker, args=(f"type_{i % 5}",)) for i in range(10)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert len(errors) == 0, f"CC-009: 并发 record_task_start 不应导致异常: {errors}"
+        assert metrics._total_tasks == 1000, f"CC-009: total_tasks 计数应该是 1000，实际是 {metrics._total_tasks}"
+
+
+# ============================================================================
+# 回归测试 31: PerfMetricsCollector 共享数据结构并发不安全
+# Bug: step_history 等共享数据结构多线程访问不安全
+# 修复: 添加 _data_lock 保护所有共享数据结构的读写
+# ============================================================================
+
+class TestPerfMetricsCollectorConcurrencySafety:
+    """防止 PerfMetricsCollector 共享数据结构并发访问不安全"""
+
+    def test_record_step_concurrent(self):
+        """多线程并发调用 record_step 不应导致异常"""
+        import threading
+        from services.perf_metrics import PerfMetricsCollector
+
+        collector = PerfMetricsCollector()
+        collector.step_history.clear()
+        collector.repair_history.clear()
+
+        errors = []
+
+        def worker(thread_id):
+            try:
+                for i in range(100):
+                    collector.record_step(f"step_{i % 10}", float(thread_id * 10 + i))
+            except Exception as e:
+                errors.append(str(e))
+
+        threads = [threading.Thread(target=worker, args=(i,)) for i in range(10)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert len(errors) == 0, f"CC-010: 并发 record_step 不应导致异常: {errors}"
+        assert len(collector.step_history) == 10, f"CC-010: step_history 应该有 10 个 step，实际是 {len(collector.step_history)}"
+
+    def test_get_summary_during_writes(self):
+        """写入过程中调用 get_summary 不应导致异常"""
+        import threading
+        import time
+        from services.perf_metrics import PerfMetricsCollector
+
+        collector = PerfMetricsCollector()
+        collector.step_history.clear()
+        collector.repair_history.clear()
+
+        errors = []
+        stop = threading.Event()
+
+        def writer():
+            try:
+                i = 0
+                while not stop.is_set():
+                    collector.record_step(f"step_{i % 5}", float(i))
+                    if i % 100 == 0:
+                        collector.repair_history.append({
+                            'task_id': f'task_{i}',
+                            'total_time_ms': float(i),
+                            'size_samples': 48000,
+                            'algorithm_version': 'v2.3',
+                            'xrtf': 1.0,
+                            'breakdown_by_step': {},
+                            'timestamp': time.time()
+                        })
+                    i += 1
+            except Exception as e:
+                errors.append(str(e))
+
+        def reader():
+            try:
+                while not stop.is_set():
+                    collector.get_summary()
+                    time.sleep(0.001)
+            except Exception as e:
+                errors.append(str(e))
+
+        w_thread = threading.Thread(target=writer)
+        r_thread = threading.Thread(target=reader)
+        w_thread.start()
+        r_thread.start()
+
+        time.sleep(0.1)
+        stop.set()
+
+        w_thread.join()
+        r_thread.join()
+
+        assert len(errors) == 0, f"CC-010: 读写并发不应导致异常: {errors}"
+
+
+# ============================================================================
+# 回归测试 32: _loop / _loop_warned 全局变量无同步
+# Bug: 多线程下读写 _loop 和 _loop_warned 可能出现竞态
+# 修复: 添加 _loop_lock 保护这些全局变量的读写
+# ============================================================================
+
+class TestEventLoopGlobalSync:
+    """防止 _loop / _loop_warned 全局变量并发访问无同步"""
+
+    def test_loop_has_lock(self):
+        """应该有 _loop_lock 保护全局变量"""
+        import inspect
+        from services import task_manager
+
+        assert hasattr(task_manager, '_loop_lock'), (
+            "CC-011: task_manager 应该有 _loop_lock 用于保护 _loop 和 _loop_warned"
+        )
+
+        get_loop_source = inspect.getsource(task_manager._get_loop)
+        assert '_loop_lock' in get_loop_source, (
+            "CC-011: _get_loop 应该使用 _loop_lock 保护全局变量访问"
+        )
+
+        set_loop_source = inspect.getsource(task_manager.set_event_loop)
+        assert '_loop_lock' in set_loop_source, (
+            "CC-011: set_event_loop 应该使用 _loop_lock 保护全局变量写入"
+        )
+
+
+# ============================================================================
+# 回归测试 33: 监控线程用 list[bool] 而非 threading.Event
+# Bug: 用 list[bool] 作为停止标志不能保证跨线程可见性
+# 修复: 改用 threading.Event() 作为停止标志
+# ============================================================================
+
+class TestStuckMonitorUsesEvent:
+    """防止监控线程用 list[bool] 作停止标志（可见性无保证）"""
+
+    def test_task_classes_use_event_for_stop(self):
+        """RepairTask/DetectTask/RenderTask 应该用 threading.Event 作停止标志"""
+        import inspect
+        from services.task_manager import RepairTask, DetectTask, RenderTask
+
+        for cls in [RepairTask, DetectTask, RenderTask]:
+            init_source = inspect.getsource(cls.__init__)
+            assert 'threading.Event()' in init_source or 'Event()' in init_source, (
+                f"CC-013: {cls.__name__}.__init__ 应该用 threading.Event() 作为 _stop_monitor，而不是 list[bool]"
+            )
+
+    def test_run_detect_uses_event(self):
+        """_run_detect 函数应该用 threading.Event 作 stop_monitor"""
+        import inspect
+        from services import task_manager
+
+        source = inspect.getsource(task_manager._run_detect)
+        assert 'threading.Event()' in source, (
+            "CC-013: _run_detect 应该用 threading.Event() 作为 stop_monitor"
+        )
+        assert 'stop_monitor.set()' in source, (
+            "CC-013: _run_detect 应该用 stop_monitor.set() 而不是 stop_monitor[0] = True"
+        )
+
+    def test_run_repair_uses_event(self):
+        """_run_repair 函数应该用 threading.Event 作 stop_monitor"""
+        import inspect
+        from services import task_manager
+
+        source = inspect.getsource(task_manager._run_repair)
+        assert 'threading.Event()' in source, (
+            "CC-013: _run_repair 应该用 threading.Event() 作为 stop_monitor"
+        )
+        assert 'stop_monitor.set()' in source, (
+            "CC-013: _run_repair 应该用 stop_monitor.set() 而不是 stop_monitor[0] = True"
+        )
+
+
+# ============================================================================
+# 回归测试 34: TaskTracer._traces 字典极端异常路径下泄漏
+# Bug: 任务极端异常终止时 trace 可能不被清理，导致内存泄漏
+# 修复: 1. 修复 record_task_start 的锁重入问题  2. 添加超时自动清理机制
+# ============================================================================
+
+class TestTaskTracerNoLeak:
+    """防止 TaskTracer._traces 在极端异常路径下泄漏"""
+
+    def test_record_task_start_no_deadlock(self):
+        """record_task_start 不应导致死锁（锁重入问题）"""
+        import threading
+        from services.observability import TaskTracer
+
+        tracer = TaskTracer()
+        tracer._traces.clear()
+        tracer._history.clear()
+
+        errors = []
+        result = {"success": False}
+
+        def worker():
+            try:
+                tracer.record_task_start("test_no_deadlock", "repair")
+                result["success"] = True
+            except Exception as e:
+                errors.append(str(e))
+
+        t = threading.Thread(target=worker)
+        t.start()
+        t.join(timeout=2.0)
+
+        assert not t.is_alive(), (
+            "CC-015: record_task_start 导致死锁，线程 2 秒内未返回"
+        )
+        assert result["success"], f"CC-015: record_task_start 执行失败: {errors}"
+
+    def test_expired_traces_get_cleaned_up(self):
+        """超时的 trace 应该在 get_active_traces 时被自动清理"""
+        import time
+        from services.observability import TaskTracer
+
+        tracer = TaskTracer()
+        tracer._traces.clear()
+        tracer._history.clear()
+        tracer._trace_timeout = 0.01  # 设为 10ms 方便测试
+
+        tracer.create_trace("expired_task_1", "repair")
+        tracer.create_trace("expired_task_2", "detect")
+
+        assert len(tracer._traces) == 2, "初始应该有 2 个 trace"
+
+        time.sleep(0.05)  # 等待超时
+
+        active = tracer.get_active_traces()
+
+        assert len(active) == 0, f"CC-015: 超时的 trace 应该被清理，实际还有 {len(active)} 个"
+        assert len(tracer._traces) == 0, f"CC-015: _traces 字典应该为空，实际有 {len(tracer._traces)} 个"
+        assert len(tracer._history) == 2, f"CC-015: 被清理的 trace 应该移到 history，实际有 {len(tracer._history)} 个"
+
+        for trace in tracer._history:
+            assert trace.final_status == "expired", (
+                f"CC-015: 被清理的 trace final_status 应该是 'expired'，实际是 {trace.final_status}"
+            )
+
+
+# ============================================================================
+# 回归测试 35: SQLite 连接未用 context manager
+# Bug: 手动 conn.close() 在异常路径下可能泄漏连接
+# 修复: 使用 contextlib.closing 确保连接总是被关闭
+# ============================================================================
+
+class TestSQLiteConnectionContextManager:
+    """防止 SQLite 连接异常路径下未关闭导致泄漏"""
+
+    def test_database_uses_closing_context(self):
+        """database.py 应该使用 contextlib.closing 管理连接"""
+        import inspect
+        import database
+
+        assert 'from contextlib import closing' in inspect.getsource(database), (
+            "CC-016: database.py 应该导入 contextlib.closing"
+        )
+
+        funcs_to_check = [
+            'create_task',
+            'update_task',
+            'get_task',
+            'find_task_by_hash',
+            'delete_task',
+            'save_analysis_cache',
+            'get_analysis_cache',
+        ]
+
+        for func_name in funcs_to_check:
+            func = getattr(database, func_name)
+            source = inspect.getsource(func)
+            assert 'with closing(' in source, (
+                f"CC-016: {func_name} 应该使用 'with closing(get_db())' 确保连接关闭"
+            )
+            assert 'conn.close()' not in source, (
+                f"CC-016: {func_name} 不应该有手动 conn.close()，应该用 context manager"
+            )
+
+    def test_init_db_uses_closing(self):
+        """init_db 应该使用 context manager"""
+        import inspect
+        from database import init_db
+
+        source = inspect.getsource(init_db)
+        assert 'with closing(' in source, (
+            "CC-016: init_db 应该使用 context manager 确保连接关闭"
+        )

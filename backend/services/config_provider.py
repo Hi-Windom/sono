@@ -3,11 +3,39 @@ from abc import ABC, abstractmethod
 
 class ConfigProvider(ABC):
     @abstractmethod
+    def get_host(self) -> str:
+        pass
+
+    @abstractmethod
+    def get_port(self) -> int:
+        pass
+
+    @abstractmethod
     def get_output_dir(self) -> str:
         pass
 
     @abstractmethod
     def get_upload_dir(self) -> str:
+        pass
+
+    @abstractmethod
+    def get_decoded_dir(self) -> str:
+        pass
+
+    @abstractmethod
+    def get_db_path(self) -> str:
+        pass
+
+    @abstractmethod
+    def get_max_upload_size(self) -> int:
+        pass
+
+    @abstractmethod
+    def get_allowed_extensions(self) -> set[str]:
+        pass
+
+    @abstractmethod
+    def get_max_workers(self) -> int:
         pass
 
     @abstractmethod
@@ -20,6 +48,10 @@ class ConfigProvider(ABC):
 
     @abstractmethod
     def get_mobile_mode(self) -> bool:
+        pass
+
+    @abstractmethod
+    def get_admin_token(self) -> str:
         pass
 
     @abstractmethod
@@ -32,6 +64,14 @@ class ConfigProvider(ABC):
 
 
 class EnvConfigProvider(ConfigProvider):
+    def get_host(self) -> str:
+        import config
+        return config.HOST
+
+    def get_port(self) -> int:
+        import config
+        return config.PORT
+
     def get_output_dir(self) -> str:
         import config
         return config.OUTPUT_DIR
@@ -39,6 +79,26 @@ class EnvConfigProvider(ConfigProvider):
     def get_upload_dir(self) -> str:
         import config
         return config.UPLOAD_DIR
+
+    def get_decoded_dir(self) -> str:
+        import config
+        return config.DECODED_DIR
+
+    def get_db_path(self) -> str:
+        import config
+        return config.DB_PATH
+
+    def get_max_upload_size(self) -> int:
+        import config
+        return config.MAX_UPLOAD_SIZE
+
+    def get_allowed_extensions(self) -> set[str]:
+        import config
+        return config.ALLOWED_EXTENSIONS.copy()
+
+    def get_max_workers(self) -> int:
+        import config
+        return config.MAX_WORKERS
 
     def get_max_concurrent_tasks(self) -> int:
         import config
@@ -51,6 +111,10 @@ class EnvConfigProvider(ConfigProvider):
     def get_mobile_mode(self) -> bool:
         import config
         return config.MOBILE_MODE
+
+    def get_admin_token(self) -> str:
+        import config
+        return config.ADMIN_TOKEN
 
     def get_default_algorithm_version(self) -> str:
         import os
@@ -65,11 +129,32 @@ class DictConfigProvider(ConfigProvider):
     def __init__(self, config_dict: dict):
         self._config = config_dict
 
+    def get_host(self) -> str:
+        return self._config["host"]
+
+    def get_port(self) -> int:
+        return self._config["port"]
+
     def get_output_dir(self) -> str:
         return self._config["output_dir"]
 
     def get_upload_dir(self) -> str:
         return self._config["upload_dir"]
+
+    def get_decoded_dir(self) -> str:
+        return self._config["decoded_dir"]
+
+    def get_db_path(self) -> str:
+        return self._config["db_path"]
+
+    def get_max_upload_size(self) -> int:
+        return self._config["max_upload_size"]
+
+    def get_allowed_extensions(self) -> set[str]:
+        return self._config["allowed_extensions"].copy()
+
+    def get_max_workers(self) -> int:
+        return self._config["max_workers"]
 
     def get_max_concurrent_tasks(self) -> int:
         return self._config["max_concurrent_tasks"]
@@ -79,6 +164,9 @@ class DictConfigProvider(ConfigProvider):
 
     def get_mobile_mode(self) -> bool:
         return self._config["mobile_mode"]
+
+    def get_admin_token(self) -> str:
+        return self._config.get("admin_token", "")
 
     def get_default_algorithm_version(self) -> str:
         return self._config["default_algorithm_version"]

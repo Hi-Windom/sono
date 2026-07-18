@@ -99,7 +99,10 @@ class TaskExecutor:
         metrics = get_system_metrics()
         trace = tracer.get_trace(task_id)
         task_type = trace.task_type if trace else "unknown"
-        tracer.record_state_change(task_id, "", "cancelled", step="已取消")
+        from_status = ""
+        if trace and trace.state_changes:
+            from_status = trace.state_changes[-1].to_status
+        tracer.record_state_change(task_id, from_status, "cancelled", step="已取消")
         tracer.record_task_end(task_id, "cancelled")
         metrics.record_task_cancellation(task_type)
 
