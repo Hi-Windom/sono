@@ -359,4 +359,132 @@ class TestCancelTaskBehavior:
                 finally:
                     config.DB_PATH = old_db
         finally:
-            task_manager._ws_send_final = original_send
+                    task_manager._ws_send_final = original_send
+
+
+# ============================================================================
+# 回归测试 7: _get_loop 不应该创建未运行的事件循环
+# Bug: _get_loop 在 _loop 为 None 时兜底创建新事件循环，但新循环未运行，
+#      导致 run_coroutine_threadsafe 投递的协程永远不执行，WebSocket 消息静默丢失
+# ============================================================================
+
+class TestEventLoopNoSilentFailure:
+    """防止事件循环兜底创建导致 WebSocket 消息静默丢失"""
+
+    def test_get_loop_returns_none_when_not_set(self):
+        """未设置 event loop 时 _get_loop 应该返回 None，不创建未运行的循环"""
+        import threading
+        from services import task_manager
+
+        original_loop = task_manager._loop
+        original_warned = task_manager._loop_warned
+        try:
+            task_manager._loop = None
+            task_manager._loop_warned = False
+
+            result = [None]
+            def thread_test():
+                result[0] = task_manager._get_loop()
+
+            t = threading.Thread(target=thread_test)
+            t.start()
+            t.join()
+
+            assert result[0] is None, "_get_loop 应该返回 None，而不是创建未运行的事件循环"
+        finally:
+            task_manager._loop = original_loop
+            task_manager._loop_warned = original_warned
+
+    def test_ws_send_no_crash_when_no_loop(self):
+        """_ws_send_progress/_ws_send_final 在没有 event loop 时不应崩溃"""
+        import threading
+        from services import task_manager
+
+        original_loop = task_manager._loop
+        original_warned = task_manager._loop_warned
+        try:
+            task_manager._loop = None
+            task_manager._loop_warned = False
+
+            def thread_test():
+                task_manager._ws_send_progress("test-task", {"status": "testing"})
+                task_manager._ws_send_final("test-task", {"status": "done"})
+
+            t = threading.Thread(target=thread_test)
+            t.start()
+            t.join()
+        finally:
+            task_manager._loop = original_loop
+            task_manager._loop_warned = original_warned
+
+
+# ============================================================================
+# 回归测试 8: _merge_wavs 应该处理不同采样率的音轨
+# Bug: _merge_wavs 不检查 vocal_sr 和 acc_sr 是否一致，直接相加，
+#      采样率不同时混音会导致音高/速度错误，输出时长也不对
+# ============================================================================
+
+class TestMergeWavsSampleRateMismatch:
+    """防止不同采样率音轨混音导致速度/音高错误"""
+
+    def test_merge_different_sample_rates(self):
+        """人声和伴奏采样率不同时，输出时长应该约等于 1.0s（误差<1%）"""
+        import tempfile
+        import os
+        import numpy as np
+        import soundfile as sf
+        from api.routes.download import _merge_wavs
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sr_vocal = 44100
+            sr_acc = 48000
+            duration = 1.0
+
+            t_vocal = np.arange(int(sr_vocal * duration)) / sr_vocal
+            vocal_y = 0.3 * np.sin(2 * np.pi * 440 * t_vocal)
+            vocal_path = os.path.join(tmpdir, "vocal.wav")
+            sf.write(vocal_path, vocal_y, sr_vocal)
+
+            t_acc = np.arange(int(sr_acc * duration)) / sr_acc
+            acc_y = 0.3 * np.sin(2 * np.pi * 880 * t_acc)
+            acc_path = os.path.join(tmpdir, "acc.wav")
+            sf.write(acc_path, acc_y, sr_acc)
+
+            output_path = os.path.join(tmpdir, "merged.wav")
+            _merge_wavs(vocal_path, acc_path, output_path)
+
+            y_out, sr_out = sf.read(output_path)
+            out_duration = len(y_out) / sr_out
+
+            assert sr_out == sr_vocal, f"输出采样率应该等于人声采样率 {sr_vocal}，实际是 {sr_out}"
+            assert abs(out_duration - duration) / duration < 0.01, (
+                f"输出时长应该约为 {duration}s，实际是 {out_duration:.3f}s，误差超过 1%"
+            )
+
+    def test_merge_same_sample_rate_unchanged(self):
+        """采样率相同时，行为和之前完全一致"""
+        import tempfile
+        import os
+        import numpy as np
+        import soundfile as sf
+        from api.routes.download import _merge_wavs
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sr = 44100
+            duration = 1.0
+
+            t = np.arange(int(sr * duration)) / sr
+            vocal_y = 0.3 * np.sin(2 * np.pi * 440 * t)
+            vocal_path = os.path.join(tmpdir, "vocal.wav")
+            sf.write(vocal_path, vocal_y, sr)
+
+            acc_y = 0.3 * np.sin(2 * np.pi * 880 * t)
+            acc_path = os.path.join(tmpdir, "acc.wav")
+            sf.write(acc_path, acc_y, sr)
+
+            output_path = os.path.join(tmpdir, "merged.wav")
+            _merge_wavs(vocal_path, acc_path, output_path)
+
+            y_out, sr_out = sf.read(output_path)
+            assert sr_out == sr
+            assert abs(len(y_out) / sr_out - duration) / duration < 0.001

@@ -120,6 +120,7 @@ def _generate_waveform_peaks(output_path: str, num_peaks: int = WAVEFORM_PEAKS_C
         return None
 
 _loop = None
+_loop_warned = False
 
 def set_event_loop(loop: asyncio.AbstractEventLoop) -> None:
     """由应用启动（lifespan）在主线程事件循环中调用，缓存正在运行的 loop。
@@ -128,29 +129,44 @@ def set_event_loop(loop: asyncio.AbstractEventLoop) -> None:
     必须投递到「正在运行」的主 loop 上，否则协程永远不会被执行
     （表现为 WebSocket 进度静默丢失，前端只能退回 HTTP 轮询）。
     """
-    global _loop
+    global _loop, _loop_warned
     _loop = loop
+    _loop_warned = False
 
 def _get_loop():
-    global _loop
+    """获取正在运行的事件循环。
+
+    没有设置 loop 时返回 None，不兜底创建未运行的事件循环。
+    调用方需要处理 None 的情况（打日志、退回轮询等）。
+    """
+    global _loop_warned
     if _loop is None:
-        try:
-            _loop = asyncio.get_event_loop()
-        except RuntimeError:
-            _loop = asyncio.new_event_loop()
+        if not _loop_warned:
+            logger.warning("[_get_loop] 事件循环未设置（set_event_loop 未调用），WebSocket 消息将无法发送，前端需退回 HTTP 轮询")
+            _loop_warned = True
+        return None
     if _loop.is_closed():
-        _loop = asyncio.new_event_loop()
+        if not _loop_warned:
+            logger.warning("[_get_loop] 事件循环已关闭，WebSocket 消息将无法发送")
+            _loop_warned = True
+        return None
     return _loop
 
 def _ws_send_progress(task_id: str, data: dict[str, Any]) -> None:
+    loop = _get_loop()
+    if loop is None:
+        return
     try:
-        asyncio.run_coroutine_threadsafe(ws_manager.send_progress(task_id, data), _get_loop())
+        asyncio.run_coroutine_threadsafe(ws_manager.send_progress(task_id, data), loop)
     except Exception as e:
         logger.warning(f"[_ws_send_progress] 发送进度消息失败: {e}")
 
 def _ws_send_final(task_id: str, data: dict[str, Any]) -> None:
+    loop = _get_loop()
+    if loop is None:
+        return
     try:
-        asyncio.run_coroutine_threadsafe(ws_manager.send_final(task_id, data), _get_loop())
+        asyncio.run_coroutine_threadsafe(ws_manager.send_final(task_id, data), loop)
     except Exception as e:
         logger.warning(f"[_ws_send_final] 发送最终消息失败: {e}")
 

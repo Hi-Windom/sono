@@ -1,5 +1,6 @@
 import os
 import logging
+import threading
 from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse, Response
@@ -12,6 +13,15 @@ from services.task_manager import executor
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+_mp3_encode_locks: dict[str, threading.Lock] = {}
+_mp3_encode_locks_guard = threading.Lock()
+
+def _get_mp3_encode_lock(task_id: str) -> threading.Lock:
+    with _mp3_encode_locks_guard:
+        if task_id not in _mp3_encode_locks:
+            _mp3_encode_locks[task_id] = threading.Lock()
+        return _mp3_encode_locks[task_id]
 
 
 def _safe_output_path(filename: str) -> str:
@@ -52,6 +62,18 @@ def _merge_wavs(vocal_path: str, acc_path: str, output_path: str):
 
     vocal_y, vocal_sr = load_audio_with_fallback(vocal_path, sr=None, mono=False)
     acc_y, acc_sr = load_audio_with_fallback(acc_path, sr=None, mono=False)
+
+    if acc_sr != vocal_sr:
+        from scipy.signal import resample_poly
+        target_sr = vocal_sr
+        target_len = int(acc_y.shape[1] * target_sr / acc_sr)
+        acc_resampled = np.zeros((acc_y.shape[0], target_len), dtype=acc_y.dtype)
+        for ch in range(acc_y.shape[0]):
+            resampled = resample_poly(acc_y[ch], target_sr, acc_sr)
+            acc_resampled[ch, :len(resampled)] = resampled[:target_len]
+        acc_y = acc_resampled
+        acc_sr = target_sr
+        logger.info(f"[_merge_wavs] 重采样伴奏: {acc_sr}Hz → {vocal_sr}Hz")
 
     max_len = max(vocal_y.shape[1], acc_y.shape[1])
     if vocal_y.shape[1] < max_len:
@@ -249,17 +271,42 @@ async def download_mp3(task_id: str, request: Request):
 
     mp3_path = os.path.join(OUTPUT_DIR, f"{task_id}_repaired.mp3")
     if not os.path.exists(mp3_path):
-        try:
-            _wav_to_mp3(wav_path, mp3_path)
-        except FileNotFoundError as e:
-            raise HTTPException(status_code=404, detail=str(e))
-        except (ImportError, RuntimeError) as e:
-            raise HTTPException(status_code=500, detail=f"MP3编码库未安装: {e}")
-        except ValueError as e:
-            raise HTTPException(status_code=500, detail=f"音频格式不支持: {e}")
-        except Exception as e:
-            logger.error(f"[DOWNLOAD-MP3] 转码失败 task_id={task_id}: {e}")
-            raise HTTPException(status_code=500, detail=f"MP3转码失败: {e}")
+        lock = _get_mp3_encode_lock(task_id)
+        with lock:
+            if not os.path.exists(mp3_path):
+                temp_mp3 = mp3_path + ".tmp"
+                try:
+                    _wav_to_mp3(wav_path, temp_mp3)
+                    os.replace(temp_mp3, mp3_path)
+                except FileNotFoundError as e:
+                    if os.path.exists(temp_mp3):
+                        try:
+                            os.unlink(temp_mp3)
+                        except OSError:
+                            pass
+                    raise HTTPException(status_code=404, detail=str(e))
+                except (ImportError, RuntimeError) as e:
+                    if os.path.exists(temp_mp3):
+                        try:
+                            os.unlink(temp_mp3)
+                        except OSError:
+                            pass
+                    raise HTTPException(status_code=500, detail=f"MP3编码库未安装: {e}")
+                except ValueError as e:
+                    if os.path.exists(temp_mp3):
+                        try:
+                            os.unlink(temp_mp3)
+                        except OSError:
+                            pass
+                    raise HTTPException(status_code=500, detail=f"音频格式不支持: {e}")
+                except Exception as e:
+                    if os.path.exists(temp_mp3):
+                        try:
+                            os.unlink(temp_mp3)
+                        except OSError:
+                            pass
+                    logger.error(f"[DOWNLOAD-MP3] 转码失败 task_id={task_id}: {e}")
+                    raise HTTPException(status_code=500, detail=f"MP3转码失败: {e}")
 
     if temp_wav and os.path.exists(temp_wav):
         os.unlink(temp_wav)
