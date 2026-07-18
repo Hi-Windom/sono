@@ -324,6 +324,62 @@
       "filePath": "/workspace/src/components/AlgorithmSelector.tsx"
     },
     {
+      "id": "src-components-repair-RepairProfileDisplay",
+      "label": "RepairProfileDisplay",
+      "type": "external",
+      "layer": "frontend",
+      "filePath": "/workspace/src/components/repair/RepairProfileDisplay.tsx"
+    },
+    {
+      "id": "src-components-repair-RepairModeSelector",
+      "label": "RepairModeSelector",
+      "type": "external",
+      "layer": "frontend",
+      "filePath": "/workspace/src/components/repair/RepairModeSelector.tsx"
+    },
+    {
+      "id": "src-components-repair-VolumeSlider",
+      "label": "VolumeSlider",
+      "type": "external",
+      "layer": "frontend",
+      "filePath": "/workspace/src/components/repair/VolumeSlider.tsx"
+    },
+    {
+      "id": "src-components-repair-DeliverySpecsSection",
+      "label": "DeliverySpecsSection",
+      "type": "external",
+      "layer": "frontend",
+      "filePath": "/workspace/src/components/repair/DeliverySpecsSection.tsx"
+    },
+    {
+      "id": "src-components-repair-StorageEstimateCard",
+      "label": "StorageEstimateCard",
+      "type": "external",
+      "layer": "frontend",
+      "filePath": "/workspace/src/components/repair/StorageEstimateCard.tsx"
+    },
+    {
+      "id": "src-components-repair-RenderCacheList",
+      "label": "RenderCacheList",
+      "type": "external",
+      "layer": "frontend",
+      "filePath": "/workspace/src/components/repair/RenderCacheList.tsx"
+    },
+    {
+      "id": "src-components-repair-RepairParamsSection",
+      "label": "RepairParamsSection",
+      "type": "external",
+      "layer": "frontend",
+      "filePath": "/workspace/src/components/repair/RepairParamsSection.tsx"
+    },
+    {
+      "id": "src-components-repair-shared",
+      "label": "shared",
+      "type": "external",
+      "layer": "frontend",
+      "filePath": "/workspace/src/components/repair/shared.ts"
+    },
+    {
       "id": "src-components-BuildInfo",
       "label": "BuildInfo",
       "type": "component",
@@ -366,16 +422,18 @@
       "filePath": "/workspace/src/components/StemProcessingPanel.tsx"
     },
     {
-      "id": "src-utils-wavParser",
-      "label": "utils",
-      "type": "frontend",
-      "layer": "/workspace/src/utils/wavParser.ts"
+      "id": "src-components-repair",
+      "label": "repair",
+      "type": "component",
+      "layer": "frontend",
+      "filePath": "/workspace/src/components/repair"
     },
     {
-      "id": "src-workers-useAudioWorker",
-      "label": "worker",
-      "type": "frontend",
-      "layer": "/workspace/src/workers/useAudioWorker.ts"
+      "id": "src-hooks-audio",
+      "label": "audio",
+      "type": "hook",
+      "layer": "frontend",
+      "filePath": "/workspace/src/hooks/audio"
     },
     {
       "id": "src-hooks-useTheme",
@@ -1240,157 +1298,6 @@
       "type": "module",
       "layer": "backend",
       "filePath": "/workspace/backend/services/audio_repair.py"
-    },
-    {
-      "id": "algo-v1.0",
-      "label": "算法 v1.0",
-      "type": "module",
-      "layer": "backend",
-      "filePath": "/workspace/backend/services/audio_repair.py",
-      "description": "算法版本 v1.0"
-    },
-    {
-      "id": "algo-v1.1",
-      "label": "算法 v1.1",
-      "type": "module",
-      "layer": "backend",
-      "filePath": "/workspace/backend/services/audio_repair.py",
-      "description": "算法版本 v1.1"
-    },
-    {
-      "id": "algo-v1.2",
-      "label": "算法 v1.2",
-      "type": "module",
-      "layer": "backend",
-      "filePath": "/workspace/backend/services/audio_repair.py",
-      "description": "算法版本 v1.2"
-    },
-    {
-      "id": "algo-v2.0",
-      "label": "算法 v2.0",
-      "type": "module",
-      "layer": "backend",
-      "filePath": "/workspace/backend/services/audio_repair.py",
-      "description": "算法版本 v2.0"
-    },
-    {
-      "id": "algo-v2.1",
-      "label": "算法 v2.1",
-      "type": "module",
-      "layer": "backend",
-      "filePath": "/workspace/backend/services/audio_repair.py",
-      "description": "算法版本 v2.1"
-    },
-    {
-      "id": "algo-v2.2",
-      "label": "算法 v2.2",
-      "type": "module",
-      "layer": "backend",
-      "filePath": "/workspace/backend/services/audio_repair.py",
-      "description": "算法版本 v2.2"
-    },
-    {
-      "id": "algo-v2.2a",
-      "label": "算法 v2.2a",
-      "type": "module",
-      "layer": "backend",
-      "filePath": "/workspace/backend/services/audio_repair.py",
-      "description": "算法版本 v2.2a"
-    },
-    {
-      "id": "algo-v2.3",
-      "label": "算法 v2.3",
-      "type": "module",
-      "layer": "backend",
-      "filePath": "/workspace/backend/services/audio_repair.py",
-      "description": "算法版本 v2.3"
-    },
-    {
-      "id": "algo-v2.3a",
-      "label": "算法 v2.3a",
-      "type": "module",
-      "layer": "backend",
-      "filePath": "/workspace/backend/services/audio_repair.py",
-      "description": "算法版本 v2.3a"
-    },
-    {
-      "id": "algo-v2.4",
-      "label": "算法 v2.4",
-      "type": "module",
-      "layer": "backend",
-      "filePath": "/workspace/backend/services/audio_repair.py",
-      "description": "算法版本 v2.4"
-    },
-    {
-      "id": "algo-v2.4a",
-      "label": "算法 v2.4a",
-      "type": "module",
-      "layer": "backend",
-      "filePath": "/workspace/backend/services/audio_repair.py",
-      "description": "算法版本 v2.4a"
-    },
-    {
-      "id": "algo-v3.0",
-      "label": "算法 v3.0",
-      "type": "module",
-      "layer": "backend",
-      "filePath": "/workspace/backend/services/audio_repair.py",
-      "description": "算法版本 v3.0"
-    },
-    {
-      "id": "algo-v3.0a",
-      "label": "算法 v3.0a",
-      "type": "module",
-      "layer": "backend",
-      "filePath": "/workspace/backend/services/audio_repair.py",
-      "description": "算法版本 v3.0a"
-    },
-    {
-      "id": "algo-v3.1",
-      "label": "算法 v3.1",
-      "type": "module",
-      "layer": "backend",
-      "filePath": "/workspace/backend/services/audio_repair.py",
-      "description": "算法版本 v3.1"
-    },
-    {
-      "id": "algo-v3.1a",
-      "label": "算法 v3.1a",
-      "type": "module",
-      "layer": "backend",
-      "filePath": "/workspace/backend/services/audio_repair.py",
-      "description": "算法版本 v3.1a"
-    },
-    {
-      "id": "algo-v3.2",
-      "label": "算法 v3.2",
-      "type": "module",
-      "layer": "backend",
-      "filePath": "/workspace/backend/services/audio_repair.py",
-      "description": "算法版本 v3.2"
-    },
-    {
-      "id": "algo-v3.2a",
-      "label": "算法 v3.2a",
-      "type": "module",
-      "layer": "backend",
-      "filePath": "/workspace/backend/services/audio_repair.py",
-      "description": "算法版本 v3.2a"
-    },
-    {
-      "id": "algo-v4.0a",
-      "label": "算法 v4.0a",
-      "type": "module",
-      "layer": "backend",
-      "filePath": "/workspace/backend/services/audio_repair.py",
-      "description": "算法版本 v4.0a"
-    },
-    {
-      "id": "repair-module-__pycache__",
-      "label": "__pycache__",
-      "type": "module",
-      "layer": "backend",
-      "filePath": "/workspace/backend/services/repair/__pycache__"
     },
     {
       "id": "repair-module-repair_v2_0",
@@ -2261,6 +2168,54 @@
       "type": "import"
     },
     {
+      "source": "src-components-AIRepairPanel",
+      "target": "src-components-repair-RepairProfileDisplay",
+      "label": "导入",
+      "type": "import"
+    },
+    {
+      "source": "src-components-AIRepairPanel",
+      "target": "src-components-repair-RepairModeSelector",
+      "label": "导入",
+      "type": "import"
+    },
+    {
+      "source": "src-components-AIRepairPanel",
+      "target": "src-components-repair-VolumeSlider",
+      "label": "导入",
+      "type": "import"
+    },
+    {
+      "source": "src-components-AIRepairPanel",
+      "target": "src-components-repair-DeliverySpecsSection",
+      "label": "导入",
+      "type": "import"
+    },
+    {
+      "source": "src-components-AIRepairPanel",
+      "target": "src-components-repair-StorageEstimateCard",
+      "label": "导入",
+      "type": "import"
+    },
+    {
+      "source": "src-components-AIRepairPanel",
+      "target": "src-components-repair-RenderCacheList",
+      "label": "导入",
+      "type": "import"
+    },
+    {
+      "source": "src-components-AIRepairPanel",
+      "target": "src-components-repair-RepairParamsSection",
+      "label": "导入",
+      "type": "import"
+    },
+    {
+      "source": "src-components-AIRepairPanel",
+      "target": "src-components-repair-shared",
+      "label": "导入",
+      "type": "import"
+    },
+    {
       "source": "src-components-AlgorithmSelector",
       "target": "src-services-backendApi",
       "label": "导入",
@@ -2313,72 +2268,6 @@
       "target": "src-hooks-useAudioProcessor",
       "label": "导入",
       "type": "import"
-    },
-    {
-      "source": "src-hooks-useAudioProcessor",
-      "target": "src-utils-advancedAudioProcessing",
-      "label": "调用",
-      "type": "call"
-    },
-    {
-      "source": "src-hooks-useAudioProcessor",
-      "target": "src-utils-settingsStorage",
-      "label": "调用",
-      "type": "call"
-    },
-    {
-      "source": "src-hooks-useAudioProcessor",
-      "target": "src-utils-wavParser",
-      "label": "调用",
-      "type": "call"
-    },
-    {
-      "source": "src-hooks-useAudioProcessor",
-      "target": "src-utils-sessionDB",
-      "label": "调用",
-      "type": "call"
-    },
-    {
-      "source": "src-hooks-useAudioProcessor",
-      "target": "src-utils-fileHash",
-      "label": "调用",
-      "type": "call"
-    },
-    {
-      "source": "src-hooks-useAudioProcessor",
-      "target": "src-workers-useAudioWorker",
-      "label": "调用",
-      "type": "call"
-    },
-    {
-      "source": "src-hooks-useAudioProcessor",
-      "target": "src-store-repairSessionStore",
-      "label": "调用",
-      "type": "call"
-    },
-    {
-      "source": "src-hooks-useAudioProcessor",
-      "target": "src-services-backendApi",
-      "label": "调用",
-      "type": "call"
-    },
-    {
-      "source": "src-hooks-useAudioProcessor",
-      "target": "src-components-RepairCacheModal",
-      "label": "调用",
-      "type": "call"
-    },
-    {
-      "source": "src-hooks-useAudioProcessor",
-      "target": "src-services-backendApi",
-      "label": "调用",
-      "type": "call"
-    },
-    {
-      "source": "src-hooks-useAudioProcessor",
-      "target": "src-utils-settingsStorage",
-      "label": "调用",
-      "type": "call"
     },
     {
       "source": "frontend",
@@ -3069,120 +2958,6 @@
       "target": "backend-services-audio_repair.py",
       "label": "修复引擎",
       "type": "import"
-    },
-    {
-      "source": "backend-services-audio_repair.py",
-      "target": "algo-v1.0",
-      "label": "算法版本",
-      "type": "data-flow"
-    },
-    {
-      "source": "backend-services-audio_repair.py",
-      "target": "algo-v1.1",
-      "label": "算法版本",
-      "type": "data-flow"
-    },
-    {
-      "source": "backend-services-audio_repair.py",
-      "target": "algo-v1.2",
-      "label": "算法版本",
-      "type": "data-flow"
-    },
-    {
-      "source": "backend-services-audio_repair.py",
-      "target": "algo-v2.0",
-      "label": "算法版本",
-      "type": "data-flow"
-    },
-    {
-      "source": "backend-services-audio_repair.py",
-      "target": "algo-v2.1",
-      "label": "算法版本",
-      "type": "data-flow"
-    },
-    {
-      "source": "backend-services-audio_repair.py",
-      "target": "algo-v2.2",
-      "label": "算法版本",
-      "type": "data-flow"
-    },
-    {
-      "source": "backend-services-audio_repair.py",
-      "target": "algo-v2.2a",
-      "label": "算法版本",
-      "type": "data-flow"
-    },
-    {
-      "source": "backend-services-audio_repair.py",
-      "target": "algo-v2.3",
-      "label": "算法版本",
-      "type": "data-flow"
-    },
-    {
-      "source": "backend-services-audio_repair.py",
-      "target": "algo-v2.3a",
-      "label": "算法版本",
-      "type": "data-flow"
-    },
-    {
-      "source": "backend-services-audio_repair.py",
-      "target": "algo-v2.4",
-      "label": "算法版本",
-      "type": "data-flow"
-    },
-    {
-      "source": "backend-services-audio_repair.py",
-      "target": "algo-v2.4a",
-      "label": "算法版本",
-      "type": "data-flow"
-    },
-    {
-      "source": "backend-services-audio_repair.py",
-      "target": "algo-v3.0",
-      "label": "算法版本",
-      "type": "data-flow"
-    },
-    {
-      "source": "backend-services-audio_repair.py",
-      "target": "algo-v3.0a",
-      "label": "算法版本",
-      "type": "data-flow"
-    },
-    {
-      "source": "backend-services-audio_repair.py",
-      "target": "algo-v3.1",
-      "label": "算法版本",
-      "type": "data-flow"
-    },
-    {
-      "source": "backend-services-audio_repair.py",
-      "target": "algo-v3.1a",
-      "label": "算法版本",
-      "type": "data-flow"
-    },
-    {
-      "source": "backend-services-audio_repair.py",
-      "target": "algo-v3.2",
-      "label": "算法版本",
-      "type": "data-flow"
-    },
-    {
-      "source": "backend-services-audio_repair.py",
-      "target": "algo-v3.2a",
-      "label": "算法版本",
-      "type": "data-flow"
-    },
-    {
-      "source": "backend-services-audio_repair.py",
-      "target": "algo-v4.0a",
-      "label": "算法版本",
-      "type": "data-flow"
-    },
-    {
-      "source": "backend-services-audio_repair.py",
-      "target": "repair-module-__pycache__",
-      "label": "动态加载",
-      "type": "call"
     },
     {
       "source": "backend-services-audio_repair.py",
