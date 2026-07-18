@@ -2,7 +2,7 @@ import os
 import json
 import logging
 from datetime import datetime, timezone
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, Header
 from pydantic import BaseModel
 
 import config
@@ -686,7 +686,10 @@ async def clean_invalid_cache():
 
 
 @router.post("/cache/clear-all")
-async def clear_all_cache():
+async def clear_all_cache(x_admin_token: str = Header(None)):
+    admin_token = config.ADMIN_TOKEN
+    if admin_token and x_admin_token != admin_token:
+        raise HTTPException(status_code=401, detail="未授权的操作")
     conn = get_db()
 
     total_released = 0

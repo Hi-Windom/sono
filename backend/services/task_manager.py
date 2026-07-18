@@ -731,6 +731,7 @@ class DetectTask(BaseTask):
         self.detect_type = detect_type
         self.detector_version = detector_version
         self._start_time = 0.0
+        self._perf_ended = False
         prev_task = get_task(task_id)
         self._prev_status = prev_task["status"] if prev_task else "pending"
         self._stop_monitor = threading.Event()
@@ -738,6 +739,7 @@ class DetectTask(BaseTask):
         self._last_progress_time = [0.0]
         self._last_progress = [-1.0]
         self._is_stuck = [False]
+        self._perf_collector = get_perf_collector()
 
     @property
     def task_type(self) -> str:
@@ -789,6 +791,7 @@ class DetectTask(BaseTask):
 
     def execute(self, progress_callback) -> dict[str, Any]:
         self._start_time = time.time()
+        self._perf_collector.start_detect(self.task_id)
         logger.info(f"[DetectTask] 开始 task_id={self.task_id} type={self.detect_type} version={self.detector_version}")
 
         prev_task = get_task(self.task_id)
@@ -821,9 +824,14 @@ class DetectTask(BaseTask):
                 self._is_stuck[0] = False
             progress_callback(p, s)
 
-        result = detect_ai_audio(self.audio_path, wrapped_progress, version=self.detector_version)
+        with perf_timer("detect_total"):
+            result = detect_ai_audio(self.audio_path, wrapped_progress, version=self.detector_version)
         result["detect_type"] = self.detect_type
         result["detector_version"] = self.detector_version
+
+        perf_data = self._perf_collector.end_detect(self.task_id, self.detector_version)
+        self._perf_ended = True
+        result["perf_data"] = perf_data
 
         elapsed = time.time() - self._start_time
         logger.info(f"[DetectTask] 完成 task_id={self.task_id} elapsed={elapsed:.1f}s")
@@ -869,6 +877,11 @@ class DetectTask(BaseTask):
         self._stop_monitor.set()
         if self._monitor_thread is not None:
             self._monitor_thread.join(timeout=3.0)
+        if not self._perf_ended:
+            try:
+                self._perf_collector.end_detect(self.task_id, self.detector_version)
+            except Exception as e:
+                logger.warning(f"[DetectTask] perf_collector.end_detect 失败 task_id={self.task_id}: {e}")
 
 
 class RenderTask(BaseTask):

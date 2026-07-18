@@ -2,7 +2,7 @@ import os
 import logging
 import threading
 from datetime import datetime, timezone
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Query, Header
 from fastapi.responses import FileResponse, StreamingResponse, Response
 from urllib.parse import quote
 
@@ -10,6 +10,7 @@ from config import OUTPUT_DIR, DECODED_DIR, UPLOAD_DIR
 from database import get_task, find_task_by_hash, update_task
 from services.task_manager import executor
 from services.file_gateway import output_gateway, upload_gateway, SecurityError
+from ._common import verify_task_access_token
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +75,14 @@ def _merge_wavs(vocal_path: str, acc_path: str, output_path: str):
 
 
 @router.get("/download/{task_id}")
-async def download_audio(task_id: str):
+async def download_audio(
+    task_id: str,
+    access_token: str = Query(None),
+    x_task_token: str = Header(None),
+):
+    token = x_task_token or access_token
+    if not verify_task_access_token(task_id, token):
+        raise HTTPException(status_code=403, detail="无效的任务访问令牌")
     task = get_task(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
@@ -222,7 +230,15 @@ async def download_file(filename: str, request: Request):
 
 
 @router.get("/download-mp3/{task_id}")
-async def download_mp3(task_id: str, request: Request):
+async def download_mp3(
+    task_id: str,
+    request: Request,
+    access_token: str = Query(None),
+    x_task_token: str = Header(None),
+):
+    token = x_task_token or access_token
+    if not verify_task_access_token(task_id, token):
+        raise HTTPException(status_code=403, detail="无效的任务访问令牌")
     wav_filename = f"{task_id}_repaired.wav"
     wav_path = output_gateway.resolve(wav_filename)
     temp_wav = None
@@ -368,7 +384,15 @@ async def download_mp3(task_id: str, request: Request):
 
 
 @router.get("/download-m4a/{task_id}")
-async def download_m4a(task_id: str, request: Request):
+async def download_m4a(
+    task_id: str,
+    request: Request,
+    access_token: str = Query(None),
+    x_task_token: str = Header(None),
+):
+    token = x_task_token or access_token
+    if not verify_task_access_token(task_id, token):
+        raise HTTPException(status_code=403, detail="无效的任务访问令牌")
     from services.m4a_encoder import encode_m4a, is_available as m4a_available
 
     if not m4a_available():
@@ -657,7 +681,15 @@ async def download_m4a_file(filename: str, request: Request):
 
 
 @router.get("/preview/{task_id}")
-async def preview_audio(task_id: str, type: str = 'repaired'):
+async def preview_audio(
+    task_id: str,
+    type: str = 'repaired',
+    access_token: str = Query(None),
+    x_task_token: str = Header(None),
+):
+    token = x_task_token or access_token
+    if not verify_task_access_token(task_id, token):
+        raise HTTPException(status_code=403, detail="无效的任务访问令牌")
     task = get_task(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")

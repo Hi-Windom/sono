@@ -38,6 +38,8 @@ def get_total_memory_bytes():
     return None
 
 def estimate_repair_memory_bytes(n_samples, n_channels, sr, working_sr, algorithm_version=None):
+    if n_samples <= 0:
+        return 0
     upsampled_samples = int(n_samples * working_sr / sr)
     use_f32 = should_use_float32(n_samples, n_channels)
     elem_size = 4 if use_f32 else 8

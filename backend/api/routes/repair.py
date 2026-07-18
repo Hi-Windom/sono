@@ -3,7 +3,7 @@ import json
 import logging
 import shutil
 import traceback
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Header, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
@@ -11,6 +11,7 @@ from config import UPLOAD_DIR, OUTPUT_DIR
 from database import create_task, get_task, find_task_by_hash, update_task
 from services.task_manager import generate_task_id, submit_repair_task, can_accept_task, cancel_task
 from services.param_maps import flatten_vocal_params, flatten_inst_params
+from ._common import verify_task_access_token
 
 logger = logging.getLogger(__name__)
 
@@ -240,7 +241,15 @@ async def repair_debug_endpoint(request: DebugRepairRequest):
 
 
 @router.get("/repair-debug/{task_id}/{filename}")
-async def download_debug_variant(task_id: str, filename: str):
+async def download_debug_variant(
+    task_id: str,
+    filename: str,
+    access_token: str = Query(None),
+    x_task_token: str = Header(None),
+):
+    token = x_task_token or access_token
+    if not verify_task_access_token(task_id, token):
+        raise HTTPException(status_code=403, detail="无效的任务访问令牌")
     safe_filename = os.path.basename(filename)
     if safe_filename != filename:
         raise HTTPException(status_code=400, detail="无效的文件名")
@@ -260,7 +269,14 @@ async def download_debug_variant(task_id: str, filename: str):
 
 
 @router.get("/tracks/{task_id}")
-async def get_track_status(task_id: str):
+async def get_track_status(
+    task_id: str,
+    access_token: str = Query(None),
+    x_task_token: str = Header(None),
+):
+    token = x_task_token or access_token
+    if not verify_task_access_token(task_id, token):
+        raise HTTPException(status_code=403, detail="无效的任务访问令牌")
     main_task = get_task(task_id)
     if not main_task:
         raise HTTPException(status_code=404, detail="任务不存在")
@@ -303,9 +319,17 @@ async def get_track_status(task_id: str):
 
 
 @router.get("/status/{task_id}")
-async def get_task_status(request: Request, task_id: str):
+async def get_task_status(
+    request: Request,
+    task_id: str,
+    access_token: str = Query(None),
+    x_task_token: str = Header(None),
+):
     request_id = getattr(request.state, "request_id", "unknown")
     try:
+        token = x_task_token or access_token
+        if not verify_task_access_token(task_id, token):
+            raise HTTPException(status_code=403, detail="无效的任务访问令牌")
         logger.debug(f"[{request_id}] [/status/{task_id}] 查询任务状态")
         task = get_task(task_id)
         if not task:
@@ -321,7 +345,14 @@ async def get_task_status(request: Request, task_id: str):
 
 
 @router.post("/cancel/{task_id}")
-async def cancel_task_endpoint(task_id: str):
+async def cancel_task_endpoint(
+    task_id: str,
+    access_token: str = Query(None),
+    x_task_token: str = Header(None),
+):
+    token = x_task_token or access_token
+    if not verify_task_access_token(task_id, token):
+        raise HTTPException(status_code=403, detail="无效的任务访问令牌")
     task = get_task(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")

@@ -24,6 +24,7 @@ def get_db() -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA busy_timeout=30000")
+    conn.execute("PRAGMA wal_autocheckpoint=1000")
     return conn
 
 def init_db() -> None:
@@ -78,11 +79,18 @@ def init_db() -> None:
             conn.execute("ALTER TABLE tasks ADD COLUMN render_result TEXT")
         except Exception:
             pass
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_tasks_file_hash ON tasks(file_hash)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_tasks_created_at ON tasks(created_at)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_tasks_status_created_at ON tasks(status, created_at)")
         conn.commit()
 
 def cleanup_stale_tasks() -> int:
+    import logging
+    logger = logging.getLogger(__name__)
     conn = get_db()
     try:
+        conn.execute("BEGIN IMMEDIATE")
         stale_statuses = ('pending', 'processing', 'detecting', 'analyzing', 'repairing', 'rendering')
         cursor = conn.execute(
             "SELECT id, status, original_filename FROM tasks WHERE status IN ({})".format(
@@ -91,15 +99,12 @@ def cleanup_stale_tasks() -> int:
             stale_statuses,
         )
         stale_tasks = cursor.fetchall()
-        if not stale_tasks:
-            return 0
         for row in stale_tasks:
-            logger = __import__('logging').getLogger(__name__)
             logger.info(
                 f"[cleanup_stale_tasks] 标记停滞任务为失败: id={row['id']} "
                 f"status={row['status']} filename={row['original_filename']}"
             )
-        conn.execute(
+        cursor = conn.execute(
             "UPDATE tasks SET status = 'error', error = '服务器重启，任务中断', progress = 0, "
             "step = '任务已中断', updated_at = CURRENT_TIMESTAMP WHERE status IN ({})".format(
                 ','.join('?' * len(stale_statuses))
@@ -107,7 +112,10 @@ def cleanup_stale_tasks() -> int:
             stale_statuses,
         )
         conn.commit()
-        return len(stale_tasks)
+        return cursor.rowcount
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         conn.close()
 
@@ -191,7 +199,7 @@ def find_repair_cache(file_hash: str, params: dict) -> TaskDict | None:
     
     with closing(get_db()) as conn:
         rows = conn.execute(
-            "SELECT * FROM tasks WHERE file_hash = ? ORDER BY updated_at DESC",
+            "SELECT * FROM tasks WHERE file_hash = ? AND status = 'completed' AND output_path != '' ORDER BY updated_at DESC",
             (file_hash,),
         ).fetchall()
     logger.info(f"[cache-lookup] hash={file_hash} found {len(rows)} total tasks")
@@ -262,7 +270,7 @@ def find_dual_repair_cache(vocal_file_hash: str, accompaniment_file_hash: str, p
 
     with closing(get_db()) as conn:
         rows = conn.execute(
-            "SELECT * FROM tasks WHERE json_extract(params, '$.processing_mode') = 'dual' ORDER BY updated_at DESC"
+            "SELECT * FROM tasks WHERE json_extract(params, '$.processing_mode') = 'dual' AND status = 'completed' AND output_path != '' ORDER BY updated_at DESC"
         ).fetchall()
     logger.info(f"[cache-lookup-dual] vocal_hash={vocal_file_hash} acc_hash={accompaniment_file_hash} found {len(rows)} dual tasks")
 
@@ -475,6 +483,7 @@ def get_training_db() -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA busy_timeout=30000")
+    conn.execute("PRAGMA wal_autocheckpoint=1000")
     return conn
 
 def init_training_db() -> None:

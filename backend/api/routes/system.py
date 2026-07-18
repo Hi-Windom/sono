@@ -95,7 +95,10 @@ async def memory_info(request: MemoryInfoRequest):
 
 
 @router.post("/log")
-async def log_message(request: LogRequest):
+async def log_message(request: LogRequest, x_admin_token: str = Header(None)):
+    admin_token = config.ADMIN_TOKEN
+    if admin_token and x_admin_token != admin_token:
+        raise HTTPException(status_code=401, detail="未授权的操作")
     level = request.level.lower()
     if level == "error":
         logger.error(request.message)

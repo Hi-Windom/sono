@@ -101,13 +101,25 @@ def create_app() -> FastAPI:
             logger.error(f"[{request_id}] !!! {request.method} {request.url.path} error={type(e).__name__}: {e}\n{tb_str}")
             raise
 
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+    from starlette.middleware.base import BaseHTTPMiddleware
+    from starlette.responses import Response
+
+    class DynamicCORSMiddleware(BaseHTTPMiddleware):
+        async def dispatch(self, request, call_next):
+            origin = request.headers.get("origin")
+            response = await call_next(request)
+            if origin:
+                response.headers["Access-Control-Allow-Origin"] = origin
+                response.headers["Access-Control-Allow-Credentials"] = "true"
+            else:
+                response.headers["Access-Control-Allow-Origin"] = "*"
+            response.headers["Access-Control-Allow-Methods"] = "*"
+            response.headers["Access-Control-Allow-Headers"] = "*"
+            if request.method == "OPTIONS":
+                return Response(status_code=204, headers=dict(response.headers))
+            return response
+
+    app.add_middleware(DynamicCORSMiddleware)
 
     app.include_router(router)
 

@@ -9,9 +9,10 @@ import os
 import hashlib
 import logging
 from typing import List, Dict, Any
-from fastapi import APIRouter, UploadFile, File, HTTPException, Form
+from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Header
 from pydantic import BaseModel
 
+import config
 from services.wasm_runtime import WasmRuntime, WasmModuleRegistry
 
 logger = logging.getLogger(__name__)
@@ -125,12 +126,16 @@ async def list_modules():
 async def upload_wasm_module(
     file: UploadFile = File(...),
     module_name: str = Form(None),
+    x_admin_token: str = Header(None),
 ):
     """
     上传 WASM 模块
     
     上传后模块会被保存到 modules 目录，并自动注册。
     """
+    admin_token = config.ADMIN_TOKEN
+    if admin_token and x_admin_token != admin_token:
+        raise HTTPException(status_code=401, detail="未授权的操作")
     if not file.filename or not file.filename.endswith('.wasm'):
         raise HTTPException(status_code=400, detail="Only .wasm files are allowed")
     

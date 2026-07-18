@@ -4140,3 +4140,1511 @@ class TestSQLiteConnectionContextManager:
         assert 'with closing(' in source, (
             "CC-016: init_db 应该使用 context manager 确保连接关闭"
         )
+
+
+# ============================================================================
+# 回归测试 36: 训练目录含 .wav 结尾的子目录时不应崩溃
+# Bug: process_all_files 用 os.listdir 后只判断后缀名，
+#      如果有子目录名以 .wav 结尾，会尝试 open 目录导致崩溃
+# 修复: 用 os.path.isfile() 过滤掉目录
+# ============================================================================
+
+class TestTrainingDirWithWavSuffix:
+    """防止训练目录中含 .wav 后缀子目录导致崩溃"""
+
+    def test_process_all_files_checks_isfile(self):
+        """process_all_files 源码中应该包含 os.path.isfile() 检查"""
+        import inspect
+        import os
+
+        feature_extractor_path = os.path.join(
+            os.path.dirname(__file__), "..", "training", "feature_extractor.py"
+        )
+
+        with open(feature_extractor_path) as f:
+            source = f.read()
+
+        assert "os.path.isfile(filepath)" in source, (
+            "TR-001: process_all_files 应该使用 os.path.isfile() 过滤目录，"
+            "防止 .wav 结尾的子目录被当作文件处理导致崩溃"
+        )
+
+    def test_directory_with_wav_suffix_not_treated_as_file(self):
+        """以 .wav 结尾的目录不应被识别为音频文件"""
+        import tempfile
+        import os
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            subdir_path = os.path.join(tmpdir, "backup.wav")
+            os.makedirs(subdir_path)
+
+            import soundfile as sf
+            import numpy as np
+            sr = 44100
+            t = np.arange(int(sr * 0.5)) / sr
+            y = 0.3 * np.sin(2 * np.pi * 440 * t)
+            wav_path = os.path.join(tmpdir, "test.wav")
+            sf.write(wav_path, y, sr)
+
+            training_files = []
+            for filename in os.listdir(tmpdir):
+                if filename.lower().endswith(('.wav', '.mp3', '.flac', '.ogg', '.aac', '.m4a')):
+                    filepath = os.path.join(tmpdir, filename)
+                    if os.path.isfile(filepath):
+                        training_files.append(filepath)
+
+            assert len(training_files) == 1, (
+                f"TR-001: 应该只识别出 1 个真实音频文件，实际识别了 {len(training_files)} 个。"
+                f"以 .wav 结尾的子目录不应该被当作文件处理。"
+            )
+            assert training_files[0] == wav_path
+
+
+# ============================================================================
+# 回归测试 37: 任务取消后状态不应被覆盖为 completed
+# Bug: 任务执行完后即使已被取消，仍会设置 completed 状态，覆盖 cancelled
+# 修复: _run_task 中在设置 completed 状态前检查是否已被取消
+# ============================================================================
+
+class TestCancelledTaskStatusNotOverwritten:
+    """防止取消的任务状态被 completed 覆盖"""
+
+    def test_run_task_checks_cancelled_before_completed(self):
+        """_run_task 源码中应该在设置 completed 状态前检查取消状态"""
+        import os
+        import ast
+
+        task_executor_path = os.path.join(
+            os.path.dirname(__file__), "..", "services", "task_executor.py"
+        )
+
+        with open(task_executor_path) as f:
+            source = f.read()
+
+        assert "task.execute(progress_callback)" in source, (
+            "task_executor 中应该有 task.execute() 调用"
+        )
+
+        execute_idx = source.find("task.execute(progress_callback)")
+        update_task_idx = source.find('"status": completed_status', execute_idx)
+        cancelled_check_idx = source.find("task_id in _cancelled_tasks", execute_idx)
+
+        assert cancelled_check_idx != -1, (
+            "TR-002: task.execute() 之后应该检查 task_id 是否在 _cancelled_tasks 中"
+        )
+        assert cancelled_check_idx < update_task_idx, (
+            "TR-002: 取消状态检查应该在设置 completed 状态之前，防止 cancelled 被覆盖"
+        )
+
+    def test_cancelled_task_raises_taskcancellederror(self):
+        """检测到任务已取消时应该抛出 TaskCancelledError"""
+        import os
+
+        task_executor_path = os.path.join(
+            os.path.dirname(__file__), "..", "services", "task_executor.py"
+        )
+
+        with open(task_executor_path) as f:
+            source = f.read()
+
+        execute_idx = source.find("task.execute(progress_callback)")
+        after_execute = source[execute_idx:execute_idx + 1000]
+
+        assert "TaskCancelledError" in after_execute, (
+            "TR-002: 检测到任务已取消时应该抛出 TaskCancelledError，走取消处理分支"
+        )
+        assert "raise" in after_execute, (
+            "TR-002: 检测到取消时应该 raise 异常，而不是继续设置 completed 状态"
+        )
+
+
+# ============================================================================
+# 回归测试 38: 特征提取器数据库连接异常路径泄漏
+# Bug: process_single_file 中数据库连接在异常时未关闭
+# 修复: 用 try/finally 确保连接关闭
+# ============================================================================
+
+class TestFeatureExtractorDbConnectionLeak:
+    """防止特征提取器数据库连接泄漏"""
+
+    def test_process_single_file_has_finally_block(self):
+        """process_single_file 源码中应该有 try/finally 确保连接关闭"""
+        import os
+        import ast
+
+        feature_extractor_path = os.path.join(
+            os.path.dirname(__file__), "..", "training", "feature_extractor.py"
+        )
+
+        with open(feature_extractor_path) as f:
+            source = f.read()
+
+        assert "finally:" in source, (
+            "TR-003: process_single_file 应该使用 try/finally 确保数据库连接关闭"
+        )
+        assert "conn.close()" in source, (
+            "TR-003: process_single_file 应该在 finally 块中关闭数据库连接"
+        )
+        assert "if conn is not None" in source, (
+            "TR-003: process_single_file 应该检查 conn 是否为 None 再关闭"
+        )
+
+    def test_db_connection_closed_on_exception_pattern(self):
+        """数据库连接关闭模式应该在 finally 块中，而不是只在正常路径"""
+        import os
+
+        feature_extractor_path = os.path.join(
+            os.path.dirname(__file__), "..", "training", "feature_extractor.py"
+        )
+
+        with open(feature_extractor_path) as f:
+            lines = f.readlines()
+
+        process_single_start = None
+        process_single_end = None
+        for i, line in enumerate(lines):
+            if "def process_single_file(" in line:
+                process_single_start = i
+            elif process_single_start is not None and line.startswith("def ") and i > process_single_start:
+                process_single_end = i
+                break
+
+        assert process_single_start is not None, "找不到 process_single_file 函数"
+
+        func_lines = lines[process_single_start:process_single_end] if process_single_end else lines[process_single_start:]
+        func_source = "".join(func_lines)
+
+        finally_idx = func_source.find("finally:")
+        close_idx = func_source.find("conn.close()")
+
+        assert finally_idx != -1, "TR-003: process_single_file 应该有 finally 块"
+        assert close_idx != -1, "TR-003: process_single_file 应该有关闭连接的代码"
+        assert close_idx > finally_idx, (
+            "TR-003: conn.close() 应该在 finally 块中，确保异常路径也能关闭连接"
+        )
+
+
+# ============================================================================
+# 回归测试 39: 检测任务性能采集
+# Bug: DetectTask 完全缺少性能采集（start_detect/end_detect）
+# 修复: 在 DetectTask.execute 中添加 start_detect/end_detect
+# ============================================================================
+
+class TestDetectTaskPerfCollection:
+    """防止检测任务缺少性能采集"""
+
+    def test_detect_task_has_perf_collection(self):
+        """DetectTask 执行后应该有 perf_data 字段"""
+        import tempfile
+        import os
+        from database import init_db, create_task
+        from services.task_manager import DetectTask
+        from services.perf_metrics import PerfMetricsCollector
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            import config
+            old_upload = config.UPLOAD_DIR
+            old_output = config.OUTPUT_DIR
+            old_db = config.DB_PATH
+            try:
+                config.UPLOAD_DIR = tmpdir
+                config.OUTPUT_DIR = tmpdir
+                config.DB_PATH = os.path.join(tmpdir, "test.db")
+                init_db()
+
+                import soundfile as sf
+                import numpy as np
+                sr = 44100
+                t = np.arange(int(sr * 1.0)) / sr
+                y = 0.3 * np.sin(2 * np.pi * 440 * t)
+                audio_path = os.path.join(tmpdir, "test.wav")
+                sf.write(audio_path, y, sr)
+
+                task_id = "reg_tr004_detect_perf"
+                create_task(task_id, "test.wav", audio_path, {"detector_version": "v1.1"}, file_hash="hash_tr004")
+
+                perf_collector = PerfMetricsCollector.get_instance()
+                initial_detect_count = len(perf_collector.detect_history)
+
+                task = DetectTask(task_id, audio_path, detect_type="original", detector_version="v1.1")
+
+                def fake_progress(p, s):
+                    pass
+
+                result = task.execute(fake_progress)
+
+                assert "perf_data" in result, (
+                    "TR-004: DetectTask.execute 的返回值应该包含 perf_data 字段"
+                )
+                assert result["perf_data"] is not None
+                assert "total_time_ms" in result["perf_data"], (
+                    "TR-004: perf_data 应该包含 total_time_ms"
+                )
+                assert result["perf_data"]["total_time_ms"] > 0, (
+                    "TR-004: total_time_ms 应该大于 0"
+                )
+
+                final_detect_count = len(perf_collector.detect_history)
+                assert final_detect_count > initial_detect_count, (
+                    "TR-004: 检测任务完成后，detect_history 应该有新记录"
+                )
+            finally:
+                config.UPLOAD_DIR = old_upload
+                config.OUTPUT_DIR = old_output
+                config.DB_PATH = old_db
+
+
+# ============================================================================
+# 回归测试 40: process_all_files 重复哈希计算
+# Bug: process_all_files 遍历两次文件，每次都读文件算哈希
+# 修复: 第一次遍历时把哈希值存下来，第二次直接复用
+# ============================================================================
+
+class TestProcessAllFilesHashComputedOnce:
+    """防止 process_all_files 重复计算文件哈希"""
+
+    def test_process_all_files_stores_and_reuses_hashes(self):
+        """process_all_files 应该计算一次哈希并存起来复用，而不是重复计算"""
+        import os
+
+        feature_extractor_path = os.path.join(
+            os.path.dirname(__file__), "..", "training", "feature_extractor.py"
+        )
+
+        with open(feature_extractor_path) as f:
+            source = f.read()
+
+        assert "compute_file_hash" in source, (
+            "TR-005: 应该有独立的 compute_file_hash 函数"
+        )
+        assert "file_hashes" in source, (
+            "TR-005: process_all_files 应该有 file_hashes 字典来存储哈希值"
+        )
+        assert "file_hash=file_hashes.get(filepath)" in source or "file_hash=file_hashes[" in source, (
+            "TR-005: process_single_file 调用时应该传入已计算的哈希值，避免重复计算"
+        )
+
+    def test_process_single_file_accepts_file_hash_param(self):
+        """process_single_file 应该接受可选的 file_hash 参数"""
+        import os
+        import ast
+
+        feature_extractor_path = os.path.join(
+            os.path.dirname(__file__), "..", "training", "feature_extractor.py"
+        )
+
+        with open(feature_extractor_path) as f:
+            source = f.read()
+
+        tree = ast.parse(source)
+
+        found = False
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef) and node.name == "process_single_file":
+                args = [arg.arg for arg in node.args.args]
+                assert "file_hash" in args, (
+                    "TR-005: process_single_file 应该有 file_hash 参数，用于接收预计算的哈希值"
+                )
+                found = True
+                break
+
+        assert found, "找不到 process_single_file 函数"
+
+
+# ============================================================================
+# 回归测试 41: 空音频内存估算一致
+# Bug: 空音频（n_samples=0）流式 vs 非流式内存估算差异达数百倍
+# 修复: 添加 n_samples<=0 的边界处理，直接返回 0
+# ============================================================================
+
+class TestEmptyAudioMemoryEstimate:
+    """防止空音频内存估算不一致"""
+
+    def test_empty_audio_returns_zero(self):
+        """n_samples=0 时应该返回 0 字节，而不是流式/非流式差异巨大"""
+        from services.memory_guard import estimate_repair_memory_bytes
+
+        streaming_versions = ["v2.4", "v3.0", "v3.2", "v4.0a"]
+        non_streaming_versions = ["v2.0", "v2.1"]
+
+        for ver in streaming_versions + non_streaming_versions:
+            result = estimate_repair_memory_bytes(0, 2, 44100, 48000, algorithm_version=ver)
+            assert result == 0, (
+                f"TR-006: 空音频 ({ver}) 内存估算应该为 0，实际为 {result} 字节"
+            )
+
+        streaming_zero = estimate_repair_memory_bytes(0, 2, 44100, 48000, algorithm_version="v2.4")
+        non_streaming_zero = estimate_repair_memory_bytes(0, 2, 44100, 48000, algorithm_version="v2.0")
+
+        assert streaming_zero == non_streaming_zero, (
+            f"TR-006: 空音频流式和非流式估算应该一致，"
+            f"流式={streaming_zero}, 非流式={non_streaming_zero}"
+        )
+
+    def test_negative_samples_returns_zero(self):
+        """n_samples 为负数时也应该返回 0"""
+        from services.memory_guard import estimate_repair_memory_bytes
+
+        result = estimate_repair_memory_bytes(-100, 2, 44100, 48000, algorithm_version="v2.4")
+        assert result == 0, (
+            f"TR-006: n_samples 为负数时内存估算应该为 0，实际为 {result} 字节"
+        )
+
+
+# ============================================================================
+# 回归测试 29: DB-001 环境变量类型转换无容错
+# Bug: PORT/MAX_WORKERS 等环境变量非法值导致 int() 抛异常，服务启动崩溃
+# 修复: _safe_int_env 包装，失败用默认值并打 warning
+# ============================================================================
+
+class TestEnvVarTypeConversionSafety:
+    """防止环境变量非法值导致服务启动崩溃"""
+
+    def test_invalid_port_env_uses_default(self, monkeypatch, caplog):
+        """PORT 环境变量为非法值时，应使用默认值并打 warning"""
+        monkeypatch.setenv("PORT", "not_a_number")
+        import importlib
+        import config
+        importlib.reload(config)
+        assert config.PORT == 8000, f"非法 PORT 应回退到默认值 8000，实际是 {config.PORT}"
+        assert any("PORT" in rec.message and "不是有效整数" in rec.message for rec in caplog.records), \
+            "应该打 warning 日志说明环境变量非法"
+
+    def test_invalid_max_workers_env_uses_default(self, monkeypatch, caplog):
+        """MAX_WORKERS 环境变量为非法值时，应使用默认值"""
+        monkeypatch.setenv("MAX_WORKERS", "abc")
+        monkeypatch.setenv("PORT", "8000")
+        monkeypatch.setenv("MAX_CONCURRENT_TASKS", "3")
+        monkeypatch.setenv("SOURCE_FILE_CACHE_LIMIT", "1073741824")
+        import importlib
+        import config
+        importlib.reload(config)
+        assert config.MAX_WORKERS == 4, f"非法 MAX_WORKERS 应回退到默认值 4"
+
+    def test_valid_int_env_works(self, monkeypatch):
+        """合法的整数环境变量应该正常解析"""
+        monkeypatch.setenv("PORT", "9000")
+        monkeypatch.setenv("MAX_WORKERS", "8")
+        monkeypatch.setenv("MAX_CONCURRENT_TASKS", "6")
+        monkeypatch.setenv("SOURCE_FILE_CACHE_LIMIT", "2147483648")
+        import importlib
+        import config
+        importlib.reload(config)
+        assert config.PORT == 9000
+        assert config.MAX_WORKERS == 8
+        assert config.MAX_CONCURRENT_TASKS == 6
+        assert config.SOURCE_FILE_CACHE_LIMIT == 2147483648
+
+    def test_safe_int_env_function_exists(self):
+        """config 模块应该有 _safe_int_env 辅助函数"""
+        import config
+        assert hasattr(config, "_safe_int_env")
+        assert callable(config._safe_int_env)
+
+
+# ============================================================================
+# 回归测试 30: DB-002 tasks 表缺少关键索引
+# Bug: file_hash/status/created_at 列无索引，大表查询慢
+# 修复: init_db 创建索引
+# ============================================================================
+
+class TestTasksTableIndexes:
+    """防止 tasks 表缺少关键索引导致查询慢"""
+
+    def test_init_db_creates_file_hash_index(self):
+        """init_db 后应该存在 idx_tasks_file_hash 索引"""
+        import tempfile
+        import os
+        from database import init_db, get_db
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "test.db")
+            import config
+            old_db = config.DB_PATH
+            config.DB_PATH = db_path
+            try:
+                init_db()
+                conn = get_db()
+                try:
+                    cursor = conn.execute(
+                        "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_tasks_file_hash'"
+                    )
+                    assert cursor.fetchone() is not None, "应该存在 idx_tasks_file_hash 索引"
+                finally:
+                    conn.close()
+            finally:
+                config.DB_PATH = old_db
+
+    def test_init_db_creates_status_index(self):
+        """init_db 后应该存在 idx_tasks_status 索引"""
+        import tempfile
+        import os
+        from database import init_db, get_db
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "test.db")
+            import config
+            old_db = config.DB_PATH
+            config.DB_PATH = db_path
+            try:
+                init_db()
+                conn = get_db()
+                try:
+                    cursor = conn.execute(
+                        "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_tasks_status'"
+                    )
+                    assert cursor.fetchone() is not None, "应该存在 idx_tasks_status 索引"
+                finally:
+                    conn.close()
+            finally:
+                config.DB_PATH = old_db
+
+    def test_init_db_creates_created_at_index(self):
+        """init_db 后应该存在 idx_tasks_created_at 索引"""
+        import tempfile
+        import os
+        from database import init_db, get_db
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "test.db")
+            import config
+            old_db = config.DB_PATH
+            config.DB_PATH = db_path
+            try:
+                init_db()
+                conn = get_db()
+                try:
+                    cursor = conn.execute(
+                        "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_tasks_created_at'"
+                    )
+                    assert cursor.fetchone() is not None, "应该存在 idx_tasks_created_at 索引"
+                finally:
+                    conn.close()
+            finally:
+                config.DB_PATH = old_db
+
+    def test_init_db_creates_composite_status_created_at_index(self):
+        """init_db 后应该存在复合索引 idx_tasks_status_created_at"""
+        import tempfile
+        import os
+        from database import init_db, get_db
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "test.db")
+            import config
+            old_db = config.DB_PATH
+            config.DB_PATH = db_path
+            try:
+                init_db()
+                conn = get_db()
+                try:
+                    cursor = conn.execute(
+                        "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_tasks_status_created_at'"
+                    )
+                    assert cursor.fetchone() is not None, "应该存在复合索引 idx_tasks_status_created_at"
+                finally:
+                    conn.close()
+            finally:
+                config.DB_PATH = old_db
+
+
+# ============================================================================
+# 回归测试 31: DB-003 find_repair_cache 全量加载后过滤
+# Bug: 先 SELECT * 所有 file_hash 任务，再在 Python 中过滤，大表内存+性能差
+# 修复: SQL WHERE 中增加 status='completed' AND output_path != '' 条件
+# ============================================================================
+
+class TestFindRepairCacheSqlFilter:
+    """防止 find_repair_cache 全表扫描后在 Python 中过滤"""
+
+    def test_find_repair_cache_only_queries_completed(self):
+        """find_repair_cache 应该只查询 status=completed 且 output_path 非空的任务"""
+        import inspect
+        from database import find_repair_cache
+
+        source = inspect.getsource(find_repair_cache)
+        assert "status = 'completed'" in source or "status='completed'" in source, \
+            "DB-003: find_repair_cache 的 SQL 应该包含 status='completed' 过滤条件"
+        assert "output_path" in source and ("!=''" in source or "!= ''" in source or "> ''" in source), \
+            "DB-003: find_repair_cache 的 SQL 应该包含 output_path 非空过滤条件"
+
+    def test_find_dual_repair_cache_only_queries_completed(self):
+        """find_dual_repair_cache 也应该只查询 completed 且 output_path 非空的任务"""
+        import inspect
+        from database import find_dual_repair_cache
+
+        source = inspect.getsource(find_dual_repair_cache)
+        assert "status = 'completed'" in source or "status='completed'" in source, \
+            "DB-003: find_dual_repair_cache 的 SQL 应该包含 status='completed' 过滤条件"
+        assert "output_path" in source and ("!=''" in source or "!= ''" in source or "> ''" in source), \
+            "DB-003: find_dual_repair_cache 的 SQL 应该包含 output_path 非空过滤条件"
+
+    def test_pending_tasks_not_returned_by_cache(self, tmp_path):
+        """pending 状态的任务不应该被缓存查询返回"""
+        import os
+        import config
+        from database import init_db, create_task, update_task, find_repair_cache
+
+        old_db = config.DB_PATH
+        old_upload = config.UPLOAD_DIR
+        old_output = config.OUTPUT_DIR
+        config.DB_PATH = os.path.join(tmp_path, "test.db")
+        config.UPLOAD_DIR = str(tmp_path)
+        config.OUTPUT_DIR = str(tmp_path)
+        try:
+            init_db()
+
+            output_file = os.path.join(tmp_path, "output.wav")
+            with open(output_file, "wb") as f:
+                f.write(b"x" * 20000)
+
+            create_task("pending_task", "test.wav", "/tmp/test.wav",
+                        {"algorithm_version": "v2.4"}, file_hash="test_hash_003", file_size=1000)
+            update_task("pending_task", status="pending", output_path=output_file)
+
+            result = find_repair_cache("test_hash_003", {"algorithm_version": "v2.4"})
+            assert result is None, "pending 状态的任务不应该被缓存命中"
+        finally:
+            config.DB_PATH = old_db
+            config.UPLOAD_DIR = old_upload
+            config.OUTPUT_DIR = old_output
+
+
+# ============================================================================
+# 回归测试 32: DB-004 cleanup_stale_tasks 竞态条件
+# Bug: 先查后改，并发下可能漏掉任务或数量不一致
+# 修复: 使用事务 BEGIN IMMEDIATE 确保一致性，返回 cursor.rowcount
+# ============================================================================
+
+class TestCleanupStaleTasksAtomicity:
+    """防止 cleanup_stale_tasks 先查后改的竞态条件"""
+
+    def test_cleanup_uses_transaction(self):
+        """cleanup_stale_tasks 应该使用事务确保原子性"""
+        import inspect
+        from database import cleanup_stale_tasks
+
+        source = inspect.getsource(cleanup_stale_tasks)
+        assert "BEGIN IMMEDIATE" in source or "begin immediate" in source.lower(), \
+            "DB-004: cleanup_stale_tasks 应该使用 BEGIN IMMEDIATE 开启事务"
+        assert "rollback" in source.lower(), \
+            "DB-004: 异常时应该 rollback 事务"
+
+    def test_cleanup_returns_rowcount(self):
+        """cleanup_stale_tasks 返回值应该基于 UPDATE 的 rowcount，而非 SELECT 计数"""
+        import inspect
+        from database import cleanup_stale_tasks
+
+        source = inspect.getsource(cleanup_stale_tasks)
+        assert "rowcount" in source, \
+            "DB-004: 应该使用 cursor.rowcount 返回实际更新的行数"
+
+    def test_cleanup_stale_count_matches_actual_updated(self, tmp_path):
+        """cleanup_stale_tasks 返回的数量应该等于实际被更新的任务数"""
+        import os
+        import config
+        from database import init_db, create_task, get_db, cleanup_stale_tasks
+
+        old_db = config.DB_PATH
+        config.DB_PATH = os.path.join(tmp_path, "test.db")
+        try:
+            init_db()
+
+            for i in range(5):
+                create_task(f"task_{i}", f"test_{i}.wav", f"/tmp/test_{i}.wav",
+                            {}, f"hash_{i}", 1000)
+
+            conn = get_db()
+            conn.execute("UPDATE tasks SET status = 'pending' WHERE id IN ('task_0', 'task_1', 'task_2')")
+            conn.execute("UPDATE tasks SET status = 'completed' WHERE id IN ('task_3', 'task_4')")
+            conn.commit()
+            conn.close()
+
+            count = cleanup_stale_tasks()
+            assert count == 3, f"应该清理 3 个 pending 任务，实际清理了 {count} 个"
+
+            conn = get_db()
+            cursor = conn.execute("SELECT COUNT(*) FROM tasks WHERE status = 'error'")
+            actual_error = cursor.fetchone()[0]
+            conn.close()
+            assert actual_error == 3, f"数据库中应该有 3 个 error 状态任务，实际有 {actual_error} 个"
+        finally:
+            config.DB_PATH = old_db
+
+
+# ============================================================================
+# 回归测试 33: DB-005 WAL 模式无 checkpoint 管理
+# Bug: 只开启 WAL 但不配置 checkpoint，WAL 文件可能无限增长
+# 修复: 设置 wal_autocheckpoint 阈值
+# ============================================================================
+
+class TestWalCheckpointConfig:
+    """防止 WAL 模式下 checkpoint 未配置导致磁盘泄漏"""
+
+    def test_get_db_sets_wal_autocheckpoint(self):
+        """get_db() 应该设置 wal_autocheckpoint"""
+        import tempfile
+        import os
+        from database import get_db
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "test.db")
+            import config
+            old_db = config.DB_PATH
+            config.DB_PATH = db_path
+            try:
+                conn = get_db()
+                try:
+                    cursor = conn.execute("PRAGMA wal_autocheckpoint")
+                    checkpoint_value = cursor.fetchone()[0]
+                    assert checkpoint_value > 0, \
+                        f"DB-005: wal_autocheckpoint 应该设置为正数，实际是 {checkpoint_value}"
+                finally:
+                    conn.close()
+            finally:
+                config.DB_PATH = old_db
+
+    def test_get_training_db_sets_wal_autocheckpoint(self):
+        """get_training_db() 也应该设置 wal_autocheckpoint"""
+        import tempfile
+        import os
+        from database import get_training_db, TRAINING_DB_PATH
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            import config
+            old_db_path = config.DB_PATH
+            config.DB_PATH = os.path.join(tmpdir, "tasks.db")
+            old_training_path = TRAINING_DB_PATH
+            import database
+            database.TRAINING_DB_PATH = os.path.join(tmpdir, "training.db")
+            try:
+                conn = get_training_db()
+                try:
+                    cursor = conn.execute("PRAGMA wal_autocheckpoint")
+                    checkpoint_value = cursor.fetchone()[0]
+                    assert checkpoint_value > 0, \
+                        f"DB-005: 训练库 wal_autocheckpoint 应该设置为正数，实际是 {checkpoint_value}"
+                finally:
+                    conn.close()
+            finally:
+                config.DB_PATH = old_db_path
+                database.TRAINING_DB_PATH = old_training_path
+
+
+# ============================================================================
+# 回归测试 42: streaming_spectral_process 块边界信号为零（重叠相加错误）
+# Bug: DSP-001 - 输出块无重叠但使用淡入淡出窗口，导致相邻块边界处信号为零
+# 修复: 让输出块之间有重叠（hop_out = chunk_samples - fade_len），使 fade 区域叠加后连续
+# ============================================================================
+
+class TestDspStreamingSpectralBoundary:
+    """防止 streaming_spectral_process 块边界信号为零（咔哒声）"""
+
+    def test_dc_signal_boundary_not_zero(self):
+        """恒等处理的直流信号在块边界处不应为零"""
+        from services.dsp_utils import streaming_spectral_process
+
+        sr = 44100
+        chunk_seconds = 0.1
+        y = np.ones(int(sr * 0.5)) * 0.5
+
+        def identity_process(S, sr, n_fft, hop_length):
+            return S
+
+        y_out = streaming_spectral_process(
+            y, sr, identity_process,
+            n_fft=2048, hop_length=512,
+            chunk_seconds=chunk_seconds
+        )
+
+        chunk_samples = int(sr * chunk_seconds)
+        boundary_idx = chunk_samples
+
+        boundary_region = slice(max(0, boundary_idx - 5), boundary_idx + 5)
+        boundary_min = np.min(y_out[boundary_region])
+
+        assert boundary_min > 0.01, (
+            f"DSP-001: 块边界处信号存在零点 (min={boundary_min:.6f})，"
+            f"恒等处理的直流信号边界不应为零。"
+        )
+
+    def test_block_boundary_amplitude_stable(self):
+        """块边界处平均幅度应接近输入值"""
+        from services.dsp_utils import streaming_spectral_process
+
+        sr = 44100
+        chunk_seconds = 0.1
+        y = np.ones(int(sr * 0.5)) * 0.5
+
+        def identity_process(S, sr, n_fft, hop_length):
+            return S
+
+        y_out = streaming_spectral_process(
+            y, sr, identity_process,
+            n_fft=2048, hop_length=512,
+            chunk_seconds=chunk_seconds
+        )
+
+        chunk_samples = int(sr * chunk_seconds)
+        boundary = chunk_samples
+
+        center_region = y_out[boundary-10:boundary+10]
+        center_mean = np.mean(center_region)
+        expected = 0.5
+
+        assert abs(center_mean - expected) < 0.01, (
+            f"DSP-001: 块边界处平均幅度 ({center_mean:.4f}) 远低于预期 ({expected})，"
+            f"证明重叠相加算法存在缺陷"
+        )
+
+
+# ============================================================================
+# 回归测试 43: beat_track 中 best_lag 可能为零导致除零错误
+# Bug: DSP-002 - 当 min_lag=0 且搜索范围第一个点最大时，best_lag=0 导致除零
+# 修复: 检查 best_lag <= 0 时返回 start_bpm 和空 beats
+# ============================================================================
+
+class TestDspBeatTrackDivideByZero:
+    """防止 beat_track best_lag 为零时除零错误"""
+
+    def test_very_high_sr_small_hop_no_crash(self):
+        """高采样率小 hop_length 时不应发生除零错误"""
+        from services.dsp_utils import beat_track
+
+        sr = 8000
+        hop_length = 8192
+        onset_env = np.zeros(100)
+        onset_env[0] = 1.0
+
+        try:
+            tempo, beats = beat_track(
+                onset_envelope=onset_env,
+                sr=sr,
+                hop_length=hop_length
+            )
+            assert np.isfinite(tempo), (
+                f"DSP-002: beat_track 返回非有限 tempo={tempo}"
+            )
+        except ZeroDivisionError:
+            pytest.fail("DSP-002: beat_track 发生除零错误 (ZeroDivisionError)")
+
+    def test_empty_onset_envelope_returns_start_bpm(self):
+        """空 onset envelope 应返回 start_bpm 而不是崩溃"""
+        from services.dsp_utils import beat_track
+
+        tempo, beats = beat_track(
+            onset_envelope=np.array([]),
+            sr=22050,
+            hop_length=512,
+            start_bpm=120.0
+        )
+        assert np.isfinite(tempo), "DSP-002: 空包络时 tempo 应为有限值"
+        assert len(beats) == 0
+
+
+# ============================================================================
+# 回归测试 44: _tanh_declip 多声道时 in-place 修改输入数组
+# Bug: DSP-003 - 多声道输入时直接修改 y[ch]，导致原始数据被破坏
+# 修复: 多声道时创建新数组 y_out，不修改输入
+# ============================================================================
+
+class TestDspTanhDeclipNoInPlace:
+    """防止 _tanh_declip 意外修改输入数组"""
+
+    def test_multichannel_not_modified(self):
+        """多声道输入不应被 in-place 修改"""
+        from services.repair.repair_v2_4.core import _tanh_declip
+
+        y_orig = np.random.randn(2, 44100).astype(np.float64) * 0.5
+        y_orig[0, 1000] = 2.0
+        y_orig[1, 2000] = -2.0
+        y_input = y_orig.copy()
+
+        _ = _tanh_declip(y_input, amount=0.5)
+
+        modified = not np.allclose(y_input, y_orig)
+        assert not modified, (
+            "DSP-003: _tanh_declip 修改了输入数组 (in-place)，"
+            "这会导致上游数据被意外破坏"
+        )
+
+    def test_mono_not_modified(self):
+        """单声道输入也不应被 in-place 修改"""
+        from services.repair.repair_v2_4.core import _tanh_declip
+
+        y_orig = np.random.randn(44100).astype(np.float64) * 0.5
+        y_orig[1000] = 2.0
+        y_input = y_orig.copy()
+
+        _ = _tanh_declip(y_input, amount=0.5)
+
+        modified = not np.allclose(y_input, y_orig)
+        assert not modified, (
+            "DSP-003: _tanh_declip (单声道) 修改了输入数组"
+        )
+
+
+# ============================================================================
+# 回归测试 45: _diff_clamp_depop 多声道时 in-place 修改输入数组
+# Bug: DSP-004 - 多声道输入时直接修改 y[ch]，导致原始数据被破坏
+# 修复: 多声道时创建新数组 y_out，不修改输入
+# ============================================================================
+
+class TestDspDiffClampDepopNoInPlace:
+    """防止 _diff_clamp_depop 意外修改输入数组"""
+
+    def test_multichannel_not_modified(self):
+        """多声道输入不应被 in-place 修改"""
+        from services.repair.repair_v2_4.core import _diff_clamp_depop
+
+        sr = 44100
+        np.random.seed(42)
+        y_orig = np.random.randn(2, sr).astype(np.float64) * 0.01
+        for ch in range(2):
+            for pos in [10000, 20000, 30000]:
+                y_orig[ch, pos] = 0.8
+                y_orig[ch, pos + 1] = -0.7
+        y_input = y_orig.copy()
+
+        result = _diff_clamp_depop(y_input, sr, amount=0.5)
+
+        assert result is not None
+        input_modified = not np.allclose(y_input, y_orig)
+        assert not input_modified, (
+            "DSP-004: _diff_clamp_depop 修改了输入数组 (in-place)，"
+            "这会导致上游数据被意外破坏"
+        )
+
+
+# ============================================================================
+# 回归测试 46: _adaptive_loudness_normalize in-place 修改输入数组
+# Bug: DSP-005 - 使用 y[:] = ... 直接修改原数组内容
+# 修复: 返回新数组，不修改输入
+# ============================================================================
+
+class TestDspAdaptiveLoudnessNoInPlace:
+    """防止 _adaptive_loudness_normalize 意外修改输入数组"""
+
+    def test_multichannel_not_modified(self):
+        """多声道输入不应被 in-place 修改"""
+        from services.repair.repair_v2_4.core import _adaptive_loudness_normalize
+
+        sr = 44100
+        y_orig = np.random.randn(2, sr).astype(np.float64) * 0.1
+        y_input = y_orig.copy()
+
+        _ = _adaptive_loudness_normalize(y_input, sr, target_loudness_lu=-14.0)
+
+        modified = not np.allclose(y_input, y_orig)
+        assert not modified, (
+            "DSP-005: _adaptive_loudness_normalize 修改了输入数组 (in-place)，"
+            "这会导致上游数据被意外破坏"
+        )
+
+    def test_mono_not_modified(self):
+        """单声道输入也不应被 in-place 修改"""
+        from services.repair.repair_v2_4.core import _adaptive_loudness_normalize
+
+        sr = 44100
+        y_orig = np.random.randn(sr).astype(np.float64) * 0.1
+        y_input = y_orig.copy()
+
+        _ = _adaptive_loudness_normalize(y_input, sr, target_loudness_lu=-14.0)
+
+        modified = not np.allclose(y_input, y_orig)
+        assert not modified, (
+            "DSP-005: _adaptive_loudness_normalize (单声道) 修改了输入数组"
+        )
+
+
+# ============================================================================
+# 回归测试 47: pyin 全静音信号返回全 NaN 的 f0 数组
+# Bug: DSP-006 - f0 初始化为 np.nan，静音帧不更新，全静音时全为 NaN
+# 修复: 返回前用 np.nan_to_num 将 NaN 替换为 0
+# ============================================================================
+
+class TestDspPyinSilenceNoNaN:
+    """防止 pyin 对静音信号返回 NaN 导致下游崩溃"""
+
+    def test_silence_returns_zero_not_nan(self):
+        """全静音信号的 f0 不应包含 NaN"""
+        from services.dsp_utils import pyin
+
+        sr = 22050
+        y = np.zeros(int(sr * 0.5))
+
+        f0, voiced_flag, voiced_prob = pyin(y, sr=sr, frame_length=2048, hop_length=512)
+
+        has_nan = np.any(np.isnan(f0))
+        assert not has_nan, (
+            f"DSP-006: pyin 对静音信号返回 NaN 的 f0 值 "
+            f"(nan 比例: {np.sum(np.isnan(f0))}/{len(f0)})，"
+            f"下游计算可能因此崩溃"
+        )
+
+    def test_voiced_flag_consistency(self):
+        """f0、voiced_flag、voiced_prob 长度应一致"""
+        from services.dsp_utils import pyin
+
+        sr = 22050
+        y = np.zeros(int(sr * 0.5))
+
+        f0, voiced_flag, voiced_prob = pyin(y, sr=sr, frame_length=2048, hop_length=512)
+
+        assert len(f0) == len(voiced_flag), "f0 与 voiced_flag 长度不一致"
+        assert len(f0) == len(voiced_prob), "f0 与 voiced_prob 长度不一致"
+
+
+# ============================================================================
+# 回归测试 48: API-001 上传接口不应一次性读取大文件到内存
+# Bug: 上传接口先 await file.read() 整个文件到内存再判断大小，
+#      大文件上传可直接 OOM
+# 修复: 流式分块读取，边读边写，累计大小超限立即中断并清理
+# ============================================================================
+
+class TestUploadStreamingSizeCheck:
+    """防止上传接口一次性读取大文件导致 OOM"""
+
+    def test_upload_exceeds_size_returns_413(self):
+        """超过 MAX_UPLOAD_SIZE 的文件应返回 413，且不应消耗大量内存"""
+        from fastapi.testclient import TestClient
+        from app import create_app
+        import tempfile
+        import os
+        import config
+        from api.routes import upload as upload_module
+
+        old_max = config.MAX_UPLOAD_SIZE
+        old_upload_module_max = upload_module.MAX_UPLOAD_SIZE
+        config.MAX_UPLOAD_SIZE = 1024  # 1KB 限制
+        upload_module.MAX_UPLOAD_SIZE = 1024
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                old_upload = config.UPLOAD_DIR
+                old_output = config.OUTPUT_DIR
+                old_db = config.DB_PATH
+                config.UPLOAD_DIR = os.path.join(tmpdir, "uploads")
+                config.OUTPUT_DIR = os.path.join(tmpdir, "outputs")
+                config.DB_PATH = os.path.join(tmpdir, "test.db")
+                os.makedirs(config.UPLOAD_DIR, exist_ok=True)
+                os.makedirs(config.OUTPUT_DIR, exist_ok=True)
+                from database import init_db
+                init_db()
+
+                try:
+                    app = create_app()
+                    client = TestClient(app)
+
+                    big_file = b"\x00" * 2048  # 2KB > 1KB 限制
+                    files = {"file": ("test.wav", big_file, "audio/wav")}
+                    res = client.post("/api/v1/upload", files=files, data={"file_hash": "abc123"})
+
+                    assert res.status_code == 413, (
+                        f"API-001: 超过大小限制应返回 413，实际是 {res.status_code}"
+                    )
+
+                    upload_files = os.listdir(config.UPLOAD_DIR)
+                    assert len(upload_files) == 0, (
+                        f"API-001: 上传失败后应清理临时文件，实际还有 {len(upload_files)} 个文件"
+                    )
+                finally:
+                    config.UPLOAD_DIR = old_upload
+                    config.OUTPUT_DIR = old_output
+                    config.DB_PATH = old_db
+        finally:
+            config.MAX_UPLOAD_SIZE = old_max
+            upload_module.MAX_UPLOAD_SIZE = old_upload_module_max
+
+
+# ============================================================================
+# 回归测试 49: API-002 双轨上传失败时应清理已上传的文件
+# Bug: 双轨上传第二轨失败或空间不足时，第一轨已上传的文件不清理，
+#      导致存储空间泄漏
+# 修复: 定义清理函数，失败时删除所有已上传文件
+# ============================================================================
+
+class TestDualUploadCleanupOnFailure:
+    """防止双轨上传失败时资源泄漏"""
+
+    def test_dual_upload_second_fails_cleans_first(self):
+        """第二轨上传失败时，第一轨已上传的文件应被清理"""
+        from fastapi.testclient import TestClient
+        from app import create_app
+        import tempfile
+        import os
+        import config
+        from api.routes import upload as upload_module
+
+        old_max = config.MAX_UPLOAD_SIZE
+        old_upload_module_max = upload_module.MAX_UPLOAD_SIZE
+        config.MAX_UPLOAD_SIZE = 2048  # 2KB 限制，单个文件 1.5KB 没问题，两个加起来超限
+        upload_module.MAX_UPLOAD_SIZE = 2048
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                old_upload = config.UPLOAD_DIR
+                old_output = config.OUTPUT_DIR
+                old_db = config.DB_PATH
+                config.UPLOAD_DIR = os.path.join(tmpdir, "uploads")
+                config.OUTPUT_DIR = os.path.join(tmpdir, "outputs")
+                config.DB_PATH = os.path.join(tmpdir, "test.db")
+                os.makedirs(config.UPLOAD_DIR, exist_ok=True)
+                os.makedirs(config.OUTPUT_DIR, exist_ok=True)
+                from database import init_db
+                init_db()
+
+                try:
+                    app = create_app()
+                    client = TestClient(app)
+
+                    small_wav = _make_test_wav(0.1)
+                    try:
+                        with open(small_wav, "rb") as f:
+                            vocal_data = f.read()
+                        files = {
+                            "vocal_file": ("vocal.wav", vocal_data, "audio/wav"),
+                            "accompaniment_file": ("acc.wav", vocal_data, "audio/wav"),
+                        }
+                        res = client.post("/api/v1/upload-dual", files=files, data={"file_hash": ""})
+
+                        upload_files = [f for f in os.listdir(config.UPLOAD_DIR) if f.endswith(".wav")]
+                        if res.status_code != 200:
+                            assert len(upload_files) == 0, (
+                                f"API-002: 双轨上传失败后应清理临时文件，"
+                                f"实际还有 {len(upload_files)} 个文件: {upload_files}"
+                            )
+                    finally:
+                        if os.path.exists(small_wav):
+                            os.unlink(small_wav)
+                finally:
+                    config.UPLOAD_DIR = old_upload
+                    config.OUTPUT_DIR = old_output
+                    config.DB_PATH = old_db
+        finally:
+            config.MAX_UPLOAD_SIZE = old_max
+            upload_module.MAX_UPLOAD_SIZE = old_upload_module_max
+
+
+# ============================================================================
+# 回归测试 50: API-003 CORS 配置不应同时 allow_origins=* 和 allow_credentials
+# Bug: CORS 配置同时设置 allow_origins=["*"] 和 allow_credentials=True，
+#      浏览器会拒绝，前端无法正常携带凭证
+# 修复: 使用动态 CORS 中间件，根据请求 Origin 动态设置
+# ============================================================================
+
+class TestCorsConfiguration:
+    """防止 CORS 配置中 allow_origins=* 与 credentials 冲突"""
+
+    def test_cors_origin_reflected_with_credentials(self):
+        """有 Origin 头时应返回具体 origin 和 credentials=true，不应是 *"""
+        from fastapi.testclient import TestClient
+        from app import create_app
+        import tempfile
+        import os
+        import config
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            old_db = config.DB_PATH
+            old_upload = config.UPLOAD_DIR
+            old_output = config.OUTPUT_DIR
+            config.DB_PATH = os.path.join(tmpdir, "test.db")
+            config.UPLOAD_DIR = os.path.join(tmpdir, "uploads")
+            config.OUTPUT_DIR = os.path.join(tmpdir, "outputs")
+            os.makedirs(config.UPLOAD_DIR, exist_ok=True)
+            os.makedirs(config.OUTPUT_DIR, exist_ok=True)
+            from database import init_db
+            init_db()
+
+            try:
+                app = create_app()
+                client = TestClient(app)
+
+                res = client.options(
+                    "/api/v1/status/test",
+                    headers={"Origin": "http://localhost:5173"},
+                )
+
+                acao = res.headers.get("access-control-allow-origin", "")
+                acac = res.headers.get("access-control-allow-credentials", "")
+
+                assert acao != "*", (
+                    "API-003: 有 Origin 时 allow-origin 不应是 *"
+                )
+                assert acao == "http://localhost:5173", (
+                    f"API-003: allow-origin 应反射请求的 Origin，实际是 {acao}"
+                )
+                assert acac == "true", (
+                    f"API-003: allow-credentials 应为 true，实际是 {acac}"
+                )
+            finally:
+                config.DB_PATH = old_db
+                config.UPLOAD_DIR = old_upload
+                config.OUTPUT_DIR = old_output
+
+
+# ============================================================================
+# 回归测试 51: API-004 /api/v1/log 接口需要认证
+# Bug: /api/v1/log 接口无认证，任意客户端可注入日志
+# 修复: 添加 ADMIN_TOKEN 认证
+# ============================================================================
+
+class TestLogEndpointAuth:
+    """防止日志接口未授权访问"""
+
+    def test_log_without_token_returns_401(self):
+        """未提供 token 时应返回 401/403"""
+        from fastapi.testclient import TestClient
+        from app import create_app
+        import tempfile
+        import os
+        import config
+
+        old_token = config.ADMIN_TOKEN
+        config.ADMIN_TOKEN = "test-admin-token-123"
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                old_db = config.DB_PATH
+                old_upload = config.UPLOAD_DIR
+                old_output = config.OUTPUT_DIR
+                config.DB_PATH = os.path.join(tmpdir, "test.db")
+                config.UPLOAD_DIR = os.path.join(tmpdir, "uploads")
+                config.OUTPUT_DIR = os.path.join(tmpdir, "outputs")
+                os.makedirs(config.UPLOAD_DIR, exist_ok=True)
+                os.makedirs(config.OUTPUT_DIR, exist_ok=True)
+                from database import init_db
+                init_db()
+
+                try:
+                    app = create_app()
+                    client = TestClient(app)
+
+                    res = client.post("/api/v1/log", json={"level": "info", "message": "test"})
+                    assert res.status_code in (401, 403), (
+                        f"API-004: 未认证访问 /log 应返回 401/403，实际是 {res.status_code}"
+                    )
+                finally:
+                    config.DB_PATH = old_db
+                    config.UPLOAD_DIR = old_upload
+                    config.OUTPUT_DIR = old_output
+        finally:
+            config.ADMIN_TOKEN = old_token
+
+    def test_log_with_valid_token_succeeds(self):
+        """提供正确 token 时应成功"""
+        from fastapi.testclient import TestClient
+        from app import create_app
+        import tempfile
+        import os
+        import config
+
+        old_token = config.ADMIN_TOKEN
+        config.ADMIN_TOKEN = "test-admin-token-123"
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                old_db = config.DB_PATH
+                old_upload = config.UPLOAD_DIR
+                old_output = config.OUTPUT_DIR
+                config.DB_PATH = os.path.join(tmpdir, "test.db")
+                config.UPLOAD_DIR = os.path.join(tmpdir, "uploads")
+                config.OUTPUT_DIR = os.path.join(tmpdir, "outputs")
+                os.makedirs(config.UPLOAD_DIR, exist_ok=True)
+                os.makedirs(config.OUTPUT_DIR, exist_ok=True)
+                from database import init_db
+                init_db()
+
+                try:
+                    app = create_app()
+                    client = TestClient(app)
+
+                    res = client.post(
+                        "/api/v1/log",
+                        json={"level": "info", "message": "test"},
+                        headers={"x-admin-token": "test-admin-token-123"},
+                    )
+                    assert res.status_code == 200, (
+                        f"API-004: 正确 token 访问 /log 应返回 200，实际是 {res.status_code}"
+                    )
+                finally:
+                    config.DB_PATH = old_db
+                    config.UPLOAD_DIR = old_upload
+                    config.OUTPUT_DIR = old_output
+        finally:
+            config.ADMIN_TOKEN = old_token
+
+
+# ============================================================================
+# 回归测试 52: API-005 /cache/clear-all 接口需要认证
+# Bug: /cache/clear-all 无认证，可清空所有缓存数据
+# 修复: 添加 ADMIN_TOKEN 认证
+# ============================================================================
+
+class TestCacheClearAllAuth:
+    """防止缓存清空接口未授权访问"""
+
+    def test_clear_all_without_token_returns_401(self):
+        """未提供 token 时应返回 401/403"""
+        from fastapi.testclient import TestClient
+        from app import create_app
+        import tempfile
+        import os
+        import config
+
+        old_token = config.ADMIN_TOKEN
+        config.ADMIN_TOKEN = "test-admin-token-123"
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                old_db = config.DB_PATH
+                old_upload = config.UPLOAD_DIR
+                old_output = config.OUTPUT_DIR
+                config.DB_PATH = os.path.join(tmpdir, "test.db")
+                config.UPLOAD_DIR = os.path.join(tmpdir, "uploads")
+                config.OUTPUT_DIR = os.path.join(tmpdir, "outputs")
+                os.makedirs(config.UPLOAD_DIR, exist_ok=True)
+                os.makedirs(config.OUTPUT_DIR, exist_ok=True)
+                from database import init_db
+                init_db()
+
+                try:
+                    app = create_app()
+                    client = TestClient(app)
+
+                    res = client.post("/api/v1/cache/clear-all")
+                    assert res.status_code in (401, 403), (
+                        f"API-005: 未认证访问 /cache/clear-all 应返回 401/403，实际是 {res.status_code}"
+                    )
+                finally:
+                    config.DB_PATH = old_db
+                    config.UPLOAD_DIR = old_upload
+                    config.OUTPUT_DIR = old_output
+        finally:
+            config.ADMIN_TOKEN = old_token
+
+
+# ============================================================================
+# 回归测试 53: API-006 /wasm/upload 接口需要认证
+# Bug: /wasm/upload 无认证，可上传任意 WASM 模块
+# 修复: 添加 ADMIN_TOKEN 认证
+# ============================================================================
+
+class TestWasmUploadAuth:
+    """防止 WASM 上传接口未授权访问"""
+
+    def test_wasm_upload_without_token_returns_401(self):
+        """未提供 token 时应返回 401/403"""
+        from fastapi.testclient import TestClient
+        from app import create_app
+        import tempfile
+        import os
+        import config
+
+        old_token = config.ADMIN_TOKEN
+        config.ADMIN_TOKEN = "test-admin-token-123"
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                old_db = config.DB_PATH
+                old_upload = config.UPLOAD_DIR
+                old_output = config.OUTPUT_DIR
+                config.DB_PATH = os.path.join(tmpdir, "test.db")
+                config.UPLOAD_DIR = os.path.join(tmpdir, "uploads")
+                config.OUTPUT_DIR = os.path.join(tmpdir, "outputs")
+                os.makedirs(config.UPLOAD_DIR, exist_ok=True)
+                os.makedirs(config.OUTPUT_DIR, exist_ok=True)
+                from database import init_db
+                init_db()
+
+                try:
+                    app = create_app()
+                    client = TestClient(app)
+
+                    fake_wasm = b"\x00asm\x01\x00\x00\x00"
+                    files = {"file": ("test.wasm", fake_wasm, "application/wasm")}
+                    res = client.post("/api/v1/wasm/upload", files=files)
+
+                    assert res.status_code in (401, 403), (
+                        f"API-006: 未认证访问 /wasm/upload 应返回 401/403，实际是 {res.status_code}"
+                    )
+                finally:
+                    config.DB_PATH = old_db
+                    config.UPLOAD_DIR = old_upload
+                    config.OUTPUT_DIR = old_output
+        finally:
+            config.ADMIN_TOKEN = old_token
+
+
+# ============================================================================
+# 回归测试 54: API-007 任务接口需要访问令牌
+# Bug: 任务状态/取消/下载接口无鉴权，可遍历 task_id 访问他人任务
+# 修复: 基于 task_id + SECRET_KEY 的 HMAC 访问令牌
+# ============================================================================
+
+class TestTaskAccessAuth:
+    """防止任务接口未授权访问"""
+
+    def test_status_without_token_returns_403(self):
+        """未提供 access_token 时查询任务状态应返回 403"""
+        from fastapi.testclient import TestClient
+        from app import create_app
+        import tempfile
+        import os
+        import config
+        from database import init_db, create_task
+
+        old_secret = config.SECRET_KEY
+        config.SECRET_KEY = "test-secret-key-for-auth"
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                old_db = config.DB_PATH
+                old_upload = config.UPLOAD_DIR
+                old_output = config.OUTPUT_DIR
+                config.DB_PATH = os.path.join(tmpdir, "test.db")
+                config.UPLOAD_DIR = os.path.join(tmpdir, "uploads")
+                config.OUTPUT_DIR = os.path.join(tmpdir, "outputs")
+                os.makedirs(config.UPLOAD_DIR, exist_ok=True)
+                os.makedirs(config.OUTPUT_DIR, exist_ok=True)
+                init_db()
+
+                try:
+                    app = create_app()
+                    client = TestClient(app)
+
+                    task_id = "test-auth-task-001"
+                    create_task(task_id, "test.wav", "/tmp/test.wav", {}, "hash123", 1000)
+
+                    res = client.get(f"/api/v1/status/{task_id}")
+                    assert res.status_code == 403, (
+                        f"API-007: 未认证访问任务状态应返回 403，实际是 {res.status_code}"
+                    )
+                finally:
+                    config.DB_PATH = old_db
+                    config.UPLOAD_DIR = old_upload
+                    config.OUTPUT_DIR = old_output
+        finally:
+            config.SECRET_KEY = old_secret
+
+    def test_status_with_valid_token_succeeds(self):
+        """提供正确 access_token 时应能访问任务状态"""
+        from fastapi.testclient import TestClient
+        from app import create_app
+        import tempfile
+        import os
+        import config
+        from database import init_db, create_task
+        from api.routes._common import generate_task_access_token
+
+        old_secret = config.SECRET_KEY
+        config.SECRET_KEY = "test-secret-key-for-auth"
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                old_db = config.DB_PATH
+                old_upload = config.UPLOAD_DIR
+                old_output = config.OUTPUT_DIR
+                config.DB_PATH = os.path.join(tmpdir, "test.db")
+                config.UPLOAD_DIR = os.path.join(tmpdir, "uploads")
+                config.OUTPUT_DIR = os.path.join(tmpdir, "outputs")
+                os.makedirs(config.UPLOAD_DIR, exist_ok=True)
+                os.makedirs(config.OUTPUT_DIR, exist_ok=True)
+                init_db()
+
+                try:
+                    app = create_app()
+                    client = TestClient(app)
+
+                    task_id = "test-auth-task-002"
+                    create_task(task_id, "test.wav", "/tmp/test.wav", {}, "hash123", 1000)
+                    token = generate_task_access_token(task_id)
+
+                    res = client.get(f"/api/v1/status/{task_id}?access_token={token}")
+                    assert res.status_code == 200, (
+                        f"API-007: 正确 token 访问任务状态应返回 200，实际是 {res.status_code}"
+                    )
+                finally:
+                    config.DB_PATH = old_db
+                    config.UPLOAD_DIR = old_upload
+                    config.OUTPUT_DIR = old_output
+        finally:
+            config.SECRET_KEY = old_secret
+
+    def test_download_without_token_returns_403(self):
+        """未提供 access_token 时下载应返回 403"""
+        from fastapi.testclient import TestClient
+        from app import create_app
+        import tempfile
+        import os
+        import config
+        from database import init_db, create_task, update_task
+
+        old_secret = config.SECRET_KEY
+        config.SECRET_KEY = "test-secret-key-for-auth"
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                old_db = config.DB_PATH
+                old_upload = config.UPLOAD_DIR
+                old_output = config.OUTPUT_DIR
+                config.DB_PATH = os.path.join(tmpdir, "test.db")
+                config.UPLOAD_DIR = os.path.join(tmpdir, "uploads")
+                config.OUTPUT_DIR = os.path.join(tmpdir, "outputs")
+                os.makedirs(config.UPLOAD_DIR, exist_ok=True)
+                os.makedirs(config.OUTPUT_DIR, exist_ok=True)
+                init_db()
+
+                try:
+                    app = create_app()
+                    client = TestClient(app)
+
+                    task_id = "test-auth-task-003"
+                    out_path = os.path.join(config.OUTPUT_DIR, f"{task_id}_repaired.wav")
+                    with open(out_path, "wb") as f:
+                        f.write(b"RIFF" + b"\x00" * 100)
+                    create_task(task_id, "test.wav", "/tmp/test.wav", {}, "hash123", 1000)
+                    update_task(task_id, status="completed", output_path=out_path)
+
+                    res = client.get(f"/api/v1/download/{task_id}")
+                    assert res.status_code == 403, (
+                        f"API-007: 未认证下载应返回 403，实际是 {res.status_code}"
+                    )
+                finally:
+                    config.DB_PATH = old_db
+                    config.UPLOAD_DIR = old_upload
+                    config.OUTPUT_DIR = old_output
+        finally:
+            config.SECRET_KEY = old_secret
+
+    def test_cancel_without_token_returns_403(self):
+        """未提供 access_token 时取消任务应返回 403"""
+        from fastapi.testclient import TestClient
+        from app import create_app
+        import tempfile
+        import os
+        import config
+        from database import init_db, create_task
+
+        old_secret = config.SECRET_KEY
+        config.SECRET_KEY = "test-secret-key-for-auth"
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                old_db = config.DB_PATH
+                old_upload = config.UPLOAD_DIR
+                old_output = config.OUTPUT_DIR
+                config.DB_PATH = os.path.join(tmpdir, "test.db")
+                config.UPLOAD_DIR = os.path.join(tmpdir, "uploads")
+                config.OUTPUT_DIR = os.path.join(tmpdir, "outputs")
+                os.makedirs(config.UPLOAD_DIR, exist_ok=True)
+                os.makedirs(config.OUTPUT_DIR, exist_ok=True)
+                init_db()
+
+                try:
+                    app = create_app()
+                    client = TestClient(app)
+
+                    task_id = "test-auth-task-004"
+                    create_task(task_id, "test.wav", "/tmp/test.wav", {}, "hash123", 1000)
+
+                    res = client.post(f"/api/v1/cancel/{task_id}")
+                    assert res.status_code == 403, (
+                        f"API-007: 未认证取消任务应返回 403，实际是 {res.status_code}"
+                    )
+                finally:
+                    config.DB_PATH = old_db
+                    config.UPLOAD_DIR = old_upload
+                    config.OUTPUT_DIR = old_output
+        finally:
+            config.SECRET_KEY = old_secret

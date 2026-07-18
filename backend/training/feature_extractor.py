@@ -223,32 +223,33 @@ def extract_all_features(y: np.ndarray, sr: int) -> Dict:
     return features
 
 
-def process_single_file(filepath: str) -> Optional[Dict]:
+def compute_file_hash(filepath: str) -> str:
+    """计算文件的 SHA256 哈希"""
+    with open(filepath, 'rb') as f:
+        return hashlib.sha256(f.read()).hexdigest()
+
+
+def process_single_file(filepath: str, file_hash: Optional[str] = None) -> Optional[Dict]:
     """处理单个文件，返回特征数据"""
+    conn = None
     try:
         print(f"  处理: {os.path.basename(filepath)}")
         
-        # 计算文件哈希
-        with open(filepath, 'rb') as f:
-            file_hash = hashlib.sha256(f.read()).hexdigest()
+        if file_hash is None:
+            file_hash = compute_file_hash(filepath)
         
-        # 检查是否已处理
         if is_file_processed(file_hash):
             print(f"    [跳过] 已处理过")
             return None
         
-        # 加载音频
         y, sr = load_audio_with_fallback(filepath, sr=None, mono=True)
         duration = len(y) / sr
         
-        # 检测类型（纯音乐 vs 歌唱）
         file_type = detect_vocal_vs_instrumental(y, sr)
         print(f"    类型: {file_type}")
         
-        # 提取特征
         features = extract_all_features(y, sr)
         
-        # 保存特征到缓存文件
         cache_filename = f"{file_hash[:16]}.json"
         cache_path = os.path.join(FEATURE_CACHE_DIR, cache_filename)
         with open(cache_path, 'w') as f:
@@ -262,7 +263,6 @@ def process_single_file(filepath: str) -> Optional[Dict]:
                 'extracted_at': datetime.now().isoformat()
             }, f, indent=2)
         
-        # 记录到数据库
         conn = get_feature_db()
         conn.execute(
             """INSERT INTO file_features 
@@ -272,7 +272,6 @@ def process_single_file(filepath: str) -> Optional[Dict]:
              duration, sr, cache_path)
         )
         conn.commit()
-        conn.close()
         
         print(f"    [完成] 特征已提取并保存")
         return {
@@ -284,29 +283,34 @@ def process_single_file(filepath: str) -> Optional[Dict]:
     except Exception as e:
         print(f"    [错误] {e}")
         return None
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 
 def process_all_files():
     """处理所有未处理的训练文件"""
     init_feature_db()
     
-    # 获取所有训练文件
     training_files = []
     for filename in os.listdir(TRAINING_DIR):
         if filename.lower().endswith(('.wav', '.mp3', '.flac', '.ogg', '.aac', '.m4a')):
             filepath = os.path.join(TRAINING_DIR, filename)
-            training_files.append(filepath)
+            if os.path.isfile(filepath):
+                training_files.append(filepath)
     
     print(f"发现 {len(training_files)} 个训练文件")
     
-    # 统计已处理和未处理
+    file_hashes = {}
     processed_count = 0
     new_count = 0
     
     for filepath in training_files:
-        # 快速检查是否已处理
-        with open(filepath, 'rb') as f:
-            file_hash = hashlib.sha256(f.read()).hexdigest()
+        file_hash = compute_file_hash(filepath)
+        file_hashes[filepath] = file_hash
         if is_file_processed(file_hash):
             processed_count += 1
         else:
@@ -320,11 +324,10 @@ def process_all_files():
         print("所有文件已处理完成，无需增量更新")
         return
     
-    # 处理未处理的文件
     results = []
     for i, filepath in enumerate(training_files, 1):
         print(f"[{i}/{len(training_files)}]", end=" ")
-        result = process_single_file(filepath)
+        result = process_single_file(filepath, file_hash=file_hashes.get(filepath))
         if result:
             results.append(result)
     

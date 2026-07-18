@@ -15,12 +15,12 @@
 
 | ID | 问题 | 位置 | 影响 | 状态 |
 |----|------|------|------|------|
-| TR-001 | 训练目录含 `.wav` 结尾的子目录时，`process_all_files` 尝试 open 目录导致崩溃 | `training/feature_extractor.py:295-298` | 训练任务直接崩溃 | ⏳ 待修复 |
-| TR-002 | 任务取消后仍可继续执行完成，状态从 `cancelled` 被覆盖为 `completed` | `services/task_executor.py` | 取消的任务仍占用资源，状态错乱 | ⏳ 待修复 |
-| TR-003 | 特征提取器数据库连接泄漏 — 异常路径未关闭连接 | `training/feature_extractor.py` | 数据库连接耗尽 | ⏳ 待修复 |
-| TR-004 | 检测任务完全缺少性能采集 | `services/task_manager.py` | 检测任务无 perf 数据 | ⏳ 待修复 |
-| TR-005 | `process_all_files` 重复哈希计算 — 遍历两次读文件算哈希 | `training/feature_extractor.py:308-310, 232-233` | 训练速度慢一倍 | ⏳ 待修复 |
-| TR-006 | 空音频内存估算不一致 — 流式 vs 非流式差异达数百倍 | `services/memory_guard.py` | 内存估算严重不准 | ⏳ 待修复 |
+| TR-001 | 训练目录含 `.wav` 结尾的子目录时，`process_all_files` 尝试 open 目录导致崩溃 | `training/feature_extractor.py:295-298` | 训练任务直接崩溃 | ✅ 已修复 |
+| TR-002 | 任务取消后仍可继续执行完成，状态从 `cancelled` 被覆盖为 `completed` | `services/task_executor.py` | 取消的任务仍占用资源，状态错乱 | ✅ 已修复 |
+| TR-003 | 特征提取器数据库连接泄漏 — 异常路径未关闭连接 | `training/feature_extractor.py` | 数据库连接耗尽 | ✅ 已修复 |
+| TR-004 | 检测任务完全缺少性能采集 | `services/task_manager.py` | 检测任务无 perf 数据 | ✅ 已修复 |
+| TR-005 | `process_all_files` 重复哈希计算 — 遍历两次读文件算哈希 | `training/feature_extractor.py:308-310, 232-233` | 训练速度慢一倍 | ✅ 已修复 |
+| TR-006 | 空音频内存估算不一致 — 流式 vs 非流式差异达数百倍 | `services/memory_guard.py` | 内存估算严重不准 | ✅ 已修复 |
 
 ### 🟡 中严重程度（6 个）
 
@@ -51,12 +51,12 @@
 
 | ID | 问题 | 位置 | 影响 | 状态 |
 |----|------|------|------|------|
-| DSP-001 | `streaming_spectral_process` 块边界信号为零（重叠相加错误） | `dsp_utils.py:140-196` | 输出音频块边界有咔哒声 | ⏳ 待修复 |
-| DSP-002 | `beat_track` 中 `best_lag` 可能为零导致除零错误（返回 `inf`） | `dsp_utils.py:421-422` | 节拍检测崩溃 | ⏳ 待修复 |
-| DSP-003 | `_tanh_declip` 多声道时 in-place 修改输入数组 | `repair_v2_4/core.py:43-51` | 副作用 bug | ⏳ 待修复 |
-| DSP-004 | `_diff_clamp_depop` 多声道时 in-place 修改输入数组 | `repair_v2_4/core.py:86-93` | 副作用 bug | ⏳ 待修复 |
-| DSP-005 | `_adaptive_loudness_normalize` in-place 修改输入数组 | `repair_v2_4/core.py:116-153` | 副作用 bug | ⏳ 待修复 |
-| DSP-006 | `pyin` 全静音信号返回全 `NaN` 的 f0 数组，下游计算可能崩溃 | `dsp_utils.py:483-522` | 基频检测崩溃 | ⏳ 待修复 |
+| DSP-001 | `streaming_spectral_process` 块边界信号为零（重叠相加错误） | `dsp_utils.py:140-196` | 输出音频块边界有咔哒声 | ✅ 已修复 |
+| DSP-002 | `beat_track` 中 `best_lag` 可能为零导致除零错误（返回 `inf`） | `dsp_utils.py:421-422` | 节拍检测崩溃 | ✅ 已修复 |
+| DSP-003 | `_tanh_declip` 多声道时 in-place 修改输入数组 | `repair_v2_4/core.py:43-51` | 副作用 bug | ✅ 已修复 |
+| DSP-004 | `_diff_clamp_depop` 多声道时 in-place 修改输入数组 | `repair_v2_4/core.py:86-93` | 副作用 bug | ✅ 已修复 |
+| DSP-005 | `_adaptive_loudness_normalize` in-place 修改输入数组 | `repair_v2_4/core.py:116-153` | 副作用 bug | ✅ 已修复 |
+| DSP-006 | `pyin` 全静音信号返回全 `NaN` 的 f0 数组，下游计算可能崩溃 | `dsp_utils.py:483-522` | 基频检测崩溃 | ✅ 已修复 |
 
 ### 🟡 中严重程度（9 个）
 
@@ -90,13 +90,13 @@
 
 | ID | 问题 | 位置 | 影响 | 状态 |
 |----|------|------|------|------|
-| API-001 | 上传接口先读整个文件到内存再判断大小，大文件可导致 OOM | `upload.py:86-101` | 拒绝服务 | ⏳ 待修复 |
-| API-002 | 双轨上传空间不足时无清理逻辑，资源泄漏 | `upload.py:329-350` | 磁盘泄漏 | ⏳ 待修复 |
-| API-003 | CORS 配置 `allow_origins=["*"]` 与 `allow_credentials=True` 冲突 | `app.py:104-110` | 安全配置错误 | ⏳ 待修复 |
-| API-004 | `/api/v1/log` 接口无认证，任意客户端可注入日志 | `system.py:97-108` | 日志污染 | ⏳ 待修复 |
-| API-005 | `/cache/clear-all` 无认证，可清空所有缓存数据 | `cache.py:688-709` | 数据丢失 | ⏳ 待修复 |
-| API-006 | `/wasm/upload` 无认证，可上传任意 WASM 模块（潜在 RCE） | `wasm.py:124-170` | 远程代码执行风险 | ⏳ 待修复 |
-| API-007 | 任务状态/取消/下载接口无鉴权，可遍历 task_id 访问他人任务 | `repair.py:305-320` | 数据泄露 | ⏳ 待修复 |
+| API-001 | 上传接口先读整个文件到内存再判断大小，大文件可导致 OOM | `upload.py:86-101` | 拒绝服务 | ✅ 已修复 |
+| API-002 | 双轨上传空间不足时无清理逻辑，资源泄漏 | `upload.py:329-350` | 磁盘泄漏 | ✅ 已修复 |
+| API-003 | CORS 配置 `allow_origins=["*"]` 与 `allow_credentials=True` 冲突 | `app.py:104-110` | 安全配置错误 | ✅ 已修复 |
+| API-004 | `/api/v1/log` 接口无认证，任意客户端可注入日志 | `system.py:97-108` | 日志污染 | ✅ 已修复 |
+| API-005 | `/cache/clear-all` 无认证，可清空所有缓存数据 | `cache.py:688-709` | 数据丢失 | ✅ 已修复 |
+| API-006 | `/wasm/upload` 无认证，可上传任意 WASM 模块（潜在 RCE） | `wasm.py:124-170` | 远程代码执行风险 | ✅ 已修复 |
+| API-007 | 任务状态/取消/下载接口无鉴权，可遍历 task_id 访问他人任务 | `repair.py:305-320` | 数据泄露 | ✅ 已修复 |
 
 ### 🟡 中严重程度（6 个）
 
@@ -126,11 +126,11 @@
 
 | ID | 问题 | 位置 | 影响 | 状态 |
 |----|------|------|------|------|
-| DB-001 | 环境变量类型转换无容错 — 非法值导致服务启动崩溃 | `config.py:13, 18, 19, 21` | 服务不可用 | ⏳ 待修复 |
-| DB-002 | tasks 表缺少关键索引（file_hash/status/created_at） | `database.py:31-49` | 查询慢，缓存命中检测全表扫描 | ⏳ 待修复 |
-| DB-003 | `find_repair_cache` 全量加载后在 Python 中过滤 | `database.py:188-257` | 大数据库下内存+性能问题 | ⏳ 待修复 |
-| DB-004 | `cleanup_stale_tasks` 竞态条件 — 先查后改 | `database.py:83-112` | 并发下可能漏掉任务 | ⏳ 待修复 |
-| DB-005 | WAL 模式无 checkpoint 管理导致 WAL 文件无限增长 | `database.py:22-27` | 磁盘空间泄漏 | ⏳ 待修复 |
+| DB-001 | 环境变量类型转换无容错 — 非法值导致服务启动崩溃 | `config.py:13, 18, 19, 21` | 服务不可用 | ✅ 已修复 |
+| DB-002 | tasks 表缺少关键索引（file_hash/status/created_at） | `database.py:31-49` | 查询慢，缓存命中检测全表扫描 | ✅ 已修复 |
+| DB-003 | `find_repair_cache` 全量加载后在 Python 中过滤 | `database.py:188-257` | 大数据库下内存+性能问题 | ✅ 已修复 |
+| DB-004 | `cleanup_stale_tasks` 竞态条件 — 先查后改 | `database.py:83-112` | 并发下可能漏掉任务 | ✅ 已修复 |
+| DB-005 | WAL 模式无 checkpoint 管理导致 WAL 文件无限增长 | `database.py:22-27` | 磁盘空间泄漏 | ✅ 已修复 |
 
 ### 🟡 中严重程度（6 个）
 

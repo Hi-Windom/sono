@@ -156,6 +156,11 @@ class TaskExecutor:
 
             result = task.execute(progress_callback)
 
+            with _cancelled_lock:
+                if task_id in _cancelled_tasks:
+                    logger.info(f"[TaskExecutor] 任务执行完成但已被取消，跳过设置 completed 状态 task_id={task_id}")
+                    raise TaskCancelledError(f"任务已取消: {task_id}")
+
             extra_fields = task.on_success(result) or {}
 
             update_fields: dict[str, Any] = {

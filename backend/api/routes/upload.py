@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from config import ALLOWED_EXTENSIONS, MAX_UPLOAD_SIZE, UPLOAD_DIR, BASE_DIR
 from database import create_task, find_task_by_hash
 from services.task_manager import generate_task_id
-from ._common import _get_audio_info
+from ._common import _get_audio_info, generate_task_access_token
 
 _SESSION_ID_PATTERN = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
 _audio_files_cache_lock = threading.Lock()
@@ -72,9 +72,11 @@ async def storage_estimate(request: StorageEstimateRequest):
 async def check_file_hash(request: CheckHashRequest):
     existing = find_task_by_hash(request.file_hash)
     if existing:
+        task_id = existing["id"]
         return {
             "exists": True,
-            "task_id": existing["id"],
+            "task_id": task_id,
+            "access_token": generate_task_access_token(task_id),
             "output_path": existing.get("output_path", ""),
             "status": existing.get("status", ""),
             "params": existing.get("params", {}),
@@ -93,14 +95,24 @@ async def upload_audio(file: UploadFile = File(...), file_hash: str = Form("")):
 
     os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-    with open(upload_path, "wb") as f:
-        content = await file.read()
-        if len(content) > MAX_UPLOAD_SIZE:
-            os.remove(upload_path)
-            raise HTTPException(status_code=413, detail=f"文件过大，最大支持 {MAX_UPLOAD_SIZE // 1024 // 1024}MB")
-        f.write(content)
-
-    file_size = len(content)
+    file_size = 0
+    try:
+        with open(upload_path, "wb") as f:
+            while True:
+                chunk = await file.read(CHUNK_SIZE)
+                if not chunk:
+                    break
+                file_size += len(chunk)
+                if file_size > MAX_UPLOAD_SIZE:
+                    raise HTTPException(status_code=413, detail=f"文件过大，最大支持 {MAX_UPLOAD_SIZE // 1024 // 1024}MB")
+                f.write(chunk)
+    except HTTPException:
+        if os.path.exists(upload_path):
+            try:
+                os.remove(upload_path)
+            except OSError:
+                pass
+        raise
 
     try:
         disk_usage = os.statvfs(UPLOAD_DIR)
@@ -124,6 +136,7 @@ async def upload_audio(file: UploadFile = File(...), file_hash: str = Form("")):
 
     return {
         "task_id": task_id,
+        "access_token": generate_task_access_token(task_id),
         "filename": file.filename,
         "size": file_size,
         "audio_info": audio_info,
@@ -296,6 +309,7 @@ async def upload_finalize(session_id: str = Form(...)):
     return {
         "success": True,
         "task_id": task_id,
+        "access_token": generate_task_access_token(task_id),
         "filename": filename,
         "size": file_size,
         "audio_info": audio_info,
@@ -326,33 +340,55 @@ async def upload_dual_audio(
 
     os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-    vocal_content = await vocal_file.read()
-    accompaniment_content = await accompaniment_file.read()
+    vocal_size = 0
+    acc_size = 0
 
-    if len(vocal_content) > MAX_UPLOAD_SIZE:
-        raise HTTPException(status_code=413, detail=f"人声文件过大，最大支持 {MAX_UPLOAD_SIZE // 1024 // 1024}MB")
-    if len(accompaniment_content) > MAX_UPLOAD_SIZE:
-        raise HTTPException(status_code=413, detail=f"伴奏文件过大，最大支持 {MAX_UPLOAD_SIZE // 1024 // 1024}MB")
+    def _cleanup_dual():
+        for p in [vocal_upload_path, accompaniment_upload_path]:
+            if os.path.exists(p):
+                try:
+                    os.remove(p)
+                except OSError:
+                    pass
 
-    total_size = len(vocal_content) + len(accompaniment_content)
     try:
-        disk_usage = os.statvfs(UPLOAD_DIR)
-        available_bytes = disk_usage.f_bavail * disk_usage.f_frsize
-        min_required = total_size * 2
-        if available_bytes < min_required:
-            available_mb = available_bytes // 1024 // 1024
-            required_mb = min_required // 1024 // 1024
-            raise HTTPException(
-                status_code=507,
-                detail=f"存储空间不足：可用 {available_mb}MB，至少需要 {required_mb}MB（文件大小的2倍）"
-            )
-    except OSError:
-        pass
+        with open(vocal_upload_path, "wb") as f:
+            while True:
+                chunk = await vocal_file.read(CHUNK_SIZE)
+                if not chunk:
+                    break
+                vocal_size += len(chunk)
+                if vocal_size > MAX_UPLOAD_SIZE:
+                    raise HTTPException(status_code=413, detail=f"人声文件过大，最大支持 {MAX_UPLOAD_SIZE // 1024 // 1024}MB")
+                f.write(chunk)
 
-    with open(vocal_upload_path, "wb") as f:
-        f.write(vocal_content)
-    with open(accompaniment_upload_path, "wb") as f:
-        f.write(accompaniment_content)
+        with open(accompaniment_upload_path, "wb") as f:
+            while True:
+                chunk = await accompaniment_file.read(CHUNK_SIZE)
+                if not chunk:
+                    break
+                acc_size += len(chunk)
+                if acc_size > MAX_UPLOAD_SIZE:
+                    raise HTTPException(status_code=413, detail=f"伴奏文件过大，最大支持 {MAX_UPLOAD_SIZE // 1024 // 1024}MB")
+                f.write(chunk)
+
+        total_size = vocal_size + acc_size
+        try:
+            disk_usage = os.statvfs(UPLOAD_DIR)
+            available_bytes = disk_usage.f_bavail * disk_usage.f_frsize
+            min_required = total_size * 2
+            if available_bytes < min_required:
+                available_mb = available_bytes // 1024 // 1024
+                required_mb = min_required // 1024 // 1024
+                raise HTTPException(
+                    status_code=507,
+                    detail=f"存储空间不足：可用 {available_mb}MB，至少需要 {required_mb}MB（文件大小的2倍）"
+                )
+        except OSError:
+            pass
+    except HTTPException:
+        _cleanup_dual()
+        raise
 
     vocal_hash = vocal_file_hash or file_hash
     accompaniment_hash = accompaniment_file_hash or file_hash
@@ -362,10 +398,10 @@ async def upload_dual_audio(
 
     create_task(vocal_task_id, f"vocal_{vocal_file.filename or 'audio'}", vocal_upload_path,
                 {"audio_info": vocal_audio_info} if vocal_audio_info else {},
-                vocal_hash, len(vocal_content))
+                vocal_hash, vocal_size)
     create_task(accompaniment_task_id, f"acc_{accompaniment_file.filename or 'audio'}", accompaniment_upload_path,
                 {"audio_info": acc_audio_info} if acc_audio_info else {},
-                accompaniment_hash, len(accompaniment_content))
+                accompaniment_hash, acc_size)
     create_task(main_task_id, f"dual_{vocal_file.filename or 'audio'}", vocal_upload_path, {
         "vocal_task_id": vocal_task_id,
         "accompaniment_task_id": accompaniment_task_id,
@@ -373,7 +409,7 @@ async def upload_dual_audio(
         "accompaniment_file_hash": accompaniment_hash,
         "vocal_filename": vocal_file.filename or "",
         "accompaniment_filename": accompaniment_file.filename or "",
-    }, file_hash, len(vocal_content) + len(accompaniment_content))
+    }, file_hash, vocal_size + acc_size)
 
     logger.info(f"[/upload-dual] main_task_id={main_task_id} vocal={vocal_task_id} acc={accompaniment_task_id} vocal_hash={vocal_hash[:12] if vocal_hash else 'none'} acc_hash={accompaniment_hash[:12] if accompaniment_hash else 'none'}")
 
@@ -382,12 +418,13 @@ async def upload_dual_audio(
 
     return {
         "task_id": main_task_id,
+        "access_token": generate_task_access_token(main_task_id),
         "vocal_task_id": vocal_task_id,
         "accompaniment_task_id": accompaniment_task_id,
         "vocal_filename": vocal_file.filename,
         "accompaniment_filename": accompaniment_file.filename,
-        "vocal_size": len(vocal_content),
-        "accompaniment_size": len(accompaniment_content),
+        "vocal_size": vocal_size,
+        "accompaniment_size": acc_size,
         "vocal_info": _get_audio_info(vocal_upload_path),
         "accompaniment_info": _get_audio_info(accompaniment_upload_path),
     }

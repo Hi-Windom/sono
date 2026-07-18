@@ -42,13 +42,14 @@ def _tanh_declip_1d(data, threshold):
 
 def _tanh_declip(y, amount):
     if amount <= 0:
-        return y
+        return y.copy() if y.ndim > 1 else y
     threshold = 0.90
     if y.ndim == 1:
         return _tanh_declip_1d(y, threshold)
+    y_out = np.empty_like(y)
     for ch in range(y.shape[0]):
-        y[ch] = _tanh_declip_1d(y[ch], threshold)
-    return y
+        y_out[ch] = _tanh_declip_1d(y[ch], threshold)
+    return y_out
 
 
 def _diff_clamp_depop_1d(data, sr, amount):
@@ -85,12 +86,13 @@ def _diff_clamp_depop_1d(data, sr, amount):
 
 def _diff_clamp_depop(y, sr, amount):
     if amount <= 0:
-        return y
+        return y.copy() if y.ndim > 1 else y
     if y.ndim == 1:
         return _diff_clamp_depop_1d(y, sr, amount)
+    y_out = np.empty_like(y)
     for ch in range(y.shape[0]):
-        y[ch] = _diff_clamp_depop_1d(y[ch], sr, amount)
-    return y
+        y_out[ch] = _diff_clamp_depop_1d(y[ch], sr, amount)
+    return y_out
 
 
 def _soft_peak_limit_1d(data, threshold):
@@ -115,9 +117,9 @@ def _soft_peak_limit(y, threshold=0.9):
 
 def _adaptive_loudness_normalize(y, sr, target_loudness_lu=-14.0):
     if y.ndim == 1:
-        y_2d = y.reshape(1, -1)
-        _adaptive_loudness_normalize(y_2d, sr, target_loudness_lu)
-        return y
+        y_2d = y.reshape(1, -1).copy()
+        result_2d = _adaptive_loudness_normalize(y_2d, sr, target_loudness_lu)
+        return result_2d[0]
     y_64 = y.astype(np.float64)
     n_samples = y_64.shape[1]
     block_samples = int(sr * 0.4)
@@ -130,8 +132,7 @@ def _adaptive_loudness_normalize(y, sr, target_loudness_lu=-14.0):
         gains = np.clip(gains, 0.1, 10.0)
         for ch in range(y_64.shape[0]):
             y_64[ch] *= gains[ch]
-        y[:] = y_64.astype(y.dtype)
-        return y
+        return y_64.astype(y.dtype)
     gains = np.ones(y_64.shape[0])
     for ch in range(y_64.shape[0]):
         block_energies = []
@@ -149,8 +150,7 @@ def _adaptive_loudness_normalize(y, sr, target_loudness_lu=-14.0):
         gains[ch] = gain
     for ch in range(y_64.shape[0]):
         y_64[ch] *= gains[ch]
-    y[:] = y_64.astype(y.dtype)
-    return y
+    return y_64.astype(y.dtype)
 
 
 def _harmonic_bass_enhance(y, sr, amount, music_type):

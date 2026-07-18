@@ -1,5 +1,8 @@
 import os
+import logging
 from datetime import datetime, timezone
+
+logger = logging.getLogger(__name__)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_DIR = os.path.join(BASE_DIR, "storage", "uploads")
@@ -9,20 +12,36 @@ DECODED_DIR = os.path.join(BASE_DIR, "storage", "decoded")
 DB_PATH = os.path.join(BASE_DIR, "storage", "tasks.db")
 DEPLOY_TIME_FILE = os.path.join(BASE_DIR, "storage", "deploy_time")
 
+
+def _safe_int_env(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except (ValueError, TypeError):
+        logger.warning(
+            f"环境变量 {name} 值 '{raw}' 不是有效整数，使用默认值 {default}"
+        )
+        return default
+
+
 HOST = os.getenv("HOST", "0.0.0.0")
-PORT = int(os.getenv("PORT", "8000"))
+PORT = _safe_int_env("PORT", 8000)
 MAX_UPLOAD_SIZE = 1 * 1024 * 1024 * 1024
 
 ALLOWED_EXTENSIONS = {".wav", ".mp3", ".flac", ".ogg", ".aac", ".m4a", ".wma"}
 
-MAX_WORKERS = int(os.getenv("MAX_WORKERS", "4"))
-MAX_CONCURRENT_TASKS = int(os.getenv("MAX_CONCURRENT_TASKS", str(max(1, MAX_WORKERS - 1))))
+MAX_WORKERS = _safe_int_env("MAX_WORKERS", 4)
+_default_concurrent = max(1, MAX_WORKERS - 1)
+MAX_CONCURRENT_TASKS = _safe_int_env("MAX_CONCURRENT_TASKS", _default_concurrent)
 
-SOURCE_FILE_CACHE_LIMIT = int(os.getenv("SOURCE_FILE_CACHE_LIMIT", str(1024 * 1024 * 1024)))
+SOURCE_FILE_CACHE_LIMIT = _safe_int_env("SOURCE_FILE_CACHE_LIMIT", 1024 * 1024 * 1024)
 
 MOBILE_MODE = os.getenv("MOBILE_MODE", "").lower() in ("1", "true", "yes")
 
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
+SECRET_KEY = os.getenv("SECRET_KEY", "default-secret-key-change-in-production")
 
 
 def _init_deploy_time():
