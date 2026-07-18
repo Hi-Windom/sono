@@ -192,16 +192,64 @@ STUCK_THRESHOLD = 30
 _cancelled_tasks: set[str] = set()
 _cancelled_lock = threading.Lock()
 _CANCEL_CLEANUP_DELAY = 3600
+_cancel_expiry: dict[str, float] = {}
+_cancel_cleanup_thread: threading.Thread | None = None
+_cancel_cleanup_stop = threading.Event()
+_cancel_cleanup_cond = threading.Condition()
+
+
+def _ensure_cancel_cleanup_thread():
+    global _cancel_cleanup_thread
+    if _cancel_cleanup_thread is not None and _cancel_cleanup_thread.is_alive():
+        return
+    with _cancelled_lock:
+        if _cancel_cleanup_thread is not None and _cancel_cleanup_thread.is_alive():
+            return
+        _cancel_cleanup_stop.clear()
+        _cancel_cleanup_thread = threading.Thread(target=_cancel_cleanup_worker, daemon=True)
+        _cancel_cleanup_thread.start()
+
+
+def _cancel_cleanup_worker():
+    while not _cancel_cleanup_stop.is_set():
+        now = time.time()
+        expired = []
+        next_expiry = None
+        with _cancelled_lock:
+            for task_id, expiry in list(_cancel_expiry.items()):
+                if now >= expiry:
+                    expired.append(task_id)
+                elif next_expiry is None or expiry < next_expiry:
+                    next_expiry = expiry
+            for task_id in expired:
+                _cancelled_tasks.discard(task_id)
+                _cancel_expiry.pop(task_id, None)
+        if expired:
+            logger.debug(f"[cancel] 定时清理 {len(expired)} 个过期取消标记")
+
+        wait_time = min(60, _CANCEL_CLEANUP_DELAY)
+        if next_expiry is not None:
+            wait_time = min(wait_time, max(0, next_expiry - time.time()))
+        wait_time = max(0.1, wait_time)
+
+        with _cancel_cleanup_cond:
+            if not _cancel_cleanup_stop.is_set():
+                _cancel_cleanup_cond.wait(wait_time)
 
 
 def _schedule_cancel_cleanup(task_id: str) -> None:
-    def _cleanup():
-        time.sleep(_CANCEL_CLEANUP_DELAY)
-        with _cancelled_lock:
-            _cancelled_tasks.discard(task_id)
-        logger.debug(f"[cancel] 超时清理取消标记 task_id={task_id}")
-    t = threading.Thread(target=_cleanup, daemon=True)
-    t.start()
+    _ensure_cancel_cleanup_thread()
+    expiry = time.time() + _CANCEL_CLEANUP_DELAY
+    with _cancelled_lock:
+        _cancel_expiry[task_id] = expiry
+    with _cancel_cleanup_cond:
+        _cancel_cleanup_cond.notify_all()
+
+
+def _discard_cancelled_task(task_id: str) -> None:
+    with _cancelled_lock:
+        _cancelled_tasks.discard(task_id)
+        _cancel_expiry.pop(task_id, None)
 
 
 def cancel_task(task_id: str) -> bool:
@@ -258,6 +306,7 @@ def _run_detect(task_id: str, audio_path: str, detect_type: str, detector_versio
         if task_id in _cancelled_tasks:
             logger.info(f"[detect] 任务已取消，跳过执行 task_id={task_id}")
             _cancelled_tasks.discard(task_id)
+            _cancel_expiry.pop(task_id, None)
             _track_task_end(task_id)
             return
 
@@ -356,6 +405,7 @@ def _run_detect(task_id: str, audio_path: str, detect_type: str, detector_versio
         _track_task_end(task_id)
         with _cancelled_lock:
             _cancelled_tasks.discard(task_id)
+            _cancel_expiry.pop(task_id, None)
 
 
 def _run_repair(task_id: str, audio_path: str, params: dict[str, Any], mobile_mode: bool = False) -> None:
@@ -369,6 +419,7 @@ def _run_repair(task_id: str, audio_path: str, params: dict[str, Any], mobile_mo
         if task_id in _cancelled_tasks:
             logger.info(f"[repair] 任务已取消，跳过执行 task_id={task_id}")
             _cancelled_tasks.discard(task_id)
+            _cancel_expiry.pop(task_id, None)
             _track_task_end(task_id)
             return
     
@@ -524,6 +575,7 @@ def _run_repair(task_id: str, audio_path: str, params: dict[str, Any], mobile_mo
         _track_task_end(task_id)
         with _cancelled_lock:
             _cancelled_tasks.discard(task_id)
+            _cancel_expiry.pop(task_id, None)
 
 
 def get_task_status(task_id: str) -> TaskDict | None:

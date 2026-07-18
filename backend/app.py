@@ -6,7 +6,7 @@ import uuid
 import traceback
 from contextlib import asynccontextmanager
 from pathlib import Path
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, Response, JSONResponse
@@ -14,7 +14,6 @@ from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from api.routes import router
 from config import MOBILE_MODE
-from pydantic import BaseModel
 
 BASE_DIR = Path(__file__).resolve().parent
 LOG_FILE = BASE_DIR / 'server.log'
@@ -44,6 +43,8 @@ logger = logging.getLogger(__name__)
 
 
 def create_app() -> FastAPI:
+    from config import init_storage
+    init_storage()
     from database import init_db, init_training_db
     init_db()
     init_training_db()
@@ -195,7 +196,16 @@ def create_app() -> FastAPI:
         }
 
     @app.get("/api/v1/logs")
-    async def download_logs(lines: int = 2000):
+    async def download_logs(
+        lines: int = 2000,
+        x_admin_token: str | None = Header(None),
+    ):
+        import config
+        admin_token = config.ADMIN_TOKEN
+        if not admin_token:
+            raise HTTPException(status_code=403, detail="日志接口未启用（未配置 ADMIN_TOKEN）")
+        if x_admin_token != admin_token:
+            raise HTTPException(status_code=401, detail="未授权的操作")
         if not LOG_FILE.exists():
             raise HTTPException(status_code=404, detail="日志文件不存在")
         try:

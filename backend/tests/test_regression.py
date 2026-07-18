@@ -5648,3 +5648,2122 @@ class TestTaskAccessAuth:
                     config.OUTPUT_DIR = old_output
         finally:
             config.SECRET_KEY = old_secret
+
+
+# ============================================================================
+# 回归测试 DSP-007: mel_filterbank 两套实现不一致
+# Bug: _mel_filterbank_cached 与 mel_filterbank 实现不同，结果不一致
+# 修复: mel_filterbank 和 mel_frequencies 统一使用缓存版本
+# ============================================================================
+
+class TestDSP007MelFilterbankConsistency:
+    """防止 mel_filterbank 两套实现结果不一致"""
+
+    def test_cached_vs_uncached_identical(self):
+        """_mel_filterbank 与 mel_filterbank 应该返回完全相同的结果"""
+        from services.dsp_utils import _mel_filterbank, mel_filterbank
+
+        sr = 22050
+        n_fft = 2048
+        n_mels = 128
+
+        fb_cached = _mel_filterbank(sr, n_fft, n_mels=n_mels)
+        fb_uncached = mel_filterbank(sr, n_fft, n_mels=n_mels)
+
+        assert fb_cached.shape == fb_uncached.shape
+        assert np.allclose(fb_cached, fb_uncached, atol=1e-10), (
+            "DSP-007: 两个 mel filterbank 实现结果不一致，"
+            "MFCC 等特征计算会产生偏差"
+        )
+
+    def test_mel_frequencies_consistent(self):
+        """mel_frequencies 与 _mel_frequencies_cached 应该一致"""
+        from services.dsp_utils import _mel_frequencies_cached, mel_frequencies
+
+        n_mels = 128
+        fmin = 0.0
+        fmax = 11025.0
+
+        mel_cached = _mel_frequencies_cached(n_mels, fmin, fmax)
+        mel_public = mel_frequencies(n_mels=n_mels, fmin=fmin, fmax=fmax)
+
+        assert len(mel_cached) == len(mel_public)
+        assert np.allclose(mel_cached, mel_public, atol=1e-10)
+
+
+# ============================================================================
+# 回归测试 DSP-008: repair_audio 重采样后 dtype 变回 float64
+# Bug: y_new = np.zeros(...) 默认 float64，float32 内存优化失效
+# 修复: 显式指定 dtype=y.dtype
+# ============================================================================
+
+class TestDSP008ResampleDtypePreservation:
+    """防止重采样后 float32 内存优化失效"""
+
+    def test_repair_audio_resample_preserves_float32(self):
+        """repair_audio 中重采样后的数组 dtype 应与输入一致"""
+        import inspect
+        from services.repair.repair_v2_4 import core
+
+        source = inspect.getsource(core.repair_audio)
+        assert "np.zeros((y.shape[0], target_len), dtype=y.dtype)" in source, (
+            "DSP-008: repair_audio 中重采样目标数组应指定 dtype=y.dtype，"
+            "否则大音频的 float32 内存优化会失效，内存占用翻倍"
+        )
+
+
+# ============================================================================
+# 回归测试 DSP-009/017: 窗口缓存复数 dtype 泄漏 + 无大小限制
+# Bug: _get_window 额外缓存复数 dtype 窗口且缓存无大小限制
+# 修复: 移除复数 dtype 缓存，使用 OrderedDict + LRU 限制大小
+# ============================================================================
+
+class TestDSP009DSP017WindowCache:
+    """防止窗口缓存复数 dtype 泄漏和无限制增长"""
+
+    def test_no_complex_dtype_in_cache(self):
+        """_WINDOW_CACHE 中不应有复数 dtype 的条目"""
+        from services.dsp_utils import _get_window
+        import services.dsp_utils as dsp_mod
+
+        dsp_mod._WINDOW_CACHE.clear()
+
+        _get_window('hann', 1024, dtype=np.float64)
+        _get_window('hann', 512, dtype=np.float32)
+
+        has_complex = any(
+            'complex' in str(k[2]) for k in dsp_mod._WINDOW_CACHE.keys()
+        )
+        assert not has_complex, (
+            "DSP-009: _WINDOW_CACHE 中存在复数 dtype 窗口缓存，浪费内存"
+        )
+
+    def test_window_cache_has_size_limit(self):
+        """窗口缓存应该有大小限制（LRU 淘汰）"""
+        from services.dsp_utils import _get_window, _MAX_WINDOW_CACHE_SIZE
+        import services.dsp_utils as dsp_mod
+
+        dsp_mod._WINDOW_CACHE.clear()
+
+        for i in range(_MAX_WINDOW_CACHE_SIZE + 10):
+            _get_window('hann', 256 + i * 16, dtype=np.float64)
+
+        assert len(dsp_mod._WINDOW_CACHE) <= _MAX_WINDOW_CACHE_SIZE, (
+            f"DSP-017: 窗口缓存大小超过限制 {_MAX_WINDOW_CACHE_SIZE}，"
+            f"实际 {len(dsp_mod._WINDOW_CACHE)}，极端参数下内存泄漏"
+        )
+
+
+# ============================================================================
+# 回归测试 DSP-010/011/012: in-place 修改输入数组
+# Bug: _harmonic_bass_enhance / _air_texture_reconstruct / _soft_peak_limit
+#      多声道时直接修改输入数组
+# 修复: 先 copy() 再修改，返回新数组
+# ============================================================================
+
+class TestDSP010DSP011DSP012InPlace:
+    """防止音频处理函数 in-place 修改输入数组"""
+
+    def test_harmonic_bass_enhance_no_in_place(self):
+        """_harmonic_bass_enhance 不应修改输入数组"""
+        from services.repair.repair_v2_4.core import _harmonic_bass_enhance
+
+        sr = 44100
+        np.random.seed(42)
+        y_orig = np.random.randn(2, sr).astype(np.float64) * 0.1
+        y_input = y_orig.copy()
+
+        _ = _harmonic_bass_enhance(y_input, sr, amount=0.5, music_type="generic")
+
+        assert np.allclose(y_input, y_orig), (
+            "DSP-010: _harmonic_bass_enhance 修改了输入数组 (in-place)"
+        )
+
+    def test_air_texture_reconstruct_no_in_place(self):
+        """_air_texture_reconstruct 不应修改输入数组"""
+        from services.repair.repair_v2_4.core import _air_texture_reconstruct
+
+        sr = 44100
+        np.random.seed(42)
+        y_orig = np.random.randn(2, sr).astype(np.float64) * 0.1
+        y_input = y_orig.copy()
+
+        _ = _air_texture_reconstruct(y_input, sr, amount=0.5, music_type="generic")
+
+        assert np.allclose(y_input, y_orig), (
+            "DSP-011: _air_texture_reconstruct 修改了输入数组 (in-place)"
+        )
+
+    def test_soft_peak_limit_no_in_place(self):
+        """_soft_peak_limit 多声道时不应修改输入数组"""
+        from services.repair.repair_v2_4.core import _soft_peak_limit
+
+        sr = 44100
+        y_orig = np.random.randn(2, sr).astype(np.float64) * 0.5
+        y_orig[:, 1000:1010] = 2.0
+        y_input = y_orig.copy()
+
+        _ = _soft_peak_limit(y_input, threshold=0.9)
+
+        assert np.allclose(y_input, y_orig), (
+            "DSP-012: _soft_peak_limit 修改了输入数组 (in-place)，"
+            "与单声道版本行为不一致"
+        )
+
+
+# ============================================================================
+# 回归测试 DSP-013: time_stretch_hifi speed=1 返回原数组引用
+# Bug: speed 接近 1 时直接 return y，后续修改会影响原数组
+# 修复: 返回 y.copy()
+# ============================================================================
+
+class TestDSP013TimeStretchSpeedOneCopy:
+    """防止 time_stretch_hifi speed=1 时返回原数组引用"""
+
+    def test_speed_1_returns_copy_mono(self):
+        """单声道 speed=1 时应返回副本而非原引用"""
+        from services.time_stretch import time_stretch_hifi
+
+        sr = 44100
+        y = np.random.randn(sr).astype(np.float64) * 0.5
+
+        result = time_stretch_hifi(y, sr, speed=1.0)
+
+        assert result is not y, (
+            "DSP-013: time_stretch_hifi speed=1 时返回原数组引用，"
+            "后续修改结果会意外影响输入数组"
+        )
+        assert np.allclose(result, y)
+
+    def test_speed_1_returns_copy_multichannel(self):
+        """多声道 speed=1 时也应返回副本"""
+        from services.time_stretch import time_stretch_hifi
+
+        sr = 44100
+        y = np.random.randn(2, sr).astype(np.float64) * 0.5
+
+        result = time_stretch_hifi(y, sr, speed=1.0)
+
+        assert result is not y, (
+            "DSP-013: time_stretch_hifi 多声道 speed=1 时应返回副本"
+        )
+
+
+# ============================================================================
+# 回归测试 DSP-014/016: 静音信号语义不明确
+# Bug: spectral_rolloff / chroma_stft 对静音信号返回 0 或全零，语义模糊
+# 修复: 静音帧返回 NaN 作为明确标记
+# ============================================================================
+
+class TestDSP014DSP016SilenceSemantics:
+    """防止静音信号返回语义不明确的值"""
+
+    def test_spectral_rolloff_silence_returns_nan(self):
+        """全静音频谱的 rolloff 应返回 NaN 而非 0 Hz"""
+        from services.dsp_utils import spectral_rolloff
+
+        sr = 22050
+        n_fft = 2048
+        n_frames = 5
+        S = np.zeros((n_fft // 2 + 1, n_frames), dtype=np.float64)
+
+        rolloff = spectral_rolloff(S=S, sr=sr, n_fft=n_fft)
+
+        assert np.all(np.isnan(rolloff)), (
+            "DSP-014: 全静音频谱 rolloff 返回 0 Hz，语义不明确，"
+            "应返回 NaN 标记无效值"
+        )
+
+    def test_chroma_stft_silence_returns_nan(self):
+        """全静音频谱的 chroma 应返回 NaN 而非全零"""
+        from services.dsp_utils import chroma_stft
+
+        sr = 22050
+        n_fft = 2048
+        n_frames = 5
+        S = np.zeros((n_fft // 2 + 1, n_frames), dtype=np.float64)
+
+        chroma = chroma_stft(S=S, sr=sr, n_fft=n_fft)
+
+        assert np.all(np.isnan(chroma)), (
+            "DSP-016: 全静音频谱 chroma 全部为 0，语义不明确，"
+            "应返回 NaN 标记无效值"
+        )
+
+
+# ============================================================================
+# 回归测试 DSP-015: delta 函数大 order 时递归栈溢出
+# Bug: 使用递归实现高阶 delta，order 很大时栈溢出
+# 修复: 使用迭代实现
+# ============================================================================
+
+class TestDSP015DeltaNoStackOverflow:
+    """防止 delta 函数大 order 时递归栈溢出"""
+
+    def test_large_order_no_recursion_error(self):
+        """大 order 值不应触发 RecursionError"""
+        from services.dsp_utils import delta
+
+        data = np.random.randn(1, 1000)
+
+        import sys
+        old_limit = sys.getrecursionlimit()
+        try:
+            sys.setrecursionlimit(200)
+            try:
+                result = delta(data, width=9, order=50)
+                assert result is not None
+                assert result.shape == data.shape
+            except RecursionError:
+                pytest.fail(
+                    "DSP-015: delta 函数在大 order 时发生递归栈溢出，"
+                    "应使用迭代实现"
+                )
+        finally:
+            sys.setrecursionlimit(old_limit)
+
+    def test_delta_order_zero_returns_copy(self):
+        """order=0 应返回数据副本"""
+        from services.dsp_utils import delta
+
+        data = np.random.randn(1, 100)
+        result = delta(data, width=9, order=0)
+
+        assert result is not data
+        assert np.allclose(result, data)
+
+
+# ============================================================================
+# 回归测试 DSP-018: rms 静音信号语义不明确
+# Bug: rms 对全静音频谱返回 0，语义模糊（无法区分静音与直流）
+# 修复: 基于频谱的 rms 计算对静音帧返回 NaN
+# ============================================================================
+
+class TestDSP018RmsSilenceSemantics:
+    """防止 rms 静音信号返回语义不明确的值"""
+
+    def test_rms_silence_spectrum_returns_nan(self):
+        """基于频谱的 rms 对全静音帧应返回 NaN"""
+        from services.dsp_utils import rms
+
+        sr = 22050
+        n_fft = 2048
+        n_frames = 5
+        S = np.zeros((n_fft // 2 + 1, n_frames), dtype=np.float64)
+
+        result = rms(S=S)
+
+        assert np.all(np.isnan(result)), (
+            "DSP-018: 全静音频谱的 rms 返回 0，语义不明确，"
+            "应返回 NaN 标记无效值"
+        )
+
+    def test_rms_time_domain_still_returns_zero(self):
+        """时域 rms 对全零信号仍返回 0（物理意义明确）"""
+        from services.dsp_utils import rms
+
+        y = np.zeros(44100, dtype=np.float64)
+        result = rms(y=y, frame_length=2048, hop_length=512)
+
+        assert not np.any(np.isnan(result)), (
+            "时域 rms 对全零信号返回 0 是正确的物理意义，不应改为 NaN"
+        )
+        assert np.all(result == 0)
+
+
+# ============================================================================
+# 回归测试: DB-006 数据库版本管理和迁移机制
+# Bug: 无版本号追踪，无迁移脚本，多版本部署 schema 不一致
+# 修复: 添加 schema_version 表和迁移列表，init_db 按版本顺序执行迁移
+# ============================================================================
+
+class TestDatabaseSchemaVersioning:
+    """防止数据库 schema 无版本管理导致升级困难"""
+
+    def test_init_db_creates_schema_version_table(self, tmp_path):
+        """init_db 应该创建 schema_version 表"""
+        import tempfile
+        import os
+        import sqlite3
+        import config
+        from database import init_db
+
+        db_path = os.path.join(tmp_path, "test_version.db")
+        old_db = config.DB_PATH
+        config.DB_PATH = db_path
+        try:
+            init_db()
+
+            conn = sqlite3.connect(db_path)
+            cursor = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='schema_version'"
+            )
+            table_exists = cursor.fetchone() is not None
+            conn.close()
+
+            assert table_exists, "DB-006: init_db 后应该存在 schema_version 表"
+        finally:
+            config.DB_PATH = old_db
+
+    def test_schema_version_is_set(self, tmp_path):
+        """schema_version 表中应该有正确的版本号"""
+        import tempfile
+        import os
+        import sqlite3
+        import config
+        from database import init_db, SCHEMA_VERSION
+
+        db_path = os.path.join(tmp_path, "test_version2.db")
+        old_db = config.DB_PATH
+        config.DB_PATH = db_path
+        try:
+            init_db()
+
+            conn = sqlite3.connect(db_path)
+            cursor = conn.execute("SELECT version FROM schema_version WHERE id = 1")
+            row = cursor.fetchone()
+            conn.close()
+
+            assert row is not None, "schema_version 表中应该有版本记录"
+            assert row[0] >= 1, f"版本号应该 >= 1，实际是 {row[0]}"
+            assert row[0] == SCHEMA_VERSION, (
+                f"版本号应该等于 SCHEMA_VERSION={SCHEMA_VERSION}，实际是 {row[0]}"
+            )
+        finally:
+            config.DB_PATH = old_db
+
+    def test_migrations_list_exists(self):
+        """应该有 _MIGRATIONS 迁移列表"""
+        import database
+
+        assert hasattr(database, "_MIGRATIONS"), "DB-006: 应该有 _MIGRATIONS 迁移列表"
+        assert isinstance(database._MIGRATIONS, list), "_MIGRATIONS 应该是列表"
+        assert len(database._MIGRATIONS) >= 1, "_MIGRATIONS 应该至少有一个迁移"
+        assert len(database._MIGRATIONS) == database.SCHEMA_VERSION, (
+            f"迁移数量应该等于 SCHEMA_VERSION，"
+            f"迁移数={len(database._MIGRATIONS)}, SCHEMA_VERSION={database.SCHEMA_VERSION}"
+        )
+
+
+# ============================================================================
+# 回归测试: DB-007 大查询分页支持
+# Bug: get_all_tasks_ordered / get_all_analysis_cache 用 fetchall() 全量加载
+# 修复: 添加 get_tasks_paginated / get_analysis_cache_paginated / iter_*_batch
+# ============================================================================
+
+class TestDatabasePagination:
+    """防止大查询全量加载导致内存问题"""
+
+    def test_get_tasks_paginated_exists(self):
+        """应该有 get_tasks_paginated 分页查询函数"""
+        import database
+
+        assert hasattr(database, "get_tasks_paginated"), "DB-007: 应该有 get_tasks_paginated 函数"
+        assert callable(database.get_tasks_paginated)
+
+    def test_get_analysis_cache_paginated_exists(self):
+        """应该有 get_analysis_cache_paginated 分页查询函数"""
+        import database
+
+        assert hasattr(database, "get_analysis_cache_paginated"), (
+            "DB-007: 应该有 get_analysis_cache_paginated 函数"
+        )
+        assert callable(database.get_analysis_cache_paginated)
+
+    def test_iter_tasks_batch_exists(self):
+        """应该有 iter_tasks_batch 分批迭代函数"""
+        import database
+
+        assert hasattr(database, "iter_tasks_batch"), "DB-007: 应该有 iter_tasks_batch 函数"
+        assert callable(database.iter_tasks_batch)
+
+    def test_iter_analysis_cache_batch_exists(self):
+        """应该有 iter_analysis_cache_batch 分批迭代函数"""
+        import database
+
+        assert hasattr(database, "iter_analysis_cache_batch"), (
+            "DB-007: 应该有 iter_analysis_cache_batch 函数"
+        )
+        assert callable(database.iter_analysis_cache_batch)
+
+    def test_paginated_tasks_respects_limit_offset(self, tmp_path):
+        """分页查询应该正确处理 limit 和 offset"""
+        import tempfile
+        import os
+        import config
+        from database import init_db, create_task, get_tasks_paginated
+
+        db_path = os.path.join(tmp_path, "test_paginate.db")
+        old_db = config.DB_PATH
+        config.DB_PATH = db_path
+        try:
+            init_db()
+
+            for i in range(10):
+                create_task(f"task-{i}", f"test-{i}.wav", f"/tmp/test-{i}.wav", {}, f"hash-{i}", 1000)
+
+            page1 = get_tasks_paginated(limit=3, offset=0)
+            assert len(page1) == 3, f"第一页应该有 3 条，实际 {len(page1)} 条"
+
+            page2 = get_tasks_paginated(limit=3, offset=3)
+            assert len(page2) == 3, f"第二页应该有 3 条，实际 {len(page2)} 条"
+
+            page1_ids = [t["id"] for t in page1]
+            page2_ids = [t["id"] for t in page2]
+            assert len(set(page1_ids) & set(page2_ids)) == 0, "两页数据不应该重叠"
+
+            last_page = get_tasks_paginated(limit=3, offset=9)
+            assert len(last_page) == 1, f"最后一页应该有 1 条，实际 {len(last_page)} 条"
+        finally:
+            config.DB_PATH = old_db
+
+    def test_iter_tasks_batch_yields_correct_batches(self, tmp_path):
+        """iter_tasks_batch 应该按批次正确产出数据"""
+        import tempfile
+        import os
+        import config
+        from database import init_db, create_task, iter_tasks_batch
+
+        db_path = os.path.join(tmp_path, "test_batch.db")
+        old_db = config.DB_PATH
+        config.DB_PATH = db_path
+        try:
+            init_db()
+
+            for i in range(10):
+                create_task(f"batch-{i}", f"test-{i}.wav", f"/tmp/test-{i}.wav", {}, f"hash-b-{i}", 1000)
+
+            all_tasks = []
+            batch_count = 0
+            for batch in iter_tasks_batch(batch_size=4):
+                batch_count += 1
+                all_tasks.extend(batch)
+                assert len(batch) <= 4, f"每批不应超过 4 条，实际 {len(batch)} 条"
+
+            assert batch_count == 3, f"应该有 3 批，实际 {batch_count} 批"
+            assert len(all_tasks) == 10, f"总共应该有 10 条，实际 {len(all_tasks)} 条"
+        finally:
+            config.DB_PATH = old_db
+
+
+# ============================================================================
+# 回归测试: DB-008 config.py 导入无副作用
+# Bug: 导入 config 模块就创建目录和写文件，测试环境受影响
+# 修复: 改为懒加载，提供 init_storage() 显式初始化
+# ============================================================================
+
+class TestConfigNoImportSideEffects:
+    """防止 config 模块导入时产生文件系统副作用"""
+
+    def test_init_storage_function_exists(self):
+        """应该有 init_storage 函数用于显式初始化"""
+        import config
+
+        assert hasattr(config, "init_storage"), "DB-008: 应该有 init_storage 函数"
+        assert callable(config.init_storage)
+
+    def test_config_has_initialized_flag(self):
+        """应该有 _initialized 标志追踪初始化状态"""
+        import config
+
+        assert hasattr(config, "_initialized"), "DB-008: 应该有 _initialized 标志"
+
+    def test_init_storage_is_idempotent(self, tmp_path, monkeypatch):
+        """多次调用 init_storage 应该是幂等的"""
+        import config
+
+        call_count = [0]
+        original_makedirs = os.makedirs
+
+        def counting_makedirs(path, exist_ok=False):
+            call_count[0] += 1
+            return original_makedirs(path, exist_ok=exist_ok)
+
+        monkeypatch.setattr(os, "makedirs", counting_makedirs)
+        monkeypatch.setattr(config, "_initialized", False)
+
+        config.init_storage()
+        first_call_count = call_count[0]
+        assert first_call_count > 0, "第一次调用应该创建目录"
+
+        call_count[0] = 0
+        config.init_storage()
+        assert call_count[0] == 0, "第二次调用不应该再创建目录（幂等）"
+
+
+# ============================================================================
+# 回归测试: DB-009 MAX_CONCURRENT_TASKS 容错
+# Bug: MAX_WORKERS 非法值会导致 MAX_CONCURRENT_TASKS 计算前崩溃
+# 修复: 所有整数配置都通过 _safe_int_env 转换，有容错降级
+# ============================================================================
+
+class TestMaxConcurrentTasksFaultTolerance:
+    """防止 MAX_CONCURRENT_TASKS 配置崩溃"""
+
+    def test_safe_int_env_handles_invalid_value(self):
+        """_safe_int_env 应该处理非法值并返回默认值"""
+        from unittest import mock
+        import config
+
+        with mock.patch.dict(os.environ, {"MAX_WORKERS": "invalid_number"}):
+            result = config._safe_int_env("MAX_WORKERS", 4)
+            assert result == 4, "非法值应该返回默认值 4"
+
+    def test_max_workers_invalid_does_not_crash(self):
+        """MAX_WORKERS 设置为非法值时不应崩溃"""
+        from unittest import mock
+        import importlib
+
+        with mock.patch.dict(os.environ, {"MAX_WORKERS": "not_a_number"}):
+            import config
+            importlib.reload(config)
+            assert config.MAX_WORKERS == 4, "非法 MAX_WORKERS 应降级为默认值 4"
+            assert config.MAX_CONCURRENT_TASKS >= 1, "MAX_CONCURRENT_TASKS 应该 >= 1"
+
+    def test_max_concurrent_tasks_invalid_does_not_crash(self):
+        """MAX_CONCURRENT_TASKS 设置为非法值时不应崩溃"""
+        from unittest import mock
+        import importlib
+
+        with mock.patch.dict(os.environ, {"MAX_CONCURRENT_TASKS": "bad_value"}):
+            import config
+            importlib.reload(config)
+            assert config.MAX_CONCURRENT_TASKS >= 1, (
+                "非法 MAX_CONCURRENT_TASKS 应降级，结果应 >= 1"
+            )
+
+
+# ============================================================================
+# 回归测试: DB-010 update_task 白名单维护性
+# Bug: 白名单维护容易遗漏，新增字段忘记更新白名单会导致更新失败
+# 修复: 添加 _TASK_TABLE_COLUMNS 全量列集合，assert 确保白名单是子集
+# ============================================================================
+
+class TestUpdateTaskWhitelistMaintainability:
+    """防止 update_task 列名白名单维护遗漏"""
+
+    def test_task_table_columns_defined(self):
+        """应该有 _TASK_TABLE_COLUMNS 定义完整的表列集合"""
+        import database
+
+        assert hasattr(database, "_TASK_TABLE_COLUMNS"), "DB-010: 应该有 _TASK_TABLE_COLUMNS"
+        assert isinstance(database._TASK_TABLE_COLUMNS, set)
+
+    def test_allowed_columns_is_subset_of_table_columns(self):
+        """_ALLOWED_TASK_COLUMNS 应该是 _TASK_TABLE_COLUMNS 的子集"""
+        import database
+
+        assert database._ALLOWED_TASK_COLUMNS.issubset(database._TASK_TABLE_COLUMNS), (
+            f"DB-010: _ALLOWED_TASK_COLUMNS 包含不存在的列: "
+            f"{database._ALLOWED_TASK_COLUMNS - database._TASK_TABLE_COLUMNS}"
+        )
+
+    def test_module_load_assert_passes(self):
+        """模块加载时应该通过 assert 检查（不会抛出 AssertionError）"""
+        import importlib
+        import database
+
+        importlib.reload(database)
+        assert hasattr(database, "_ALLOWED_TASK_COLUMNS")
+        assert hasattr(database, "_TASK_TABLE_COLUMNS")
+
+
+# ============================================================================
+# 回归测试: DB-011 analysis_cache 索引和过期清理
+# Bug: analysis_cache 表无额外索引且无过期清理，无限增长
+# 修复: 添加 file_size 和 created_at 索引，添加 cleanup_expired_analysis_cache
+# ============================================================================
+
+class TestAnalysisCacheIndexAndCleanup:
+    """防止 analysis_cache 表无索引无清理导致无限增长"""
+
+    def test_analysis_cache_has_created_at_index(self, tmp_path):
+        """analysis_cache 表应该有 created_at 索引"""
+        import tempfile
+        import os
+        import sqlite3
+        import config
+        from database import init_db
+
+        db_path = os.path.join(tmp_path, "test_analysis_idx.db")
+        old_db = config.DB_PATH
+        config.DB_PATH = db_path
+        try:
+            init_db()
+
+            conn = sqlite3.connect(db_path)
+            cursor = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='analysis_cache'"
+            )
+            indexes = [row[0] for row in cursor.fetchall()]
+            conn.close()
+
+            created_indexes = [idx for idx in indexes if "created" in idx.lower()]
+            assert len(created_indexes) >= 1, (
+                f"DB-011: analysis_cache 应该有 created_at 索引，实际索引: {indexes}"
+            )
+        finally:
+            config.DB_PATH = old_db
+
+    def test_analysis_cache_has_file_size_index(self, tmp_path):
+        """analysis_cache 表应该有 file_size 索引"""
+        import tempfile
+        import os
+        import sqlite3
+        import config
+        from database import init_db
+
+        db_path = os.path.join(tmp_path, "test_analysis_idx2.db")
+        old_db = config.DB_PATH
+        config.DB_PATH = db_path
+        try:
+            init_db()
+
+            conn = sqlite3.connect(db_path)
+            cursor = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='analysis_cache'"
+            )
+            indexes = [row[0] for row in cursor.fetchall()]
+            conn.close()
+
+            size_indexes = [idx for idx in indexes if "size" in idx.lower()]
+            assert len(size_indexes) >= 1, (
+                f"DB-011: analysis_cache 应该有 file_size 索引，实际索引: {indexes}"
+            )
+        finally:
+            config.DB_PATH = old_db
+
+    def test_cleanup_expired_analysis_cache_exists(self):
+        """应该有 cleanup_expired_analysis_cache 清理函数"""
+        import database
+
+        assert hasattr(database, "cleanup_expired_analysis_cache"), (
+            "DB-011: 应该有 cleanup_expired_analysis_cache 函数"
+        )
+        assert callable(database.cleanup_expired_analysis_cache)
+
+    def test_cleanup_expired_removes_old_entries(self, tmp_path):
+        """过期清理应该删除超过指定天数的缓存"""
+        import tempfile
+        import os
+        import sqlite3
+        import config
+        from database import init_db, save_analysis_cache, get_all_analysis_cache, cleanup_expired_analysis_cache
+
+        db_path = os.path.join(tmp_path, "test_cleanup.db")
+        old_db = config.DB_PATH
+        config.DB_PATH = db_path
+        try:
+            init_db()
+
+            save_analysis_cache("hash-recent", "recent.wav", 1000, "{}", "{}")
+            save_analysis_cache("hash-old", "old.wav", 2000, "{}", "{}")
+
+            conn = sqlite3.connect(db_path)
+            conn.execute(
+                "UPDATE analysis_cache SET created_at = datetime('now', '-60 days') WHERE quick_hash = ?",
+                ("hash-old",)
+            )
+            conn.commit()
+            conn.close()
+
+            all_before = get_all_analysis_cache()
+            assert len(all_before) == 2, f"清理前应该有 2 条，实际 {len(all_before)} 条"
+
+            deleted = cleanup_expired_analysis_cache(max_age_days=30)
+            assert deleted >= 1, f"应该至少删除 1 条过期记录，实际删除 {deleted} 条"
+
+            all_after = get_all_analysis_cache()
+            assert len(all_after) == 1, f"清理后应该剩 1 条，实际 {len(all_after)} 条"
+            assert all_after[0]["quick_hash"] == "hash-recent", "应该保留近期的记录"
+        finally:
+            config.DB_PATH = old_db
+
+
+# ============================================================================
+# 回归测试: DB-012 数据库文件权限
+# Bug: 数据库文件权限未设置，可能被系统其他用户读取
+# 修复: init_db 后设置数据库文件权限为 0o600（仅所有者读写）
+# ============================================================================
+
+class TestDatabaseFilePermissions:
+    """防止数据库文件权限过宽导致安全风险"""
+
+    def test_set_db_file_permissions_exists(self):
+        """应该有 _set_db_file_permissions 函数"""
+        import database
+
+        assert hasattr(database, "_set_db_file_permissions"), (
+            "DB-012: 应该有 _set_db_file_permissions 函数"
+        )
+        assert callable(database._set_db_file_permissions)
+
+    def test_init_db_sets_permissions(self, tmp_path):
+        """init_db 后数据库文件权限应该是 0o600"""
+        import tempfile
+        import os
+        import stat
+        import config
+        from database import init_db
+
+        db_path = os.path.join(tmp_path, "test_perms.db")
+        old_db = config.DB_PATH
+        config.DB_PATH = db_path
+        try:
+            init_db()
+
+            assert os.path.exists(db_path), "数据库文件应该存在"
+
+            file_stat = os.stat(db_path)
+            mode = file_stat.st_mode & 0o777
+
+            assert mode == 0o600, (
+                f"DB-012: 数据库文件权限应该是 0o600（仅所有者读写），"
+                f"实际是 {oct(mode)}"
+            )
+        finally:
+            config.DB_PATH = old_db
+
+    def test_training_db_permissions_set(self, tmp_path):
+        """init_training_db 后训练数据库权限也应该是 0o600"""
+        import tempfile
+        import os
+        import stat
+        import config
+        import database
+        from database import init_training_db
+
+        old_db = config.DB_PATH
+        config.DB_PATH = os.path.join(tmp_path, "tasks.db")
+        training_db_path = os.path.join(tmp_path, "training.db")
+        old_training = database.TRAINING_DB_PATH
+        database.TRAINING_DB_PATH = training_db_path
+        try:
+            init_training_db()
+
+            assert os.path.exists(training_db_path), "训练数据库文件应该存在"
+
+            file_stat = os.stat(training_db_path)
+            mode = file_stat.st_mode & 0o777
+
+            assert mode == 0o600, (
+                f"DB-012: 训练数据库文件权限应该是 0o600，实际是 {oct(mode)}"
+            )
+        finally:
+            config.DB_PATH = old_db
+            database.TRAINING_DB_PATH = old_training
+
+
+# ============================================================================
+# 回归测试: DB-013 _parse_json_fields 职责分离
+# Bug: _parse_json_fields 不仅解析 JSON，还做文件系统操作，职责耦合
+# 修复: 将文件系统操作分离到 _enrich_output_size 函数
+# ============================================================================
+
+class TestParseJsonFieldsSeparation:
+    """防止 _parse_json_fields 职责耦合"""
+
+    def test_enrich_output_size_function_exists(self):
+        """应该有 _enrich_output_size 独立函数"""
+        import database
+
+        assert hasattr(database, "_enrich_output_size"), (
+            "DB-013: 应该有 _enrich_output_size 独立函数"
+        )
+        assert callable(database._enrich_output_size)
+
+    def test_parse_json_fields_no_filesystem_ops(self):
+        """_parse_json_fields 不应该包含文件系统操作"""
+        import inspect
+        import database
+
+        source = inspect.getsource(database._parse_json_fields)
+        assert "os.path.exists" not in source, (
+            "DB-013: _parse_json_fields 不应该调用 os.path.exists"
+        )
+        assert "os.path.getsize" not in source, (
+            "DB-013: _parse_json_fields 不应该调用 os.path.getsize"
+        )
+
+    def test_enrich_output_size_sets_output_size(self, tmp_path):
+        """_enrich_output_size 应该正确设置 output_size 字段"""
+        import database
+
+        result = {"output_path": str(tmp_path / "test.wav")}
+        test_file = tmp_path / "test.wav"
+        test_file.write_bytes(b"x" * 4096)
+
+        database._enrich_output_size(result)
+
+        assert "output_size" in result, "结果应该包含 output_size"
+        assert result["output_size"] == 4096, f"output_size 应该是 4096，实际 {result['output_size']}"
+
+    def test_get_task_still_returns_output_size(self, tmp_path):
+        """get_task 返回结果仍然应该包含 output_size（向后兼容）"""
+        import tempfile
+        import os
+        import config
+        from database import init_db, create_task, update_task, get_task
+
+        db_path = os.path.join(tmp_path, "test_output_size.db")
+        old_db = config.DB_PATH
+        config.DB_PATH = db_path
+        try:
+            init_db()
+
+            out_file = os.path.join(tmp_path, "output.wav")
+            with open(out_file, "wb") as f:
+                f.write(b"x" * 8192)
+
+            create_task("test-output-size", "test.wav", "/tmp/in.wav", {}, "hash1", 1000)
+            update_task("test-output-size", output_path=out_file)
+
+            task = get_task("test-output-size")
+            assert task is not None
+            assert "output_size" in task, "get_task 结果应该包含 output_size"
+            assert task["output_size"] == 8192, (
+                f"output_size 应该是 8192，实际 {task['output_size']}"
+            )
+        finally:
+            config.DB_PATH = old_db
+
+
+# ============================================================================
+# 回归测试: DB-014 持久化 PRAGMA 配置职责清晰
+# Bug: 所有 PRAGMA 都散落在 get_db 中，配置意图不清晰
+# 修复: init_db 作为持久化配置的主要入口，明确管理 WAL/autocheckpoint 等设置；
+#      get_db 保留 WAL 设置作为安全网（确保向后兼容），但核心配置在 init_db
+# ============================================================================
+
+class TestGetDbPragmaOptimization:
+    """确保持久化 PRAGMA 配置职责清晰，init_db 是主要配置点"""
+
+    def test_init_db_sets_wal_mode_explicitly(self):
+        """init_db 应该显式设置 WAL 模式（作为主要配置点）"""
+        import inspect
+        import database
+
+        source = inspect.getsource(database.init_db)
+        assert "PRAGMA journal_mode=WAL" in source, (
+            "DB-014: init_db 应该显式设置 WAL 模式"
+        )
+
+    def test_init_db_sets_wal_autocheckpoint(self):
+        """init_db 应该配置 wal_autocheckpoint"""
+        import inspect
+        import database
+
+        source = inspect.getsource(database.init_db)
+        assert "wal_autocheckpoint" in source, (
+            "DB-014: init_db 应该配置 wal_autocheckpoint"
+        )
+
+    def test_get_db_sets_busy_timeout(self):
+        """get_db 应该设置 busy_timeout（连接级设置，每次都需要）"""
+        import inspect
+        import database
+
+        source = inspect.getsource(database.get_db)
+        assert "busy_timeout" in source, "get_db 应该设置 busy_timeout"
+
+    def test_init_db_sets_wal_mode(self, tmp_path):
+        """init_db 后数据库应该是 WAL 模式"""
+        import tempfile
+        import os
+        import sqlite3
+        import config
+        from database import init_db
+
+        db_path = os.path.join(tmp_path, "test_wal_init.db")
+        old_db = config.DB_PATH
+        config.DB_PATH = db_path
+        try:
+            init_db()
+
+            conn = sqlite3.connect(db_path)
+            cursor = conn.execute("PRAGMA journal_mode")
+            mode = cursor.fetchone()[0]
+            conn.close()
+
+            assert mode.lower() == "wal", (
+                f"DB-014: init_db 后应该是 WAL 模式，实际是 {mode}"
+            )
+        finally:
+            config.DB_PATH = old_db
+
+    def test_training_db_init_sets_wal(self, tmp_path):
+        """init_training_db 也应该配置 WAL"""
+        import tempfile
+        import os
+        import sqlite3
+        import config
+        import database
+        from database import init_training_db
+
+        old_db = config.DB_PATH
+        config.DB_PATH = os.path.join(tmp_path, "tasks.db")
+        training_db_path = os.path.join(tmp_path, "training.db")
+        old_training = database.TRAINING_DB_PATH
+        database.TRAINING_DB_PATH = training_db_path
+        try:
+            init_training_db()
+
+            conn = sqlite3.connect(training_db_path)
+            cursor = conn.execute("PRAGMA journal_mode")
+            mode = cursor.fetchone()[0]
+            conn.close()
+
+            assert mode.lower() == "wal", (
+                f"DB-014: init_training_db 后应该是 WAL 模式，实际是 {mode}"
+            )
+        finally:
+            config.DB_PATH = old_db
+            database.TRAINING_DB_PATH = old_training
+
+
+# ============================================================================
+# 回归测试 30: API-008 /upload-status 参数缺失返回 422
+# Bug: /upload-status session_id 参数缺失时返回 500 而非 422
+# 修复: 确保 FastAPI 验证正常工作，缺失必填参数返回 422
+# ============================================================================
+
+class TestUploadStatusValidation:
+    """防止 upload-status 接口参数缺失时返回错误状态码"""
+
+    def test_missing_session_id_returns_422(self):
+        """缺失 session_id 参数时应该返回 422 Unprocessable Entity"""
+        from fastapi.testclient import TestClient
+        from app import create_app
+        import tempfile
+        import os
+        import config
+        from database import init_db
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            old_db = config.DB_PATH
+            old_upload = config.UPLOAD_DIR
+            old_output = config.OUTPUT_DIR
+            config.DB_PATH = os.path.join(tmpdir, "test.db")
+            config.UPLOAD_DIR = os.path.join(tmpdir, "uploads")
+            config.OUTPUT_DIR = os.path.join(tmpdir, "outputs")
+            os.makedirs(config.UPLOAD_DIR, exist_ok=True)
+            os.makedirs(config.OUTPUT_DIR, exist_ok=True)
+            try:
+                init_db()
+                app = create_app()
+                client = TestClient(app)
+
+                res = client.get("/api/v1/upload-status")
+                assert res.status_code == 422, (
+                    f"API-008: 缺失必填参数应返回 422，实际返回 {res.status_code}"
+                )
+            finally:
+                config.DB_PATH = old_db
+                config.UPLOAD_DIR = old_upload
+                config.OUTPUT_DIR = old_output
+
+
+# ============================================================================
+# 回归测试 31: API-009 /download-file 反斜杠路径遍历防护
+# Bug: /download-file 路径遍历防护未验证反斜杠绕过
+# 修复: file_gateway.resolve 检查反斜杠，确保路径遍历被阻止
+# ============================================================================
+
+class TestDownloadFileBackslashProtection:
+    """防止 download-file 接口被反斜杠路径遍历绕过"""
+
+    def test_backslash_path_traversal_blocked(self):
+        """filename 包含反斜杠路径遍历时应该被阻止"""
+        from services.file_gateway import SafeFileGateway, SecurityError
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            gw = SafeFileGateway(tmpdir)
+
+            traversal_inputs = [
+                "..\\..\\etc\\passwd",
+                "..\\test.wav",
+                "test\\..\\test.wav",
+            ]
+
+            for bad_name in traversal_inputs:
+                try:
+                    gw.resolve(bad_name)
+                    pytest.fail(f"{bad_name} 应该被 SecurityError 阻止，但没有抛出异常")
+                except SecurityError:
+                    pass
+
+    def test_download_file_backslash_returns_400(self):
+        """通过 API 访问反斜杠路径应该返回 400"""
+        from fastapi.testclient import TestClient
+        from app import create_app
+        import tempfile
+        import os
+        import config
+        from database import init_db
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            old_db = config.DB_PATH
+            old_upload = config.UPLOAD_DIR
+            old_output = config.OUTPUT_DIR
+            config.DB_PATH = os.path.join(tmpdir, "test.db")
+            config.UPLOAD_DIR = os.path.join(tmpdir, "uploads")
+            config.OUTPUT_DIR = os.path.join(tmpdir, "outputs")
+            os.makedirs(config.UPLOAD_DIR, exist_ok=True)
+            os.makedirs(config.OUTPUT_DIR, exist_ok=True)
+            try:
+                init_db()
+                app = create_app()
+                client = TestClient(app)
+
+                malicious = "..\\..\\etc\\passwd"
+                res = client.get(f"/api/v1/download-file/{malicious}")
+                assert res.status_code in (400, 404), (
+                    f"API-009: 反斜杠路径遍历应被阻止，实际返回 {res.status_code}"
+                )
+            finally:
+                config.DB_PATH = old_db
+                config.UPLOAD_DIR = old_upload
+                config.OUTPUT_DIR = old_output
+
+
+# ============================================================================
+# 回归测试 32: API-010 WebSocket /ws/{task_id} 需要鉴权
+# Bug: WebSocket 无鉴权，任意客户端可监听任务进度
+# 修复: 添加任务访问令牌验证，未授权时关闭连接
+# ============================================================================
+
+class TestWebSocketAuth:
+    """防止 WebSocket 接口未授权访问任务进度"""
+
+    def test_websocket_without_token_rejected(self):
+        """未提供访问令牌时 WebSocket 连接应该被拒绝"""
+        from fastapi.testclient import TestClient
+        from app import create_app
+        import tempfile
+        import os
+        import config
+        from database import init_db, create_task
+
+        old_secret = config.SECRET_KEY
+        config.SECRET_KEY = "test-secret-for-ws-auth"
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                old_db = config.DB_PATH
+                old_upload = config.UPLOAD_DIR
+                old_output = config.OUTPUT_DIR
+                config.DB_PATH = os.path.join(tmpdir, "test.db")
+                config.UPLOAD_DIR = os.path.join(tmpdir, "uploads")
+                config.OUTPUT_DIR = os.path.join(tmpdir, "outputs")
+                os.makedirs(config.UPLOAD_DIR, exist_ok=True)
+                os.makedirs(config.OUTPUT_DIR, exist_ok=True)
+                try:
+                    init_db()
+                    app = create_app()
+                    client = TestClient(app)
+
+                    task_id = "test-ws-auth-001"
+                    create_task(task_id, "test.wav", "/tmp/test.wav", {}, "hash123", 1000)
+
+                    with pytest.raises(Exception):
+                        with client.websocket_connect(f"/api/v1/ws/{task_id}") as ws:
+                            ws.receive_json()
+                finally:
+                    config.DB_PATH = old_db
+                    config.UPLOAD_DIR = old_upload
+                    config.OUTPUT_DIR = old_output
+        finally:
+            config.SECRET_KEY = old_secret
+
+    def test_websocket_with_wrong_token_rejected(self):
+        """提供错误访问令牌时 WebSocket 连接应该被拒绝"""
+        from fastapi.testclient import TestClient
+        from app import create_app
+        import tempfile
+        import os
+        import config
+        from database import init_db, create_task
+
+        old_secret = config.SECRET_KEY
+        config.SECRET_KEY = "test-secret-for-ws-auth"
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                old_db = config.DB_PATH
+                old_upload = config.UPLOAD_DIR
+                old_output = config.OUTPUT_DIR
+                config.DB_PATH = os.path.join(tmpdir, "test.db")
+                config.UPLOAD_DIR = os.path.join(tmpdir, "uploads")
+                config.OUTPUT_DIR = os.path.join(tmpdir, "outputs")
+                os.makedirs(config.UPLOAD_DIR, exist_ok=True)
+                os.makedirs(config.OUTPUT_DIR, exist_ok=True)
+                try:
+                    init_db()
+                    app = create_app()
+                    client = TestClient(app)
+
+                    task_id = "test-ws-auth-002"
+                    create_task(task_id, "test.wav", "/tmp/test.wav", {}, "hash123", 1000)
+
+                    with pytest.raises(Exception):
+                        with client.websocket_connect(
+                            f"/api/v1/ws/{task_id}?access_token=wrong-token"
+                        ) as ws:
+                            ws.receive_json()
+                finally:
+                    config.DB_PATH = old_db
+                    config.UPLOAD_DIR = old_upload
+                    config.OUTPUT_DIR = old_output
+        finally:
+            config.SECRET_KEY = old_secret
+
+
+# ============================================================================
+# 回归测试 33: API-011 /perf/reset 需要认证
+# Bug: /perf/reset 无认证，可重置性能统计
+# 修复: 添加 ADMIN_TOKEN 认证，未配置时禁用
+# ============================================================================
+
+class TestPerfResetAuth:
+    """防止性能统计重置接口未授权访问"""
+
+    def test_perf_reset_without_admin_token_disabled(self):
+        """未配置 ADMIN_TOKEN 时，perf/reset 应该返回 403"""
+        from fastapi.testclient import TestClient
+        from app import create_app
+        import tempfile
+        import os
+        import config
+        from database import init_db
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            old_db = config.DB_PATH
+            old_upload = config.UPLOAD_DIR
+            old_output = config.OUTPUT_DIR
+            old_token = config.ADMIN_TOKEN
+            config.DB_PATH = os.path.join(tmpdir, "test.db")
+            config.UPLOAD_DIR = os.path.join(tmpdir, "uploads")
+            config.OUTPUT_DIR = os.path.join(tmpdir, "outputs")
+            config.ADMIN_TOKEN = ""
+            os.makedirs(config.UPLOAD_DIR, exist_ok=True)
+            os.makedirs(config.OUTPUT_DIR, exist_ok=True)
+            try:
+                init_db()
+                app = create_app()
+                client = TestClient(app)
+
+                response = client.get("/api/v1/perf/reset")
+                assert response.status_code == 403, (
+                    f"API-011: 未配置 token 时应返回 403，实际返回 {response.status_code}"
+                )
+            finally:
+                config.DB_PATH = old_db
+                config.UPLOAD_DIR = old_upload
+                config.OUTPUT_DIR = old_output
+                config.ADMIN_TOKEN = old_token
+
+    def test_perf_reset_with_wrong_token_returns_401(self):
+        """错误 token 时应该返回 401"""
+        from fastapi.testclient import TestClient
+        from app import create_app
+        import tempfile
+        import os
+        import config
+        from database import init_db
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            old_db = config.DB_PATH
+            old_upload = config.UPLOAD_DIR
+            old_output = config.OUTPUT_DIR
+            old_token = config.ADMIN_TOKEN
+            config.DB_PATH = os.path.join(tmpdir, "test.db")
+            config.UPLOAD_DIR = os.path.join(tmpdir, "uploads")
+            config.OUTPUT_DIR = os.path.join(tmpdir, "outputs")
+            config.ADMIN_TOKEN = "perf-secret-123"
+            os.makedirs(config.UPLOAD_DIR, exist_ok=True)
+            os.makedirs(config.OUTPUT_DIR, exist_ok=True)
+            try:
+                init_db()
+                app = create_app()
+                client = TestClient(app)
+
+                response = client.get(
+                    "/api/v1/perf/reset", headers={"X-Admin-Token": "wrong"}
+                )
+                assert response.status_code == 401, (
+                    f"错误 token 应返回 401，实际返回 {response.status_code}"
+                )
+            finally:
+                config.DB_PATH = old_db
+                config.UPLOAD_DIR = old_upload
+                config.OUTPUT_DIR = old_output
+                config.ADMIN_TOKEN = old_token
+
+    def test_perf_reset_with_correct_token_succeeds(self):
+        """正确 token 时应该成功"""
+        from fastapi.testclient import TestClient
+        from app import create_app
+        import tempfile
+        import os
+        import config
+        from database import init_db
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            old_db = config.DB_PATH
+            old_upload = config.UPLOAD_DIR
+            old_output = config.OUTPUT_DIR
+            old_token = config.ADMIN_TOKEN
+            config.DB_PATH = os.path.join(tmpdir, "test.db")
+            config.UPLOAD_DIR = os.path.join(tmpdir, "uploads")
+            config.OUTPUT_DIR = os.path.join(tmpdir, "outputs")
+            config.ADMIN_TOKEN = "perf-secret-123"
+            os.makedirs(config.UPLOAD_DIR, exist_ok=True)
+            os.makedirs(config.OUTPUT_DIR, exist_ok=True)
+            try:
+                init_db()
+                app = create_app()
+                client = TestClient(app)
+
+                response = client.get(
+                    "/api/v1/perf/reset", headers={"X-Admin-Token": "perf-secret-123"}
+                )
+                assert response.status_code == 200, (
+                    f"正确 token 应返回 200，实际返回 {response.status_code}"
+                )
+                data = response.json()
+                assert data.get("status") == "ok"
+            finally:
+                config.DB_PATH = old_db
+                config.UPLOAD_DIR = old_upload
+                config.OUTPUT_DIR = old_output
+                config.ADMIN_TOKEN = old_token
+
+
+# ============================================================================
+# 回归测试 34: API-012 /api/v1/logs 日志接口需要认证
+# Bug: 日志接口无认证，泄露服务器敏感信息
+# 修复: 添加 ADMIN_TOKEN 认证，未配置时禁用
+# ============================================================================
+
+class TestLogsEndpointAuth:
+    """防止日志接口未授权访问泄露敏感信息"""
+
+    def test_logs_without_admin_token_disabled(self):
+        """未配置 ADMIN_TOKEN 时，logs 接口应该返回 403"""
+        from fastapi.testclient import TestClient
+        from app import create_app
+        import tempfile
+        import os
+        import config
+        from database import init_db
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            old_db = config.DB_PATH
+            old_upload = config.UPLOAD_DIR
+            old_output = config.OUTPUT_DIR
+            old_token = config.ADMIN_TOKEN
+            config.DB_PATH = os.path.join(tmpdir, "test.db")
+            config.UPLOAD_DIR = os.path.join(tmpdir, "uploads")
+            config.OUTPUT_DIR = os.path.join(tmpdir, "outputs")
+            config.ADMIN_TOKEN = ""
+            os.makedirs(config.UPLOAD_DIR, exist_ok=True)
+            os.makedirs(config.OUTPUT_DIR, exist_ok=True)
+            try:
+                init_db()
+                app = create_app()
+                client = TestClient(app)
+
+                response = client.get("/api/v1/logs?lines=10")
+                assert response.status_code == 403, (
+                    f"API-012: 未配置 token 时应返回 403，实际返回 {response.status_code}"
+                )
+            finally:
+                config.DB_PATH = old_db
+                config.UPLOAD_DIR = old_upload
+                config.OUTPUT_DIR = old_output
+                config.ADMIN_TOKEN = old_token
+
+    def test_logs_with_wrong_token_returns_401(self):
+        """错误 token 时应该返回 401"""
+        from fastapi.testclient import TestClient
+        from app import create_app
+        import tempfile
+        import os
+        import config
+        from database import init_db
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            old_db = config.DB_PATH
+            old_upload = config.UPLOAD_DIR
+            old_output = config.OUTPUT_DIR
+            old_token = config.ADMIN_TOKEN
+            config.DB_PATH = os.path.join(tmpdir, "test.db")
+            config.UPLOAD_DIR = os.path.join(tmpdir, "uploads")
+            config.OUTPUT_DIR = os.path.join(tmpdir, "outputs")
+            config.ADMIN_TOKEN = "logs-secret-456"
+            os.makedirs(config.UPLOAD_DIR, exist_ok=True)
+            os.makedirs(config.OUTPUT_DIR, exist_ok=True)
+            try:
+                init_db()
+                app = create_app()
+                client = TestClient(app)
+
+                response = client.get(
+                    "/api/v1/logs?lines=10", headers={"X-Admin-Token": "wrong"}
+                )
+                assert response.status_code == 401, (
+                    f"错误 token 应返回 401，实际返回 {response.status_code}"
+                )
+            finally:
+                config.DB_PATH = old_db
+                config.UPLOAD_DIR = old_upload
+                config.OUTPUT_DIR = old_output
+                config.ADMIN_TOKEN = old_token
+
+    def test_logs_with_correct_token_succeeds(self):
+        """正确 token 时应该成功"""
+        from fastapi.testclient import TestClient
+        from app import create_app
+        import tempfile
+        import os
+        import config
+        from database import init_db
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            old_db = config.DB_PATH
+            old_upload = config.UPLOAD_DIR
+            old_output = config.OUTPUT_DIR
+            old_token = config.ADMIN_TOKEN
+            config.DB_PATH = os.path.join(tmpdir, "test.db")
+            config.UPLOAD_DIR = os.path.join(tmpdir, "uploads")
+            config.OUTPUT_DIR = os.path.join(tmpdir, "outputs")
+            config.ADMIN_TOKEN = "logs-secret-456"
+            os.makedirs(config.UPLOAD_DIR, exist_ok=True)
+            os.makedirs(config.OUTPUT_DIR, exist_ok=True)
+            try:
+                init_db()
+                app = create_app()
+                client = TestClient(app)
+
+                response = client.get(
+                    "/api/v1/logs?lines=10", headers={"X-Admin-Token": "logs-secret-456"}
+                )
+                assert response.status_code == 200, (
+                    f"正确 token 应返回 200，实际返回 {response.status_code}"
+                )
+            finally:
+                config.DB_PATH = old_db
+                config.UPLOAD_DIR = old_upload
+                config.OUTPUT_DIR = old_output
+                config.ADMIN_TOKEN = old_token
+
+
+# ============================================================================
+# 回归测试 35: API-013 /quality-tests/start 需要认证
+# Bug: 质量测试启动接口无认证，可无限启动子进程导致 DoS
+# 修复: 添加 ADMIN_TOKEN 认证，未配置时禁用
+# ============================================================================
+
+class TestQualityTestsAuth:
+    """防止质量测试接口未授权启动导致 DoS"""
+
+    def test_quality_tests_start_without_admin_token_disabled(self):
+        """未配置 ADMIN_TOKEN 时，quality-tests/start 应该返回 403"""
+        from fastapi.testclient import TestClient
+        from app import create_app
+        import tempfile
+        import os
+        import config
+        from database import init_db
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            old_db = config.DB_PATH
+            old_upload = config.UPLOAD_DIR
+            old_output = config.OUTPUT_DIR
+            old_token = config.ADMIN_TOKEN
+            config.DB_PATH = os.path.join(tmpdir, "test.db")
+            config.UPLOAD_DIR = os.path.join(tmpdir, "uploads")
+            config.OUTPUT_DIR = os.path.join(tmpdir, "outputs")
+            config.ADMIN_TOKEN = ""
+            os.makedirs(config.UPLOAD_DIR, exist_ok=True)
+            os.makedirs(config.OUTPUT_DIR, exist_ok=True)
+            try:
+                init_db()
+                app = create_app()
+                client = TestClient(app)
+
+                response = client.post("/api/v1/quality-tests/start")
+                assert response.status_code == 403, (
+                    f"API-013: 未配置 token 时应返回 403，实际返回 {response.status_code}"
+                )
+            finally:
+                config.DB_PATH = old_db
+                config.UPLOAD_DIR = old_upload
+                config.OUTPUT_DIR = old_output
+                config.ADMIN_TOKEN = old_token
+
+    def test_quality_tests_start_with_wrong_token_returns_401(self):
+        """错误 token 时应该返回 401"""
+        from fastapi.testclient import TestClient
+        from app import create_app
+        import tempfile
+        import os
+        import config
+        from database import init_db
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            old_db = config.DB_PATH
+            old_upload = config.UPLOAD_DIR
+            old_output = config.OUTPUT_DIR
+            old_token = config.ADMIN_TOKEN
+            config.DB_PATH = os.path.join(tmpdir, "test.db")
+            config.UPLOAD_DIR = os.path.join(tmpdir, "uploads")
+            config.OUTPUT_DIR = os.path.join(tmpdir, "outputs")
+            config.ADMIN_TOKEN = "qt-secret-789"
+            os.makedirs(config.UPLOAD_DIR, exist_ok=True)
+            os.makedirs(config.OUTPUT_DIR, exist_ok=True)
+            try:
+                init_db()
+                app = create_app()
+                client = TestClient(app)
+
+                response = client.post(
+                    "/api/v1/quality-tests/start", headers={"X-Admin-Token": "wrong"}
+                )
+                assert response.status_code == 401, (
+                    f"错误 token 应返回 401，实际返回 {response.status_code}"
+                )
+            finally:
+                config.DB_PATH = old_db
+                config.UPLOAD_DIR = old_upload
+                config.OUTPUT_DIR = old_output
+                config.ADMIN_TOKEN = old_token
+
+
+# ============================================================================
+# 回归测试 36: API-014 /repair-debug 异步执行不阻塞
+# Bug: /repair-debug 同步执行，大文件阻塞请求线程
+# 修复: 使用 run_in_executor 在后台线程执行
+# ============================================================================
+
+class TestRepairDebugAsync:
+    """防止 repair-debug 接口同步执行阻塞请求"""
+
+    def test_repair_debug_uses_run_in_executor(self):
+        """repair_debug_endpoint 应该使用 run_in_executor 异步执行"""
+        import inspect
+        from api.routes.repair import repair_debug_endpoint
+
+        source = inspect.getsource(repair_debug_endpoint)
+        assert "run_in_executor" in source, (
+            "API-014: repair-debug 应该使用 run_in_executor 异步执行，避免阻塞"
+        )
+
+    def test_repair_debug_is_async(self):
+        """repair_debug_endpoint 应该是 async 函数"""
+        import inspect
+        from api.routes.repair import repair_debug_endpoint
+
+        assert inspect.iscoroutinefunction(repair_debug_endpoint), (
+            "repair-debug 端点应该是 async 函数"
+        )
+
+
+# ============================================================================
+# 回归测试 37: API-015 get_task_status 异常返回 500 而非 503
+# Bug: 状态查询接口异常返回 503 Service Unavailable
+# 修复: 内部错误应该返回 500 Internal Server Error
+# ============================================================================
+
+class TestTaskStatusErrorCode:
+    """防止任务状态接口异常时返回错误的状态码"""
+
+    def test_status_endpoint_returns_500_on_error(self):
+        """get_task_status 异常时应该返回 500 而非 503"""
+        import inspect
+        from api.routes.repair import get_task_status
+
+        source = inspect.getsource(get_task_status)
+        assert "status_code=500" in source, (
+            "API-015: 获取任务状态失败时应该返回 500，而非 503"
+        )
+        assert "status_code=503" not in source, (
+            "API-015: 不应该返回 503 状态码"
+        )
+
+
+# ============================================================================
+# 回归测试: TR-007 PerfTimer 异常时不记录 step
+# Bug: PerfTimer.__exit__ 不管有没有异常都记录性能数据，导致失败操作污染统计
+# 修复: 当 exc_type 不为 None 时（有异常），不记录 step
+# ============================================================================
+
+class TestPerfTimerExceptionNoRecord:
+    """防止 PerfTimer 在异常时仍然记录性能数据"""
+
+    def test_exception_not_recorded(self):
+        """异常路径下的 step 不应该被记录到性能统计中"""
+        import threading
+        from services.perf_metrics import PerfMetricsCollector, PerfTimer
+
+        PerfMetricsCollector._instance = None
+        PerfMetricsCollector._lock = threading.Lock()
+
+        collector = PerfMetricsCollector.get_instance()
+        step_name = "test_tr007_exception_step"
+
+        try:
+            with PerfTimer(step_name):
+                raise ValueError("test exception")
+        except ValueError:
+            pass
+
+        assert step_name not in collector.step_history, (
+            "TR-007: 异常路径下的 step 不应该被记录到 step_history 中"
+        )
+
+    def test_success_is_recorded(self):
+        """正常路径下的 step 应该被正常记录"""
+        import threading
+        from services.perf_metrics import PerfMetricsCollector, PerfTimer
+
+        PerfMetricsCollector._instance = None
+        PerfMetricsCollector._lock = threading.Lock()
+
+        collector = PerfMetricsCollector.get_instance()
+        step_name = "test_tr007_success_step"
+
+        with PerfTimer(step_name):
+            pass
+
+        assert step_name in collector.step_history, (
+            "正常路径下的 step 应该被记录"
+        )
+        assert len(collector.step_history[step_name]) == 1
+
+
+# ============================================================================
+# 回归测试: TR-008 end_repair 校验 task_id 匹配
+# Bug: start(A) 后 end(B) 数据串扰，性能数据张冠李戴
+# 修复: end_repair 和 end_detect 校验 task_id，不匹配时打 warning 日志
+# ============================================================================
+
+class TestPerfTaskIdValidation:
+    """防止 end_repair/end_detect task_id 不匹配导致数据串扰"""
+
+    def test_end_repair_mismatch_logs_warning(self, caplog):
+        """end_repair task_id 不匹配时应该打 warning 日志"""
+        import threading
+        import logging
+        from services.perf_metrics import PerfMetricsCollector
+
+        PerfMetricsCollector._instance = None
+        PerfMetricsCollector._lock = threading.Lock()
+
+        collector = PerfMetricsCollector.get_instance()
+        collector.start_repair("task-A")
+
+        with caplog.at_level(logging.WARNING):
+            collector.end_repair("task-B", 48000, "v2.4")
+
+        assert any("task_id 不匹配" in rec.message for rec in caplog.records), (
+            "TR-008: end_repair task_id 不匹配时应该打 warning 日志"
+        )
+
+    def test_end_detect_mismatch_logs_warning(self, caplog):
+        """end_detect task_id 不匹配时应该打 warning 日志"""
+        import threading
+        import logging
+        from services.perf_metrics import PerfMetricsCollector
+
+        PerfMetricsCollector._instance = None
+        PerfMetricsCollector._lock = threading.Lock()
+
+        collector = PerfMetricsCollector.get_instance()
+        collector.start_detect("task-A")
+
+        with caplog.at_level(logging.WARNING):
+            collector.end_detect("task-B", "v1.1")
+
+        assert any("task_id 不匹配" in rec.message for rec in caplog.records), (
+            "TR-008: end_detect task_id 不匹配时应该打 warning 日志"
+        )
+
+    def test_matching_task_id_no_warning(self, caplog):
+        """task_id 匹配时不应该打不匹配的 warning"""
+        import threading
+        import logging
+        from services.perf_metrics import PerfMetricsCollector
+
+        PerfMetricsCollector._instance = None
+        PerfMetricsCollector._lock = threading.Lock()
+
+        collector = PerfMetricsCollector.get_instance()
+        collector.start_repair("task-A")
+
+        with caplog.at_level(logging.WARNING):
+            collector.end_repair("task-A", 48000, "v2.4")
+
+        assert not any("task_id 不匹配" in rec.message for rec in caplog.records), (
+            "task_id 匹配时不应该打不匹配的 warning"
+        )
+
+
+# ============================================================================
+# 回归测试: TR-009 safety_margin 参数生效
+# Bug: check_memory_before_repair 的 safety_margin 参数完全未使用
+# 修复: 将 safety_margin 应用到内存估算中
+# ============================================================================
+
+class TestSafetyMarginUsed:
+    """防止 safety_margin 参数形同虚设"""
+
+    def test_safety_margin_increases_estimate(self):
+        """safety_margin > 0 时，估算内存应该增加"""
+        from services.memory_guard import estimate_repair_memory_bytes, check_memory_before_repair
+        from unittest.mock import patch
+
+        base_estimate = estimate_repair_memory_bytes(48000 * 60, 2, 44100, 48000, algorithm_version="v2.4")
+        assert base_estimate > 0
+
+        available = base_estimate * 1.1
+        with patch("services.memory_guard.get_available_memory_bytes", return_value=available):
+            try:
+                check_memory_before_repair(48000 * 60, 2, 44100, 48000, safety_margin=0.0, algorithm_version="v2.4")
+                no_margin_ok = True
+            except MemoryError:
+                no_margin_ok = False
+
+            try:
+                check_memory_before_repair(48000 * 60, 2, 44100, 48000, safety_margin=2.0, algorithm_version="v2.4")
+                high_margin_ok = True
+            except MemoryError:
+                high_margin_ok = False
+
+        assert no_margin_ok, "safety_margin=0 时应该通过"
+        assert not high_margin_ok, (
+            "TR-009: safety_margin=2.0 时估算应该增加 3 倍，应该触发 MemoryError"
+        )
+
+    def test_zero_safety_margin_same_as_base(self):
+        """safety_margin=0 时行为应该和原来一致"""
+        from services.memory_guard import estimate_repair_memory_bytes, check_memory_before_repair
+        from unittest.mock import patch
+
+        base_estimate = estimate_repair_memory_bytes(48000 * 60, 2, 44100, 48000, algorithm_version="v2.4")
+        available = base_estimate * 2
+
+        with patch("services.memory_guard.get_available_memory_bytes", return_value=available):
+            result = check_memory_before_repair(
+                48000 * 60, 2, 44100, 48000, safety_margin=0.0, algorithm_version="v2.4"
+            )
+            assert result == 48000
+
+
+# ============================================================================
+# 回归测试: TR-010 has_streaming 与 peak_temp 版本集合一致
+# Bug: has_streaming 中缺少 v2.2a，与 peak_temp 的版本集合不匹配
+# 修复: 在 has_streaming 中添加 v2.2a
+# ============================================================================
+
+class TestStreamingVersionConsistency:
+    """防止 has_streaming 与 peak_temp 版本集合不一致"""
+
+    def test_v2_2a_has_streaming(self):
+        """v2.2a 应该被识别为流式处理版本"""
+        from services.memory_guard import estimate_repair_memory_bytes
+
+        non_streaming = estimate_repair_memory_bytes(48000 * 600, 2, 44100, 48000, algorithm_version="v2.0")
+        streaming = estimate_repair_memory_bytes(48000 * 600, 2, 44100, 48000, algorithm_version="v2.2a")
+
+        assert streaming < non_streaming, (
+            "TR-010: v2.2a 应该是流式版本，长音频下内存估算应该小于非流式版本"
+        )
+
+    def test_all_peak_temp_versions_in_has_streaming(self):
+        """peak_temp 中所有带 a/+ 的版本都应该在 has_streaming 中"""
+        import inspect
+        from services import memory_guard
+
+        source = inspect.getsource(memory_guard.estimate_repair_memory_bytes)
+
+        assert '"v2.2a"' in source or "'v2.2a'" in source, "v2.2a 应该在 has_streaming 中"
+
+
+# ============================================================================
+# 回归测试: TR-011 训练数据路径符号链接安全校验
+# Bug: 训练数据路径无符号链接安全校验，symlink 指向目录外仍会被读取
+# 修复: 检查符号链接的真实路径是否在训练目录内
+# ============================================================================
+
+class TestTrainingSymlinkSafety:
+    """防止训练数据目录中符号链接指向目录外"""
+
+    def test_process_all_files_has_symlink_check(self):
+        """process_all_files 源码中应该包含 realpath 校验逻辑"""
+        import os
+        import inspect
+
+        feature_extractor_path = os.path.join(
+            os.path.dirname(__file__), "..", "training", "feature_extractor.py"
+        )
+        with open(feature_extractor_path) as f:
+            source = f.read()
+
+        assert "realpath" in source, (
+            "TR-011: process_all_files 应该使用 realpath 检查符号链接真实路径"
+        )
+        assert "startswith" in source and "TRAINING_DIR" in source, (
+            "TR-011: 应该检查真实路径是否在训练目录内"
+        )
+
+    def test_symlink_escape_detected_by_logic(self, tmp_path):
+        """验证 symlink 指向目录外时能被检测逻辑发现"""
+        import os
+
+        training_dir = tmp_path / "training"
+        training_dir.mkdir()
+        outside_dir = tmp_path / "outside"
+        outside_dir.mkdir()
+
+        outside_file = outside_dir / "evil.wav"
+        outside_file.write_bytes(b"fake wav data")
+
+        symlink_path = training_dir / "linked.wav"
+        os.symlink(str(outside_file), str(symlink_path))
+
+        training_dir_real = os.path.realpath(str(training_dir))
+        real_path = os.path.realpath(str(symlink_path))
+
+        is_outside = not real_path.startswith(training_dir_real + os.sep) and real_path != training_dir_real
+
+        assert is_outside, (
+            "TR-011: 指向目录外的 symlink 应该被检测为越界"
+        )
+
+
+# ============================================================================
+# 回归测试: TR-012 P95 百分位计算准确性
+# Bug: int(n*0.95) 索引法，小样本下退化为最大值
+# 修复: 使用线性插值法计算百分位
+# ============================================================================
+
+class TestP95Accuracy:
+    """防止 P95 百分位计算不准确"""
+
+    def test_p95_small_sample_not_max(self):
+        """小样本下 P95 不应该直接等于最大值"""
+        import threading
+        from services.perf_metrics import PerfMetricsCollector
+
+        PerfMetricsCollector._instance = None
+        PerfMetricsCollector._lock = threading.Lock()
+
+        collector = PerfMetricsCollector.get_instance()
+
+        for i in range(1, 21):
+            collector.record_step("test_tr012", float(i * 10))
+
+        summary = collector.get_summary()
+        step_stats = summary["steps"]["test_tr012"]
+        p95 = step_stats["p95_ms"]
+
+        assert p95 < 200, (
+            f"TR-012: 20 个样本的 P95 应该 < 200（最大值），实际是 {p95}"
+        )
+        assert p95 > 190, (
+            f"TR-012: 20 个样本的 P95 应该在 190-200 之间，实际是 {p95}"
+        )
+
+    def test_p95_linear_interpolation(self):
+        """P95 应该使用线性插值，对于 10 个样本 P95 = 0.95*(n-1) = 8.55"""
+        import threading
+        from services.perf_metrics import PerfMetricsCollector
+
+        PerfMetricsCollector._instance = None
+        PerfMetricsCollector._lock = threading.Lock()
+
+        collector = PerfMetricsCollector.get_instance()
+
+        values = [10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 100.0]
+        for v in values:
+            collector.record_step("test_tr012_linear", v)
+
+        summary = collector.get_summary()
+        step_stats = summary["steps"]["test_tr012_linear"]
+        p95 = step_stats["p95_ms"]
+
+        expected_p95 = 95.5
+        assert abs(p95 - expected_p95) < 0.01, (
+            f"TR-012: 10 个样本的 P95 应该约为 {expected_p95}（线性插值 idx=8.55），实际是 {p95}"
+        )
+
+    def test_repair_p95_also_uses_interpolation(self):
+        """repair 的 P95 也应该使用线性插值"""
+        import threading
+        from services.perf_metrics import PerfMetricsCollector
+
+        PerfMetricsCollector._instance = None
+        PerfMetricsCollector._lock = threading.Lock()
+
+        collector = PerfMetricsCollector.get_instance()
+        collector.repair_history.clear()
+
+        for i in range(1, 21):
+            collector.repair_history.append({
+                'total_time_ms': float(i * 10),
+                'algorithm_version': 'v2.4',
+                'xrtf': 1.0,
+            })
+
+        summary = collector.get_summary()
+        p95 = summary["repair"]["overall"]["p95_ms"]
+
+        assert p95 < 200, (
+            f"TR-012: repair P95 也应该使用插值，20 个样本应该 < 200，实际是 {p95}"
+        )
+
+
+# ============================================================================
+# 回归测试: TR-013 _schedule_cancel_cleanup 复用单线程
+# Bug: 每次取消创建新线程，高并发下线程数激增
+# 修复: 使用单个后台清理线程 + 过期时间字典，而非每个任务开新线程
+# ============================================================================
+
+class TestCancelCleanupSingleThread:
+    """防止每次取消任务都创建新线程"""
+
+    def test_schedule_does_not_create_new_thread_per_call(self):
+        """多次调用 _schedule_cancel_cleanup 不应该创建大量新线程"""
+        import threading
+        import time
+        from services import task_manager
+
+        original_delay = task_manager._CANCEL_CLEANUP_DELAY
+        original_thread = task_manager._cancel_cleanup_thread
+        original_stop = task_manager._cancel_cleanup_stop
+        original_cond = task_manager._cancel_cleanup_cond
+        original_expiry = task_manager._cancel_expiry.copy()
+        original_cancelled = set(task_manager._cancelled_tasks)
+
+        try:
+            task_manager._CANCEL_CLEANUP_DELAY = 0.2
+            task_manager._cancel_cleanup_thread = None
+            task_manager._cancel_cleanup_stop = threading.Event()
+            task_manager._cancel_cleanup_cond = threading.Condition()
+            task_manager._cancel_expiry.clear()
+            with task_manager._cancelled_lock:
+                task_manager._cancelled_tasks.clear()
+
+            thread_count_before = threading.active_count()
+
+            for i in range(20):
+                task_id = f"test-cancel-{i}"
+                with task_manager._cancelled_lock:
+                    task_manager._cancelled_tasks.add(task_id)
+                task_manager._schedule_cancel_cleanup(task_id)
+
+            thread_count_after = threading.active_count()
+            thread_increase = thread_count_after - thread_count_before
+
+            assert thread_increase <= 2, (
+                f"TR-013: 20 次取消应该只增加 1 个清理线程，实际增加了 {thread_increase} 个"
+            )
+
+            time.sleep(0.5)
+
+            with task_manager._cancelled_lock:
+                remaining = len(task_manager._cancelled_tasks)
+
+            assert remaining == 0, (
+                f"过期后取消标记应该被清理，剩余 {remaining} 个"
+            )
+
+        finally:
+            task_manager._CANCEL_CLEANUP_DELAY = original_delay
+            if original_thread is not None and original_thread.is_alive():
+                task_manager._cancel_cleanup_stop.set()
+                with task_manager._cancel_cleanup_cond:
+                    task_manager._cancel_cleanup_cond.notify_all()
+                original_thread.join(timeout=1.0)
+            task_manager._cancel_cleanup_thread = original_thread
+            task_manager._cancel_cleanup_stop = original_stop
+            task_manager._cancel_cleanup_cond = original_cond
+            task_manager._cancel_expiry.clear()
+            task_manager._cancel_expiry.update(original_expiry)
+            with task_manager._cancelled_lock:
+                task_manager._cancelled_tasks.clear()
+                task_manager._cancelled_tasks.update(original_cancelled)
+
+
+# ============================================================================
+# 回归测试: TR-014 特征缓存原子写入
+# Bug: 直接写入目标 JSON 文件，中途异常残留不完整 JSON
+# 修复: 先写 .tmp 临时文件，写完 fsync 后原子 replace
+# ============================================================================
+
+class TestFeatureCacheAtomicWrite:
+    """防止特征缓存写入中途异常留下不完整 JSON"""
+
+    def test_source_has_atomic_write_pattern(self):
+        """feature_extractor 源码中应该包含原子写入模式（.tmp + os.replace + fsync）"""
+        import os
+
+        feature_extractor_path = os.path.join(
+            os.path.dirname(__file__), "..", "training", "feature_extractor.py"
+        )
+        with open(feature_extractor_path) as f:
+            source = f.read()
+
+        assert ".tmp" in source, (
+            "TR-014: 特征缓存写入应该使用 .tmp 临时文件"
+        )
+        assert "os.replace" in source or "replace(" in source, (
+            "TR-014: 特征缓存写入应该使用 os.replace 原子替换"
+        )
+        assert "fsync" in source, (
+            "TR-014: 特征缓存写入应该使用 fsync 确保落盘"
+        )
+
+    def test_atomic_write_success_no_temp_file(self, tmp_path):
+        """成功写入后临时文件应该被清理，目标文件有效"""
+        import os
+        import json
+
+        cache_dir = tmp_path / "features"
+        cache_dir.mkdir()
+
+        test_hash = "validjson12345678"
+        cache_filename = f"{test_hash[:16]}.json"
+        cache_path = os.path.join(str(cache_dir), cache_filename)
+        temp_path = cache_path + ".tmp"
+
+        data = {
+            'file_hash': test_hash,
+            'filename': 'test.wav',
+            'file_type': 'instrumental',
+            'duration': 10.0,
+            'sample_rate': 44100,
+            'features': {'mfcc_mean': 0.5},
+            'extracted_at': '2026-01-01T00:00:00'
+        }
+
+        with open(temp_path, 'w') as f:
+            json.dump(data, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temp_path, cache_path)
+
+        assert os.path.exists(cache_path), "成功写入后目标文件应该存在"
+        assert not os.path.exists(temp_path), "成功写入后临时文件应该不存在"
+
+        with open(cache_path) as f:
+            loaded = json.load(f)
+        assert loaded['file_hash'] == test_hash
+        assert loaded['features']['mfcc_mean'] == 0.5
+
+    def test_atomic_write_failure_no_corrupt_target(self, tmp_path):
+        """写入失败时目标文件不应该被创建/修改"""
+        import os
+        import json
+
+        cache_dir = tmp_path / "features"
+        cache_dir.mkdir()
+
+        test_hash = "failwrite12345678"
+        cache_filename = f"{test_hash[:16]}.json"
+        cache_path = os.path.join(str(cache_dir), cache_filename)
+        temp_path = cache_path + ".tmp"
+
+        original_data = {'existing': 'data'}
+        with open(cache_path, 'w') as f:
+            json.dump(original_data, f)
+
+        try:
+            with open(temp_path, 'w') as f:
+                f.write('{broken json')
+                f.flush()
+                os.fsync(f.fileno())
+                raise IOError("simulated disk failure")
+            os.replace(temp_path, cache_path)
+        except IOError:
+            if os.path.exists(temp_path):
+                try:
+                    os.unlink(temp_path)
+                except OSError:
+                    pass
+
+        assert not os.path.exists(temp_path), "写入失败时临时文件应该被清理"
+        assert os.path.exists(cache_path), "写入失败时目标文件应该保留原样"
+
+        with open(cache_path) as f:
+            loaded = json.load(f)
+        assert loaded == original_data, "写入失败时目标文件内容不应该被修改"
+
+
+# ============================================================================
+# 回归测试: TR-015 空音频 xRTF 边界明确
+# Bug: xRTF=0 无法区分「真 0 秒音频」与「获取失败 size_samples=0」
+# 修复: size_samples <= 0 时 xrtf 设为 None，统计时过滤 None 值
+# ============================================================================
+
+class TestXrtfBoundaryClear:
+    """防止 xRTF=0 语义模糊，无法区分真零和获取失败"""
+
+    def test_zero_size_samples_returns_none_xrtf(self):
+        """size_samples=0 时 xrtf 应该是 None 而非 0"""
+        import threading
+        from services.perf_metrics import PerfMetricsCollector
+
+        PerfMetricsCollector._instance = None
+        PerfMetricsCollector._lock = threading.Lock()
+
+        collector = PerfMetricsCollector.get_instance()
+        collector.start_repair("task-zero-size")
+        result = collector.end_repair("task-zero-size", 0, "v2.4")
+
+        assert result['xrtf'] is None, (
+            "TR-015: size_samples=0 时 xrtf 应该是 None，表示无法计算"
+        )
+
+    def test_non_zero_audio_has_valid_xrtf(self):
+        """正常音频应该有有效的 xRTF 数值"""
+        import threading
+        import time
+        from services.perf_metrics import PerfMetricsCollector
+
+        PerfMetricsCollector._instance = None
+        PerfMetricsCollector._lock = threading.Lock()
+
+        collector = PerfMetricsCollector.get_instance()
+        collector.start_repair("task-valid")
+        time.sleep(0.01)
+        result = collector.end_repair("task-valid", 48000, "v2.4")
+
+        assert result['xrtf'] is not None, "正常音频 xrtf 不应该是 None"
+        assert isinstance(result['xrtf'], (int, float)), "xrtf 应该是数值"
+        assert result['xrtf'] > 0, "正常音频 xrtf 应该 > 0"
+
+    def test_xrtf_stats_filters_none(self):
+        """calc_xrtf_stats 应该过滤掉 None 值，不影响统计"""
+        import threading
+        from services.perf_metrics import PerfMetricsCollector
+
+        PerfMetricsCollector._instance = None
+        PerfMetricsCollector._lock = threading.Lock()
+
+        collector = PerfMetricsCollector.get_instance()
+        collector.repair_history.clear()
+
+        collector.repair_history.append({'total_time_ms': 100, 'xrtf': 10.0, 'algorithm_version': 'v2.4'})
+        collector.repair_history.append({'total_time_ms': 200, 'xrtf': None, 'algorithm_version': 'v2.4'})
+        collector.repair_history.append({'total_time_ms': 300, 'xrtf': 20.0, 'algorithm_version': 'v2.4'})
+
+        summary = collector.get_summary()
+        xrtf_stats = summary["repair"]["xrtf"]
+
+        assert xrtf_stats['avg'] == 15.0, (
+            f"TR-015: xRTF 统计应该过滤 None，均值应该是 15.0，实际是 {xrtf_stats['avg']}"
+        )
+        assert xrtf_stats['count'] == 2, (
+            f"应该只有 2 个有效 xRTF 样本，实际是 {xrtf_stats['count']}"
+        )

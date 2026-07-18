@@ -3,13 +3,16 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import stat
 from contextlib import closing
-from typing import Any
+from typing import Any, Iterator
 
 import config
 from services.param_maps import DUAL_REPAIR_PARAM_KEYS, SINGLE_REPAIR_PARAM_KEYS
 
 TaskDict = dict[str, Any]
+
+SCHEMA_VERSION = 1
 
 _ALLOWED_TASK_COLUMNS = {
     "status", "progress", "step", "original_filename", "original_path",
@@ -18,72 +21,111 @@ _ALLOWED_TASK_COLUMNS = {
     "render_filename", "render_result"
 }
 
+_TASK_TABLE_COLUMNS = {
+    "id", "status", "progress", "step", "original_filename", "original_path",
+    "file_hash", "file_size", "output_path", "params", "detection_result",
+    "repaired_detection_result", "repair_result", "error",
+    "render_filename", "render_result", "created_at", "updated_at"
+}
+
+assert _ALLOWED_TASK_COLUMNS.issubset(_TASK_TABLE_COLUMNS), \
+    "_ALLOWED_TASK_COLUMNS 包含不存在的列"
+
+
+def _set_db_file_permissions(db_path: str) -> None:
+    if os.path.exists(db_path):
+        try:
+            os.chmod(db_path, stat.S_IRUSR | stat.S_IWUSR)
+        except OSError:
+            pass
+
 
 def get_db() -> sqlite3.Connection:
     conn = sqlite3.connect(config.DB_PATH, timeout=30.0)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA busy_timeout=30000")
-    conn.execute("PRAGMA wal_autocheckpoint=1000")
     return conn
+
+
+def _get_schema_version(conn: sqlite3.Connection) -> int:
+    try:
+        row = conn.execute("SELECT version FROM schema_version WHERE id = 1").fetchone()
+        return row["version"] if row else 0
+    except sqlite3.OperationalError:
+        return 0
+
+
+def _set_schema_version(conn: sqlite3.Connection, version: int) -> None:
+    conn.execute(
+        "INSERT OR REPLACE INTO schema_version (id, version) VALUES (1, ?)",
+        (version,)
+    )
+
+
+def _migrate_v1(conn: sqlite3.Connection) -> None:
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS tasks (
+            id TEXT PRIMARY KEY,
+            status TEXT NOT NULL DEFAULT 'pending',
+            progress REAL NOT NULL DEFAULT 0,
+            step TEXT NOT NULL DEFAULT '',
+            original_filename TEXT NOT NULL DEFAULT '',
+            original_path TEXT NOT NULL DEFAULT '',
+            file_hash TEXT NOT NULL DEFAULT '',
+            file_size INTEGER NOT NULL DEFAULT 0,
+            output_path TEXT NOT NULL DEFAULT '',
+            params TEXT NOT NULL DEFAULT '{}',
+            detection_result TEXT,
+            repaired_detection_result TEXT,
+            repair_result TEXT,
+            error TEXT,
+            render_filename TEXT,
+            render_result TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS analysis_cache (
+            quick_hash TEXT PRIMARY KEY,
+            file_name TEXT NOT NULL DEFAULT '',
+            file_size INTEGER NOT NULL DEFAULT 0,
+            wav_info TEXT NOT NULL DEFAULT '',
+            analysis TEXT NOT NULL DEFAULT '',
+            waveform_peaks TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_tasks_file_hash ON tasks(file_hash)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_tasks_created_at ON tasks(created_at)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_tasks_status_created_at ON tasks(status, created_at)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_analysis_cache_file_size ON analysis_cache(file_size)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_analysis_cache_created_at ON analysis_cache(created_at)")
+
+
+_MIGRATIONS = [
+    _migrate_v1,
+]
+
 
 def init_db() -> None:
     with closing(get_db()) as conn:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA wal_autocheckpoint=1000")
         conn.execute("""
-            CREATE TABLE IF NOT EXISTS tasks (
-                id TEXT PRIMARY KEY,
-                status TEXT NOT NULL DEFAULT 'pending',
-                progress REAL NOT NULL DEFAULT 0,
-                step TEXT NOT NULL DEFAULT '',
-                original_filename TEXT NOT NULL DEFAULT '',
-                original_path TEXT NOT NULL DEFAULT '',
-                file_hash TEXT NOT NULL DEFAULT '',
-                file_size INTEGER NOT NULL DEFAULT 0,
-                output_path TEXT NOT NULL DEFAULT '',
-                params TEXT NOT NULL DEFAULT '{}',
-                detection_result TEXT,
-                repaired_detection_result TEXT,
-                repair_result TEXT,
-                error TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            CREATE TABLE IF NOT EXISTS schema_version (
+                id INTEGER PRIMARY KEY,
+                version INTEGER NOT NULL DEFAULT 0
             )
         """)
-        try:
-            conn.execute("ALTER TABLE tasks ADD COLUMN file_hash TEXT NOT NULL DEFAULT ''")
-        except Exception:
-            pass
-        try:
-            conn.execute("ALTER TABLE tasks ADD COLUMN file_size INTEGER NOT NULL DEFAULT 0")
-        except Exception:
-            pass
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS analysis_cache (
-                quick_hash TEXT PRIMARY KEY,
-                file_name TEXT NOT NULL DEFAULT '',
-                file_size INTEGER NOT NULL DEFAULT 0,
-                wav_info TEXT NOT NULL DEFAULT '',
-                analysis TEXT NOT NULL DEFAULT '',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        try:
-            conn.execute("ALTER TABLE analysis_cache ADD COLUMN waveform_peaks TEXT")
-        except Exception:
-            pass
-        try:
-            conn.execute("ALTER TABLE tasks ADD COLUMN render_filename TEXT")
-        except Exception:
-            pass
-        try:
-            conn.execute("ALTER TABLE tasks ADD COLUMN render_result TEXT")
-        except Exception:
-            pass
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_tasks_file_hash ON tasks(file_hash)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_tasks_created_at ON tasks(created_at)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_tasks_status_created_at ON tasks(status, created_at)")
+        current_version = _get_schema_version(conn)
+        for i in range(current_version, len(_MIGRATIONS)):
+            _MIGRATIONS[i](conn)
+        _set_schema_version(conn, len(_MIGRATIONS))
         conn.commit()
+    _set_db_file_permissions(config.DB_PATH)
 
 def cleanup_stale_tasks() -> int:
     import logging
@@ -174,6 +216,7 @@ def get_task(task_id: str) -> TaskDict | None:
         if ts_field in result:
             result[ts_field] = _format_timestamp(result[ts_field])
     _parse_json_fields(result)
+    _enrich_output_size(result)
     return result
 
 def find_task_by_hash(file_hash: str) -> TaskDict | None:
@@ -191,6 +234,7 @@ def find_task_by_hash(file_hash: str) -> TaskDict | None:
     if output_path and not os.path.exists(output_path):
         result["output_path"] = ""
     _parse_json_fields(result)
+    _enrich_output_size(result)
     return result
 
 def find_repair_cache(file_hash: str, params: dict) -> TaskDict | None:
@@ -354,6 +398,27 @@ def get_all_tasks_ordered() -> list[TaskDict]:
         rows = conn.execute("SELECT id, original_path, output_path, file_size, created_at FROM tasks ORDER BY created_at ASC").fetchall()
     return [dict(r) for r in rows]
 
+
+def get_tasks_paginated(limit: int = 100, offset: int = 0) -> list[TaskDict]:
+    with closing(get_db()) as conn:
+        rows = conn.execute(
+            "SELECT id, original_path, output_path, file_size, created_at FROM tasks ORDER BY created_at ASC LIMIT ? OFFSET ?",
+            (limit, offset)
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def iter_tasks_batch(batch_size: int = 100) -> Iterator[list[TaskDict]]:
+    offset = 0
+    while True:
+        batch = get_tasks_paginated(limit=batch_size, offset=offset)
+        if not batch:
+            break
+        yield batch
+        offset += len(batch)
+        if len(batch) < batch_size:
+            break
+
 def delete_task(task_id: str) -> None:
     with closing(get_db()) as conn:
         conn.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
@@ -434,6 +499,38 @@ def get_all_analysis_cache() -> list[dict[str, Any]]:
         rows = conn.execute("SELECT * FROM analysis_cache ORDER BY created_at DESC").fetchall()
     return [dict(r) for r in rows]
 
+
+def get_analysis_cache_paginated(limit: int = 100, offset: int = 0) -> list[dict[str, Any]]:
+    with closing(get_db()) as conn:
+        rows = conn.execute(
+            "SELECT * FROM analysis_cache ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            (limit, offset)
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def iter_analysis_cache_batch(batch_size: int = 100) -> Iterator[list[dict[str, Any]]]:
+    offset = 0
+    while True:
+        batch = get_analysis_cache_paginated(limit=batch_size, offset=offset)
+        if not batch:
+            break
+        yield batch
+        offset += len(batch)
+        if len(batch) < batch_size:
+            break
+
+
+def cleanup_expired_analysis_cache(max_age_days: int = 30) -> int:
+    with closing(get_db()) as conn:
+        cursor = conn.execute(
+            "DELETE FROM analysis_cache WHERE julianday('now') - julianday(created_at) > ?",
+            (max_age_days,)
+        )
+        conn.commit()
+        return cursor.rowcount
+
+
 def delete_analysis_cache(quick_hash: str) -> None:
     with closing(get_db()) as conn:
         conn.execute("DELETE FROM analysis_cache WHERE quick_hash = ?", (quick_hash,))
@@ -465,6 +562,8 @@ def _parse_json_fields(result: TaskDict) -> None:
             except (json.JSONDecodeError, TypeError):
                 pass
 
+
+def _enrich_output_size(result: TaskDict) -> None:
     output_path = result.get("output_path")
     if output_path and os.path.exists(output_path):
         try:
@@ -478,16 +577,19 @@ def _parse_json_fields(result: TaskDict) -> None:
 # 训练素材相关数据库操作
 TRAINING_DB_PATH = os.path.join(os.path.dirname(config.DB_PATH), "training.db")
 
+
 def get_training_db() -> sqlite3.Connection:
     conn = sqlite3.connect(TRAINING_DB_PATH, timeout=30.0)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA busy_timeout=30000")
-    conn.execute("PRAGMA wal_autocheckpoint=1000")
     return conn
+
 
 def init_training_db() -> None:
     with closing(get_training_db()) as conn:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA wal_autocheckpoint=1000")
         conn.execute("""
             CREATE TABLE IF NOT EXISTS training_files (
                 id TEXT PRIMARY KEY,
@@ -499,6 +601,7 @@ def init_training_db() -> None:
             )
         """)
         conn.commit()
+    _set_db_file_permissions(TRAINING_DB_PATH)
 
 def create_training_record(file_id: str, filename: str, filepath: str, file_hash: str, file_size: int = 0) -> None:
     with closing(get_training_db()) as conn:

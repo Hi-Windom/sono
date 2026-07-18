@@ -4,7 +4,7 @@ from services.dsp_utils import stft, istft
 
 def time_stretch_hifi(y, sr, speed, n_fft=4096, hop_length=512):
     if speed <= 0 or abs(speed - 1.0) < 0.001:
-        return y
+        return y.copy()
     if y.ndim == 1:
         y = y.reshape(1, -1)
         was_mono = True

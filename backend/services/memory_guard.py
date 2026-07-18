@@ -48,7 +48,7 @@ def estimate_repair_memory_bytes(n_samples, n_channels, sr, working_sr, algorith
     n_fft = 2048
     hop_length = 512
     n_frames = upsampled_samples // hop_length + 1
-    has_streaming = algorithm_version in ("v2.2", "v2.3", "v2.3a", "v2.4", "v2.4a", "v3.0", "v3.0a", "v3.1", "v3.1a", "v3.2", "v3.2+", "v3.2a", "v3.2a+", "v4.0a", "v4.0a+")
+    has_streaming = algorithm_version in ("v2.2", "v2.2a", "v2.3", "v2.3a", "v2.4", "v2.4a", "v3.0", "v3.0a", "v3.1", "v3.1a", "v3.2", "v3.2+", "v3.2a", "v3.2a+", "v4.0a", "v4.0a+")
 
     if has_streaming:
         stft_bytes = (n_fft // 2 + 1) * (working_sr * 10 // hop_length + 1) * 16
@@ -97,11 +97,14 @@ def check_memory_before_repair(n_samples, n_channels, sr, working_sr, safety_mar
         logger.warning("[memory_guard] 无法获取可用内存，跳过检查")
         return working_sr
     estimated = estimate_repair_memory_bytes(n_samples, n_channels, sr, working_sr, algorithm_version=algorithm_version)
+    if safety_margin > 0:
+        estimated = int(estimated * (1.0 + safety_margin))
     if estimated <= available:
-        logger.info(f"[memory_guard] 内存检查通过: 预估 {estimated/1024/1024:.0f}MB, 可用 {available/1024/1024:.0f}MB, 工作采样率 {working_sr}Hz")
+        logger.info(f"[memory_guard] 内存检查通过: 预估 {estimated/1024/1024:.0f}MB, 可用 {available/1024/1024:.0f}MB, 安全边际 {safety_margin:.0%}, 工作采样率 {working_sr}Hz")
         return working_sr
     logger.error(
         f"[memory_guard] 内存不足: 预估 {estimated/1024/1024:.0f}MB > 可用 {available/1024/1024:.0f}MB, "
+        f"安全边际 {safety_margin:.0%}, "
         f"音频参数: n_samples={n_samples}, channels={n_channels}, sr={sr}, working_sr={working_sr}"
     )
     raise MemoryError(

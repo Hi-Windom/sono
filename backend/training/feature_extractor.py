@@ -252,16 +252,28 @@ def process_single_file(filepath: str, file_hash: Optional[str] = None) -> Optio
         
         cache_filename = f"{file_hash[:16]}.json"
         cache_path = os.path.join(FEATURE_CACHE_DIR, cache_filename)
-        with open(cache_path, 'w') as f:
-            json.dump({
-                'file_hash': file_hash,
-                'filename': os.path.basename(filepath),
-                'file_type': file_type,
-                'duration': duration,
-                'sample_rate': sr,
-                'features': features,
-                'extracted_at': datetime.now().isoformat()
-            }, f, indent=2)
+        temp_path = cache_path + ".tmp"
+        try:
+            with open(temp_path, 'w') as f:
+                json.dump({
+                    'file_hash': file_hash,
+                    'filename': os.path.basename(filepath),
+                    'file_type': file_type,
+                    'duration': duration,
+                    'sample_rate': sr,
+                    'features': features,
+                    'extracted_at': datetime.now().isoformat()
+                }, f, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(temp_path, cache_path)
+        except Exception:
+            if os.path.exists(temp_path):
+                try:
+                    os.unlink(temp_path)
+                except Exception:
+                    pass
+            raise
         
         conn = get_feature_db()
         conn.execute(
@@ -295,11 +307,16 @@ def process_all_files():
     """处理所有未处理的训练文件"""
     init_feature_db()
     
+    training_dir_real = os.path.realpath(TRAINING_DIR)
     training_files = []
     for filename in os.listdir(TRAINING_DIR):
         if filename.lower().endswith(('.wav', '.mp3', '.flac', '.ogg', '.aac', '.m4a')):
             filepath = os.path.join(TRAINING_DIR, filename)
             if os.path.isfile(filepath):
+                real_path = os.path.realpath(filepath)
+                if not real_path.startswith(training_dir_real + os.sep) and real_path != training_dir_real:
+                    print(f"  [跳过] 符号链接指向目录外: {filepath} -> {real_path}")
+                    continue
                 training_files.append(filepath)
     
     print(f"发现 {len(training_files)} 个训练文件")

@@ -12,6 +12,8 @@ DECODED_DIR = os.path.join(BASE_DIR, "storage", "decoded")
 DB_PATH = os.path.join(BASE_DIR, "storage", "tasks.db")
 DEPLOY_TIME_FILE = os.path.join(BASE_DIR, "storage", "deploy_time")
 
+_initialized = False
+
 
 def _safe_int_env(name: str, default: int) -> int:
     raw = os.getenv(name)
@@ -54,12 +56,18 @@ def _init_deploy_time():
             return
         except (ValueError, OSError):
             pass
+    os.makedirs(os.path.dirname(DEPLOY_TIME_FILE), exist_ok=True)
     with open(DEPLOY_TIME_FILE, "w") as f:
         f.write(now)
 
 
-os.makedirs(UPLOAD_DIR, exist_ok=True)
-os.makedirs(OUTPUT_DIR, exist_ok=True)
-os.makedirs(TRAINING_DIR, exist_ok=True)
-os.makedirs(DECODED_DIR, exist_ok=True)
-_init_deploy_time()
+def init_storage():
+    global _initialized
+    if _initialized:
+        return
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    os.makedirs(TRAINING_DIR, exist_ok=True)
+    os.makedirs(DECODED_DIR, exist_ok=True)
+    _init_deploy_time()
+    _initialized = True

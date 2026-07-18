@@ -3,7 +3,7 @@ import asyncio
 import logging
 import time
 from datetime import datetime, timezone
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, Header
+from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, Header, Query
 from pydantic import BaseModel
 
 import config
@@ -14,6 +14,7 @@ from services.ai_detector import get_detector_versions
 from services.memory_guard import get_available_memory_bytes, estimate_repair_memory_bytes, should_use_float32, get_total_memory_bytes
 from services.ws_manager import ws_manager
 from database import get_queue_status, get_task
+from ._common import verify_task_access_token
 
 logger = logging.getLogger(__name__)
 
@@ -489,7 +490,12 @@ def _run_quality_tests_background(task_id: str, loop):
 
 
 @router.post("/quality-tests/start")
-async def start_quality_tests():
+async def start_quality_tests(x_admin_token: str | None = Header(None)):
+    admin_token = config.ADMIN_TOKEN
+    if not admin_token:
+        raise HTTPException(status_code=403, detail="质量测试接口未启用（未配置 ADMIN_TOKEN）")
+    if x_admin_token != admin_token:
+        raise HTTPException(status_code=401, detail="未授权的操作")
     import uuid
     import asyncio
     global _quality_test_cache
@@ -511,7 +517,27 @@ async def get_quality_test_result(task_id: str):
 
 
 @router.websocket("/ws/{task_id}")
-async def websocket_task_status(websocket: WebSocket, task_id: str):
+async def websocket_task_status(
+    websocket: WebSocket,
+    task_id: str,
+    access_token: str | None = Query(None),
+    x_task_token: str | None = Header(None),
+):
+    token = x_task_token or access_token
+    if task_id.startswith("qt-"):
+        qt_task = _quality_test_cache.get(task_id)
+        if not qt_task:
+            await websocket.close(code=1008, reason="测试任务不存在")
+            return
+    else:
+        if not verify_task_access_token(task_id, token):
+            await websocket.close(code=1008, reason="无效的任务访问令牌")
+            return
+        task = get_task(task_id)
+        if not task:
+            await websocket.close(code=1008, reason="任务不存在")
+            return
+
     await websocket.accept()
     await ws_manager.start_heartbeat_monitor()
 

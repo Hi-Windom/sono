@@ -23,9 +23,10 @@ class PerfTimer:
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.end_time = time.perf_counter()
         self.duration_ms = (self.end_time - self.start_time) * 1000
-        PerfMetricsCollector.get_instance().record_step(
-            self.name, self.duration_ms, self.metadata
-        )
+        if exc_type is None:
+            PerfMetricsCollector.get_instance().record_step(
+                self.name, self.duration_ms, self.metadata
+            )
         return False
 
 
@@ -76,25 +77,33 @@ class PerfMetricsCollector:
         end_time = time.perf_counter()
         start_time = getattr(self._thread_local, 'start_time', end_time)
         steps = getattr(self._thread_local, 'steps', {})
+        expected_task_id = getattr(self._thread_local, 'task_id', None)
+        if expected_task_id is not None and expected_task_id != task_id:
+            logger.warning(
+                f"[perf] end_repair task_id 不匹配: 期望 {expected_task_id}, 实际 {task_id}"
+            )
         total_time_ms = (end_time - start_time) * 1000
 
         duration_seconds = total_time_ms / 1000
         audio_duration_seconds = size_samples / 48000
-        xrtf = audio_duration_seconds / duration_seconds if duration_seconds > 0 else 0
+        xrtf = audio_duration_seconds / duration_seconds if duration_seconds > 0 else None
+        if size_samples <= 0:
+            xrtf = None
 
         result = {
             'task_id': task_id,
             'total_time_ms': total_time_ms,
             'size_samples': size_samples,
             'algorithm_version': algorithm_version,
-            'xrtf': round(xrtf, 2),
+            'xrtf': round(xrtf, 2) if xrtf is not None else None,
             'breakdown_by_step': {k: round(v, 2) for k, v in steps.items()},
             'timestamp': time.time()
         }
 
         with self._data_lock:
             self.repair_history.append(result)
-        logger.info(f"[perf] repair completed: task_id={task_id} total={total_time_ms:.1f}ms xRTF={xrtf:.2f}x")
+        xrtf_str = f"{xrtf:.2f}x" if xrtf is not None else "N/A (size_samples=0)"
+        logger.info(f"[perf] repair completed: task_id={task_id} total={total_time_ms:.1f}ms xRTF={xrtf_str}")
         return result
 
     def start_detect(self, task_id: str):
@@ -106,6 +115,11 @@ class PerfMetricsCollector:
         end_time = time.perf_counter()
         start_time = getattr(self._thread_local, 'start_time', end_time)
         steps = getattr(self._thread_local, 'steps', {})
+        expected_task_id = getattr(self._thread_local, 'task_id', None)
+        if expected_task_id is not None and expected_task_id != task_id:
+            logger.warning(
+                f"[perf] end_detect task_id 不匹配: 期望 {expected_task_id}, 实际 {task_id}"
+            )
         total_time_ms = (end_time - start_time) * 1000
 
         result = {
@@ -138,6 +152,18 @@ class PerfMetricsCollector:
             })
 
     def get_summary(self) -> dict:
+        def _percentile(sorted_values, p):
+            n = len(sorted_values)
+            if n == 0:
+                return 0
+            if n == 1:
+                return sorted_values[0]
+            idx = p * (n - 1)
+            lower = int(idx)
+            upper = min(lower + 1, n - 1)
+            frac = idx - lower
+            return sorted_values[lower] + (sorted_values[upper] - sorted_values[lower]) * frac
+
         def calc_stats(history, key='total_time_ms'):
             if not history:
                 return {'count': 0, 'avg_ms': 0, 'min_ms': 0, 'max_ms': 0, 'p50_ms': 0, 'p95_ms': 0}
@@ -148,20 +174,21 @@ class PerfMetricsCollector:
                 'avg_ms': round(sum(values) / n, 2),
                 'min_ms': round(values[0], 2),
                 'max_ms': round(values[-1], 2),
-                'p50_ms': round(values[n // 2], 2),
-                'p95_ms': round(values[int(n * 0.95)] if n > 0 else 0, 2),
+                'p50_ms': round(_percentile(values, 0.50), 2),
+                'p95_ms': round(_percentile(values, 0.95), 2),
             }
 
         def calc_xrtf_stats(history):
             if not history:
-                return {'avg': 0, 'min': 0, 'max': 0}
-            values = [h.get('xrtf', 0) for h in history if h.get('xrtf', 0) > 0]
+                return {'avg': 0, 'min': 0, 'max': 0, 'count': 0}
+            values = [h.get('xrtf') for h in history if h.get('xrtf') is not None and h.get('xrtf') > 0]
             if not values:
-                return {'avg': 0, 'min': 0, 'max': 0}
+                return {'avg': 0, 'min': 0, 'max': 0, 'count': 0}
             return {
                 'avg': round(sum(values) / len(values), 2),
                 'min': round(min(values), 2),
                 'max': round(max(values), 2),
+                'count': len(values),
             }
 
         with self._data_lock:
@@ -195,8 +222,8 @@ class PerfMetricsCollector:
                     'avg_ms': round(sum(durations) / n, 2),
                     'min_ms': round(durations[0], 2),
                     'max_ms': round(durations[-1], 2),
-                    'p50_ms': round(durations[n // 2], 2),
-                    'p95_ms': round(durations[int(n * 0.95)] if n > 0 else 0, 2),
+                    'p50_ms': round(_percentile(durations, 0.50), 2),
+                    'p95_ms': round(_percentile(durations, 0.95), 2),
                 }
 
         return {

@@ -26,20 +26,20 @@
 
 | ID | 问题 | 位置 | 影响 | 状态 |
 |----|------|------|------|------|
-| TR-007 | `PerfTimer` 异常时仍记录 step — 失败操作污染均值/P95 统计 | `services/perf_metrics.py` | 性能统计不准确 | ⏳ 待修复 |
-| TR-008 | `end_repair` 未校验 task_id 匹配 — start(A) 后 end(B) 数据串扰 | `services/perf_metrics.py` | 性能数据张冠李戴 | ⏳ 待修复 |
-| TR-009 | `safety_margin` 参数完全未使用 — 仅在签名中出现 | `services/memory_guard.py` | 安全边际无效 | ⏳ 待修复 |
-| TR-010 | 算法版本列表不一致 — `has_streaming` 与 `peak_temp` 的版本集合不匹配 | `services/memory_guard.py` | 部分算法内存估算错误 | ⏳ 待修复 |
-| TR-011 | 训练数据路径无符号链接安全校验 — symlink 指向目录外仍会被读取 | `training/feature_extractor.py` | 安全风险 | ⏳ 待修复 |
-| TR-012 | P95 百分位计算不准确 — `int(n*0.95)` 索引法，小样本下退化为最大值 | `services/perf_metrics.py` | P95 统计偏高 | ⏳ 待修复 |
+| TR-007 | `PerfTimer` 异常时仍记录 step — 失败操作污染均值/P95 统计 | `services/perf_metrics.py` | 性能统计不准确 | ✅ 已修复 |
+| TR-008 | `end_repair` 未校验 task_id 匹配 — start(A) 后 end(B) 数据串扰 | `services/perf_metrics.py` | 性能数据张冠李戴 | ✅ 已修复 |
+| TR-009 | `safety_margin` 参数完全未使用 — 仅在签名中出现 | `services/memory_guard.py` | 安全边际无效 | ✅ 已修复 |
+| TR-010 | 算法版本列表不一致 — `has_streaming` 与 `peak_temp` 的版本集合不匹配 | `services/memory_guard.py` | 部分算法内存估算错误 | ✅ 已修复 |
+| TR-011 | 训练数据路径无符号链接安全校验 — symlink 指向目录外仍会被读取 | `training/feature_extractor.py` | 安全风险 | ✅ 已修复 |
+| TR-012 | P95 百分位计算不准确 — `int(n*0.95)` 索引法，小样本下退化为最大值 | `services/perf_metrics.py` | P95 统计偏高 | ✅ 已修复 |
 
 ### 🟢 低严重程度（3 个）
 
 | ID | 问题 | 位置 | 影响 | 状态 |
 |----|------|------|------|------|
-| TR-013 | `_schedule_cancel_cleanup` 每次取消创建新线程 — 高并发下线程数激增 | `services/task_manager.py` | 极端场景资源浪费 | ⏳ 待修复 |
-| TR-014 | 特征缓存写入中途异常残留不完整 JSON — 无原子写入保护 | `training/feature_extractor.py:254-263` | 缓存损坏 | ⏳ 待修复 |
-| TR-015 | 空音频 xRTF=0 边界不明确 — 无法区分「真 0 秒」与「获取失败」 | `services/perf_metrics.py` | 统计语义模糊 | ⏳ 待修复 |
+| TR-013 | `_schedule_cancel_cleanup` 每次取消创建新线程 — 高并发下线程数激增 | `services/task_manager.py` | 极端场景资源浪费 | ✅ 已修复 |
+| TR-014 | 特征缓存写入中途异常残留不完整 JSON — 无原子写入保护 | `training/feature_extractor.py:254-263` | 缓存损坏 | ✅ 已修复 |
+| TR-015 | 空音频 xRTF=0 边界不明确 — 无法区分「真 0 秒」与「获取失败」 | `services/perf_metrics.py` | 统计语义模糊 | ✅ 已修复 |
 
 ---
 
@@ -62,23 +62,23 @@
 
 | ID | 问题 | 位置 | 影响 | 状态 |
 |----|------|------|------|------|
-| DSP-007 | `mel_filterbank` 与 `_mel_filterbank_cached` 实现不一致（最大差异 0.98） | `dsp_utils.py:263-285, 568-600` | MFCC 特征计算不一致 | ⏳ 待修复 |
-| DSP-008 | `repair_audio` 重采样后 dtype 从 float32 变回 float64，内存优化失效 | `repair_v2_4/core.py:270-274` | 大音频内存翻倍 | ⏳ 待修复 |
-| DSP-009 | `_get_window` 缓存无用的复数 dtype 窗口（内存浪费） | `dsp_utils.py:15` | 内存占用增加 | ⏳ 待修复 |
-| DSP-010 | `_harmonic_bass_enhance` in-place 修改输入数组 | `repair_v2_4/core.py:156-186` | 副作用 bug | ⏳ 待修复 |
-| DSP-011 | `_air_texture_reconstruct` in-place 修改输入数组 | `repair_v2_4/core.py:189-231` | 副作用 bug | ⏳ 待修复 |
-| DSP-012 | `_soft_peak_limit` 多声道时 in-place 修改输入数组 | `repair_v2_4/core.py:108-113` | 副作用 bug | ⏳ 待修复 |
-| DSP-013 | `time_stretch_hifi` speed=1 时返回原数组引用，有副作用风险 | `time_stretch.py:5-7` | 潜在副作用 | ⏳ 待修复 |
-| DSP-014 | `spectral_rolloff` 全静音时返回 0 Hz（语义不明确） | `dsp_utils.py:240-252` | 下游判断歧义 | ⏳ 待修复 |
-| DSP-015 | `delta` 函数大 order 值时递归栈溢出风险 | `dsp_utils.py:303-319` | 极端输入崩溃 | ⏳ 待修复 |
+| DSP-007 | `mel_filterbank` 与 `_mel_filterbank_cached` 实现不一致（最大差异 0.98） | `dsp_utils.py:263-285, 568-600` | MFCC 特征计算不一致 | ✅ 已修复 |
+| DSP-008 | `repair_audio` 重采样后 dtype 从 float32 变回 float64，内存优化失效 | `repair_v2_4/core.py:270-274` | 大音频内存翻倍 | ✅ 已修复 |
+| DSP-009 | `_get_window` 缓存无用的复数 dtype 窗口（内存浪费） | `dsp_utils.py:15` | 内存占用增加 | ✅ 已修复 |
+| DSP-010 | `_harmonic_bass_enhance` in-place 修改输入数组 | `repair_v2_4/core.py:156-186` | 副作用 bug | ✅ 已修复 |
+| DSP-011 | `_air_texture_reconstruct` in-place 修改输入数组 | `repair_v2_4/core.py:189-231` | 副作用 bug | ✅ 已修复 |
+| DSP-012 | `_soft_peak_limit` 多声道时 in-place 修改输入数组 | `repair_v2_4/core.py:108-113` | 副作用 bug | ✅ 已修复 |
+| DSP-013 | `time_stretch_hifi` speed=1 时返回原数组引用，有副作用风险 | `time_stretch.py:5-7` | 潜在副作用 | ✅ 已修复 |
+| DSP-014 | `spectral_rolloff` 全静音时返回 0 Hz（语义不明确） | `dsp_utils.py:240-252` | 下游判断歧义 | ✅ 已修复 |
+| DSP-015 | `delta` 函数大 order 值时递归栈溢出风险 | `dsp_utils.py:303-319` | 极端输入崩溃 | ✅ 已修复 |
 
 ### 🟢 低严重程度（3 个）
 
 | ID | 问题 | 位置 | 影响 | 状态 |
 |----|------|------|------|------|
-| DSP-016 | `chroma_stft` 对静音信号返回全零（语义不明确） | `dsp_utils.py:341-359` | 语义模糊 | ⏳ 待修复 |
-| DSP-017 | STFT 窗口缓存无大小限制，极端参数下内存泄漏 | `dsp_utils.py:15` | 理论风险 | ⏳ 待修复 |
-| DSP-018 | `rms` 计算对全零信号返回 0 但未区分「静音」与「直流信号」 | `dsp_utils.py` | 语义模糊 | ⏳ 待修复 |
+| DSP-016 | `chroma_stft` 对静音信号返回全零（语义不明确） | `dsp_utils.py:341-359` | 语义模糊 | ✅ 已修复 |
+| DSP-017 | STFT 窗口缓存无大小限制，极端参数下内存泄漏 | `dsp_utils.py:15` | 理论风险 | ✅ 已修复 |
+| DSP-018 | `rms` 计算对全零信号返回 0 但未区分「静音」与「直流信号」 | `dsp_utils.py` | 语义模糊 | ✅ 已修复 |
 
 ---
 
@@ -102,19 +102,19 @@
 
 | ID | 问题 | 位置 | 影响 | 状态 |
 |----|------|------|------|------|
-| API-008 | `/upload-status` 参数缺失时返回 500 而非 422 | `upload.py:210-213` | 状态码错误 | ⏳ 待修复 |
-| API-009 | `/download-file` 路径遍历防护需验证反斜杠绕过 | `download.py:116-119` | 潜在安全风险 | ⏳ 待修复 |
-| API-010 | WebSocket `/ws/{task_id}` 无鉴权，可监听任意任务 | `system.py:510-512` | 进度信息泄露 | ⏳ 待修复 |
-| API-011 | `/perf/reset` 无认证，可重置性能统计 | `perf.py:17-25` | 监控数据篡改 | ⏳ 待修复 |
-| API-012 | `/api/v1/logs` 日志接口无认证，泄露敏感信息 | `app.py:185-206` | 信息泄露 | ⏳ 待修复 |
-| API-013 | `/quality-tests/start` 无认证无限启动子进程，DoS 风险 | `system.py:488-499` | 拒绝服务 | ⏳ 待修复 |
+| API-008 | `/upload-status` 参数缺失时返回 500 而非 422 | `upload.py:210-213` | 状态码错误 | ✅ 已修复 |
+| API-009 | `/download-file` 路径遍历防护需验证反斜杠绕过 | `download.py:116-119` | 潜在安全风险 | ✅ 已修复 |
+| API-010 | WebSocket `/ws/{task_id}` 无鉴权，可监听任意任务 | `system.py:510-512` | 进度信息泄露 | ✅ 已修复 |
+| API-011 | `/perf/reset` 无认证，可重置性能统计 | `perf.py:17-25` | 监控数据篡改 | ✅ 已修复 |
+| API-012 | `/api/v1/logs` 日志接口无认证，泄露敏感信息 | `app.py:185-206` | 信息泄露 | ✅ 已修复 |
+| API-013 | `/quality-tests/start` 无认证无限启动子进程，DoS 风险 | `system.py:488-499` | 拒绝服务 | ✅ 已修复 |
 
 ### 🟢 低严重程度（2 个）
 
 | ID | 问题 | 位置 | 影响 | 状态 |
 |----|------|------|------|------|
-| API-014 | `/repair-debug` 同步执行，大文件阻塞请求线程 | `repair.py:225-239` | 阻塞请求 | ⏳ 待修复 |
-| API-015 | `get_task_status` 异常返回 503 而非 500，状态码错误 | `repair.py:317-320` | 状态码错误 | ⏳ 待修复 |
+| API-014 | `/repair-debug` 同步执行，大文件阻塞请求线程 | `repair.py:225-239` | 阻塞请求 | ✅ 已修复 |
+| API-015 | `get_task_status` 异常返回 503 而非 500，状态码错误 | `repair.py:317-320` | 状态码错误 | ✅ 已修复 |
 
 ---
 
@@ -136,20 +136,20 @@
 
 | ID | 问题 | 位置 | 影响 | 状态 |
 |----|------|------|------|------|
-| DB-006 | 数据库迁移/版本管理缺失 | `database.py:29-81` | 升级困难 | ⏳ 待修复 |
-| DB-007 | 大查询结果集无分页 — `fetchall()` 全量加载 | `database.py:344-347, 424-427` | 内存问题 | ⏳ 待修复 |
-| DB-008 | config.py 模块导入时产生副作用（创建目录等） | `config.py:28-46` | 测试环境受影响 | ⏳ 待修复 |
-| DB-009 | `MAX_CONCURRENT_TASKS` 默认值依赖顺序且无容错 | `config.py:19` | 配置顺序敏感 | ⏳ 待修复 |
-| DB-010 | `update_task` 用 f-string 拼接列名（白名单但有维护风险） | `database.py:141-157` | 维护风险 | ⏳ 待修复 |
-| DB-011 | `analysis_cache` 表缺少索引且无过期清理 | `database.py:59-68` | 无限增长 | ⏳ 待修复 |
+| DB-006 | 数据库迁移/版本管理缺失 | `database.py:29-81` | 升级困难 | ✅ 已修复 |
+| DB-007 | 大查询结果集无分页 — `fetchall()` 全量加载 | `database.py:344-347, 424-427` | 内存问题 | ✅ 已修复 |
+| DB-008 | config.py 模块导入时产生副作用（创建目录等） | `config.py:28-46` | 测试环境受影响 | ✅ 已修复 |
+| DB-009 | `MAX_CONCURRENT_TASKS` 默认值依赖顺序且无容错 | `config.py:19` | 配置顺序敏感 | ✅ 已修复 |
+| DB-010 | `update_task` 用 f-string 拼接列名（白名单但有维护风险） | `database.py:141-157` | 维护风险 | ✅ 已修复 |
+| DB-011 | `analysis_cache` 表缺少索引且无过期清理 | `database.py:59-68` | 无限增长 | ✅ 已修复 |
 
 ### 🟢 低严重程度（3 个）
 
 | ID | 问题 | 位置 | 影响 | 状态 |
 |----|------|------|------|------|
-| DB-012 | 数据库文件权限未设置 | `database.py:22-27` | 安全风险 | ⏳ 待修复 |
-| DB-013 | `_parse_json_fields` 职责耦合 — 掺杂文件系统操作 | `database.py:451-467` | 设计问题 | ⏳ 待修复 |
-| DB-014 | `get_db` 每次都重复设置 PRAGMA | `database.py:22-27` | 微小性能损耗 | ⏳ 待修复 |
+| DB-012 | 数据库文件权限未设置 | `database.py:22-27` | 安全风险 | ✅ 已修复 |
+| DB-013 | `_parse_json_fields` 职责耦合 — 掺杂文件系统操作 | `database.py:451-467` | 设计问题 | ✅ 已修复 |
+| DB-014 | `get_db` 每次都重复设置 PRAGMA | `database.py:22-27` | 微小性能损耗 | ✅ 已修复 |
 
 ---
 

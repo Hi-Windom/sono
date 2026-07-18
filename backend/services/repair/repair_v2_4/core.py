@@ -110,9 +110,10 @@ def _soft_peak_limit_1d(data, threshold):
 def _soft_peak_limit(y, threshold=0.9):
     if y.ndim == 1:
         return _soft_peak_limit_1d(y, threshold)
+    y_out = np.empty_like(y)
     for ch in range(y.shape[0]):
-        y[ch] = _soft_peak_limit_1d(y[ch], threshold)
-    return y
+        y_out[ch] = _soft_peak_limit_1d(y[ch], threshold)
+    return y_out
 
 
 def _adaptive_loudness_normalize(y, sr, target_loudness_lu=-14.0):
@@ -155,11 +156,11 @@ def _adaptive_loudness_normalize(y, sr, target_loudness_lu=-14.0):
 
 def _harmonic_bass_enhance(y, sr, amount, music_type):
     if amount <= 0:
-        return y
+        return y.copy()
     if y.ndim == 1:
         y_2d = y.reshape(1, -1)
-        _harmonic_bass_enhance(y_2d, sr, amount, music_type)
-        return y
+        result_2d = _harmonic_bass_enhance(y_2d, sr, amount, music_type)
+        return result_2d[0]
     nyq = sr / 2
     low_cut = min(250, nyq * 0.9)
     sos_low = butter(4, low_cut / nyq, btype='low', output='sos')
@@ -169,6 +170,7 @@ def _harmonic_bass_enhance(y, sr, amount, music_type):
         sos_body = butter(4, [body_high / nyq, body_low / nyq], btype='band', output='sos')
     else:
         sos_body = None
+    y_out = y.copy()
     for ch in range(y.shape[0]):
         low_band = sosfiltfilt(sos_low, y[ch])
         half_len = len(low_band) // 2
@@ -181,18 +183,19 @@ def _harmonic_bass_enhance(y, sr, amount, music_type):
         body = np.zeros_like(y[ch])
         if sos_body is not None:
             body = sosfiltfilt(sos_body, y[ch])
-        y[ch] += sub_harmonic * amount * 0.15 + excited * amount * 0.1 + body * (10 ** (1.5 / 20) - 1) * amount
+        y_out[ch] += sub_harmonic * amount * 0.15 + excited * amount * 0.1 + body * (10 ** (1.5 / 20) - 1) * amount
         del low_band, sub_harmonic, excited, body
-    return y
+    return y_out
 
 
 def _air_texture_reconstruct(y, sr, amount, music_type):
     if amount <= 0:
-        return y
+        return y.copy()
     if y.ndim == 1:
         y_2d = y.reshape(1, -1)
-        _air_texture_reconstruct(y_2d, sr, amount, music_type)
-        return y
+        result_2d = _air_texture_reconstruct(y_2d, sr, amount, music_type)
+        return result_2d[0]
+    y_out = y.copy()
     for ch in range(y.shape[0]):
         n_samples = y.shape[1]
         if n_samples < N_FFT:
@@ -226,9 +229,9 @@ def _air_texture_reconstruct(y, sr, amount, music_type):
             noise *= mid_env_norm[np.newaxis, :]
             reconstructed[air_indices, :] += noise * np.exp(1j * np.angle(S[air_indices, :]))
         y_recon = istft(reconstructed, hop_length=HOP_LENGTH, length=n_samples)
-        y[ch] += y_recon * amount * 0.2
+        y_out[ch] += y_recon * amount * 0.2
         del S, reconstructed, y_recon
-    return y
+    return y_out
 
 
 def repair_audio(input_path: str, output_path: str, params: dict, progress_callback=None) -> dict:
@@ -267,7 +270,7 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
         if progress_callback:
             progress_callback(0.02, f"v2.4 重采样到 {working_sr//1000}kHz...")
         target_len = int(y.shape[1] * working_sr / sr)
-        y_new = np.zeros((y.shape[0], target_len))
+        y_new = np.zeros((y.shape[0], target_len), dtype=y.dtype)
         for ch in range(y.shape[0]):
             resampled = resample_poly(y[ch], working_sr, sr)
             y_new[ch, :len(resampled)] = resampled[:target_len]

@@ -233,8 +233,16 @@ async def repair_debug_endpoint(request: DebugRepairRequest):
         raise HTTPException(status_code=400, detail="原始音频不存在")
 
     debug_dir = os.path.join(OUTPUT_DIR, f"debug_{request.task_id}")
-    from services.repair_debug import run_debug_repair
-    result = run_debug_repair(audio_path, debug_dir, request.algorithm_version)
+    os.makedirs(debug_dir, exist_ok=True)
+
+    def _run_debug():
+        from services.repair_debug import run_debug_repair
+        return run_debug_repair(audio_path, debug_dir, request.algorithm_version)
+
+    import asyncio
+    from services.task_manager import executor
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(executor, _run_debug)
     result["task_id"] = request.task_id
     result["debug_dir"] = debug_dir
     return result
@@ -341,7 +349,7 @@ async def get_task_status(
     except Exception as e:
         tb_str = traceback.format_exc()
         logger.error(f"[{request_id}] [/status/{task_id}] 获取任务状态失败: {type(e).__name__}: {e}\n{tb_str}")
-        raise HTTPException(status_code=503, detail=f"获取任务状态失败: {str(e)[:100]}")
+        raise HTTPException(status_code=500, detail=f"获取任务状态失败: {str(e)[:100]}")
 
 
 @router.post("/cancel/{task_id}")

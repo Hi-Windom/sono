@@ -1,9 +1,11 @@
 import numpy as np
 from functools import lru_cache
 import time
+from collections import OrderedDict
 
 
-_WINDOW_CACHE = {}
+_MAX_WINDOW_CACHE_SIZE = 64
+_WINDOW_CACHE = OrderedDict()
 
 
 def _get_window(window: str, n_fft: int, dtype=np.float64) -> np.ndarray:
@@ -11,8 +13,11 @@ def _get_window(window: str, n_fft: int, dtype=np.float64) -> np.ndarray:
     if key not in _WINDOW_CACHE:
         from scipy.signal import get_window
         w = get_window(window, n_fft, fftbins=True).astype(dtype)
+        if len(_WINDOW_CACHE) >= _MAX_WINDOW_CACHE_SIZE:
+            _WINDOW_CACHE.popitem(last=False)
         _WINDOW_CACHE[key] = w
-        _WINDOW_CACHE[(window, n_fft, np.complex128 if dtype == np.float64 else np.complex64)] = w.astype(dtype)
+    else:
+        _WINDOW_CACHE.move_to_end(key)
     return _WINDOW_CACHE[key]
 
 
@@ -257,6 +262,8 @@ def spectral_rolloff(y=None, sr=22050, S=None, n_fft=2048, hop_length=512, roll_
     threshold = roll_percent * total_energy
     rolloff_idx = np.argmax(cumulative_energy >= threshold[np.newaxis, :], axis=0)
     rolloff = freqs[rolloff_idx]
+    silent = total_energy < 1e-10
+    rolloff[silent] = np.nan
     return rolloff.reshape(1, -1)
 
 
@@ -311,19 +318,23 @@ def mfcc(y=None, sr=22050, S=None, n_mfcc=20, n_fft=2048, hop_length=512, n_mels
 def delta(data, width=9, order=1):
     if width < 3 or width % 2 == 0:
         width = max(3, width if width % 2 == 1 else width + 1)
-    half_width = width // 2
-    kernel = np.arange(-half_width, half_width + 1, dtype=np.float64)
-    kernel = kernel / np.sum(np.abs(kernel))
-    if data.ndim == 1:
-        padded = np.pad(data, half_width, mode='edge')
-        result = np.convolve(padded, kernel, mode='valid')[:len(data)]
-    else:
-        padded = np.pad(data, ((0, 0), (half_width, half_width)), mode='edge')
-        result = np.zeros_like(data)
-        for row in range(data.shape[0]):
-            result[row] = np.convolve(padded[row], kernel, mode='valid')[:data.shape[1]]
-    if order > 1:
-        return delta(result, width=width, order=order - 1)
+    order = max(0, int(order))
+    if order == 0:
+        return data.copy() if isinstance(data, np.ndarray) else data
+    result = np.array(data, dtype=np.float64, copy=True)
+    for _ in range(order):
+        half_width = width // 2
+        kernel = np.arange(-half_width, half_width + 1, dtype=np.float64)
+        kernel = kernel / np.sum(np.abs(kernel))
+        if result.ndim == 1:
+            padded = np.pad(result, half_width, mode='edge')
+            result = np.convolve(padded, kernel, mode='valid')[:len(result)]
+        else:
+            padded = np.pad(result, ((0, 0), (half_width, half_width)), mode='edge')
+            new_result = np.zeros_like(result)
+            for row in range(result.shape[0]):
+                new_result[row] = np.convolve(padded[row], kernel, mode='valid')[:result.shape[1]]
+            result = new_result
     return result
 
 
@@ -340,7 +351,10 @@ def rms(y=None, S=None, n_fft=2048, hop_length=512, frame_length=2048):
         return result.reshape(1, -1)
     elif S is not None:
         mag = np.abs(S)
+        total_energy = np.sum(mag ** 2, axis=0)
         result = np.sqrt(np.mean(mag ** 2, axis=0))
+        silent = total_energy < 1e-20
+        result[silent] = np.nan
         return result.reshape(1, -1)
     else:
         raise ValueError("Either y or S must be provided")
@@ -362,8 +376,11 @@ def chroma_stft(y=None, sr=22050, S=None, n_fft=2048, hop_length=512, n_chroma=1
         mask = pitch_class == pc
         if np.any(mask):
             chroma[pc] = np.sum(valid_mag[mask], axis=0)
-    chroma_max = np.max(chroma, axis=0, keepdims=True) + 1e-10
-    chroma = chroma / chroma_max
+    chroma_max = np.max(chroma, axis=0, keepdims=True)
+    silent = (chroma_max < 1e-10).squeeze(axis=0)
+    chroma_max_safe = np.maximum(chroma_max, 1e-10)
+    chroma = chroma / chroma_max_safe
+    chroma[:, silent] = np.nan
     return chroma
 
 
@@ -563,52 +580,13 @@ def frame(y, frame_length=2048, hop_length=512):
 
 
 def mel_frequencies(n_mels=128, fmin=0.0, fmax=11025.0):
-    """计算 mel 频率刻度"""
-    def hz_to_mel(hz):
-        return 2595.0 * np.log10(1.0 + hz / 700.0)
-
-    def mel_to_hz(mel):
-        return 700.0 * (10.0 ** (mel / 2595.0) - 1.0)
-
-    mel_min = hz_to_mel(fmin)
-    mel_max = hz_to_mel(fmax)
-    mels = np.linspace(mel_min, mel_max, n_mels)
-    return mel_to_hz(mels)
+    """计算 mel 频率刻度（n_mels+2 个点，与缓存版本一致）"""
+    return _mel_frequencies_cached(n_mels, fmin, fmax)
 
 
 def mel_filterbank(sr, n_fft, n_mels=128, fmin=0.0, fmax=None):
-    """构建 mel 滤波器组"""
-    if fmax is None:
-        fmax = sr / 2.0
-
-    freqs = fft_frequencies(sr=sr, n_fft=n_fft)
-    mel_freqs = mel_frequencies(n_mels=n_mels, fmin=fmin, fmax=fmax)
-
-    # 构建三角滤波器
-    weights = np.zeros((n_mels, len(freqs)))
-
-    for i in range(n_mels):
-        # 三角滤波器的三个点
-        if i == 0:
-            left = mel_freqs[0]
-        else:
-            left = mel_freqs[i - 1]
-
-        center = mel_freqs[i]
-
-        if i == n_mels - 1:
-            right = mel_freqs[-1]
-        else:
-            right = mel_freqs[i + 1]
-
-        # 上升沿
-        for j, f in enumerate(freqs):
-            if left < f <= center:
-                weights[i, j] = (f - left) / (center - left)
-            elif center < f < right:
-                weights[i, j] = (right - f) / (right - center)
-
-    return weights
+    """构建 mel 滤波器组（与 _mel_filterbank 缓存版本一致）"""
+    return _mel_filterbank(sr, n_fft, n_mels=n_mels, fmin=fmin, fmax=fmax)
 
 
 def mel_spectrogram(y=None, sr=22050, S=None, n_fft=2048, hop_length=512, n_mels=128, fmin=0.0, fmax=None):
