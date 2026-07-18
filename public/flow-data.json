@@ -232,10 +232,18 @@
       "filePath": "/workspace/src/pages/ProfileManagerPage.tsx",
       "children": [
         "src-components-Header",
+        "src-components-Toast",
         "src-utils-advancedAudioProcessing",
         "src-utils-settingsStorage",
         "src-services-backendApi"
       ]
+    },
+    {
+      "id": "src-components-Toast",
+      "label": "Toast",
+      "type": "component",
+      "layer": "frontend",
+      "filePath": "/workspace/src/components/Toast.tsx"
     },
     {
       "id": "src-utils-advancedAudioProcessing",
@@ -421,13 +429,6 @@
       "type": "component",
       "layer": "frontend",
       "filePath": "/workspace/src/components/StemProcessingPanel.tsx"
-    },
-    {
-      "id": "src-components-Toast",
-      "label": "Toast",
-      "type": "component",
-      "layer": "frontend",
-      "filePath": "/workspace/src/components/Toast.tsx"
     },
     {
       "id": "src-components-repair",
@@ -1456,6 +1457,12 @@
     },
     {
       "source": "src-pages-ProfileManagerPage",
+      "target": "src-components-Toast",
+      "label": "渲染",
+      "type": "renders"
+    },
+    {
+      "source": "src-pages-ProfileManagerPage",
       "target": "src-utils-advancedAudioProcessing",
       "label": "使用",
       "type": "import"
@@ -1685,6 +1692,12 @@
     {
       "source": "src-components-DownloadModal",
       "target": "src-services-backendApi",
+      "label": "导入",
+      "type": "import"
+    },
+    {
+      "source": "src-components-DownloadModal",
+      "target": "src-components-Toast",
       "label": "导入",
       "type": "import"
     },
