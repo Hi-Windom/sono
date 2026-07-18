@@ -312,21 +312,32 @@ async def render_audio_endpoint(request: RenderRequest):
         render_filename = f"{request.task_id}_rendered_{algo_ver}{speed_tag}_{request.sample_rate}_{request.bit_depth}{merge_suffix}.wav"
     render_path = os.path.join(OUTPUT_DIR, render_filename)
 
-    update_task(request.task_id, status="pending", step="渲染任务已提交，等待执行...", progress=0, error="")
+    from services.task_manager import RenderTask
+    from services.task_executor import get_task_executor
 
-    if not _track_task_start(request.task_id):
-        from services.task_manager import get_active_task_count, MAX_CONCURRENT_TASKS
-        active = get_active_task_count()
-        logger.warning(f"[render] 拒绝任务 task_id={request.task_id}: 系统繁忙 ({active}/{MAX_CONCURRENT_TASKS})")
-        update_task(request.task_id, status="error", error=f"系统繁忙（{active}/{MAX_CONCURRENT_TASKS} 任务运行中），请稍后重试", step="系统繁忙")
-        _track_task_end(request.task_id)
-        return {"task_id": request.task_id, "status": "error", "error": f"系统繁忙（{active}/{MAX_CONCURRENT_TASKS} 任务运行中），请稍后重试"}
-
-    from services.task_manager import _handle_future_exception
     if is_dual_track:
-        future = executor.submit(_run_render_dual, request.task_id, vocal_output_path, accompaniment_output_path, render_path, request.sample_rate, request.bit_depth, render_filename, request.merge, request.track_type)
+        render_task = RenderTask(
+            task_id=request.task_id,
+            input_path="",
+            output_path=render_path,
+            target_sr=request.sample_rate,
+            bit_depth=request.bit_depth,
+            render_filename=render_filename,
+            vocal_path=vocal_output_path,
+            accompaniment_path=accompaniment_output_path,
+            merge=request.merge,
+            track_type=request.track_type,
+        )
     else:
-        future = executor.submit(_run_render, request.task_id, output_path, render_path, request.sample_rate, request.bit_depth, render_filename)
-    future.add_done_callback(lambda f: _handle_future_exception(f, request.task_id, "render"))
+        render_task = RenderTask(
+            task_id=request.task_id,
+            input_path=output_path,
+            output_path=render_path,
+            target_sr=request.sample_rate,
+            bit_depth=request.bit_depth,
+            render_filename=render_filename,
+        )
+
+    get_task_executor().submit(render_task)
 
     return {"task_id": request.task_id, "status": "rendering"}

@@ -19,6 +19,7 @@ from services.audio_repair import ALGORITHM_VERSIONS, DEFAULT_VERSION, repair_au
 from services.memory_guard import get_available_memory_bytes
 from services.ws_manager import ws_manager
 from services.perf_metrics import get_perf_collector, perf_timer
+from services.task_base import BaseTask
 
 logger = logging.getLogger(__name__)
 
@@ -205,47 +206,17 @@ def generate_task_id() -> str:
 
 def submit_detect_task(task_id: str, audio_path: str, detect_type: str = "original", detector_version: str = "v1.1"):
     logger.info(f"[submit_detect_task] task_id={task_id} type={detect_type} version={detector_version}")
-    label = "修复后" if detect_type == "repaired" else "原始"
-    update_task(
-        task_id,
-        status="pending",
-        progress=0.0,
-        step=f"任务已提交，等待{label}检测...",
-        error="",
-        detection_result=None if detect_type == "original" else None,
-        repaired_detection_result=None if detect_type == "repaired" else None,
-    )
-    if not _track_task_start(task_id):
-        active = get_active_task_count()
-        logger.warning(f"[submit_detect_task] 拒绝任务 task_id={task_id}: 系统繁忙 ({active}/{MAX_CONCURRENT_TASKS})")
-        update_task(task_id, status="error", error=f"系统繁忙（{active}/{MAX_CONCURRENT_TASKS} 任务运行中），请稍后重试", step="系统繁忙")
-        _track_task_end(task_id)
-        return
-    future = executor.submit(_run_detect, task_id, audio_path, detect_type, detector_version)
-    future.add_done_callback(lambda f: _handle_future_exception(f, task_id, "detect"))
+    from services.task_executor import get_task_executor
+    task = DetectTask(task_id, audio_path, detect_type, detector_version)
+    get_task_executor().submit(task)
 
 
 def submit_repair_task(task_id: str, audio_path: str, params: dict[str, Any]) -> None:
     logger.info(f"[submit_repair_task] task_id={task_id} params_keys={list(params.keys())}")
-    update_task(
-        task_id,
-        params=params,
-        status="pending",
-        progress=0.0,
-        step="任务已提交，等待执行...",
-        error="",
-        repair_result=None,
-        render_filename=None,
-        render_result=None,
-    )
-    if not _track_task_start(task_id):
-        active = get_active_task_count()
-        logger.warning(f"[submit_repair_task] 拒绝任务 task_id={task_id}: 系统繁忙 ({active}/{MAX_CONCURRENT_TASKS})")
-        update_task(task_id, status="error", error=f"系统繁忙（{active}/{MAX_CONCURRENT_TASKS} 任务运行中），请稍后重试", step="系统繁忙")
-        _track_task_end(task_id)
-        return
-    future = executor.submit(_run_repair, task_id, audio_path, params, MOBILE_MODE)
-    future.add_done_callback(lambda f: _handle_future_exception(f, task_id, "repair"))
+    update_task(task_id, params=params)
+    from services.task_executor import get_task_executor
+    task = RepairTask(task_id, audio_path, params, MOBILE_MODE)
+    get_task_executor().submit(task)
 
 
 def _handle_future_exception(future: Future[Any], task_id: str, task_type: str) -> None:
@@ -552,3 +523,548 @@ def shutdown_executor():
     logger.info("关闭任务执行器...")
     executor.shutdown(wait=True)
     logger.info("任务执行器已关闭")
+
+
+class RepairTask(BaseTask):
+    def __init__(self, task_id: str, audio_path: str, params: dict[str, Any], mobile_mode: bool = False) -> None:
+        super().__init__(task_id)
+        self.audio_path = audio_path
+        self.params = params
+        self.mobile_mode = mobile_mode
+        self.algorithm_version = params.get("algorithm_version", DEFAULT_VERSION)
+        self._start_time = 0.0
+        self._size_samples = 0
+        self._perf_ended = False
+        self._stop_monitor = [False]
+        self._monitor_thread: threading.Thread | None = None
+        self._last_progress_time = [0.0]
+        self._last_progress = [-1.0]
+        self._is_stuck = [False]
+        self._perf_collector = get_perf_collector()
+
+    @property
+    def task_type(self) -> str:
+        return "repair"
+
+    @property
+    def initial_fields(self) -> dict[str, Any]:
+        return {
+            "error": "",
+            "repair_result": None,
+            "render_filename": None,
+            "render_result": None,
+        }
+
+    @property
+    def processing_status(self) -> str:
+        return "repairing"
+
+    @property
+    def completed_status(self) -> str:
+        return "completed"
+
+    @property
+    def initial_step(self) -> str:
+        return "任务已提交，等待执行..."
+
+    @property
+    def start_step(self) -> str:
+        return "开始修复..."
+
+    @property
+    def done_step(self) -> str:
+        elapsed = time.time() - self._start_time
+        return f"修复完成 ({elapsed:.1f}s)"
+
+    @property
+    def error_step(self) -> str:
+        elapsed = time.time() - self._start_time
+        return f"修复失败 ({elapsed:.1f}s)"
+
+    @property
+    def cancel_step(self) -> str:
+        elapsed = time.time() - self._start_time
+        return f"已取消 ({elapsed:.1f}s)"
+
+    def execute(self, progress_callback) -> dict[str, Any]:
+        self._start_time = time.time()
+        self._perf_collector.start_repair(self.task_id)
+
+        if self.mobile_mode:
+            version_info = ALGORITHM_VERSIONS.get(self.algorithm_version)
+            if version_info and not version_info.get("mobile_compatible", True):
+                error_msg = f"算法版本 {self.algorithm_version} 不支持移动端，请刷新页面后重试"
+                raise ValueError(error_msg)
+
+        logger.info(f"[RepairTask] 开始 task_id={self.task_id} version={self.algorithm_version}")
+
+        self._last_progress_time[0] = time.time()
+        self._start_stuck_monitor()
+
+        output_filename = f"{self.task_id}_repaired.wav"
+        output_path = os.path.join(OUTPUT_DIR, output_filename)
+
+        if not os.path.exists(self.audio_path):
+            raise FileNotFoundError(f"音频文件不存在: {self.audio_path}")
+
+        file_size = os.path.getsize(self.audio_path)
+        logger.info(f"[RepairTask] 音频文件 task_id={self.task_id} size={file_size/1024/1024:.2f}MB")
+
+        try:
+            from services.audio_loader import load_audio_with_fallback
+            y, sr = load_audio_with_fallback(self.audio_path, sr=None, mono=False)
+            self._size_samples = y.shape[1] if y.ndim > 1 else len(y)
+        except Exception as e:
+            logger.warning(f"[RepairTask] 预加载音频获取采样数失败 task_id={self.task_id}: {e}")
+            self._size_samples = 0
+
+        active_params = {k: v for k, v in self.params.items() if isinstance(v, (int, float)) and v > 0}
+        logger.info(f"[RepairTask] 参数 task_id={self.task_id} active_params={active_params}")
+
+        if "source_bit_depth" not in self.params:
+            try:
+                from services.audio_loader import load_audio_with_fallback
+                _, _, src_bd = load_audio_with_fallback(self.audio_path, sr=None, mono=False, return_bit_depth=True)
+                self.params["source_bit_depth"] = src_bd
+            except Exception:
+                self.params["source_bit_depth"] = 24
+
+        def wrapped_progress(p: float, s: str) -> None:
+            self._last_progress_time[0] = time.time()
+            self._last_progress[0] = p
+            if self._is_stuck[0]:
+                self._is_stuck[0] = False
+            progress_callback(p, s)
+
+        with perf_timer("repair_total"):
+            repair_result = repair_audio(
+                self.audio_path,
+                output_path,
+                self.params,
+                wrapped_progress,
+                mobile_mode=self.mobile_mode
+            )
+
+        if os.path.exists(output_path):
+            output_size = os.path.getsize(output_path)
+            logger.info(f"[RepairTask] 输出文件 task_id={self.task_id} size={output_size/1024/1024:.2f}MB")
+            waveform_peaks = _generate_waveform_peaks(output_path)
+            if waveform_peaks:
+                repair_result["waveform_peaks"] = waveform_peaks
+
+        if repair_result.get("vocal_output_path") and os.path.exists(repair_result["vocal_output_path"]):
+            vocal_task_id = self.params.get("vocal_task_id")
+            if vocal_task_id:
+                update_task(vocal_task_id, output_path=repair_result["vocal_output_path"], status="completed", progress=1)
+
+        if repair_result.get("accompaniment_output_path") and os.path.exists(repair_result["accompaniment_output_path"]):
+            accompaniment_task_id = self.params.get("accompaniment_task_id")
+            if accompaniment_task_id:
+                update_task(accompaniment_task_id, output_path=repair_result["accompaniment_output_path"], status="completed", progress=1)
+
+        perf_data = self._perf_collector.end_repair(self.task_id, self._size_samples, self.algorithm_version)
+        self._perf_ended = True
+        repair_result["perf_data"] = perf_data
+
+        elapsed = time.time() - self._start_time
+        logger.info(f"[RepairTask] 完成 task_id={self.task_id} elapsed={elapsed:.1f}s issues={repair_result.get('issues_found', [])}")
+
+        return repair_result
+
+    def on_success(self, result: dict[str, Any]) -> dict[str, Any]:
+        output_filename = f"{self.task_id}_repaired.wav"
+        output_path = os.path.join(OUTPUT_DIR, output_filename)
+        return {
+            "output_path": output_path if os.path.exists(output_path) else None,
+            "repair_result": result,
+        }
+
+    def on_error(self, error: Exception) -> dict[str, Any] | None:
+        if isinstance(error, MemoryError):
+            return {
+                "error": str(error)[:500],
+                "step": f"内存不足 ({time.time() - self._start_time:.1f}s)",
+            }
+        return None
+
+    def _start_stuck_monitor(self) -> None:
+        def monitor_stuck():
+            while not self._stop_monitor[0]:
+                time.sleep(2)
+                if self._stop_monitor[0]:
+                    break
+                elapsed = time.time() - self._last_progress_time[0]
+                if elapsed > STUCK_THRESHOLD and not self._is_stuck[0]:
+                    self._is_stuck[0] = True
+                    logger.warning(f"[RepairTask] 任务疑似卡住 task_id={self.task_id} elapsed={elapsed:.1f}s")
+                    _ws_send_progress(self.task_id, {
+                        "task_id": self.task_id,
+                        "status": "repairing",
+                        "progress": self._last_progress[0],
+                        "step": "任务疑似卡住，请重试",
+                        "stuck": True,
+                        "stuck_duration": elapsed,
+                    })
+
+        self._monitor_thread = threading.Thread(target=monitor_stuck, daemon=True)
+        self._monitor_thread.start()
+
+    def cleanup(self) -> None:
+        self._stop_monitor[0] = True
+        if not self._perf_ended:
+            try:
+                self._perf_collector.end_repair(self.task_id, self._size_samples, self.algorithm_version)
+            except Exception as e:
+                logger.warning(f"[RepairTask] perf_collector.end_repair 失败 task_id={self.task_id}: {e}")
+
+
+class DetectTask(BaseTask):
+    def __init__(self, task_id: str, audio_path: str, detect_type: str = "original", detector_version: str = "v1.1") -> None:
+        super().__init__(task_id)
+        self.audio_path = audio_path
+        self.detect_type = detect_type
+        self.detector_version = detector_version
+        self._start_time = 0.0
+        self._prev_status = "pending"
+        self._stop_monitor = [False]
+        self._monitor_thread: threading.Thread | None = None
+        self._last_progress_time = [0.0]
+        self._last_progress = [-1.0]
+        self._is_stuck = [False]
+
+    @property
+    def task_type(self) -> str:
+        return "detect"
+
+    @property
+    def initial_fields(self) -> dict[str, Any]:
+        fields = {"error": ""}
+        if self.detect_type == "original":
+            fields["detection_result"] = None
+        elif self.detect_type == "repaired":
+            fields["repaired_detection_result"] = None
+        return fields
+
+    @property
+    def processing_status(self) -> str:
+        return "detecting"
+
+    @property
+    def completed_status(self) -> str:
+        return "completed" if self._prev_status == "completed" else "detected"
+
+    @property
+    def label(self) -> str:
+        return "修复后" if self.detect_type == "repaired" else "原始"
+
+    @property
+    def initial_step(self) -> str:
+        return f"任务已提交，等待{self.label}检测..."
+
+    @property
+    def start_step(self) -> str:
+        return f"开始{self.label}检测..."
+
+    @property
+    def done_step(self) -> str:
+        elapsed = time.time() - self._start_time
+        return f"{self.label}检测完成 ({elapsed:.1f}s)"
+
+    @property
+    def error_step(self) -> str:
+        elapsed = time.time() - self._start_time
+        return f"检测失败 ({elapsed:.1f}s)"
+
+    @property
+    def cancel_step(self) -> str:
+        elapsed = time.time() - self._start_time
+        return f"已取消 ({elapsed:.1f}s)"
+
+    def execute(self, progress_callback) -> dict[str, Any]:
+        self._start_time = time.time()
+        logger.info(f"[DetectTask] 开始 task_id={self.task_id} type={self.detect_type} version={self.detector_version}")
+
+        prev_task = get_task(self.task_id)
+        self._prev_status = prev_task["status"] if prev_task else "pending"
+
+        self._last_progress_time[0] = time.time()
+        self._start_stuck_monitor()
+
+        params: dict[str, Any] = (prev_task.get("params") if prev_task else None) or {}
+        processing_mode = params.get("processing_mode", "single")
+        if processing_mode == "dual":
+            vocal_path = params.get("vocal_path", "")
+            accompaniment_path = params.get("accompaniment_path", "")
+            if vocal_path and not os.path.exists(vocal_path):
+                raise FileNotFoundError(f"人声音频不存在: {vocal_path}")
+            if accompaniment_path and not os.path.exists(accompaniment_path):
+                raise FileNotFoundError(f"伴奏音频不存在: {accompaniment_path}")
+            self.audio_path = vocal_path
+        else:
+            if not os.path.exists(self.audio_path):
+                raise FileNotFoundError(f"音频文件不存在: {self.audio_path}")
+
+        file_size = os.path.getsize(self.audio_path)
+        logger.info(f"[DetectTask] 音频文件 task_id={self.task_id} size={file_size/1024/1024:.2f}MB")
+
+        def wrapped_progress(p: float, s: str) -> None:
+            self._last_progress_time[0] = time.time()
+            self._last_progress[0] = p
+            if self._is_stuck[0]:
+                self._is_stuck[0] = False
+            progress_callback(p, s)
+
+        result = detect_ai_audio(self.audio_path, wrapped_progress, version=self.detector_version)
+        result["detect_type"] = self.detect_type
+        result["detector_version"] = self.detector_version
+
+        elapsed = time.time() - self._start_time
+        logger.info(f"[DetectTask] 完成 task_id={self.task_id} elapsed={elapsed:.1f}s")
+
+        return result
+
+    def on_success(self, result: dict[str, Any]) -> dict[str, Any]:
+        if self.detect_type == "repaired":
+            return {"repaired_detection_result": result}
+        else:
+            return {"detection_result": result}
+
+    def _start_stuck_monitor(self) -> None:
+        def monitor_stuck():
+            while not self._stop_monitor[0]:
+                time.sleep(2)
+                if self._stop_monitor[0]:
+                    break
+                elapsed = time.time() - self._last_progress_time[0]
+                if elapsed > STUCK_THRESHOLD and not self._is_stuck[0]:
+                    self._is_stuck[0] = True
+                    logger.warning(f"[DetectTask] 任务疑似卡住 task_id={self.task_id} elapsed={elapsed:.1f}s")
+                    _ws_send_progress(self.task_id, {
+                        "task_id": self.task_id,
+                        "status": "detecting",
+                        "progress": self._last_progress[0],
+                        "step": "任务疑似卡住，请重试",
+                        "stuck": True,
+                        "stuck_duration": elapsed,
+                    })
+
+        self._monitor_thread = threading.Thread(target=monitor_stuck, daemon=True)
+        self._monitor_thread.start()
+
+    def cleanup(self) -> None:
+        self._stop_monitor[0] = True
+
+
+class RenderTask(BaseTask):
+    def __init__(
+        self,
+        task_id: str,
+        input_path: str,
+        output_path: str,
+        target_sr: int,
+        bit_depth: int,
+        render_filename: str,
+        vocal_path: str | None = None,
+        accompaniment_path: str | None = None,
+        merge: bool = False,
+        track_type: str = "both",
+    ) -> None:
+        super().__init__(task_id)
+        self.input_path = input_path
+        self.output_path = output_path
+        self.target_sr = target_sr
+        self.bit_depth = bit_depth
+        self.render_filename = render_filename
+        self.vocal_path = vocal_path
+        self.accompaniment_path = accompaniment_path
+        self.merge = merge
+        self.track_type = track_type
+        self._is_dual = vocal_path is not None and accompaniment_path is not None
+        self._vocal_rendered = False
+        self._accompaniment_rendered = False
+        self._vocal_render_filename: str | None = None
+        self._accompaniment_render_filename: str | None = None
+
+    @property
+    def task_type(self) -> str:
+        return "render"
+
+    @property
+    def initial_fields(self) -> dict[str, Any]:
+        return {
+            "error": "",
+            "render_result": None,
+            "render_filename": None,
+        }
+
+    @property
+    def processing_status(self) -> str:
+        return "rendering"
+
+    @property
+    def completed_status(self) -> str:
+        return "render_completed"
+
+    @property
+    def start_step(self) -> str:
+        return "开始渲染..."
+
+    @property
+    def done_step(self) -> str:
+        return "渲染完成"
+
+    @property
+    def error_step(self) -> str:
+        return "渲染失败"
+
+    def execute(self, progress_callback) -> dict[str, Any]:
+        if self._is_dual:
+            return self._execute_dual(progress_callback)
+        else:
+            return self._execute_single(progress_callback)
+
+    def _execute_single(self, progress_callback) -> dict[str, Any]:
+        from services.render import render_output
+        from services.audio_loader import load_audio_with_fallback
+
+        source_bit_depth = None
+        try:
+            _, _, src_bd = load_audio_with_fallback(self.input_path, sr=None, mono=False, return_bit_depth=True)
+            source_bit_depth = src_bd
+        except Exception:
+            pass
+
+        result = render_output(
+            self.input_path,
+            self.output_path,
+            self.target_sr,
+            self.bit_depth,
+            progress_callback=progress_callback,
+            source_bit_depth=source_bit_depth,
+        )
+        return result
+
+    def _execute_dual(self, progress_callback) -> dict[str, Any]:
+        import numpy as np
+        import soundfile as sf
+        from services.render import render_output
+        from services.audio_loader import load_audio_with_fallback
+
+        if self.track_type == "vocal":
+            progress_callback(0.2, "渲染人声轨...")
+            source_bit_depth = self._get_source_bit_depth(self.vocal_path)
+            result = render_output(
+                self.vocal_path,
+                self.output_path,
+                self.target_sr,
+                self.bit_depth,
+                progress_callback=progress_callback,
+                source_bit_depth=source_bit_depth,
+            )
+            return result
+        elif self.track_type == "accompaniment":
+            progress_callback(0.2, "渲染伴奏轨...")
+            source_bit_depth = self._get_source_bit_depth(self.accompaniment_path)
+            result = render_output(
+                self.accompaniment_path,
+                self.output_path,
+                self.target_sr,
+                self.bit_depth,
+                progress_callback=progress_callback,
+                source_bit_depth=source_bit_depth,
+            )
+            return result
+
+        progress_callback(0.1, "加载人声轨...")
+        vocal_y, vocal_sr = load_audio_with_fallback(self.vocal_path, sr=None, mono=False)
+        progress_callback(0.2, "加载伴奏轨...")
+        accompaniment_y, accompaniment_sr = load_audio_with_fallback(self.accompaniment_path, sr=None, mono=False)
+
+        progress_callback(0.3, "混音...")
+        max_len = max(vocal_y.shape[1], accompaniment_y.shape[1])
+        if vocal_y.shape[1] < max_len:
+            vocal_y = np.pad(vocal_y, ((0, 0), (0, max_len - vocal_y.shape[1])), mode='constant')
+        if accompaniment_y.shape[1] < max_len:
+            accompaniment_y = np.pad(accompaniment_y, ((0, 0), (0, max_len - accompaniment_y.shape[1])), mode='constant')
+
+        mixed = (vocal_y + accompaniment_y) / 2
+
+        progress_callback(0.5, "渲染输出...")
+        mixed = np.clip(mixed, -1.0, 1.0)
+        if vocal_sr != self.target_sr:
+            from scipy.signal import resample_poly
+            target_len = int(mixed.shape[1] * self.target_sr / vocal_sr)
+            mixed_resampled = np.zeros((mixed.shape[0], target_len), dtype=mixed.dtype)
+            for ch in range(mixed.shape[0]):
+                resampled = resample_poly(mixed[ch], self.target_sr, vocal_sr)
+                mixed_resampled[ch, :len(resampled)] = resampled[:target_len]
+            mixed = mixed_resampled
+        subtype_map = {16: "PCM_16", 24: "PCM_24", 32: "PCM_32"}
+        subtype = subtype_map.get(self.bit_depth, "PCM_24")
+        sf.write(self.output_path, mixed.T if mixed.ndim > 1 else mixed, self.target_sr, subtype=subtype)
+
+        result = {
+            "input_sample_rate": vocal_sr,
+            "output_sample_rate": self.target_sr,
+            "output_bit_depth": self.bit_depth,
+            "channels": mixed.shape[0] if mixed.ndim > 1 else 1,
+        }
+
+        base_name = self.render_filename.rsplit(".", 1)[0]
+        if base_name.endswith("_merged"):
+            base_name = base_name[:-7]
+
+        progress_callback(0.6, "渲染人声独立轨...")
+        self._vocal_render_filename = f"{base_name}_vocal.wav"
+        vocal_render_path = os.path.join(os.path.dirname(self.output_path), self._vocal_render_filename)
+        vocal_source_bit_depth = self._get_source_bit_depth(self.vocal_path)
+        try:
+            render_output(self.vocal_path, vocal_render_path, self.target_sr, self.bit_depth, progress_callback=progress_callback, source_bit_depth=vocal_source_bit_depth)
+            self._vocal_rendered = True
+            logger.info(f"[RenderTask] 人声独立轨渲染完成: {self._vocal_render_filename}")
+        except Exception as e:
+            logger.warning(f"[RenderTask] 人声独立轨渲染失败: {e}")
+
+        progress_callback(0.8, "渲染伴奏独立轨...")
+        self._accompaniment_render_filename = f"{base_name}_accompaniment.wav"
+        accompaniment_render_path = os.path.join(os.path.dirname(self.output_path), self._accompaniment_render_filename)
+        accompaniment_source_bit_depth = self._get_source_bit_depth(self.accompaniment_path)
+        try:
+            render_output(self.accompaniment_path, accompaniment_render_path, self.target_sr, self.bit_depth, progress_callback=progress_callback, source_bit_depth=accompaniment_source_bit_depth)
+            self._accompaniment_rendered = True
+            logger.info(f"[RenderTask] 伴奏独立轨渲染完成: {self._accompaniment_render_filename}")
+        except Exception as e:
+            logger.warning(f"[RenderTask] 伴奏独立轨渲染失败: {e}")
+
+        progress_callback(0.9, "完成")
+        return result
+
+    def _get_source_bit_depth(self, path: str) -> int | None:
+        try:
+            from services.audio_loader import load_audio_with_fallback
+            _, _, src_bd = load_audio_with_fallback(path, sr=None, mono=False, return_bit_depth=True)
+            return src_bd
+        except Exception:
+            return None
+
+    def on_success(self, result: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "render_filename": self.render_filename,
+            "render_result": result,
+        }
+
+    def cleanup(self) -> None:
+        from services.ws_manager import ws_manager
+        files = [{"filename": self.render_filename, "sample_rate": self.target_sr, "bit_depth": self.bit_depth, "track_type": "both"}]
+        if self._vocal_rendered and self._vocal_render_filename:
+            files.append({"filename": self._vocal_render_filename, "sample_rate": self.target_sr, "bit_depth": self.bit_depth, "track_type": "vocal"})
+        if self._accompaniment_rendered and self._accompaniment_render_filename:
+            files.append({"filename": self._accompaniment_render_filename, "sample_rate": self.target_sr, "bit_depth": self.bit_depth, "track_type": "accompaniment"})
+        try:
+            loop = asyncio.get_event_loop()
+            asyncio.run_coroutine_threadsafe(
+                ws_manager.broadcast_render_cache_update(self.task_id, files),
+                loop
+            )
+        except Exception:
+            pass
