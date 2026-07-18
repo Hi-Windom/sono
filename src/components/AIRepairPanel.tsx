@@ -55,8 +55,6 @@ interface AIRepairPanelProps {
   persistedRenderCaches?: RenderCacheEntry[];
   /** v4.0+ 分析驱动管线修复后回传的信号诊断画像（无则不展示）。 */
   repairProfile?: SignalProfile | null;
-  /** 输出音量控制 (dB) */
-  outputVolume?: number;
 }
 
 const sampleRateOptions = [
@@ -146,8 +144,8 @@ export function AIRepairPanel({
   dualTrackAccompanimentInfo,
   persistedRenderCaches,
   repairProfile,
-  outputVolume = 0,
 }: AIRepairPanelProps) {
+  const outputVolume = processingOptions.outputVolume ?? 0;
   const effectiveDuration = useMemo(() => {
     if (isDualTrackMode && dualTrackVocalInfo && dualTrackAccompanimentInfo) {
       return Math.max(dualTrackVocalInfo.duration, dualTrackAccompanimentInfo.duration);

@@ -76,9 +76,7 @@ async def memory_info(request: MemoryInfoRequest):
         }
     available = get_available_memory_bytes()
     n_samples = int(request.duration * request.sample_rate)
-    if request.algorithm_version == "v1.2":
-        working_sr = 96000
-    elif request.algorithm_version in ("v1.0", "v1.1", "v2.2a"):
+    if request.algorithm_version == "v2.2a":
         working_sr = request.sample_rate
     elif request.algorithm_version == "v2.3a":
         working_sr = 48000

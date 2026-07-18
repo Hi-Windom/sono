@@ -81,8 +81,6 @@ def estimate_repair_memory_bytes(n_samples, n_channels, sr, working_sr, algorith
     elif algorithm_version == "v4.0a+":
         # 两遍验证（多一遍画像）+ 前视压缩器多组全长缓冲，约 1.6× 音频体积的临时量
         peak_temp += upsampled_samples * elem_size * 1.6
-    elif algorithm_version in ("v1.0", "v1.1", "v1.2"):
-        peak_temp += upsampled_samples * elem_size * 0.3
     elif algorithm_version in ("v2.0", "v2.1"):
         peak_temp += upsampled_samples * elem_size * 0.2
 
