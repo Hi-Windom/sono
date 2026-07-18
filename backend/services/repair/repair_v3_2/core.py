@@ -229,14 +229,14 @@ def _diff_clamp_depop(y, sr, amount):
     return y
 
 
-def soft_peak_limit(y, threshold=0.9):
+def _soft_peak_limit(y, threshold=0.9):
     """软峰值限制器（tanh 软拐点），确保输出严格 ≤ 1.0 防止 PCM 硬削波。"""
     abs_max = np.max(np.abs(y))
     if abs_max <= threshold:
         return np.clip(y, -1.0, 1.0)
     if y.ndim == 1:
         y = y.reshape(1, -1)
-        soft_peak_limit(y, threshold)
+        _soft_peak_limit(y, threshold)
         return np.clip(y[0], -1.0, 1.0)
     for ch in range(y.shape[0]):
         abs_data = np.abs(y[ch])

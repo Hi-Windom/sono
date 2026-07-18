@@ -145,14 +145,14 @@ def _get_loop():
 def _ws_send_progress(task_id: str, data: dict[str, Any]) -> None:
     try:
         asyncio.run_coroutine_threadsafe(ws_manager.send_progress(task_id, data), _get_loop())
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"[_ws_send_progress] 发送进度消息失败: {e}")
 
 def _ws_send_final(task_id: str, data: dict[str, Any]) -> None:
     try:
         asyncio.run_coroutine_threadsafe(ws_manager.send_final(task_id, data), _get_loop())
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"[_ws_send_final] 发送最终消息失败: {e}")
 
 executor = ThreadPoolExecutor(max_workers=MAX_WORKERS)
 
@@ -389,8 +389,9 @@ def _run_repair(task_id: str, audio_path: str, params: dict[str, Any], mobile_mo
             from services.audio_loader import load_audio_with_fallback
             y, sr = load_audio_with_fallback(audio_path, sr=None, mono=False)
             size_samples = y.shape[1] if y.ndim > 1 else len(y)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"[repair] 预加载音频获取采样数失败 task_id={task_id}: {e}")
+            size_samples = 0
 
         active_params = {k: v for k, v in params.items() if isinstance(v, (int, float)) and v > 0}
         logger.info(f"[repair] 参数 task_id={task_id} active_params={active_params}")
@@ -481,8 +482,8 @@ def _run_repair(task_id: str, audio_path: str, params: dict[str, Any], mobile_mo
         if not perf_ended:
             try:
                 perf_collector.end_repair(task_id, size_samples, algorithm_version)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"[repair] perf_collector.end_repair 失败 task_id={task_id}: {e}")
         _track_task_end(task_id)
 
 
