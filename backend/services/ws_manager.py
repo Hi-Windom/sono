@@ -13,14 +13,7 @@ class ProgressWSManager:
         self._connections: dict[str, list[WebSocket]] = {}
 
     async def connect(self, task_id: str, websocket: WebSocket) -> None:
-        if task_id in self._connections:
-            for old_ws in self._connections[task_id]:
-                try:
-                    await old_ws.close()
-                except Exception:
-                    pass
-            self._connections[task_id].clear()
-        else:
+        if task_id not in self._connections:
             self._connections[task_id] = []
         self._connections[task_id].append(websocket)
 

@@ -284,7 +284,14 @@ export function useAudioDecoder({
     (async () => {
       try {
         writeLog(`[loadAudioFile] 后台上传开始...`);
-        const uploadRes = await uploadAudio(file, undefined, hash);
+        setProcessingStep('上传中...');
+        setIsProcessing(true);
+        const uploadRes = await uploadAudio(file, (loaded, total, speed) => {
+          if (seq !== loadAudioSeqRef.current) return;
+          const pct = total > 0 ? loaded / total : 0;
+          setProcessingProgress(0.9 + pct * 0.1);
+          setProcessingStep(`上传中 ${formatBytes(loaded)}/${formatBytes(total)} ${formatSpeed(speed)}`);
+        }, hash);
         if (seq !== loadAudioSeqRef.current) return;
 
         const newTaskId = uploadRes.task_id;
@@ -343,6 +350,9 @@ export function useAudioDecoder({
         pendingSessionRef.current = null;
         sessionRestoredRef.current = true;
         writeLog(`[loadAudioFile] 新文件上传完成，阻止旧会话恢复`);
+        setIsProcessing(false);
+        setProcessingStep('');
+        setProcessingProgress(0);
       } catch (err) {
         console.warn('[loadAudioFile] 上传失败:', err);
         setBackendAvailable(false);
