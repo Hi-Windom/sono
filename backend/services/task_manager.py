@@ -300,6 +300,8 @@ def _handle_future_exception(future: Future[Any], task_id: str, task_type: str) 
 
 def _run_detect(task_id: str, audio_path: str, detect_type: str, detector_version: str) -> None:
     start_time = time.time()
+    perf_collector = get_perf_collector()
+    perf_ended = False
     logger.info(f"[detect] 开始 task_id={task_id} type={detect_type} version={detector_version}")
 
     with _cancelled_lock:
@@ -309,6 +311,8 @@ def _run_detect(task_id: str, audio_path: str, detect_type: str, detector_versio
             _cancel_expiry.pop(task_id, None)
             _track_task_end(task_id)
             return
+
+    perf_collector.start_detect(task_id)
 
     last_progress_time = [time.time()]
     last_progress = [-1.0]
@@ -377,6 +381,10 @@ def _run_detect(task_id: str, audio_path: str, detect_type: str, detector_versio
         result["detect_type"] = detect_type
         result["detector_version"] = detector_version
 
+        perf_data = perf_collector.end_detect(task_id, detector_version)
+        perf_ended = True
+        result["perf_data"] = perf_data
+
         elapsed = time.time() - start_time
         final_status = "completed" if prev_status == "completed" else "detected"
 
@@ -402,6 +410,11 @@ def _run_detect(task_id: str, audio_path: str, detect_type: str, detector_versio
         raise
     finally:
         stop_monitor.set()
+        if not perf_ended:
+            try:
+                perf_collector.end_detect(task_id, detector_version)
+            except Exception as e:
+                logger.warning(f"[detect] perf_collector.end_detect 失败 task_id={task_id}: {e}")
         _track_task_end(task_id)
         with _cancelled_lock:
             _cancelled_tasks.discard(task_id)

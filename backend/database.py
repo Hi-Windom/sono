@@ -45,7 +45,14 @@ def get_db() -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA busy_timeout=30000")
+    conn.execute("PRAGMA wal_autocheckpoint=1000")
     return conn
+
+
+def checkpoint_db(mode: str = "PASSIVE") -> None:
+    with closing(get_db()) as conn:
+        conn.execute(f"PRAGMA wal_checkpoint({mode})")
+        conn.commit()
 
 
 def _get_schema_version(conn: sqlite3.Connection) -> int:
@@ -135,26 +142,17 @@ def cleanup_stale_tasks() -> int:
         conn.execute("BEGIN IMMEDIATE")
         stale_statuses = ('pending', 'processing', 'detecting', 'analyzing', 'repairing', 'rendering')
         cursor = conn.execute(
-            "SELECT id, status, original_filename FROM tasks WHERE status IN ({})".format(
-                ','.join('?' * len(stale_statuses))
-            ),
-            stale_statuses,
-        )
-        stale_tasks = cursor.fetchall()
-        for row in stale_tasks:
-            logger.info(
-                f"[cleanup_stale_tasks] 标记停滞任务为失败: id={row['id']} "
-                f"status={row['status']} filename={row['original_filename']}"
-            )
-        cursor = conn.execute(
             "UPDATE tasks SET status = 'error', error = '服务器重启，任务中断', progress = 0, "
             "step = '任务已中断', updated_at = CURRENT_TIMESTAMP WHERE status IN ({})".format(
                 ','.join('?' * len(stale_statuses))
             ),
             stale_statuses,
         )
+        count = cursor.rowcount
+        if count > 0:
+            logger.info(f"[cleanup_stale_tasks] 标记 {count} 个停滞任务为失败")
         conn.commit()
-        return cursor.rowcount
+        return count
     except Exception:
         conn.rollback()
         raise
@@ -240,158 +238,107 @@ def find_task_by_hash(file_hash: str) -> TaskDict | None:
 def find_repair_cache(file_hash: str, params: dict) -> TaskDict | None:
     import logging
     logger = logging.getLogger(__name__)
-    
+
+    where_clauses = [
+        "file_hash = ?",
+        "status = 'completed'",
+        "output_path != ''",
+        "json_extract(params, '$.processing_mode') != 'dual' OR json_extract(params, '$.processing_mode') IS NULL"
+    ]
+    query_values: list[Any] = [file_hash]
+
+    for key in sorted(SINGLE_REPAIR_PARAM_KEYS):
+        if key in params:
+            where_clauses.append(f"json_extract(params, '$.{key}') = json(?)")
+            query_values.append(json.dumps(params[key], ensure_ascii=False))
+
+    sql = (
+        "SELECT * FROM tasks WHERE "
+        + " AND ".join(where_clauses)
+        + " ORDER BY updated_at DESC LIMIT 1"
+    )
+
     with closing(get_db()) as conn:
-        rows = conn.execute(
-            "SELECT * FROM tasks WHERE file_hash = ? AND status = 'completed' AND output_path != '' ORDER BY updated_at DESC",
-            (file_hash,),
-        ).fetchall()
-    logger.info(f"[cache-lookup] hash={file_hash} found {len(rows)} total tasks")
-    
-    params_json = json.dumps(params, sort_keys=True, ensure_ascii=False)
-    logger.info(f"[cache-lookup] input_params={params_json}")
-    
-    for i, row in enumerate(rows):
-        result: TaskDict = dict(row)
-        output_path = result.get("output_path")
-        task_id = result.get("id", "?")
-        task_status = result.get("status", "?")
-        
-        if not output_path:
-            logger.info(f"[cache-lookup] task#{i} id={task_id} status={task_status} SKIP: no output_path")
-            continue
-        if not os.path.exists(output_path):
-            logger.info(f"[cache-lookup] task#{i} id={task_id} status={task_status} SKIP: file not exists path={output_path}")
-            continue
-        try:
-            size = os.path.getsize(output_path)
-        except OSError as e:
-            logger.info(f"[cache-lookup] task#{i} id={task_id} status={task_status} SKIP: getsize error {e}")
-            continue
-        if size < 10240:
-            logger.info(f"[cache-lookup] task#{i} id={task_id} status={task_status} SKIP: too small {size}B")
-            continue
-        
-        stored_params = result.get("params")
-        if stored_params and isinstance(stored_params, str):
-            try:
-                parsed = json.loads(stored_params)
-            except (json.JSONDecodeError, TypeError) as e:
-                logger.info(f"[cache-lookup] task#{i} id={task_id} status={task_status} SKIP: json parse error {e}")
-                continue
-        elif isinstance(stored_params, dict):
-            parsed = stored_params
-        else:
-            logger.info(f"[cache-lookup] task#{i} id={task_id} status={task_status} SKIP: params type={type(stored_params)} value={stored_params}")
-            continue
-        
-        stored_json = json.dumps(parsed, sort_keys=True, ensure_ascii=False)
+        row = conn.execute(sql, query_values).fetchone()
 
-        # 单轨缓存请求不应匹配双轨任务
-        if parsed.get("processing_mode") == "dual":
-            logger.info(f"[cache-lookup] task#{i} id={task_id} status={task_status} SKIP: dual mode")
-            continue
+    if row is None:
+        logger.info(f"[cache-lookup] ❌ NO MATCH for hash={file_hash}")
+        return None
 
-        stored_subset = {k: v for k, v in parsed.items() if k in SINGLE_REPAIR_PARAM_KEYS}
-        input_subset = {k: v for k, v in params.items() if k in SINGLE_REPAIR_PARAM_KEYS}
-        common_keys = stored_subset.keys() & input_subset.keys()
-        if not common_keys:
-            logger.info(f"[cache-lookup] task#{i} id={task_id} status={task_status} EMPTY_INTERSECTION stored_keys={sorted(stored_subset.keys())} input_keys={sorted(input_subset.keys())}")
-        if common_keys and all(stored_subset[k] == input_subset[k] for k in common_keys):
-            logger.info(f"[cache-lookup] ✅ MATCH task#{i} id={task_id} status={task_status} size={size} keys={sorted(common_keys)}")
-            result["output_size"] = size
-            _parse_json_fields(result)
-            return result
-        else:
-            logger.info(f"[cache-lookup] task#{i} id={task_id} status={task_status} MISMATCH stored_keys={sorted(stored_subset.keys())} input_keys={sorted(input_subset.keys())}")
-    
-    logger.info(f"[cache-lookup] ❌ NO MATCH for hash={file_hash}")
-    return None
+    result: TaskDict = dict(row)
+    output_path = result.get("output_path")
+
+    if not output_path or not os.path.exists(output_path):
+        logger.info(f"[cache-lookup] hash={file_hash} SKIP: output_path not found")
+        return None
+
+    try:
+        size = os.path.getsize(output_path)
+    except OSError as e:
+        logger.info(f"[cache-lookup] hash={file_hash} SKIP: getsize error {e}")
+        return None
+
+    if size < 10240:
+        logger.info(f"[cache-lookup] hash={file_hash} SKIP: too small {size}B")
+        return None
+
+    logger.info(f"[cache-lookup] ✅ MATCH id={result.get('id')} size={size}")
+    result["output_size"] = size
+    _parse_json_fields(result)
+    return result
 
 def find_dual_repair_cache(vocal_file_hash: str, accompaniment_file_hash: str, params: dict) -> TaskDict | None:
     import logging
     logger = logging.getLogger(__name__)
 
+    where_clauses = [
+        "json_extract(params, '$.processing_mode') = 'dual'",
+        "status = 'completed'",
+        "output_path != ''",
+        "json_extract(params, '$.vocal_file_hash') = ?",
+        "json_extract(params, '$.accompaniment_file_hash') = ?"
+    ]
+    query_values: list[Any] = [vocal_file_hash, accompaniment_file_hash]
+
+    for key in sorted(DUAL_REPAIR_PARAM_KEYS):
+        if key in params:
+            where_clauses.append(f"json_extract(params, '$.{key}') = json(?)")
+            query_values.append(json.dumps(params[key], ensure_ascii=False))
+
+    sql = (
+        "SELECT * FROM tasks WHERE "
+        + " AND ".join(where_clauses)
+        + " ORDER BY updated_at DESC LIMIT 1"
+    )
+
     with closing(get_db()) as conn:
-        rows = conn.execute(
-            "SELECT * FROM tasks WHERE json_extract(params, '$.processing_mode') = 'dual' AND status = 'completed' AND output_path != '' ORDER BY updated_at DESC"
-        ).fetchall()
-    logger.info(f"[cache-lookup-dual] vocal_hash={vocal_file_hash} acc_hash={accompaniment_file_hash} found {len(rows)} dual tasks")
+        row = conn.execute(sql, query_values).fetchone()
 
-    params_json = json.dumps(params, sort_keys=True, ensure_ascii=False)
-    logger.info(f"[cache-lookup-dual] input_params={params_json}")
+    if row is None:
+        logger.info(f"[cache-lookup-dual] NO MATCH for vocal_hash={vocal_file_hash} acc_hash={accompaniment_file_hash}")
+        return None
 
-    for i, row in enumerate(rows):
-        result: TaskDict = dict(row)
-        output_path = result.get("output_path")
-        task_id = result.get("id", "?")
-        task_status = result.get("status", "?")
+    result: TaskDict = dict(row)
+    output_path = result.get("output_path")
 
-        if not output_path:
-            logger.info(f"[cache-lookup-dual] task#{i} id={task_id} status={task_status} SKIP: no output_path")
-            continue
-        if not os.path.exists(output_path):
-            logger.info(f"[cache-lookup-dual] task#{i} id={task_id} status={task_status} SKIP: file not exists path={output_path}")
-            continue
-        try:
-            size = os.path.getsize(output_path)
-        except OSError as e:
-            logger.info(f"[cache-lookup-dual] task#{i} id={task_id} status={task_status} SKIP: getsize error {e}")
-            continue
-        if size < 10240:
-            logger.info(f"[cache-lookup-dual] task#{i} id={task_id} status={task_status} SKIP: too small {size}B")
-            continue
+    if not output_path or not os.path.exists(output_path):
+        logger.info(f"[cache-lookup-dual] vocal_hash={vocal_file_hash} SKIP: output_path not found")
+        return None
 
-        stored_params = result.get("params")
-        if stored_params and isinstance(stored_params, str):
-            try:
-                parsed = json.loads(stored_params)
-            except (json.JSONDecodeError, TypeError) as e:
-                logger.info(f"[cache-lookup-dual] task#{i} id={task_id} status={task_status} SKIP: json parse error {e}")
-                continue
-        elif isinstance(stored_params, dict):
-            parsed = stored_params
-        else:
-            logger.info(f"[cache-lookup-dual] task#{i} id={task_id} status={task_status} SKIP: params type={type(stored_params)}")
-            continue
+    try:
+        size = os.path.getsize(output_path)
+    except OSError as e:
+        logger.info(f"[cache-lookup-dual] vocal_hash={vocal_file_hash} SKIP: getsize error {e}")
+        return None
 
-        stored_vocal_hash = parsed.get("vocal_file_hash", "")
-        stored_acc_hash = parsed.get("accompaniment_file_hash", "")
-        if stored_vocal_hash != vocal_file_hash or stored_acc_hash != accompaniment_file_hash:
-            logger.info(f"[cache-lookup-dual] task#{i} id={task_id} HASH MISMATCH stored_vocal={stored_vocal_hash} stored_acc={stored_acc_hash}")
-            continue
+    if size < 10240:
+        logger.info(f"[cache-lookup-dual] vocal_hash={vocal_file_hash} SKIP: too small {size}B")
+        return None
 
-        filter_keys = {"vocal_file_hash", "accompaniment_file_hash", "vocal_task_id", "accompaniment_task_id",
-                       "vocal_filename", "accompaniment_filename", "processing_mode",
-                       "vocal_path", "accompaniment_path", "vocal_output_path", "accompaniment_output_path",
-                       "_issues", "source_bit_depth", "file_size", "file_hash",
-                       "original_filename", "original_path", "output_path",
-                       "status", "error", "progress", "step",
-                       "detection_result", "repair_result",
-                       "vocal_params", "accompaniment_params",
-                       "waveform_peaks", "source_sample_rate", "source_channels"}
-        filtered_stored = {k: v for k, v in parsed.items() if k not in filter_keys}
-
-        # 只比较影响修复结果的参数子集（交集比较，避免两边key集合不一致导致漏匹配）
-        stored_subset = {k: v for k, v in filtered_stored.items() if k in DUAL_REPAIR_PARAM_KEYS}
-        input_subset = {k: v for k, v in params.items() if k in DUAL_REPAIR_PARAM_KEYS}
-
-        common_keys = stored_subset.keys() & input_subset.keys()
-        if common_keys and all(stored_subset[k] == input_subset[k] for k in common_keys):
-            logger.info(f"[cache-lookup-dual] task#{i} id={task_id} status={task_status} size={size}")
-            result["output_size"] = size
-            _parse_json_fields(result)
-            return result
-        else:
-            stored_keys = set(stored_subset.keys())
-            input_keys = set(input_subset.keys())
-            logger.info(f"[cache-lookup-dual] task#{i} id={task_id} MISMATCH: stored_extra={stored_keys - input_keys} input_extra={input_keys - stored_keys}")
-            for k in stored_keys & input_keys:
-                if stored_subset[k] != input_subset[k]:
-                    logger.info(f"[cache-lookup-dual] task#{i} id={task_id} key={k} stored={stored_subset[k]} != input={input_subset[k]}")
-
-    logger.info(f"[cache-lookup-dual] NO MATCH for vocal_hash={vocal_file_hash} acc_hash={accompaniment_file_hash}")
-    return None
+    logger.info(f"[cache-lookup-dual] ✅ MATCH id={result.get('id')} size={size}")
+    result["output_size"] = size
+    _parse_json_fields(result)
+    return result
 
 def get_all_tasks_ordered() -> list[TaskDict]:
     with closing(get_db()) as conn:
@@ -583,7 +530,14 @@ def get_training_db() -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA busy_timeout=30000")
+    conn.execute("PRAGMA wal_autocheckpoint=1000")
     return conn
+
+
+def checkpoint_training_db(mode: str = "PASSIVE") -> None:
+    with closing(get_training_db()) as conn:
+        conn.execute(f"PRAGMA wal_checkpoint({mode})")
+        conn.commit()
 
 
 def init_training_db() -> None:

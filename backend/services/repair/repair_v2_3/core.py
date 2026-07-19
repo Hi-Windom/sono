@@ -34,13 +34,14 @@ def _tanh_declip_1d(data, threshold):
 
 def _tanh_declip(y, amount):
     if amount <= 0:
-        return y
+        return y.copy()
     threshold = 0.90
     if y.ndim == 1:
         return _tanh_declip_1d(y, threshold)
+    y_out = np.empty_like(y)
     for ch in range(y.shape[0]):
-        y[ch] = _tanh_declip_1d(y[ch], threshold)
-    return y
+        y_out[ch] = _tanh_declip_1d(y[ch], threshold)
+    return y_out
 
 
 def _diff_clamp_depop_1d(data, sr, amount):
@@ -77,12 +78,13 @@ def _diff_clamp_depop_1d(data, sr, amount):
 
 def _diff_clamp_depop(y, sr, amount):
     if amount <= 0:
-        return y
+        return y.copy()
     if y.ndim == 1:
         return _diff_clamp_depop_1d(y, sr, amount)
+    y_out = np.empty_like(y)
     for ch in range(y.shape[0]):
-        y[ch] = _diff_clamp_depop_1d(y[ch], sr, amount)
-    return y
+        y_out[ch] = _diff_clamp_depop_1d(y[ch], sr, amount)
+    return y_out
 
 
 def _global_loudness_normalize(y, sr, target_lufs):

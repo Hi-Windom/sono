@@ -42,7 +42,7 @@ def _tanh_declip_1d(data, threshold):
 
 def _tanh_declip(y, amount):
     if amount <= 0:
-        return y.copy() if y.ndim > 1 else y
+        return y.copy()
     threshold = 0.90
     if y.ndim == 1:
         return _tanh_declip_1d(y, threshold)
@@ -86,7 +86,7 @@ def _diff_clamp_depop_1d(data, sr, amount):
 
 def _diff_clamp_depop(y, sr, amount):
     if amount <= 0:
-        return y.copy() if y.ndim > 1 else y
+        return y.copy()
     if y.ndim == 1:
         return _diff_clamp_depop_1d(y, sr, amount)
     y_out = np.empty_like(y)

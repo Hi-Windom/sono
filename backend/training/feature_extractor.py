@@ -74,12 +74,14 @@ def get_feature_db():
 def is_file_processed(file_hash: str) -> bool:
     """检查文件是否已处理"""
     conn = get_feature_db()
-    row = conn.execute(
-        "SELECT 1 FROM file_features WHERE file_hash = ?",
-        (file_hash,)
-    ).fetchone()
-    conn.close()
-    return row is not None
+    try:
+        row = conn.execute(
+            "SELECT 1 FROM file_features WHERE file_hash = ?",
+            (file_hash,)
+        ).fetchone()
+        return row is not None
+    finally:
+        conn.close()
 
 
 def detect_vocal_vs_instrumental(y: np.ndarray, sr: int) -> str:

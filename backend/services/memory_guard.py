@@ -3,6 +3,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 FLOAT32_THRESHOLD_SAMPLES = 10 * 60 * 48000
+BASE_OVERHEAD_BYTES = 8 * 1024 * 1024
 
 def get_available_memory_bytes():
     try:
@@ -47,11 +48,13 @@ def estimate_repair_memory_bytes(n_samples, n_channels, sr, working_sr, algorith
 
     n_fft = 2048
     hop_length = 512
-    n_frames = upsampled_samples // hop_length + 1
+    n_frames = max(upsampled_samples // hop_length + 1, 1)
     has_streaming = algorithm_version in ("v2.2", "v2.2a", "v2.3", "v2.3a", "v2.4", "v2.4a", "v3.0", "v3.0a", "v3.1", "v3.1a", "v3.2", "v3.2+", "v3.2a", "v3.2a+", "v4.0a", "v4.0a+")
 
     if has_streaming:
-        stft_bytes = (n_fft // 2 + 1) * (working_sr * 10 // hop_length + 1) * 16
+        streaming_window_frames = working_sr * 10 // hop_length + 1
+        stft_frames = min(n_frames, streaming_window_frames)
+        stft_bytes = (n_fft // 2 + 1) * stft_frames * 16
     else:
         stft_bytes = (n_fft // 2 + 1) * n_frames * 16
 
@@ -88,7 +91,7 @@ def estimate_repair_memory_bytes(n_samples, n_channels, sr, working_sr, algorith
 
     python_overhead = 1.3
     safety = 1.2
-    total = (audio_bytes + peak_temp) * python_overhead * safety
+    total = (audio_bytes + peak_temp) * python_overhead * safety + BASE_OVERHEAD_BYTES
     return int(total)
 
 def check_memory_before_repair(n_samples, n_channels, sr, working_sr, safety_margin=0.0, algorithm_version=None):

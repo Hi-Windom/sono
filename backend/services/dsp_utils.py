@@ -446,7 +446,9 @@ def beat_track(onset_envelope=None, sr=22050, hop_length=512, start_bpm=120.0):
     best_lag = np.argmax(search_range) + min_lag
     if best_lag <= 0:
         return start_bpm, np.array([], dtype=int)
-    tempo = 60.0 * sr / hop_length / best_lag
+    tempo = 60.0 * sr / hop_length / float(best_lag)
+    if not np.isfinite(tempo) or tempo <= 0:
+        return start_bpm, np.array([], dtype=int)
     period = best_lag
     onset_peaks = onset_detect(onset_envelope=onset_envelope, sr=sr, hop_length=hop_length)
     if len(onset_peaks) == 0:
@@ -512,8 +514,8 @@ def pyin(y, fmin=65.0, fmax=2093.0, sr=22050, frame_length=2048, hop_length=None
         hop_length = frame_length // 4
     if y.ndim > 1:
         y = y[0] if y.shape[0] == 1 else y.mean(axis=0)
-    n_frames = 1 + (len(y) - frame_length) // hop_length
-    f0 = np.full(n_frames, np.nan)
+    n_frames = max(0, 1 + (len(y) - frame_length) // hop_length)
+    f0 = np.zeros(n_frames, dtype=float)
     voiced_flag = np.zeros(n_frames, dtype=bool)
     voiced_prob = np.zeros(n_frames, dtype=float)
     min_lag = max(2, int(sr / fmax))
@@ -546,7 +548,6 @@ def pyin(y, fmin=65.0, fmax=2093.0, sr=22050, frame_length=2048, hop_length=None
             f0[i] = sr / best_lag
             voiced_flag[i] = True
             voiced_prob[i] = min(1.0, best_corr)
-    f0 = np.nan_to_num(f0, nan=0.0)
     return f0, voiced_flag, voiced_prob
 
 
