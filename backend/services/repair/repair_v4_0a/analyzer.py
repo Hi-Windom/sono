@@ -82,42 +82,67 @@ def _db(x: float) -> float:
 # 频谱分析采样率上限与最大分析时长（移动端友好：长音频只取代表窗，控内存/算力）
 ANALYSIS_MAX_SR = 22050
 ANALYSIS_MAX_SECONDS = 30.0
+MULTI_WINDOW_THRESHOLD = 90.0  # 超过此时长用多窗口扫描
 
 
-def analyze_signal(y: np.ndarray, sr: int, *, light: bool = False) -> SignalProfile:
-    """一次扫描提取完整诊断画像。y 可为 (n,) 或 (ch, n)。
+def _quick_hf_energy(mono: np.ndarray, sr: int, hf_threshold: float = 12000.0) -> float:
+    """原始采样率下快速估计高频能量占比。
 
-    light=True 时跳过频谱重采样（用于修复后的轻量复核），其余特征仍全量计算。
+    使用较少 FFT 帧做近似估计，避免降采样丢失高频信息。
     """
-    profile = SignalProfile(sample_rate=int(sr))
-    if y is None or y.size == 0:
-        return profile
-
-    mono = _to_mono(y)
     n = len(mono)
+    if n < 512 or sr <= hf_threshold * 2:
+        return 0.0
+
+    n_fft = 2048
+    hop = 4096
+    n_win = min(32, max(1, (n - n_fft) // hop + 1))
+
+    win = np.hanning(n_fft)
+    hf_sum = 0.0
+    total_sum = 0.0
+
+    for w in range(n_win):
+        start = w * hop
+        if start + n_fft > n:
+            break
+        seg = mono[start:start + n_fft] * win
+        mag = np.abs(np.fft.rfft(seg))
+        freqs = np.fft.rfftfreq(n_fft, 1.0 / sr)
+        total_sum += float(np.sum(mag))
+        mask = freqs >= hf_threshold
+        hf_sum += float(np.sum(mag[mask]))
+
+    if total_sum < 1e-20:
+        return 0.0
+    return hf_sum / total_sum
+
+
+def _analyze_window(mono_win: np.ndarray, sr: int, *, light: bool = False) -> SignalProfile:
+    """对单个音频窗口做完整分析，返回 SignalProfile。"""
+    profile = SignalProfile(sample_rate=int(sr))
+    n = len(mono_win)
     profile.n_samples = n
     profile.duration = round(n / sr, 3)
-    profile.channels = 1 if y.ndim == 1 else int(y.shape[0])
+    profile.channels = 1
 
-    # —— 削波 / 峰值 / RMS / 直流（全量，内存友好）——
-    # 用 np.dot 求 sumsq 避免临时平方数组；abs 只生成一份
-    abs_y = np.abs(mono)
+    # —— 削波 / 峰值 / RMS / 直流（全窗口）——
+    abs_y = np.abs(mono_win)
     profile.peak_abs = float(abs_y.max())
-    sumsq = float(np.dot(mono, mono))
+    sumsq = float(np.dot(mono_win, mono_win))
     profile.rms = float(np.sqrt(sumsq / n + 1e-20))
-    profile.dc_offset = float(mono.sum() / n)
+    profile.dc_offset = float(mono_win.sum() / n)
     profile.clip_density = float(np.mean(abs_y > 0.985))
     profile.crest_factor = _db(profile.peak_abs) - _db(profile.rms) if profile.rms > 1e-6 else 0.0
     del abs_y
 
-    # —— 本底噪声估计：帧 RMS 向量化（替代逐帧 Python 循环）
-    # 用 reshape 视图 + einsum 计算每帧 sumsq，避免物化全长平方数组（省内存）
+    # —— 本底噪声估计 ——
     frame = 2048
     hop = 2048
     n_frames = max(1, n // hop)
     usable = n_frames * hop
     if usable > 0:
-        frames = mono[:usable].reshape(n_frames, hop)
+        frames = mono_win[:usable].reshape(n_frames, hop)
         sumsq = np.einsum('ij,ij->i', frames, frames)
         frame_rms = np.sqrt(sumsq / hop + 1e-20)
         del frames, sumsq
@@ -127,23 +152,23 @@ def analyze_signal(y: np.ndarray, sr: int, *, light: bool = False) -> SignalProf
     profile.noise_floor_db = _db(quiet_rms)
     profile.snr_db = _db(profile.rms) - profile.noise_floor_db
 
-    # —— 近似响度 (K-weighting 简化为 RMS+高通补偿) ——
+    # —— 近似响度 ——
     try:
         from scipy.signal import butter, sosfilt
         sos = butter(2, 38.0 / (sr / 2.0), btype='high', output='sos')
-        weighted = sosfilt(sos, mono)
+        weighted = sosfilt(sos, mono_win)
         mean_sq = float(np.dot(weighted, weighted) / n + 1e-20)
         profile.lufs_approx = -0.691 + 10.0 * np.log10(mean_sq + 1e-20)
         del weighted
     except Exception:
         profile.lufs_approx = _db(profile.rms) - 0.691
 
-    # 动态范围：响 95 分位 - 静 10 分位（dB），向量化
+    # 动态范围
     with np.errstate(divide='ignore'):
         loud_frames_db = 20.0 * np.log10(frame_rms + 1e-12)
     profile.dynamic_range_db = float(np.percentile(loud_frames_db, 95) - np.percentile(loud_frames_db, 10))
 
-    # —— 瞬态密度：相邻帧 RMS 一阶差分超阈值的比例（向量化）——
+    # —— 瞬态密度 ——
     if n_frames > 2:
         diff = np.abs(np.diff(frame_rms))
         med = float(np.median(diff)) if np.median(diff) > 1e-10 else 1e-10
@@ -151,10 +176,14 @@ def analyze_signal(y: np.ndarray, sr: int, *, light: bool = False) -> SignalProf
         del diff
     del frame_rms, loud_frames_db
 
-    # —— 频谱特征（降采样 + 长音频取代表窗，控内存/算力）——
+    # —— 原始采样率高频快速检测（问题2修复：不降采样也能检测高频）——
+    raw_hf_ratio = 0.0
+    if not light:
+        raw_hf_ratio = _quick_hf_energy(mono_win, sr)
+
+    # —— 频谱特征（降采样）——
     if light:
-        # 轻量复核：不做频谱重采样，频谱字段保持默认（0），仅时间域画像
-        ana = mono
+        ana = mono_win
         ana_sr = sr
         n_fft = 2048
         hop_a = 1024
@@ -175,13 +204,6 @@ def analyze_signal(y: np.ndarray, sr: int, *, light: bool = False) -> SignalProf
         freqs = np.fft.rfftfreq(n_fft, 1.0 / ana_sr)
     else:
         analysis_sr = min(sr, ANALYSIS_MAX_SR)
-        # 长音频只取居中代表窗（最多 ANALYSIS_MAX_SECONDS 秒），避免重采样全长信号
-        cap = int(sr * ANALYSIS_MAX_SECONDS)
-        if n > cap:
-            start = (n - cap) // 2
-            mono_win = mono[start:start + cap]
-        else:
-            mono_win = mono
         if sr != analysis_sr:
             from scipy.signal import resample_poly
             ratio = analysis_sr / sr
@@ -200,7 +222,7 @@ def analyze_signal(y: np.ndarray, sr: int, *, light: bool = False) -> SignalProf
             n_win = max(1, (n_ana - n_fft) // hop_a + 1)
             win = np.hanning(n_fft)
             mag_sum = np.zeros(n_fft // 2 + 1, dtype=np.float64)
-            for w in range(min(n_win, 64)):  # 最多取 64 窗，移动端友好
+            for w in range(min(n_win, 64)):
                 seg = ana[w * hop_a:w * hop_a + n_fft]
                 if len(seg) < n_fft:
                     seg = np.pad(seg, (0, n_fft - len(seg)))
@@ -211,18 +233,18 @@ def analyze_signal(y: np.ndarray, sr: int, *, light: bool = False) -> SignalProf
             win = np.hanning(len(ana))
             mag = np.abs(np.fft.rfft(ana * win))
         freqs = np.fft.rfftfreq(n_fft, 1.0 / ana_sr)
-        del ana, mono_win
+        del ana
 
     total_energy = float(np.sum(mag) + 1e-20)
 
     # 频谱质心
     profile.spectral_centroid = float(np.sum(freqs * mag) / total_energy)
-    # 滚降点（85% 能量）
+    # 滚降点
     cum = np.cumsum(mag)
     rolloff_idx = int(np.searchsorted(cum, 0.85 * cum[-1])) if cum[-1] > 0 else 0
     rolloff_idx = min(rolloff_idx, len(freqs) - 1)
     profile.spectral_rolloff = float(freqs[rolloff_idx])
-    # 频谱平坦度（几何/算术均值）
+    # 频谱平坦度
     eps = 1e-10
     geo = np.exp(np.mean(np.log(mag + eps)))
     arith = np.mean(mag) + eps
@@ -234,20 +256,159 @@ def analyze_signal(y: np.ndarray, sr: int, *, light: bool = False) -> SignalProf
         return float(np.sum(mag[mask]) / total_energy)
 
     profile.sibilance_energy = _band_ratio(4000, 9000)
-    profile.hf_energy = _band_ratio(8000, ana_sr / 2)
 
-    # —— 立体声宽度（声道间相关性）——
-    if y.ndim == 2 and y.shape[0] == 2:
-        a = y[0].astype(np.float64)
-        b = y[1].astype(np.float64)
-        ca = np.dot(a, a) + 1e-20
-        cb = np.dot(b, b) + 1e-20
-        cab = np.dot(a, b)
-        corr = float(cab / np.sqrt(ca * cb))
-        # corr=1 单声道→width 0；corr=-1 反相→width 1；线性映射
-        profile.stereo_width = float(max(0.0, min(1.0, (1.0 - corr) / 2.0)))
+    # hf_energy：如果原始采样率检测到高能量，用原始采样率的估计（问题2修复）
+    downsampled_hf = _band_ratio(8000, ana_sr / 2)
+    if raw_hf_ratio > downsampled_hf:
+        profile.hf_energy = raw_hf_ratio
+    else:
+        profile.hf_energy = downsampled_hf
 
     # —— 检测问题汇总 ——
+    issues: list[str] = []
+    if profile.has_clipping():
+        issues.append(f"削波 {profile.clip_density * 100:.1f}%")
+    if abs(profile.dc_offset) > 0.01:
+        issues.append(f"直流偏置 {profile.dc_offset:+.3f}")
+    if profile.is_noisy():
+        issues.append(f"本底噪声 SNR {profile.snr_db:.0f}dB")
+    if profile.has_sibilance():
+        issues.append(f"齿音过强 {profile.sibilance_energy * 100:.0f}%")
+    if profile.spectral_flatness > 0.4:
+        issues.append("频谱噪声化")
+    if profile.dynamic_range_db < 6.0 and profile.duration > 1.0:
+        issues.append("动态被压缩")
+    profile.detected_issues = issues
+    return profile
+
+
+def _merge_profiles(profiles: list[SignalProfile]) -> SignalProfile:
+    """合并多个窗口的 profile，取各指标的最坏值/最大值。"""
+    if not profiles:
+        return SignalProfile()
+    if len(profiles) == 1:
+        return profiles[0]
+
+    base = profiles[0]
+    merged = SignalProfile(sample_rate=base.sample_rate)
+    merged.n_samples = base.n_samples
+    merged.duration = base.duration
+    merged.channels = base.channels
+
+    # 取最大值/最坏值的指标
+    merged.clip_density = max(p.clip_density for p in profiles)
+    merged.peak_abs = max(p.peak_abs for p in profiles)
+    merged.rms = max(p.rms for p in profiles)
+    merged.crest_factor = max(p.crest_factor for p in profiles)
+    merged.dc_offset = max((p.dc_offset for p in profiles), key=abs)
+    merged.noise_floor_db = max(p.noise_floor_db for p in profiles)  # 越高越坏
+    merged.snr_db = min(p.snr_db for p in profiles)  # 越低越坏
+    merged.sibilance_energy = max(p.sibilance_energy for p in profiles)
+    merged.transient_density = max(p.transient_density for p in profiles)
+    merged.spectral_flatness = max(p.spectral_flatness for p in profiles)
+    merged.spectral_centroid = max(p.spectral_centroid for p in profiles)
+    merged.spectral_rolloff = max(p.spectral_rolloff for p in profiles)
+    merged.hf_energy = max(p.hf_energy for p in profiles)
+    merged.lufs_approx = max(p.lufs_approx for p in profiles)
+    merged.dynamic_range_db = min(p.dynamic_range_db for p in profiles)  # 越小越坏
+
+    # 合并 detected_issues（去重）
+    seen: set[str] = set()
+    all_issues: list[str] = []
+    for p in profiles:
+        for issue in p.detected_issues:
+            if issue not in seen:
+                seen.add(issue)
+                all_issues.append(issue)
+    merged.detected_issues = all_issues
+
+    return merged
+
+
+def analyze_signal(y: np.ndarray, sr: int, *, light: bool = False) -> SignalProfile:
+    """一次扫描提取完整诊断画像。y 可为 (n,) 或 (ch, n)。
+
+    light=True 时跳过频谱重采样（用于修复后的轻量复核），其余特征仍全量计算。
+
+    v4.0 修复（V4-001）：长音频采用多窗口扫描（开头+中间+结尾各30秒），
+    避免只分析中间而遗漏开头/结尾的问题。各窗口取最坏值合并。
+    时长 < 90 秒时直接分析全量。
+
+    v4.0 修复（V4-002）：在原始采样率下做快速高频检测，
+    避免降采样到 22050Hz 而丢失 >11kHz 的高频信息。
+    """
+    if y is None or y.size == 0:
+        return SignalProfile(sample_rate=int(sr))
+
+    mono = _to_mono(y)
+    n = len(mono)
+    duration = n / sr
+    channels = 1 if y.ndim == 1 else int(y.shape[0])
+
+    # 判断是否需要多窗口扫描
+    need_multi_window = (not light) and (duration > MULTI_WINDOW_THRESHOLD)
+
+    if need_multi_window:
+        # 多窗口扫描：开头30秒 + 中间30秒 + 结尾30秒
+        win_len = int(sr * ANALYSIS_MAX_SECONDS)
+        window_starts = [
+            0,                          # 开头
+            (n - win_len) // 2,         # 中间
+            n - win_len,                # 结尾
+        ]
+        profiles: list[SignalProfile] = []
+        for start in window_starts:
+            start = max(0, min(start, n - win_len))
+            end = start + win_len
+            mono_win = mono[start:end]
+            p = _analyze_window(mono_win, sr, light=light)
+            profiles.append(p)
+
+        profile = _merge_profiles(profiles)
+        # 用全量信号的元信息覆盖
+        profile.sample_rate = int(sr)
+        profile.n_samples = n
+        profile.duration = round(duration, 3)
+        profile.channels = channels
+
+        # 立体声宽度（全量信号计算）
+        if y.ndim == 2 and y.shape[0] == 2:
+            a = y[0].astype(np.float64)
+            b = y[1].astype(np.float64)
+            ca = np.dot(a, a) + 1e-20
+            cb = np.dot(b, b) + 1e-20
+            cab = np.dot(a, b)
+            corr = float(cab / np.sqrt(ca * cb))
+            profile.stereo_width = float(max(0.0, min(1.0, (1.0 - corr) / 2.0)))
+
+        # 重新生成 detected_issues（基于合并后的指标）
+        _update_detected_issues(profile)
+    else:
+        # 短音频：直接全量分析
+        profile = _analyze_window(mono, sr, light=light)
+        profile.sample_rate = int(sr)
+        profile.n_samples = n
+        profile.duration = round(duration, 3)
+        profile.channels = channels
+
+        # 立体声宽度
+        if y.ndim == 2 and y.shape[0] == 2:
+            a = y[0].astype(np.float64)
+            b = y[1].astype(np.float64)
+            ca = np.dot(a, a) + 1e-20
+            cb = np.dot(b, b) + 1e-20
+            cab = np.dot(a, b)
+            corr = float(cab / np.sqrt(ca * cb))
+            profile.stereo_width = float(max(0.0, min(1.0, (1.0 - corr) / 2.0)))
+
+        if not light:
+            _update_detected_issues(profile)
+
+    return profile
+
+
+def _update_detected_issues(profile: SignalProfile) -> None:
+    """根据 profile 指标重新生成 detected_issues 列表。"""
     issues: list[str] = []
     if profile.has_clipping():
         issues.append(f"削波 {profile.clip_density * 100:.1f}%")
@@ -264,7 +425,6 @@ def analyze_signal(y: np.ndarray, sr: int, *, light: bool = False) -> SignalProf
     if profile.dynamic_range_db < 6.0 and profile.duration > 1.0:
         issues.append("动态被压缩")
     profile.detected_issues = issues
-    return profile
 
 
 def analyze_residual(y: np.ndarray, sr: int, before: SignalProfile) -> SignalProfile:

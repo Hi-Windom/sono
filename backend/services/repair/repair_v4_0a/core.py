@@ -11,6 +11,7 @@
 """
 from __future__ import annotations
 
+import logging
 import os
 from typing import Any
 import gc
@@ -46,7 +47,11 @@ from services.repair.repair_v3_2a.core import (
     mastering_warm_lite,
     mastering_adaptive_lite,
     mix_tracks,
+    repair_single_track as _v32a_repair_single_track,
+    repair_audio as _v32a_repair_audio,
 )
+
+logger = logging.getLogger(__name__)
 
 from .analyzer import analyze_signal, profile_summary
 from .adaptive import build_strategy
@@ -128,6 +133,42 @@ def _make_sub_progress(parent: Any, lo: float, hi: float) -> Any:
         parent(f, step)
 
     return sub
+
+
+def _db(x: float) -> float:
+    if x <= 1e-12:
+        return -120.0
+    return 20.0 * np.log10(x)
+
+
+def _validate_output_quality(profile, input_duration: float) -> list[str]:
+    """基础质量校验：检查输出音频的关键质量指标。
+
+    返回 quality_warning 列表（空列表表示通过校验）。
+    使用已有的 profile 数据，开销 < 5%。
+    """
+    warnings: list[str] = []
+
+    if profile is None:
+        return ["无法获取输出信号画像"]
+
+    rms_db = _db(profile.rms)
+    if rms_db <= -60.0:
+        warnings.append(f"输出近静音 (RMS={rms_db:.1f}dB)")
+        logger.error(f"修复输出质量严重问题：输出近静音，RMS={rms_db:.1f}dB")
+
+    if profile.clip_density >= 0.10:
+        warnings.append(f"输出严重削波 (clip_density={profile.clip_density * 100:.1f}%)")
+
+    if profile.duration > 0 and input_duration > 0:
+        duration_diff_pct = abs(profile.duration - input_duration) / input_duration * 100.0
+        if duration_diff_pct > 1.0:
+            warnings.append(f"输出时长差异过大 (输入={input_duration:.2f}s, 输出={profile.duration:.2f}s, 差异={duration_diff_pct:.1f}%)")
+
+    if warnings:
+        logger.warning(f"修复输出质量警告: {', '.join(warnings)}")
+
+    return warnings
 
 
 # 各原语在 process 中的进度权重（顺序即执行顺序），用于细颗粒度上报
@@ -247,7 +288,7 @@ def _map_single_params(params: dict) -> dict:
     return out
 
 
-def repair_single_track(input_path: str, output_path: str, params: dict, progress_callback: Any = None) -> dict:
+def _repair_single_track_v4_impl(input_path: str, output_path: str, params: dict, progress_callback: Any = None) -> dict:
     if progress_callback:
         progress_callback(0.05, f"{VERSION_TAG} 加载音频...")
 
@@ -308,9 +349,10 @@ def repair_single_track(input_path: str, output_path: str, params: dict, progres
     if progress_callback:
         progress_callback(1.0, f"{VERSION_TAG} 修复完成")
 
-    # 回传真实检测画像（前端可展示）—— 轻量复核，不做频谱重采样以省内存
     final_profile = analyze_signal(y, working_sr, light=True) if y.size else None
-    return {
+    quality_warnings = _validate_output_quality(final_profile, original_duration)
+
+    result = {
         "issues_found": issues_found,
         "original_sample_rate": original_sr,
         "output_sample_rate": working_sr,
@@ -321,14 +363,25 @@ def repair_single_track(input_path: str, output_path: str, params: dict, progres
         "processing_mode": "single",
         "signal_profile": profile_summary(final_profile) if final_profile else None,
     }
+    if quality_warnings:
+        result["quality_warning"] = quality_warnings
+    return result
 
 
-def repair_audio(input_path: str, output_path: str, params: dict, progress_callback: Any = None) -> dict:
-    processing_mode = params.get("processing_mode", "single")
-    if processing_mode == "single":
-        return repair_single_track(input_path, output_path, params, progress_callback)
+def repair_single_track(input_path: str, output_path: str, params: dict, progress_callback: Any = None) -> dict:
+    try:
+        return _repair_single_track_v4_impl(input_path, output_path, params, progress_callback)
+    except Exception as e:
+        logger.warning(f"{VERSION_TAG} 单轨修复失败，降级到 v3.2a: {e}", exc_info=True)
+        if progress_callback:
+            progress_callback(0.0, f"{VERSION_TAG} 修复异常，降级到 v3.2a...")
+        result = _v32a_repair_single_track(input_path, output_path, params, progress_callback)
+        result["algorithm_version"] = f"{VERSION_TAG}(fallback:v3.2a)"
+        result["fallback_reason"] = str(e)
+        return result
 
-    # —— 双轨：人声/伴奏分别 Analyze→Adapt→Process，再混音+母带 ——
+
+def _repair_audio_v4_dual_impl(input_path: str, output_path: str, params: dict, progress_callback: Any = None) -> dict:
     vocal_path = params.get("vocal_path", input_path)
     accompaniment_path = params.get("accompaniment_path", input_path)
 
@@ -376,7 +429,6 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
     subtype_map = {16: "PCM_16", 24: "PCM_24", 32: "PCM_32"}
     subtype = subtype_map.get(bit_depth, "PCM_24")
 
-    # 保存分轨修复结果（保留 v3.2a 能力）
     if progress_callback:
         progress_callback(0.70, f"{VERSION_TAG} 保存人声修复结果...")
     vocal_output_path = params.get("vocal_output_path")
@@ -415,7 +467,6 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
     if progress_callback:
         progress_callback(0.90, f"{VERSION_TAG} 导出...")
 
-    # Apply master volume control
     output_volume_db = params.get("output_volume", 0.0)
     if output_volume_db != 0.0:
         volume_gain = 10 ** (output_volume_db / 20.0)
@@ -430,7 +481,9 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
         progress_callback(1.0, f"{VERSION_TAG} 修复完成")
 
     final_profile = analyze_signal(mixed, working_sr, light=True) if mixed.size else None
-    return {
+    quality_warnings = _validate_output_quality(final_profile, original_duration)
+
+    result = {
         "issues_found": issues_found,
         "original_sample_rate": vocal_sr,
         "output_sample_rate": working_sr,
@@ -441,3 +494,23 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
         "processing_mode": "dual",
         "signal_profile": profile_summary(final_profile) if final_profile else None,
     }
+    if quality_warnings:
+        result["quality_warning"] = quality_warnings
+    return result
+
+
+def repair_audio(input_path: str, output_path: str, params: dict, progress_callback: Any = None) -> dict:
+    processing_mode = params.get("processing_mode", "single")
+    if processing_mode == "single":
+        return repair_single_track(input_path, output_path, params, progress_callback)
+
+    try:
+        return _repair_audio_v4_dual_impl(input_path, output_path, params, progress_callback)
+    except Exception as e:
+        logger.warning(f"{VERSION_TAG} 双轨修复失败，降级到 v3.2a: {e}", exc_info=True)
+        if progress_callback:
+            progress_callback(0.0, f"{VERSION_TAG} 修复异常，降级到 v3.2a...")
+        result = _v32a_repair_audio(input_path, output_path, params, progress_callback)
+        result["algorithm_version"] = f"{VERSION_TAG}(fallback:v3.2a)"
+        result["fallback_reason"] = str(e)
+        return result
