@@ -7,10 +7,13 @@ from pydantic import BaseModel
 from config import ALLOWED_EXTENSIONS, MAX_UPLOAD_SIZE, UPLOAD_DIR, OUTPUT_DIR
 from database import create_task, get_task, update_task
 from services.task_manager import generate_task_id, submit_detect_task, can_accept_task
+from ._common import _get_audio_info
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+CHUNK_SIZE = 5 * 1024 * 1024
 
 
 class DetectRequest(BaseModel):
@@ -92,14 +95,41 @@ async def detect_file(file: UploadFile = File(...), detector_version: str = Form
     upload_path = os.path.join(UPLOAD_DIR, f"{task_id}{ext}")
     os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-    with open(upload_path, "wb") as f:
-        content = await file.read()
-        if len(content) > MAX_UPLOAD_SIZE:
-            os.remove(upload_path)
-            raise HTTPException(status_code=413, detail=f"文件过大，最大支持 {MAX_UPLOAD_SIZE // 1024 // 1024}MB")
-        f.write(content)
+    file_size = 0
+    try:
+        with open(upload_path, "wb") as f:
+            while True:
+                chunk = await file.read(CHUNK_SIZE)
+                if not chunk:
+                    break
+                file_size += len(chunk)
+                if file_size > MAX_UPLOAD_SIZE:
+                    raise HTTPException(status_code=413, detail=f"文件过大，最大支持 {MAX_UPLOAD_SIZE // 1024 // 1024}MB")
+                f.write(chunk)
+    except HTTPException:
+        if os.path.exists(upload_path):
+            try:
+                os.remove(upload_path)
+            except OSError:
+                pass
+        raise
 
-    create_task(task_id, file.filename or "audio", upload_path, {}, "", len(content))
+    if file_size == 0:
+        try:
+            os.remove(upload_path)
+        except OSError:
+            pass
+        raise HTTPException(status_code=400, detail="文件为空，无法处理")
+
+    audio_info = _get_audio_info(upload_path)
+    if not audio_info:
+        try:
+            os.remove(upload_path)
+        except OSError:
+            pass
+        raise HTTPException(status_code=400, detail="无效的音频文件")
+
+    create_task(task_id, file.filename or "audio", upload_path, {}, "", file_size)
     logger.info(f"[/detect-file] task_id={task_id} file={file.filename} detector_version={detector_version}")
 
     submit_detect_task(task_id, upload_path, "original", detector_version)

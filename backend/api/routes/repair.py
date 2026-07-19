@@ -11,6 +11,7 @@ from config import UPLOAD_DIR, OUTPUT_DIR
 from database import create_task, get_task, find_task_by_hash, update_task
 from services.task_manager import generate_task_id, submit_repair_task, can_accept_task, cancel_task
 from services.param_maps import flatten_vocal_params, flatten_inst_params
+from services.repair_registry import ALGORITHM_VERSIONS
 from ._common import verify_task_access_token
 
 logger = logging.getLogger(__name__)
@@ -89,6 +90,13 @@ async def repair_dual_audio_endpoint(request: DualRepairRequest):
     if not can_accept:
         raise HTTPException(status_code=503, detail=reject_reason)
 
+    algorithm_version = request.params.get("algorithm_version", "")
+    version_info = ALGORITHM_VERSIONS.get(algorithm_version)
+    if not version_info:
+        raise HTTPException(status_code=400, detail=f"不支持的算法版本: {algorithm_version}")
+    if not version_info.get("supports_dual_track"):
+        raise HTTPException(status_code=400, detail="当前算法版本不支持双轨修复，请使用 v3.0 及以上版本")
+
     vocal_task = get_task(request.vocal_task_id)
     accompaniment_task = get_task(request.accompaniment_task_id)
 
@@ -148,6 +156,13 @@ async def repair_dual_from_hash(request: DualRepairFromHashRequest):
     can_accept, reject_reason = can_accept_task()
     if not can_accept:
         raise HTTPException(status_code=503, detail=reject_reason)
+
+    algorithm_version = request.params.get("algorithm_version", "")
+    version_info = ALGORITHM_VERSIONS.get(algorithm_version)
+    if not version_info:
+        raise HTTPException(status_code=400, detail=f"不支持的算法版本: {algorithm_version}")
+    if not version_info.get("supports_dual_track"):
+        raise HTTPException(status_code=400, detail="当前算法版本不支持双轨修复，请使用 v3.0 及以上版本")
 
     vocal_task = find_task_by_hash(request.vocal_file_hash)
     if not vocal_task or not vocal_task.get("original_path") or not os.path.exists(vocal_task["original_path"]):

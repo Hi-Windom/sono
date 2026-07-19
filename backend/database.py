@@ -235,6 +235,30 @@ def find_task_by_hash(file_hash: str) -> TaskDict | None:
     _enrich_output_size(result)
     return result
 
+def find_dual_task_by_hashes(vocal_file_hash: str, accompaniment_file_hash: str) -> TaskDict | None:
+    with closing(get_db()) as conn:
+        row = conn.execute(
+            """
+            SELECT * FROM tasks 
+            WHERE original_filename LIKE 'dual_%'
+              AND json_extract(params, '$.vocal_file_hash') = ?
+              AND json_extract(params, '$.accompaniment_file_hash') = ?
+            ORDER BY created_at DESC LIMIT 1
+            """,
+            (vocal_file_hash, accompaniment_file_hash)
+        ).fetchone()
+    if row is None:
+        return None
+    result: TaskDict = dict(row)
+    if result.get("original_path") and not os.path.exists(result["original_path"]):
+        return None
+    output_path = result.get("output_path")
+    if output_path and not os.path.exists(output_path):
+        result["output_path"] = ""
+    _parse_json_fields(result)
+    _enrich_output_size(result)
+    return result
+
 def find_repair_cache(file_hash: str, params: dict) -> TaskDict | None:
     import logging
     logger = logging.getLogger(__name__)

@@ -9,7 +9,7 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
 from config import ALLOWED_EXTENSIONS, MAX_UPLOAD_SIZE, UPLOAD_DIR, BASE_DIR
-from database import create_task, find_task_by_hash
+from database import create_task, find_task_by_hash, find_dual_task_by_hashes
 from services.task_manager import generate_task_id
 from ._common import _get_audio_info, generate_task_access_token
 
@@ -129,10 +129,25 @@ async def upload_audio(file: UploadFile = File(...), file_hash: str = Form("")):
     except OSError:
         pass
 
-    create_task(task_id, file.filename or "audio", upload_path, {}, file_hash, file_size)
-    logger.info(f"[/upload] task_id={task_id} file_hash={file_hash or 'none'}")
+    if file_size == 0:
+        if os.path.exists(upload_path):
+            try:
+                os.remove(upload_path)
+            except OSError:
+                pass
+        raise HTTPException(status_code=400, detail="文件为空")
 
     audio_info = _get_audio_info(upload_path)
+    if audio_info is None:
+        if os.path.exists(upload_path):
+            try:
+                os.remove(upload_path)
+            except OSError:
+                pass
+        raise HTTPException(status_code=400, detail="无法解析音频文件，文件可能已损坏")
+
+    create_task(task_id, file.filename or "audio", upload_path, {"audio_info": audio_info}, file_hash, file_size)
+    logger.info(f"[/upload] task_id={task_id} file_hash={file_hash or 'none'}")
 
     return {
         "task_id": task_id,
@@ -206,6 +221,24 @@ async def upload_chunk(
         raise HTTPException(status_code=400, detail=f"无效的分片索引: {chunk_index}")
 
     chunk_content = await chunk.read()
+
+    max_chunk_size = 10 * 1024 * 1024
+    if len(chunk_content) > max_chunk_size:
+        raise HTTPException(status_code=413, detail=f"分片过大，最大支持 {max_chunk_size // 1024 // 1024}MB")
+
+    uploaded_size = 0
+    for i in range(total_chunks):
+        if i == chunk_index:
+            continue
+        existing_chunk_path = os.path.join(session_dir, f"chunk_{i:06d}")
+        if os.path.exists(existing_chunk_path):
+            try:
+                uploaded_size += os.path.getsize(existing_chunk_path)
+            except OSError:
+                pass
+
+    if uploaded_size + len(chunk_content) > MAX_UPLOAD_SIZE:
+        raise HTTPException(status_code=413, detail=f"文件过大，最大支持 {MAX_UPLOAD_SIZE // 1024 // 1024}MB")
 
     chunk_path = os.path.join(session_dir, f"chunk_{chunk_index:06d}")
     with open(chunk_path, "wb") as f:
@@ -297,14 +330,31 @@ async def upload_finalize(session_id: str = Form(...)):
 
     file_size = os.path.getsize(final_path)
 
+    if file_size == 0:
+        try:
+            os.remove(final_path)
+        except OSError:
+            pass
+        import shutil
+        shutil.rmtree(session_dir, ignore_errors=True)
+        raise HTTPException(status_code=400, detail="文件为空，无法处理")
+
+    audio_info = _get_audio_info(final_path)
+    if not audio_info:
+        try:
+            os.remove(final_path)
+        except OSError:
+            pass
+        import shutil
+        shutil.rmtree(session_dir, ignore_errors=True)
+        raise HTTPException(status_code=400, detail="无效的音频文件")
+
     create_task(task_id, filename, final_path, {}, file_hash, file_size)
 
     import shutil
     shutil.rmtree(session_dir, ignore_errors=True)
 
     logger.info(f"[upload-finalize] task_id={task_id} file_size={file_size}")
-
-    audio_info = _get_audio_info(final_path)
 
     return {
         "success": True,
@@ -324,6 +374,27 @@ async def upload_dual_audio(
     vocal_file_hash: str = Form(""),
     accompaniment_file_hash: str = Form(""),
 ):
+    vocal_hash = vocal_file_hash or file_hash
+    accompaniment_hash = accompaniment_file_hash or file_hash
+
+    if vocal_hash and accompaniment_hash:
+        existing_dual = find_dual_task_by_hashes(vocal_hash, accompaniment_hash)
+        if existing_dual:
+            main_task_id = existing_dual["id"]
+            return {
+                "cached": True,
+                "task_id": main_task_id,
+                "access_token": generate_task_access_token(main_task_id),
+                "vocal_task_id": existing_dual.get("params", {}).get("vocal_task_id", ""),
+                "accompaniment_task_id": existing_dual.get("params", {}).get("accompaniment_task_id", ""),
+                "vocal_filename": existing_dual.get("params", {}).get("vocal_filename", ""),
+                "accompaniment_filename": existing_dual.get("params", {}).get("accompaniment_filename", ""),
+                "vocal_size": 0,
+                "accompaniment_size": 0,
+                "vocal_info": None,
+                "accompaniment_info": None,
+            }
+
     vocal_ext = os.path.splitext(vocal_file.filename or '')[1].lower()
     accompaniment_ext = os.path.splitext(accompaniment_file.filename or '')[1].lower()
     if vocal_ext not in ALLOWED_EXTENSIONS:
@@ -390,17 +461,21 @@ async def upload_dual_audio(
         _cleanup_dual()
         raise
 
-    vocal_hash = vocal_file_hash or file_hash
-    accompaniment_hash = accompaniment_file_hash or file_hash
-
     vocal_audio_info = _get_audio_info(vocal_upload_path)
+    if vocal_audio_info is None:
+        _cleanup_dual()
+        raise HTTPException(status_code=400, detail="无法解析人声音频文件，文件可能已损坏")
+
     acc_audio_info = _get_audio_info(accompaniment_upload_path)
+    if acc_audio_info is None:
+        _cleanup_dual()
+        raise HTTPException(status_code=400, detail="无法解析伴奏音频文件，文件可能已损坏")
 
     create_task(vocal_task_id, f"vocal_{vocal_file.filename or 'audio'}", vocal_upload_path,
-                {"audio_info": vocal_audio_info} if vocal_audio_info else {},
+                {"audio_info": vocal_audio_info},
                 vocal_hash, vocal_size)
     create_task(accompaniment_task_id, f"acc_{accompaniment_file.filename or 'audio'}", accompaniment_upload_path,
-                {"audio_info": acc_audio_info} if acc_audio_info else {},
+                {"audio_info": acc_audio_info},
                 accompaniment_hash, acc_size)
     create_task(main_task_id, f"dual_{vocal_file.filename or 'audio'}", vocal_upload_path, {
         "vocal_task_id": vocal_task_id,
@@ -413,9 +488,6 @@ async def upload_dual_audio(
 
     logger.info(f"[/upload-dual] main_task_id={main_task_id} vocal={vocal_task_id} acc={accompaniment_task_id} vocal_hash={vocal_hash[:12] if vocal_hash else 'none'} acc_hash={accompaniment_hash[:12] if accompaniment_hash else 'none'}")
 
-    vocal_info = _get_audio_info(vocal_upload_path)
-    acc_info = _get_audio_info(accompaniment_upload_path)
-
     return {
         "task_id": main_task_id,
         "access_token": generate_task_access_token(main_task_id),
@@ -425,8 +497,8 @@ async def upload_dual_audio(
         "accompaniment_filename": accompaniment_file.filename,
         "vocal_size": vocal_size,
         "accompaniment_size": acc_size,
-        "vocal_info": _get_audio_info(vocal_upload_path),
-        "accompaniment_info": _get_audio_info(accompaniment_upload_path),
+        "vocal_info": vocal_audio_info,
+        "accompaniment_info": acc_audio_info,
     }
 
 
@@ -505,12 +577,54 @@ async def training_upload(
     from services.training_manager import save_training_file
 
     ext = os.path.splitext(file.filename)[1].lower() if file.filename else ".wav"
-    content = await file.read()
-    file_size = len(content)
+    task_id = generate_task_id()
+    temp_path = os.path.join(UPLOAD_DIR, f"{task_id}_training{ext}")
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+    file_size = 0
+    try:
+        with open(temp_path, "wb") as f:
+            while True:
+                chunk = await file.read(CHUNK_SIZE)
+                if not chunk:
+                    break
+                file_size += len(chunk)
+                if file_size > MAX_UPLOAD_SIZE:
+                    raise HTTPException(status_code=413, detail=f"文件过大，最大支持 {MAX_UPLOAD_SIZE // 1024 // 1024}MB")
+                f.write(chunk)
+    except HTTPException:
+        if os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
+        raise
+
+    if file_size == 0:
+        try:
+            os.remove(temp_path)
+        except OSError:
+            pass
+        raise HTTPException(status_code=400, detail="文件为空，无法处理")
+
+    audio_info = _get_audio_info(temp_path)
+    if not audio_info:
+        try:
+            os.remove(temp_path)
+        except OSError:
+            pass
+        raise HTTPException(status_code=400, detail="无效的音频文件")
 
     import io
-    file.file = io.BytesIO(content)
+    with open(temp_path, "rb") as f:
+        file_content = f.read()
+    file.file = io.BytesIO(file_content)
     saved_path = await save_training_file(file, file_hash, label, ext)
+
+    try:
+        os.remove(temp_path)
+    except OSError:
+        pass
 
     return {
         "status": "ok",
@@ -531,6 +645,9 @@ async def training_upload_init(
     ext = os.path.splitext(filename)[1].lower()
     if ext not in ALLOWED_EXTENSIONS:
         raise HTTPException(status_code=400, detail=f"不支持的文件格式: {ext}")
+
+    if total_size > MAX_UPLOAD_SIZE:
+        raise HTTPException(status_code=413, detail=f"文件过大，最大支持 {MAX_UPLOAD_SIZE // 1024 // 1024}MB")
 
     session_id = str(uuid.uuid4())
     session_dir = os.path.join(UPLOAD_SESSIONS_DIR, session_id)
@@ -591,6 +708,25 @@ async def training_upload_finalize(
                 final_file.write(chunk_file.read())
 
     file_size = os.path.getsize(final_path)
+
+    if file_size == 0:
+        try:
+            os.remove(final_path)
+        except OSError:
+            pass
+        import shutil
+        shutil.rmtree(session_dir, ignore_errors=True)
+        raise HTTPException(status_code=400, detail="文件为空，无法处理")
+
+    audio_info = _get_audio_info(final_path)
+    if not audio_info:
+        try:
+            os.remove(final_path)
+        except OSError:
+            pass
+        import shutil
+        shutil.rmtree(session_dir, ignore_errors=True)
+        raise HTTPException(status_code=400, detail="无效的音频文件")
 
     training_dir = os.path.join(BASE_DIR, "storage", "training")
     os.makedirs(training_dir, exist_ok=True)
