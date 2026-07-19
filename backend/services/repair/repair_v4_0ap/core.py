@@ -9,7 +9,6 @@
 """
 from __future__ import annotations
 
-import logging
 import os
 from typing import Any
 import gc
@@ -39,8 +38,6 @@ from services.repair.repair_v3_2a.core import (
     apply_air_texture_lite as _v32a_air,
     transparent_compress as _v32a_dynamic,
     loudness_normalize as _v32a_loudness,
-    repair_single_track as _v32a_repair_single_track,
-    repair_audio as _v32a_repair_audio,
 )
 
 from services.repair.repair_v4_0a.core import (
@@ -55,8 +52,6 @@ from services.repair.repair_v4_0a.core import (
 )
 from services.repair.repair_v4_0a.analyzer import analyze_signal, profile_summary
 from services.repair.repair_v4_0a.adaptive import build_strategy
-
-logger = logging.getLogger(__name__)
 
 VERSION_TAG = "v4.0a+"
 
@@ -256,7 +251,7 @@ def _resonance(y, sr, amount):
     return resonance_suppress_lite(y, sr, amount)
 
 
-def _repair_single_track_v4p_impl(input_path: str, output_path: str, params: dict, progress_callback: Any = None) -> dict:
+def repair_single_track(input_path: str, output_path: str, params: dict, progress_callback: Any = None) -> dict:
     if progress_callback:
         progress_callback(0.05, f"{VERSION_TAG} 加载音频...")
     y, sr = load_audio_with_fallback(input_path, sr=None, mono=False)
@@ -335,20 +330,11 @@ def _repair_single_track_v4p_impl(input_path: str, output_path: str, params: dic
     return result
 
 
-def repair_single_track(input_path: str, output_path: str, params: dict, progress_callback: Any = None) -> dict:
-    try:
-        return _repair_single_track_v4p_impl(input_path, output_path, params, progress_callback)
-    except Exception as e:
-        logger.warning(f"{VERSION_TAG} 单轨修复失败，降级到 v3.2a: {e}", exc_info=True)
-        if progress_callback:
-            progress_callback(0.0, f"{VERSION_TAG} 修复异常，降级到 v3.2a...")
-        result = _v32a_repair_single_track(input_path, output_path, params, progress_callback)
-        result["algorithm_version"] = f"{VERSION_TAG}(fallback:v3.2a)"
-        result["fallback_reason"] = str(e)
-        return result
+def repair_audio(input_path: str, output_path: str, params: dict, progress_callback: Any = None) -> dict:
+    processing_mode = params.get("processing_mode", "single")
+    if processing_mode == "single":
+        return repair_single_track(input_path, output_path, params, progress_callback)
 
-
-def _repair_audio_v4p_dual_impl(input_path: str, output_path: str, params: dict, progress_callback: Any = None) -> dict:
     vocal_path = params.get("vocal_path", input_path)
     accompaniment_path = params.get("accompaniment_path", input_path)
 
@@ -462,20 +448,3 @@ def _repair_audio_v4p_dual_impl(input_path: str, output_path: str, params: dict,
     if quality_warnings:
         result["quality_warning"] = quality_warnings
     return result
-
-
-def repair_audio(input_path: str, output_path: str, params: dict, progress_callback: Any = None) -> dict:
-    processing_mode = params.get("processing_mode", "single")
-    if processing_mode == "single":
-        return repair_single_track(input_path, output_path, params, progress_callback)
-
-    try:
-        return _repair_audio_v4p_dual_impl(input_path, output_path, params, progress_callback)
-    except Exception as e:
-        logger.warning(f"{VERSION_TAG} 双轨修复失败，降级到 v3.2a: {e}", exc_info=True)
-        if progress_callback:
-            progress_callback(0.0, f"{VERSION_TAG} 修复异常，降级到 v3.2a...")
-        result = _v32a_repair_audio(input_path, output_path, params, progress_callback)
-        result["algorithm_version"] = f"{VERSION_TAG}(fallback:v3.2a)"
-        result["fallback_reason"] = str(e)
-        return result

@@ -304,7 +304,7 @@ def repair_audio(input_path: str, output_path: str, params: dict, progress_callb
         if progress_callback:
             progress_callback(0.02, f"v2.3 重采样到 {working_sr//1000}kHz...")
         target_len = int(y.shape[1] * working_sr / sr)
-        y_new = np.zeros((y.shape[0], target_len))
+        y_new = np.zeros((y.shape[0], target_len), dtype=y.dtype)
         for ch in range(y.shape[0]):
             resampled = resample_poly(y[ch], working_sr, sr)
             y_new[ch, :len(resampled)] = resampled[:target_len]
