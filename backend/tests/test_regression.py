@@ -8183,3 +8183,131 @@ class TestDualUploadNoDuplicateAudioInfoCalls:
             )
         finally:
             self._cleanup(old_config)
+
+
+# ============================================================================
+# 回归测试: API-013 修复任务开始后快速更新进度，不卡在0%
+# Bug: RepairTask.execute 中预加载音频阶段没有进度反馈，用户看到卡在0%
+# 修复: 预加载前发送 2% 进度提示，合并两次预加载为一次
+# ============================================================================
+
+class TestRepairProgressNotStuckAtZero:
+    """防止修复任务开始后长时间卡在0%进度"""
+
+    def _setup_config(self, tmpdir):
+        import config
+        from database import init_db
+
+        old_upload = config.UPLOAD_DIR
+        old_output = config.OUTPUT_DIR
+        old_db = config.DB_PATH
+        config.UPLOAD_DIR = os.path.join(str(tmpdir), "uploads")
+        config.OUTPUT_DIR = os.path.join(str(tmpdir), "outputs")
+        config.DB_PATH = os.path.join(str(tmpdir), "test.db")
+        os.makedirs(config.UPLOAD_DIR, exist_ok=True)
+        os.makedirs(config.OUTPUT_DIR, exist_ok=True)
+        init_db()
+        return (old_upload, old_output, old_db)
+
+    def _cleanup_config(self, old_config):
+        import config
+        old_upload, old_output, old_db = old_config
+        config.UPLOAD_DIR = old_upload
+        config.OUTPUT_DIR = old_output
+        config.DB_PATH = old_db
+
+    def test_repair_task_has_early_progress_update(self, tmp_path):
+        """修复任务开始执行后，应在短时间内出现>0%的进度更新"""
+        import time
+        from database import create_task
+        from services.task_manager import RepairTask
+
+        old_config = self._setup_config(tmp_path)
+        try:
+            import config
+
+            wav_data = make_wav_bytes(sr=44100, duration=30.0, channels=2)
+            audio_path = os.path.join(config.UPLOAD_DIR, "test_30s.wav")
+            with open(audio_path, 'wb') as f:
+                f.write(wav_data)
+
+            task_id = "test_progress_zero_001"
+            create_task(task_id, "test_30s.wav", audio_path, "upload")
+
+            progress_updates = []
+
+            def tracking_progress(p, s):
+                progress_updates.append((time.time(), p, s))
+
+            task = RepairTask(task_id, audio_path, {
+                "algorithm_version": "v3.2",
+                "processing_mode": "single",
+            }, mobile_mode=False)
+
+            start_time = time.time()
+            try:
+                task.execute(tracking_progress)
+            except Exception:
+                pass
+
+            assert len(progress_updates) > 0, (
+                "API-013: 修复任务执行过程中应有进度更新，"
+                "否则用户会感觉卡在0%"
+            )
+            first_progress_time = progress_updates[0][0] - start_time
+            first_progress_value = progress_updates[0][1]
+            assert first_progress_value > 0, (
+                f"API-013: 第一个进度更新应>0%，实际是 {first_progress_value*100:.1f}%"
+            )
+            assert first_progress_time < 5.0, (
+                f"API-013: 第一个>0%的进度更新应在5秒内到达，"
+                f"实际用了 {first_progress_time:.2f}s，用户会感觉卡在0%"
+            )
+        finally:
+            self._cleanup_config(old_config)
+
+    def test_repair_preload_only_loads_once(self, tmp_path):
+        """RepairTask 预加载阶段应该只加载一次音频，不是两次"""
+        from unittest.mock import patch
+        from database import create_task
+        from services.task_manager import RepairTask
+
+        old_config = self._setup_config(tmp_path)
+        try:
+            import config
+
+            wav_data = make_wav_bytes(sr=44100, duration=5.0, channels=2)
+            audio_path = os.path.join(config.UPLOAD_DIR, "test_5s.wav")
+            with open(audio_path, 'wb') as f:
+                f.write(wav_data)
+
+            task_id = "test_preload_once_001"
+            create_task(task_id, "test_5s.wav", audio_path, "upload")
+
+            from services.audio_loader import load_audio_with_fallback as original_load
+            call_count = [0]
+
+            def counting_load(*args, **kwargs):
+                call_count[0] += 1
+                return original_load(*args, **kwargs)
+
+            with patch("services.audio_loader.load_audio_with_fallback", counting_load):
+                task = RepairTask(task_id, audio_path, {
+                    "algorithm_version": "v3.2",
+                    "processing_mode": "single",
+                }, mobile_mode=False)
+
+                def dummy_progress(p, s):
+                    pass
+
+                try:
+                    task.execute(dummy_progress)
+                except Exception:
+                    pass
+
+            assert call_count[0] <= 2, (
+                f"API-013: RepairTask 预加载 + repair内部加载 总共应不超过2次，"
+                f"实际调用了 {call_count[0]} 次，存在重复加载浪费"
+            )
+        finally:
+            self._cleanup_config(old_config)

@@ -680,24 +680,26 @@ class RepairTask(BaseTask):
         file_size = os.path.getsize(self.audio_path)
         logger.info(f"[RepairTask] 音频文件 task_id={self.task_id} size={file_size/1024/1024:.2f}MB")
 
+        progress_callback(0.02, "加载音频文件...")
+        self._last_progress_time[0] = time.time()
+
         try:
             from services.audio_loader import load_audio_with_fallback
-            y, sr = load_audio_with_fallback(self.audio_path, sr=None, mono=False)
+            if "source_bit_depth" not in self.params:
+                y, sr, src_bd = load_audio_with_fallback(self.audio_path, sr=None, mono=False, return_bit_depth=True)
+                self.params["source_bit_depth"] = src_bd
+            else:
+                y, sr = load_audio_with_fallback(self.audio_path, sr=None, mono=False)
             self._size_samples = y.shape[1] if y.ndim > 1 else len(y)
+            del y
         except Exception as e:
-            logger.warning(f"[RepairTask] 预加载音频获取采样数失败 task_id={self.task_id}: {e}")
+            logger.warning(f"[RepairTask] 预加载音频失败 task_id={self.task_id}: {e}")
             self._size_samples = 0
+            if "source_bit_depth" not in self.params:
+                self.params["source_bit_depth"] = 24
 
         active_params = {k: v for k, v in self.params.items() if isinstance(v, (int, float)) and v > 0}
         logger.info(f"[RepairTask] 参数 task_id={self.task_id} active_params={active_params}")
-
-        if "source_bit_depth" not in self.params:
-            try:
-                from services.audio_loader import load_audio_with_fallback
-                _, _, src_bd = load_audio_with_fallback(self.audio_path, sr=None, mono=False, return_bit_depth=True)
-                self.params["source_bit_depth"] = src_bd
-            except Exception:
-                self.params["source_bit_depth"] = 24
 
         def wrapped_progress(p: float, s: str) -> None:
             self._last_progress_time[0] = time.time()
