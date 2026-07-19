@@ -6,8 +6,11 @@ import pytest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 os.environ["TESTING"] = "1"
+
+from test_utils import make_wav_bytes
 
 from database import init_db, get_db, create_task, update_task, find_repair_cache, find_dual_repair_cache
 from services.param_maps import VOCAL_KEY_MAP, INST_KEY_MAP, DUAL_REPAIR_PARAM_KEYS, SINGLE_REPAIR_PARAM_KEYS
@@ -42,11 +45,9 @@ DURATION = 2.0
 
 
 def _make_wav(path: str, sr=SR, duration=DURATION):
-    import numpy as np
-    import soundfile as sf
-    t = np.arange(int(sr * duration), dtype=np.float64) / sr
-    y = 0.5 * np.sin(2 * np.pi * 440 * t)
-    sf.write(path, y, sr, subtype='PCM_16')
+    wav_bytes = make_wav_bytes(sr=sr, duration=duration)
+    with open(path, 'wb') as f:
+        f.write(wav_bytes)
 
 
 def _make_dual_params(**overrides):

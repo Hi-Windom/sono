@@ -6,8 +6,11 @@ import pytest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 os.environ["TESTING"] = "1"
+
+from test_utils import make_wav_bytes
 
 
 @pytest.fixture()
@@ -42,30 +45,6 @@ def api_client(fresh_db):
     from app import create_app
     app = create_app()
     return TestClient(app)
-
-
-def _make_wav_bytes(duration=1.0, sr=44100, channels=1):
-    import struct
-    import math
-    n_samples = int(sr * duration)
-    data_size = n_samples * channels * 2
-    bytes_per_sample = 2
-    block_align = channels * bytes_per_sample
-    byte_rate = sr * block_align
-
-    header = struct.pack('<4sI4s', b'RIFF', 36 + data_size, b'WAVE')
-    fmt_chunk = struct.pack('<4sIHHIIHH',
-                            b'fmt ', 16, 1, channels, sr, byte_rate, block_align, bytes_per_sample * 8)
-    data_chunk_header = struct.pack('<4sI', b'data', data_size)
-
-    samples = bytearray()
-    for i in range(n_samples):
-        val = int(0.5 * 32767 * math.sin(2 * math.pi * 440 * i / sr))
-        samples.extend(struct.pack('<h', max(-32768, min(32767, val))))
-        if channels == 2:
-            samples.extend(struct.pack('<h', max(-32768, min(32767, val))))
-
-    return header + fmt_chunk + data_chunk_header + bytes(samples)
 
 
 class TestSystemRoutes:
@@ -153,7 +132,7 @@ class TestSystemRoutes:
 
 class TestUploadRoutes:
     def test_upload_wav(self, api_client):
-        wav_bytes = _make_wav_bytes(duration=0.5)
+        wav_bytes = make_wav_bytes(duration=0.5)
         res = api_client.post(
             "/api/v1/upload",
             files={"file": ("test.wav", wav_bytes, "audio/wav")},
@@ -175,7 +154,7 @@ class TestUploadRoutes:
         assert res.status_code == 400
 
     def test_check_hash_exists(self, api_client, fresh_db):
-        wav_bytes = _make_wav_bytes(duration=0.5)
+        wav_bytes = make_wav_bytes(duration=0.5)
         upload_res = api_client.post(
             "/api/v1/upload",
             files={"file": ("test.wav", wav_bytes, "audio/wav")},
@@ -273,7 +252,7 @@ class TestRepairRoutes:
         assert res.status_code == 404
 
     def test_repair_with_valid_task(self, api_client, fresh_db):
-        wav_bytes = _make_wav_bytes(duration=0.5)
+        wav_bytes = make_wav_bytes(duration=0.5)
         upload_res = api_client.post(
             "/api/v1/upload",
             files={"file": ("test.wav", wav_bytes, "audio/wav")},

@@ -14,15 +14,17 @@ import soundfile as sf
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.dirname(__file__))
+
+from test_utils import make_wav_bytes
 
 
 def _make_test_wav(duration_sec: float = 1.0, sr: int = 44100, freq: float = 440.0, stereo: bool = False) -> str:
     tmp = tempfile.mktemp(suffix=".wav")
-    t = np.linspace(0, duration_sec, int(sr * duration_sec), endpoint=False)
-    y = np.sin(2 * np.pi * freq * t) * 0.5
-    if stereo:
-        y = np.column_stack([y, y * 0.9])
-    sf.write(tmp, y, sr, subtype="PCM_16")
+    channels = 2 if stereo else 1
+    wav_bytes = make_wav_bytes(sr=sr, duration=duration_sec, freq=freq, channels=channels)
+    with open(tmp, 'wb') as f:
+        f.write(wav_bytes)
     return tmp
 
 

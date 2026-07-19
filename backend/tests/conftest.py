@@ -6,6 +6,9 @@ import pytest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from test_utils import make_wav_bytes, make_mp3_bytes, make_large_audio_bytes, upload_file
 
 
 @pytest.fixture(autouse=True)

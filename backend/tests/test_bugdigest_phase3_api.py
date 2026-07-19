@@ -34,8 +34,11 @@ import pytest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 os.environ["TESTING"] = "1"
+
+from test_utils import make_wav_bytes
 
 
 @pytest.fixture()
@@ -72,30 +75,6 @@ def api_client(fresh_db):
     return TestClient(app)
 
 
-def _make_wav_bytes(duration=1.0, sr=44100, channels=1):
-    import struct
-    import math
-    n_samples = int(sr * duration)
-    data_size = n_samples * channels * 2
-    bytes_per_sample = 2
-    block_align = channels * bytes_per_sample
-    byte_rate = sr * block_align
-
-    header = struct.pack('<4sI4s', b'RIFF', 36 + data_size, b'WAVE')
-    fmt_chunk = struct.pack('<4sIHHIIHH',
-                            b'fmt ', 16, 1, channels, sr, byte_rate, block_align, bytes_per_sample * 8)
-    data_chunk_header = struct.pack('<4sI', b'data', data_size)
-
-    samples = bytearray()
-    for i in range(n_samples):
-        val = int(0.5 * 32767 * math.sin(2 * math.pi * 440 * i / sr))
-        samples.extend(struct.pack('<h', max(-32768, min(32767, val))))
-        if channels == 2:
-            samples.extend(struct.pack('<h', max(-32768, min(32767, val))))
-
-    return header + fmt_chunk + data_chunk_header + bytes(samples)
-
-
 # ============================================================
 # 高严重程度 BUG 测试
 # ============================================================
@@ -113,7 +92,7 @@ class TestBug001UploadOOMRisk:
         
         预期修复：应该流式读取并在读取过程中检查大小，超过限制立即终止。
         """
-        wav_data = _make_wav_bytes(duration=0.5)
+        wav_data = make_wav_bytes(duration=0.5)
         files = {"file": ("test.wav", wav_data, "audio/wav")}
         data = {"file_hash": "abc123"}
 
@@ -243,7 +222,7 @@ class TestBug005CacheClearAllNoAuth:
 
     def test_clear_all_no_auth(self, api_client):
         """复现：无需认证即可调用 clear-all。"""
-        wav_data = _make_wav_bytes(duration=0.1)
+        wav_data = make_wav_bytes(duration=0.1)
         files = {"file": ("test.wav", wav_data, "audio/wav")}
         upload_res = api_client.post("/api/v1/upload", files=files)
         assert upload_res.status_code == 200

@@ -14,14 +14,17 @@ import soundfile as sf
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.dirname(__file__))
+
+from test_utils import make_wav_bytes
 
 
 def _make_test_wav(duration_sec: float = 1.0, sr: int = 44100, freq: float = 440.0) -> str:
     """生成一个测试 WAV 文件，返回路径"""
     tmp = tempfile.mktemp(suffix=".wav")
-    t = np.linspace(0, duration_sec, int(sr * duration_sec), endpoint=False)
-    y = np.sin(2 * np.pi * freq * t) * 0.5
-    sf.write(tmp, y, sr, subtype="PCM_16")
+    wav_bytes = make_wav_bytes(sr=sr, duration=duration_sec, freq=freq)
+    with open(tmp, 'wb') as f:
+        f.write(wav_bytes)
     return tmp
 
 
@@ -7767,3 +7770,416 @@ class TestXrtfBoundaryClear:
         assert xrtf_stats['count'] == 2, (
             f"应该只有 2 个有效 xRTF 样本，实际是 {xrtf_stats['count']}"
         )
+
+
+# ============================================================================
+# 回归测试: API-007 上传损坏文件应返回明确错误
+# Bug: 上传损坏的 WAV 文件时，错误信息不明确，用户不知道是文件损坏
+# 修复: _get_audio_info 返回 None 时返回 400，错误信息包含"无效的音频文件"
+# ============================================================================
+
+class TestUploadCorruptedFileRejected:
+    """防止上传损坏/空文件时错误信息不明确"""
+
+    def _make_client(self, tmpdir):
+        from fastapi.testclient import TestClient
+        from app import create_app
+        import config
+        from database import init_db
+
+        old_upload = config.UPLOAD_DIR
+        old_output = config.OUTPUT_DIR
+        old_db = config.DB_PATH
+        config.UPLOAD_DIR = os.path.join(str(tmpdir), "uploads")
+        config.OUTPUT_DIR = os.path.join(str(tmpdir), "outputs")
+        config.DB_PATH = os.path.join(str(tmpdir), "test.db")
+        os.makedirs(config.UPLOAD_DIR, exist_ok=True)
+        os.makedirs(config.OUTPUT_DIR, exist_ok=True)
+        init_db()
+
+        app = create_app()
+        client = TestClient(app)
+        return client, (old_upload, old_output, old_db)
+
+    def _cleanup(self, old_config):
+        import config
+        old_upload, old_output, old_db = old_config
+        config.UPLOAD_DIR = old_upload
+        config.OUTPUT_DIR = old_output
+        config.DB_PATH = old_db
+
+    def test_corrupted_wav_returns_400(self, tmp_path):
+        """上传损坏的 WAV 文件应返回 400，错误信息包含无法解析/损坏相关描述"""
+        import config
+        client, old_config = self._make_client(tmp_path)
+        try:
+            corrupted_data = b"RIFF----WAVEfmt " + b"\x00" * 100
+            files = {"file": ("corrupted.wav", corrupted_data, "audio/wav")}
+            res = client.post("/api/v1/upload", files=files, data={"file_hash": ""})
+
+            assert res.status_code == 400, (
+                f"API-007: 上传损坏文件应返回 400，实际返回 {res.status_code}"
+            )
+            err_msg = res.json().get("error", {}).get("message", "")
+            assert ("无效" in err_msg or "损坏" in err_msg or "无法解析" in err_msg), (
+                f"API-007: 错误信息应包含文件无效/损坏的描述，实际是: {err_msg}"
+            )
+        finally:
+            self._cleanup(old_config)
+
+    def test_empty_file_returns_400(self, tmp_path):
+        """上传空文件应返回 400，错误信息包含'空'"""
+        client, old_config = self._make_client(tmp_path)
+        try:
+            empty_data = b""
+            files = {"file": ("empty.wav", empty_data, "audio/wav")}
+            res = client.post("/api/v1/upload", files=files, data={"file_hash": ""})
+
+            assert res.status_code == 400, (
+                f"API-007: 上传空文件应返回 400，实际返回 {res.status_code}"
+            )
+            err_msg = res.json().get("error", {}).get("message", "")
+            assert "空" in err_msg, (
+                f"API-007: 错误信息应包含'空'字，实际是: {err_msg}"
+            )
+        finally:
+            self._cleanup(old_config)
+
+
+# ============================================================================
+# 回归测试: API-008 双轨上传主任务缓存
+# Bug: 相同 vocal_hash 和 accompaniment_hash 的双轨上传没有复用主任务
+# 修复: upload-dual 中先按双 hash 查找已有主任务，命中则直接返回 cached=True
+# ============================================================================
+
+class TestDualUploadMainTaskCache:
+    """防止双轨上传相同 hash 时不缓存主任务"""
+
+    def _make_client(self, tmpdir):
+        from fastapi.testclient import TestClient
+        from app import create_app
+        import config
+        from database import init_db
+
+        old_upload = config.UPLOAD_DIR
+        old_output = config.OUTPUT_DIR
+        old_db = config.DB_PATH
+        config.UPLOAD_DIR = os.path.join(str(tmpdir), "uploads")
+        config.OUTPUT_DIR = os.path.join(str(tmpdir), "outputs")
+        config.DB_PATH = os.path.join(str(tmpdir), "test.db")
+        os.makedirs(config.UPLOAD_DIR, exist_ok=True)
+        os.makedirs(config.OUTPUT_DIR, exist_ok=True)
+        init_db()
+
+        app = create_app()
+        client = TestClient(app)
+        return client, (old_upload, old_output, old_db)
+
+    def _cleanup(self, old_config):
+        import config
+        old_upload, old_output, old_db = old_config
+        config.UPLOAD_DIR = old_upload
+        config.OUTPUT_DIR = old_output
+        config.DB_PATH = old_db
+
+    def test_same_dual_hashes_return_cached_main_task(self, tmp_path):
+        """相同 vocal_hash 和 accompaniment_hash 的两次双轨上传应返回同一个主任务"""
+        client, old_config = self._make_client(tmp_path)
+        try:
+            vocal_wav = make_wav_bytes(sr=44100, duration=0.5, freq=440.0)
+            acc_wav = make_wav_bytes(sr=44100, duration=0.5, freq=880.0)
+
+            vocal_hash = "vocal_hash_test_001"
+            acc_hash = "acc_hash_test_001"
+
+            files1 = {
+                "vocal_file": ("vocal.wav", vocal_wav, "audio/wav"),
+                "accompaniment_file": ("acc.wav", acc_wav, "audio/wav"),
+            }
+            data1 = {
+                "vocal_file_hash": vocal_hash,
+                "accompaniment_file_hash": acc_hash,
+            }
+            res1 = client.post("/api/v1/upload-dual", files=files1, data=data1)
+            assert res1.status_code == 200, f"第一次上传应成功，实际 {res1.status_code}"
+            data_first = res1.json()
+            first_task_id = data_first["task_id"]
+            assert data_first.get("cached", False) is False, "第一次上传不应命中缓存"
+
+            files2 = {
+                "vocal_file": ("vocal2.wav", vocal_wav, "audio/wav"),
+                "accompaniment_file": ("acc2.wav", acc_wav, "audio/wav"),
+            }
+            data2 = {
+                "vocal_file_hash": vocal_hash,
+                "accompaniment_file_hash": acc_hash,
+            }
+            res2 = client.post("/api/v1/upload-dual", files=files2, data=data2)
+            assert res2.status_code == 200, f"第二次上传应成功，实际 {res2.status_code}"
+            data_second = res2.json()
+            second_task_id = data_second["task_id"]
+
+            assert data_second.get("cached", False) is True, (
+                "API-008: 第二次相同 hash 双轨上传应命中缓存，cached=True"
+            )
+            assert second_task_id == first_task_id, (
+                f"API-008: 两次上传应返回同一个主任务 ID，"
+                f"第一次={first_task_id}, 第二次={second_task_id}"
+            )
+        finally:
+            self._cleanup(old_config)
+
+
+# ============================================================================
+# 回归测试: API-009 分片上传初始化大小限制
+# Bug: upload-init 不检查 total_size 是否超过 MAX_UPLOAD_SIZE
+# 修复: upload-init 中先检查 total_size，超限直接返回 413
+# ============================================================================
+
+class TestChunkUploadSizeLimits:
+    """防止分片上传初始化时绕过大小限制"""
+
+    def _make_client(self, tmpdir):
+        from fastapi.testclient import TestClient
+        from app import create_app
+        import config
+        from database import init_db
+
+        old_upload = config.UPLOAD_DIR
+        old_output = config.OUTPUT_DIR
+        old_db = config.DB_PATH
+        config.UPLOAD_DIR = os.path.join(str(tmpdir), "uploads")
+        config.OUTPUT_DIR = os.path.join(str(tmpdir), "outputs")
+        config.DB_PATH = os.path.join(str(tmpdir), "test.db")
+        os.makedirs(config.UPLOAD_DIR, exist_ok=True)
+        os.makedirs(config.OUTPUT_DIR, exist_ok=True)
+        init_db()
+
+        app = create_app()
+        client = TestClient(app)
+        return client, (old_upload, old_output, old_db)
+
+    def _cleanup(self, old_config):
+        import config
+        old_upload, old_output, old_db = old_config
+        config.UPLOAD_DIR = old_upload
+        config.OUTPUT_DIR = old_output
+        config.DB_PATH = old_db
+
+    def test_upload_init_has_size_limit(self, tmp_path):
+        """upload-init 传入超过 MAX_UPLOAD_SIZE 的 total_size 应返回 413"""
+        import config
+        client, old_config = self._make_client(tmp_path)
+        try:
+            oversized = config.MAX_UPLOAD_SIZE + 1024 * 1024
+            res = client.post(
+                "/api/v1/upload-init",
+                data={
+                    "filename": "big.wav",
+                    "total_size": oversized,
+                    "total_chunks": 100,
+                    "file_hash": "",
+                },
+            )
+
+            assert res.status_code == 413, (
+                f"API-009: upload-init 超限应返回 413，实际返回 {res.status_code}"
+            )
+        finally:
+            self._cleanup(old_config)
+
+
+# ============================================================================
+# 回归测试: API-010 detect-file 损坏文件校验
+# Bug: detect-file 上传损坏文件时可能抛未捕获异常，而非返回 400
+# 修复: detect-file 中 _get_audio_info 失败时返回 400 错误
+# ============================================================================
+
+class TestDetectFileValidation:
+    """防止 detect-file 接口对损坏文件处理不当"""
+
+    def _make_client(self, tmpdir):
+        from fastapi.testclient import TestClient
+        from app import create_app
+        import config
+        from database import init_db
+
+        old_upload = config.UPLOAD_DIR
+        old_output = config.OUTPUT_DIR
+        old_db = config.DB_PATH
+        config.UPLOAD_DIR = os.path.join(str(tmpdir), "uploads")
+        config.OUTPUT_DIR = os.path.join(str(tmpdir), "outputs")
+        config.DB_PATH = os.path.join(str(tmpdir), "test.db")
+        os.makedirs(config.UPLOAD_DIR, exist_ok=True)
+        os.makedirs(config.OUTPUT_DIR, exist_ok=True)
+        init_db()
+
+        app = create_app()
+        client = TestClient(app)
+        return client, (old_upload, old_output, old_db)
+
+    def _cleanup(self, old_config):
+        import config
+        old_upload, old_output, old_db = old_config
+        config.UPLOAD_DIR = old_upload
+        config.OUTPUT_DIR = old_output
+        config.DB_PATH = old_db
+
+    def test_detect_corrupted_file_returns_400(self, tmp_path):
+        """detect-file 上传损坏文件应返回 400"""
+        client, old_config = self._make_client(tmp_path)
+        try:
+            corrupted_data = b"NOT_A_VALID_AUDIO_FILE" + b"\x00" * 200
+            files = {"file": ("bad.wav", corrupted_data, "audio/wav")}
+            res = client.post(
+                "/api/v1/detect-file",
+                files=files,
+                data={"detector_version": "v1.1"},
+            )
+
+            assert res.status_code == 400, (
+                f"API-010: detect-file 上传损坏文件应返回 400，实际返回 {res.status_code}"
+            )
+        finally:
+            self._cleanup(old_config)
+
+
+# ============================================================================
+# 回归测试: API-011 repair-dual 算法版本校验
+# Bug: repair-dual 使用 v2.1 等不支持双轨的版本时没有提前拒绝
+# 修复: repair-dual 中检查 algorithm_version 是否 supports_dual_track
+# ============================================================================
+
+class TestRepairDualAlgorithmVersionCheck:
+    """防止双轨修复使用不支持双轨的算法版本"""
+
+    def _make_client(self, tmpdir):
+        from fastapi.testclient import TestClient
+        from app import create_app
+        import config
+        from database import init_db
+
+        old_upload = config.UPLOAD_DIR
+        old_output = config.OUTPUT_DIR
+        old_db = config.DB_PATH
+        config.UPLOAD_DIR = os.path.join(str(tmpdir), "uploads")
+        config.OUTPUT_DIR = os.path.join(str(tmpdir), "outputs")
+        config.DB_PATH = os.path.join(str(tmpdir), "test.db")
+        os.makedirs(config.UPLOAD_DIR, exist_ok=True)
+        os.makedirs(config.OUTPUT_DIR, exist_ok=True)
+        init_db()
+
+        app = create_app()
+        client = TestClient(app)
+        return client, (old_upload, old_output, old_db)
+
+    def _cleanup(self, old_config):
+        import config
+        old_upload, old_output, old_db = old_config
+        config.UPLOAD_DIR = old_upload
+        config.OUTPUT_DIR = old_output
+        config.DB_PATH = old_db
+
+    def test_v21_dual_repair_rejected(self, tmp_path):
+        """repair-dual 使用 v2.1 版本应返回 400，错误信息包含不支持双轨或 v3.0"""
+        client, old_config = self._make_client(tmp_path)
+        try:
+            vocal_wav = make_wav_bytes(sr=44100, duration=0.3, freq=440.0)
+            acc_wav = make_wav_bytes(sr=44100, duration=0.3, freq=880.0)
+
+            files_vocal = {"file": ("vocal.wav", vocal_wav, "audio/wav")}
+            res_vocal = client.post("/api/v1/upload", files=files_vocal, data={"file_hash": ""})
+            vocal_task_id = res_vocal.json()["task_id"]
+
+            files_acc = {"file": ("acc.wav", acc_wav, "audio/wav")}
+            res_acc = client.post("/api/v1/upload", files=files_acc, data={"file_hash": ""})
+            acc_task_id = res_acc.json()["task_id"]
+
+            repair_res = client.post(
+                "/api/v1/repair-dual",
+                json={
+                    "task_id": "dual_repair_test_001",
+                    "vocal_task_id": vocal_task_id,
+                    "accompaniment_task_id": acc_task_id,
+                    "params": {"algorithm_version": "v2.1"},
+                },
+            )
+
+            assert repair_res.status_code == 400, (
+                f"API-011: repair-dual 使用 v2.1 应返回 400，实际返回 {repair_res.status_code}"
+            )
+            err_msg = repair_res.json().get("error", {}).get("message", "")
+            assert ("不支持双轨" in err_msg or "v3.0" in err_msg), (
+                f"API-011: 错误信息应包含'不支持双轨'或'v3.0'，实际是: {err_msg}"
+            )
+        finally:
+            self._cleanup(old_config)
+
+
+# ============================================================================
+# 回归测试: API-012 双轨上传不重复调用 _get_audio_info
+# Bug: upload-dual 中对同一个文件多次调用 _get_audio_info（创建任务时、返回结果时各一次）
+# 修复: 复用已获取的 audio_info 结果，每个文件只调用一次 _get_audio_info
+# ============================================================================
+
+class TestDualUploadNoDuplicateAudioInfoCalls:
+    """防止双轨上传时重复调用 _get_audio_info 浪费性能"""
+
+    def _make_client(self, tmpdir):
+        from fastapi.testclient import TestClient
+        from app import create_app
+        import config
+        from database import init_db
+
+        old_upload = config.UPLOAD_DIR
+        old_output = config.OUTPUT_DIR
+        old_db = config.DB_PATH
+        config.UPLOAD_DIR = os.path.join(str(tmpdir), "uploads")
+        config.OUTPUT_DIR = os.path.join(str(tmpdir), "outputs")
+        config.DB_PATH = os.path.join(str(tmpdir), "test.db")
+        os.makedirs(config.UPLOAD_DIR, exist_ok=True)
+        os.makedirs(config.OUTPUT_DIR, exist_ok=True)
+        init_db()
+
+        app = create_app()
+        client = TestClient(app)
+        return client, (old_upload, old_output, old_db)
+
+    def _cleanup(self, old_config):
+        import config
+        old_upload, old_output, old_db = old_config
+        config.UPLOAD_DIR = old_upload
+        config.OUTPUT_DIR = old_output
+        config.DB_PATH = old_db
+
+    def test_dual_upload_calls_audio_info_twice(self, tmp_path):
+        """双轨上传时 _get_audio_info 应该只被调用 2 次（每个文件 1 次）"""
+        from unittest.mock import patch
+        from api.routes import upload as upload_module
+
+        client, old_config = self._make_client(tmp_path)
+        try:
+            original_get_audio_info = upload_module._get_audio_info
+            call_count = [0]
+
+            def counting_get_audio_info(path):
+                call_count[0] += 1
+                return original_get_audio_info(path)
+
+            vocal_wav = make_wav_bytes(sr=44100, duration=0.3, freq=440.0)
+            acc_wav = make_wav_bytes(sr=44100, duration=0.3, freq=880.0)
+
+            with patch.object(upload_module, "_get_audio_info", side_effect=counting_get_audio_info):
+                files = {
+                    "vocal_file": ("vocal.wav", vocal_wav, "audio/wav"),
+                    "accompaniment_file": ("acc.wav", acc_wav, "audio/wav"),
+                }
+                res = client.post("/api/v1/upload-dual", files=files, data={"file_hash": ""})
+
+            assert res.status_code == 200, f"双轨上传应成功，实际 {res.status_code}"
+            assert call_count[0] == 2, (
+                f"API-012: 双轨上传 _get_audio_info 应调用 2 次（每个文件 1 次），"
+                f"实际调用了 {call_count[0]} 次，存在重复调用浪费性能"
+            )
+        finally:
+            self._cleanup(old_config)

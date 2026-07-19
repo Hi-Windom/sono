@@ -6,8 +6,11 @@ import pytest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 os.environ["TESTING"] = "1"
+
+from test_utils import make_wav_bytes
 
 
 @pytest.fixture()
@@ -44,33 +47,9 @@ def api_client(fresh_db):
     return TestClient(app)
 
 
-def _make_wav_bytes(duration=1.0, sr=44100, channels=1):
-    import struct
-    import math
-    n_samples = int(sr * duration)
-    data_size = n_samples * channels * 2
-    bytes_per_sample = 2
-    block_align = channels * bytes_per_sample
-    byte_rate = sr * block_align
-
-    header = struct.pack('<4sI4s', b'RIFF', 36 + data_size, b'WAVE')
-    fmt_chunk = struct.pack('<4sIHHIIHH',
-                            b'fmt ', 16, 1, channels, sr, byte_rate, block_align, bytes_per_sample * 8)
-    data_chunk_header = struct.pack('<4sI', b'data', data_size)
-
-    samples = bytearray()
-    for i in range(n_samples):
-        val = int(0.5 * 32767 * math.sin(2 * math.pi * 440 * i / sr))
-        samples.extend(struct.pack('<h', max(-32768, min(32767, val))))
-        if channels == 2:
-            samples.extend(struct.pack('<h', max(-32768, min(32767, val))))
-
-    return header + fmt_chunk + data_chunk_header + bytes(samples)
-
-
 class TestDualUploadEndpoint:
     def test_upload_dual_returns_three_task_ids(self, api_client):
-        wav_bytes = _make_wav_bytes()
+        wav_bytes = make_wav_bytes()
         res = api_client.post("/api/v1/upload-dual", files={
             "vocal_file": ("vocal.wav", wav_bytes, "audio/wav"),
             "accompaniment_file": ("acc.wav", wav_bytes, "audio/wav"),
@@ -85,7 +64,7 @@ class TestDualUploadEndpoint:
         assert data["vocal_task_id"] != data["accompaniment_task_id"], "vocal_task_id should differ from accompaniment_task_id"
 
     def test_upload_dual_creates_three_db_tasks(self, api_client, fresh_db):
-        wav_bytes = _make_wav_bytes()
+        wav_bytes = make_wav_bytes()
         res = api_client.post("/api/v1/upload-dual", files={
             "vocal_file": ("vocal.wav", wav_bytes, "audio/wav"),
             "accompaniment_file": ("acc.wav", wav_bytes, "audio/wav"),
@@ -101,7 +80,7 @@ class TestDualUploadEndpoint:
         assert acc_task is not None, "Accompaniment task should exist in DB"
 
     def test_upload_dual_main_task_stores_sub_task_ids(self, api_client, fresh_db):
-        wav_bytes = _make_wav_bytes()
+        wav_bytes = make_wav_bytes()
         res = api_client.post("/api/v1/upload-dual", files={
             "vocal_file": ("vocal.wav", wav_bytes, "audio/wav"),
             "accompaniment_file": ("acc.wav", wav_bytes, "audio/wav"),
@@ -120,7 +99,7 @@ class TestDualUploadEndpoint:
             f"Main task params should contain accompaniment_task_id, got: {params}"
 
     def test_upload_dual_returns_filenames(self, api_client):
-        wav_bytes = _make_wav_bytes()
+        wav_bytes = make_wav_bytes()
         res = api_client.post("/api/v1/upload-dual", files={
             "vocal_file": ("my_vocal.wav", wav_bytes, "audio/wav"),
             "accompaniment_file": ("my_acc.wav", wav_bytes, "audio/wav"),
@@ -131,7 +110,7 @@ class TestDualUploadEndpoint:
         assert data["accompaniment_filename"] == "my_acc.wav"
 
     def test_upload_dual_returns_sizes(self, api_client):
-        wav_bytes = _make_wav_bytes()
+        wav_bytes = make_wav_bytes()
         res = api_client.post("/api/v1/upload-dual", files={
             "vocal_file": ("vocal.wav", wav_bytes, "audio/wav"),
             "accompaniment_file": ("acc.wav", wav_bytes, "audio/wav"),
@@ -142,7 +121,7 @@ class TestDualUploadEndpoint:
         assert data["accompaniment_size"] > 0
 
     def test_upload_dual_rejects_invalid_vocal_format(self, api_client):
-        wav_bytes = _make_wav_bytes()
+        wav_bytes = make_wav_bytes()
         res = api_client.post("/api/v1/upload-dual", files={
             "vocal_file": ("vocal.txt", b"not audio", "text/plain"),
             "accompaniment_file": ("acc.wav", wav_bytes, "audio/wav"),
@@ -150,7 +129,7 @@ class TestDualUploadEndpoint:
         assert res.status_code == 400
 
     def test_upload_dual_rejects_invalid_accompaniment_format(self, api_client):
-        wav_bytes = _make_wav_bytes()
+        wav_bytes = make_wav_bytes()
         res = api_client.post("/api/v1/upload-dual", files={
             "vocal_file": ("vocal.wav", wav_bytes, "audio/wav"),
             "accompaniment_file": ("acc.txt", b"not audio", "text/plain"),
@@ -160,7 +139,7 @@ class TestDualUploadEndpoint:
 
 class TestDualRepairEndpoint:
     def test_repair_dual_with_valid_task_ids(self, api_client, fresh_db):
-        wav_bytes = _make_wav_bytes()
+        wav_bytes = make_wav_bytes()
         upload_res = api_client.post("/api/v1/upload-dual", files={
             "vocal_file": ("vocal.wav", wav_bytes, "audio/wav"),
             "accompaniment_file": ("acc.wav", wav_bytes, "audio/wav"),
@@ -180,7 +159,7 @@ class TestDualRepairEndpoint:
         assert repair_data["status"] == "pending"
 
     def test_repair_dual_with_separate_params(self, api_client, fresh_db):
-        wav_bytes = _make_wav_bytes()
+        wav_bytes = make_wav_bytes()
         upload_res = api_client.post("/api/v1/upload-dual", files={
             "vocal_file": ("vocal.wav", wav_bytes, "audio/wav"),
             "accompaniment_file": ("acc.wav", wav_bytes, "audio/wav"),
@@ -200,7 +179,7 @@ class TestDualRepairEndpoint:
         assert repair_res.status_code == 200
 
     def test_repair_dual_nonexistent_vocal_task(self, api_client, fresh_db):
-        wav_bytes = _make_wav_bytes()
+        wav_bytes = make_wav_bytes()
         upload_res = api_client.post("/api/v1/upload-dual", files={
             "vocal_file": ("vocal.wav", wav_bytes, "audio/wav"),
             "accompaniment_file": ("acc.wav", wav_bytes, "audio/wav"),
@@ -217,7 +196,7 @@ class TestDualRepairEndpoint:
         assert repair_res.status_code == 404
 
     def test_repair_dual_nonexistent_accompaniment_task(self, api_client, fresh_db):
-        wav_bytes = _make_wav_bytes()
+        wav_bytes = make_wav_bytes()
         upload_res = api_client.post("/api/v1/upload-dual", files={
             "vocal_file": ("vocal.wav", wav_bytes, "audio/wav"),
             "accompaniment_file": ("acc.wav", wav_bytes, "audio/wav"),
@@ -243,7 +222,7 @@ class TestDualRepairEndpoint:
 
 class TestTrackStatusEndpoint:
     def test_track_status_returns_sub_task_info(self, api_client, fresh_db):
-        wav_bytes = _make_wav_bytes()
+        wav_bytes = make_wav_bytes()
         upload_res = api_client.post("/api/v1/upload-dual", files={
             "vocal_file": ("vocal.wav", wav_bytes, "audio/wav"),
             "accompaniment_file": ("acc.wav", wav_bytes, "audio/wav"),
@@ -265,7 +244,7 @@ class TestTrackStatusEndpoint:
         assert status_res.status_code == 404
 
     def test_track_status_without_sub_tasks(self, api_client, fresh_db):
-        wav_bytes = _make_wav_bytes()
+        wav_bytes = make_wav_bytes()
         upload_res = api_client.post("/api/v1/upload", files={
             "file": ("single.wav", wav_bytes, "audio/wav"),
         })
@@ -281,7 +260,7 @@ class TestTrackStatusEndpoint:
 
 class TestDualTrackEndToEnd:
     def test_full_dual_track_flow(self, api_client, fresh_db):
-        wav_bytes = _make_wav_bytes(duration=0.5)
+        wav_bytes = make_wav_bytes(duration=0.5)
 
         upload_res = api_client.post("/api/v1/upload-dual", files={
             "vocal_file": ("vocal.wav", wav_bytes, "audio/wav"),
@@ -323,7 +302,7 @@ class TestDualTrackEndToEnd:
 
 class TestParamFlattening:
     def test_vocal_params_flattened_with_vocal_prefix(self, api_client, fresh_db):
-        wav_bytes = _make_wav_bytes()
+        wav_bytes = make_wav_bytes()
         upload_res = api_client.post("/api/v1/upload-dual", files={
             "vocal_file": ("vocal.wav", wav_bytes, "audio/wav"),
             "accompaniment_file": ("acc.wav", wav_bytes, "audio/wav"),
@@ -372,7 +351,7 @@ class TestParamFlattening:
         assert "vocal_params" in params, "Nested vocal_params (flattened) should be retained for v3.2 dual-track"
 
     def test_accompaniment_params_flattened_with_inst_prefix(self, api_client, fresh_db):
-        wav_bytes = _make_wav_bytes()
+        wav_bytes = make_wav_bytes()
         upload_res = api_client.post("/api/v1/upload-dual", files={
             "vocal_file": ("vocal.wav", wav_bytes, "audio/wav"),
             "accompaniment_file": ("acc.wav", wav_bytes, "audio/wav"),
@@ -418,7 +397,7 @@ class TestParamFlattening:
         assert "accompaniment_params" not in params, "Nested accompaniment_params should not exist after flattening"
 
     def test_mix_ratio_flattened_to_vocal_ratio(self, api_client, fresh_db):
-        wav_bytes = _make_wav_bytes()
+        wav_bytes = make_wav_bytes()
         upload_res = api_client.post("/api/v1/upload-dual", files={
             "vocal_file": ("vocal.wav", wav_bytes, "audio/wav"),
             "accompaniment_file": ("acc.wav", wav_bytes, "audio/wav"),
@@ -446,7 +425,7 @@ class TestParamFlattening:
         assert "mix_ratio" not in params, "mix_ratio should be replaced by vocal_ratio"
 
     def test_processing_mode_set_to_dual(self, api_client, fresh_db):
-        wav_bytes = _make_wav_bytes()
+        wav_bytes = make_wav_bytes()
         upload_res = api_client.post("/api/v1/upload-dual", files={
             "vocal_file": ("vocal.wav", wav_bytes, "audio/wav"),
             "accompaniment_file": ("acc.wav", wav_bytes, "audio/wav"),
@@ -471,7 +450,7 @@ class TestParamFlattening:
         assert params.get("processing_mode") == "dual"
 
     def test_skipped_keys_not_in_flattened_params(self, api_client, fresh_db):
-        wav_bytes = _make_wav_bytes()
+        wav_bytes = make_wav_bytes()
         upload_res = api_client.post("/api/v1/upload-dual", files={
             "vocal_file": ("vocal.wav", wav_bytes, "audio/wav"),
             "accompaniment_file": ("acc.wav", wav_bytes, "audio/wav"),
@@ -528,7 +507,7 @@ class TestParamFlattening:
 
 class TestAudioInfoStorage:
     def test_audio_info_stored_for_vocal_task(self, api_client, fresh_db):
-        wav_bytes = _make_wav_bytes(duration=0.5)
+        wav_bytes = make_wav_bytes(duration=0.5)
         res = api_client.post("/api/v1/upload-dual", files={
             "vocal_file": ("vocal.wav", wav_bytes, "audio/wav"),
             "accompaniment_file": ("acc.wav", wav_bytes, "audio/wav"),
@@ -548,7 +527,7 @@ class TestAudioInfoStorage:
         assert audio_info["sample_rate"] > 0, f"sample_rate should be > 0, got {audio_info}"
 
     def test_audio_info_stored_for_accompaniment_task(self, api_client, fresh_db):
-        wav_bytes = _make_wav_bytes(duration=0.5)
+        wav_bytes = make_wav_bytes(duration=0.5)
         res = api_client.post("/api/v1/upload-dual", files={
             "vocal_file": ("vocal.wav", wav_bytes, "audio/wav"),
             "accompaniment_file": ("acc.wav", wav_bytes, "audio/wav"),
@@ -568,7 +547,7 @@ class TestAudioInfoStorage:
         assert audio_info["sample_rate"] > 0
 
     def test_audio_info_not_stored_in_main_task(self, api_client, fresh_db):
-        wav_bytes = _make_wav_bytes(duration=0.5)
+        wav_bytes = make_wav_bytes(duration=0.5)
         res = api_client.post("/api/v1/upload-dual", files={
             "vocal_file": ("vocal.wav", wav_bytes, "audio/wav"),
             "accompaniment_file": ("acc.wav", wav_bytes, "audio/wav"),
@@ -618,7 +597,7 @@ class TestDualCacheLookup:
         return flat
 
     def test_cache_lookup_structured_params_matches_stored(self, api_client, fresh_db):
-        wav_bytes = _make_wav_bytes(duration=0.5)
+        wav_bytes = make_wav_bytes(duration=0.5)
         upload_res = api_client.post("/api/v1/upload-dual", files={
             "vocal_file": ("vocal.wav", wav_bytes, "audio/wav"),
             "accompaniment_file": ("acc.wav", wav_bytes, "audio/wav"),
@@ -659,7 +638,7 @@ class TestDualCacheLookup:
 
     def test_cache_lookup_with_completed_task(self, api_client, fresh_db):
         import tempfile
-        wav_bytes = _make_wav_bytes(duration=0.5)
+        wav_bytes = make_wav_bytes(duration=0.5)
         upload_res = api_client.post("/api/v1/upload-dual", files={
             "vocal_file": ("vocal.wav", wav_bytes, "audio/wav"),
             "accompaniment_file": ("acc.wav", wav_bytes, "audio/wav"),

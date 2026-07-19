@@ -7,16 +7,17 @@ import pytest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 os.environ["TESTING"] = "1"
 
+from test_utils import make_wav_bytes
+
 
 def _make_test_wav(path: str, sr=44100, duration=2.0):
-    import numpy as np
-    import soundfile as sf
-    t = np.arange(int(sr * duration), dtype=np.float64) / sr
-    y = 0.5 * np.sin(2 * np.pi * 440 * t)
-    sf.write(path, y, sr, subtype='PCM_16')
+    wav_bytes = make_wav_bytes(sr=sr, duration=duration)
+    with open(path, 'wb') as f:
+        f.write(wav_bytes)
 
 
 class TestMp3FileInfo:
