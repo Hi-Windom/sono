@@ -53,6 +53,7 @@ class SignalProfile:
 
     # 立体声
     stereo_width: float = 1.0          # 0=单声道, 1=全立体声（仅多声道有意义）
+    channel_imbalance_db: float = 0.0  # 左右声道 RMS 差异 (dB)，正值=左声道大
 
     # 检测到的问题（供 issues_found 展示与策略判定）
     detected_issues: list[str] = field(default_factory=list)
@@ -311,6 +312,8 @@ def _merge_profiles(profiles: list[SignalProfile]) -> SignalProfile:
     merged.hf_energy = max(p.hf_energy for p in profiles)
     merged.lufs_approx = max(p.lufs_approx for p in profiles)
     merged.dynamic_range_db = min(p.dynamic_range_db for p in profiles)  # 越小越坏
+    merged.stereo_width = min(p.stereo_width for p in profiles)  # 越窄越坏
+    merged.channel_imbalance_db = max((p.channel_imbalance_db for p in profiles), key=abs)  # 绝对值越大越坏
 
     # 合并 detected_issues（去重）
     seen: set[str] = set()
@@ -371,7 +374,7 @@ def analyze_signal(y: np.ndarray, sr: int, *, light: bool = False) -> SignalProf
         profile.duration = round(duration, 3)
         profile.channels = channels
 
-        # 立体声宽度（全量信号计算）
+        # 立体声宽度 + 声道不平衡（全量信号计算）
         if y.ndim == 2 and y.shape[0] == 2:
             a = y[0].astype(np.float64)
             b = y[1].astype(np.float64)
@@ -380,6 +383,12 @@ def analyze_signal(y: np.ndarray, sr: int, *, light: bool = False) -> SignalProf
             cab = np.dot(a, b)
             corr = float(cab / np.sqrt(ca * cb))
             profile.stereo_width = float(max(0.0, min(1.0, (1.0 - corr) / 2.0)))
+            rms_l = float(np.sqrt(ca / len(a)))
+            rms_r = float(np.sqrt(cb / len(b)))
+            if rms_l > 1e-12 and rms_r > 1e-12:
+                profile.channel_imbalance_db = float(20.0 * np.log10(rms_l / rms_r))
+            else:
+                profile.channel_imbalance_db = 0.0
 
         # 重新生成 detected_issues（基于合并后的指标）
         _update_detected_issues(profile)
@@ -391,7 +400,7 @@ def analyze_signal(y: np.ndarray, sr: int, *, light: bool = False) -> SignalProf
         profile.duration = round(duration, 3)
         profile.channels = channels
 
-        # 立体声宽度
+        # 立体声宽度 + 声道不平衡
         if y.ndim == 2 and y.shape[0] == 2:
             a = y[0].astype(np.float64)
             b = y[1].astype(np.float64)
@@ -400,6 +409,12 @@ def analyze_signal(y: np.ndarray, sr: int, *, light: bool = False) -> SignalProf
             cab = np.dot(a, b)
             corr = float(cab / np.sqrt(ca * cb))
             profile.stereo_width = float(max(0.0, min(1.0, (1.0 - corr) / 2.0)))
+            rms_l = float(np.sqrt(ca / len(a)))
+            rms_r = float(np.sqrt(cb / len(b)))
+            if rms_l > 1e-12 and rms_r > 1e-12:
+                profile.channel_imbalance_db = float(20.0 * np.log10(rms_l / rms_r))
+            else:
+                profile.channel_imbalance_db = 0.0
 
         if not light:
             _update_detected_issues(profile)
@@ -422,6 +437,9 @@ def _update_detected_issues(profile: SignalProfile) -> None:
         issues.append("频谱噪声化")
     if profile.stereo_width < 0.15 and profile.channels == 2:
         issues.append("立体声过窄")
+    if abs(profile.channel_imbalance_db) > 3.0 and profile.channels == 2:
+        side = "左" if profile.channel_imbalance_db > 0 else "右"
+        issues.append(f"立体声不平衡（{side}声道大 {abs(profile.channel_imbalance_db):.1f}dB）")
     if profile.dynamic_range_db < 6.0 and profile.duration > 1.0:
         issues.append("动态被压缩")
     profile.detected_issues = issues
@@ -449,5 +467,6 @@ def profile_summary(profile: SignalProfile) -> dict[str, Any]:
         "lufs": round(profile.lufs_approx, 1),
         "dynamic_range_db": round(profile.dynamic_range_db, 1),
         "stereo_width": round(profile.stereo_width, 3),
+        "channel_imbalance_db": round(profile.channel_imbalance_db, 1),
         "detected_issues": list(profile.detected_issues),
     }

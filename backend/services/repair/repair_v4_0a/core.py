@@ -75,24 +75,101 @@ _SINGLE_KEY_MAP = {
 
 
 def _adaptive_declip(y: np.ndarray, amount: float, threshold: float = 0.90) -> np.ndarray:
-    """自适应去削波：支持可变阈值，amount 控制修复强度。
+    """自适应去削波：检测连续削波区域，插值重建峰值，窗口平滑过渡。
 
-    相比 v3.2a simple_declip（固定阈值 0.90），这里阈值可自适应下调，
-    保护干净段的同时精准修复削波。amount∈(0,1] 控制 tanh 软拐点的强度。
+    相比简单 tanh 压缩（阈值处硬拐点导致边缘 artifacts），这里：
+    1) 检测连续削波区域（contiguous clipped regions）
+    2) 用区域两侧干净样本做三次插值，重建自然峰值形状
+    3) Hann 窗口平滑过渡，消除边缘 discontinuity
+    amount∈(0,1] 控制修复强度（0=不处理，1=完全重建）。
     """
     if amount <= 0:
         return y
     threshold = max(0.80, min(0.99, float(threshold)))
-    mask = np.abs(y) > threshold
+    strength = max(0.1, min(1.0, float(amount)))
+
+    mask = np.abs(y) >= threshold * 0.99
     if not np.any(mask):
         return y
+
     y64 = y.astype(np.float64, copy=False)
-    masked_vals = y64[mask]
-    abs_masked = np.abs(masked_vals)
-    over = abs_masked - threshold
-    headroom = 1.0 - threshold
-    strength = max(0.1, min(1.0, float(amount)))
-    y64[mask] = np.sign(masked_vals) * (threshold + headroom * np.tanh(over / headroom) * strength)
+
+    def _reconstruct_clipped_regions(signal, thresh, stren):
+        abs_sig = np.abs(signal)
+        clipped = abs_sig >= thresh * 0.995
+        if not np.any(clipped):
+            return signal
+
+        result = signal.copy()
+        n = len(signal)
+        i = 0
+
+        while i < n:
+            if not clipped[i]:
+                i += 1
+                continue
+
+            start = i
+            while i < n and clipped[i]:
+                i += 1
+            end = i - 1
+
+            region_len = end - start + 1
+            if region_len < 2:
+                continue
+
+            margin = min(region_len * 3, 64, start, n - 1 - end)
+            if margin < 4:
+                continue
+
+            sign_val = np.sign(signal[start])
+            left_idx = start - margin
+            right_idx = end + margin
+            left_val = abs_sig[left_idx]
+            right_val = abs_sig[right_idx]
+
+            if left_val >= thresh * 0.80 or right_val >= thresh * 0.80:
+                continue
+
+            peak_est = max(thresh + (thresh - min(left_val, right_val)) * 0.5,
+                           thresh + (1.0 - thresh) * 0.5)
+            peak_est = min(peak_est, 0.995)
+
+            total_len = end + margin - (start - margin) + 1
+            region_indices = np.arange(start - margin, end + margin + 1)
+            rel_pos = np.arange(total_len) / max(total_len - 1, 1)
+
+            left_mag = left_val
+            right_mag = right_val
+            peak_mag = thresh + (peak_est - thresh) * stren
+
+            t_left = np.clip(rel_pos / 0.5, 0, 1)
+            left_curve = left_mag + (peak_mag - left_mag) * (3 * t_left**2 - 2 * t_left**3)
+            t_right = np.clip((rel_pos - 0.5) / 0.5, 0, 1)
+            right_curve = peak_mag + (right_mag - peak_mag) * (3 * t_right**2 - 2 * t_right**3)
+            peak_mask = rel_pos < 0.5
+            interp_mag = np.where(peak_mask, left_curve, right_curve)
+
+            window = np.ones(total_len)
+            fade_len = min(margin, region_len)
+            if fade_len > 0:
+                fade = 0.5 * (1 - np.cos(np.pi * np.linspace(0, 1, fade_len * 2)))
+                window[:fade_len * 2] = fade
+                window[-fade_len * 2:] = fade[::-1]
+
+            original_mag = abs_sig[region_indices]
+            new_mag = original_mag * (1 - window) + interp_mag * window
+
+            result[region_indices] = sign_val * new_mag
+
+        return result
+
+    if y64.ndim == 1:
+        y64 = _reconstruct_clipped_regions(y64, threshold, strength)
+    else:
+        for ch in range(y64.shape[0]):
+            y64[ch] = _reconstruct_clipped_regions(y64[ch], threshold, strength)
+
     return y64.astype(y.dtype)
 
 
