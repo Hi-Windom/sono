@@ -7,6 +7,11 @@
 3. **"打包安卓" = `bash scripts/build_android_release.sh`，不是手动 npm build + cp**
 4. **"重启dev" = 先停旧服务，再用 `bash scripts/start_dev.sh` 启动完整开发环境（前端+后端），不是只启动后端**
 5. **遇到用户指令与已有脚本功能匹配时，直接调用脚本，不要自己拆解步骤**
+6. **每次代码修改完成后必须立即 git commit + push 到远端，禁止修改留本地导致丢失**
+7. **前端/交互类 bug 必须用真实浏览器复现验证，禁止只跑后端测试就宣称修复成功**
+   - 复现步骤：启动 dev → OpenPreview 激活 → 浏览器实际操作 → 抓 Network/Console/后端日志实锤
+   - 修复后必须在浏览器中走完完整用户流程验证通过，才算修复完成
+   - 复现不出来永不结案，继续挖，直到找到根因
 
 ## Build & Deploy Commands
 
