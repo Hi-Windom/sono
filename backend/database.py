@@ -118,6 +118,7 @@ _MIGRATIONS = [
 
 
 def init_db() -> None:
+    os.makedirs(os.path.dirname(config.DB_PATH), exist_ok=True)
     with closing(get_db()) as conn:
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA wal_autocheckpoint=1000")
@@ -565,6 +566,7 @@ def checkpoint_training_db(mode: str = "PASSIVE") -> None:
 
 
 def init_training_db() -> None:
+    os.makedirs(os.path.dirname(TRAINING_DB_PATH), exist_ok=True)
     with closing(get_training_db()) as conn:
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA wal_autocheckpoint=1000")

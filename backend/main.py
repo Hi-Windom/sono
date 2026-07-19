@@ -47,6 +47,9 @@ def check_dependencies():
 def main():
     check_dependencies()
 
+    from config import init_storage
+    init_storage()
+
     from database import init_db
     init_db()
     print("数据库初始化完成")
